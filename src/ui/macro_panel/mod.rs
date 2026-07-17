@@ -717,8 +717,11 @@ impl CrosshairApp {
                 );
                 if !is_submenu_item && !hover_blocked && (response.hovered() || response.clicked())
                 {
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(action_hover_id, true));
+                    let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(action_hover_id, true);
+                        data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
+                    });
                 }
                 ui.label(
                     RichText::new(Self::macro_action_short_label(candidate, language))
@@ -1684,21 +1687,6 @@ impl CrosshairApp {
         let popup_rect_id = ui.make_persistent_id((id_source, popup_key, "rect"));
         let active_mouse_click_popup_key_id =
             ui.make_persistent_id((id_source, "mouse-click-active-submenu-key"));
-        let active_popup_key = ui
-            .ctx()
-            .data(|data| {
-                data.get_temp::<Option<&'static str>>(active_mouse_click_popup_key_id)
-            })
-            .flatten();
-        let pointer_over_active_popup = active_popup_key
-            .and_then(|key| {
-                let rect_id = ui.make_persistent_id((id_source, key, "rect"));
-                ui.ctx().data(|data| data.get_temp::<egui::Rect>(rect_id))
-            })
-            .zip(ui.ctx().pointer_hover_pos())
-            .is_some_and(|(rect, pos)| {
-                rect.expand2(egui::vec2(18.0, 16.0)).contains(pos)
-            });
         let mut open = ui
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
@@ -1723,8 +1711,7 @@ impl CrosshairApp {
                     [34.0, 24.0],
                     Button::new(Self::macro_action_icon_text(base_action)).selected(selected),
                 );
-                let tile_hovered = ui.rect_contains_pointer(tile_rect)
-                    && !pointer_over_active_popup;
+                let tile_hovered = ui.rect_contains_pointer(tile_rect);
                 if tile_hovered || response.clicked() {
                     Self::clear_mouse_click_submenus(ui, id_source);
                     open = true;
@@ -1737,16 +1724,9 @@ impl CrosshairApp {
                     *live_sync = true;
                     ui.close();
                 }
-                if open {
-                    egui::containers::menu::MenuState::from_ui(ui, |state, _| {
-                        state.open_item = Some(popup_id);
-                    });
-                }
                 let popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
-                    .kind(egui::PopupKind::Menu)
-                    .info(egui::UiStackInfo::new(egui::UiKind::Menu))
                     .align(egui::RectAlign::TOP_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(140.0)
@@ -1828,7 +1808,7 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::If) {
+        if active_owner != Some(MacroActionSubmenuKind::If) {
             open = false;
         }
         if open {
@@ -1960,7 +1940,7 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Mouse) {
+        if active_owner != Some(MacroActionSubmenuKind::Mouse) {
             open = false;
         }
         if top_level_hovered {
@@ -1994,17 +1974,10 @@ impl CrosshairApp {
                         data.insert_temp(active_mouse_click_popup_key_id, None::<&'static str>)
                     });
                 }
-                if open {
-                    egui::containers::menu::MenuState::from_ui(ui, |state, _| {
-                        state.open_item = Some(popup_id);
-                    });
-                }
                 let popup_rect_id = ui.make_persistent_id((id_source, "mouse-submenu-rect"));
                 let popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
-                    .kind(egui::PopupKind::Menu)
-                    .info(egui::UiStackInfo::new(egui::UiKind::Menu))
                     .align(egui::RectAlign::BOTTOM_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(372.0)
@@ -2172,8 +2145,11 @@ impl CrosshairApp {
                     Button::new(Self::material_icon_text(0xe1ba, 18.0)).selected(selected),
                 );
                 if !hover_blocked && response.hovered() {
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(action_hover_id, true));
+                    let owner_id = ui.make_persistent_id("macro-action-submenu-owner");
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(action_hover_id, true);
+                        data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
+                    });
                 }
                 if response.clicked() {
                     if !selected {
@@ -2232,7 +2208,7 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::ImageSearch) {
+        if active_owner != Some(MacroActionSubmenuKind::ImageSearch) {
             open = false;
         }
         if top_level_hovered {
@@ -2419,7 +2395,7 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Timer) {
+        if active_owner != Some(MacroActionSubmenuKind::Timer) {
             open = false;
         }
         if top_level_hovered {
@@ -17081,7 +17057,7 @@ if supports_move_mouse || show_detection_tuning {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Macro) {
+        if active_owner != Some(MacroActionSubmenuKind::Macro) {
             open = false;
         }
         if top_level_hovered {
@@ -17234,7 +17210,7 @@ if supports_move_mouse || show_detection_tuning {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Geometry) {
+        if active_owner != Some(MacroActionSubmenuKind::Geometry) {
             open = false;
         }
         if top_level_hovered {
@@ -17373,7 +17349,7 @@ if supports_move_mouse || show_detection_tuning {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::AudioSense) {
+        if active_owner != Some(MacroActionSubmenuKind::AudioSense) {
             open = false;
         }
         if top_level_hovered {
@@ -17666,7 +17642,7 @@ if supports_move_mouse || show_detection_tuning {
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
-        if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Funny) {
+        if active_owner != Some(MacroActionSubmenuKind::Funny) {
             open = false;
         }
         if top_level_hovered {
