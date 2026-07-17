@@ -760,8 +760,8 @@ impl CrosshairApp {
         if changed {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(owner_id, owner));
-            ui.ctx().request_repaint();
         }
+        ui.ctx().request_repaint();
     }
 
     fn pointer_in_mouse_click_child_popup(
