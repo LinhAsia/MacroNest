@@ -4802,6 +4802,8 @@ mod windows_overlay {
                     if screen_draw_capture_should_swallow_key_name(&key_name) {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         if is_key_up {
+                            let binding = binding_from_trigger_event(&key_name);
+                            crate::video_recorder::process_hotkey(&binding, false, false);
                             mark_screen_draw_capture_trigger_released();
                         }
                         if is_key_up {

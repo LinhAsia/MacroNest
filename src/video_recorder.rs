@@ -157,7 +157,13 @@ pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -
         && config
             .hotkey
             .as_ref()
-            .is_some_and(|trigger| hotkey::binding_matches(trigger, binding));
+            .is_some_and(|trigger| {
+                if is_down {
+                    hotkey::binding_matches(trigger, binding)
+                } else {
+                    trigger.key.eq_ignore_ascii_case(&binding.key)
+                }
+            });
     drop(config);
     if !matches {
         return false;
@@ -305,6 +311,8 @@ fn stop_recording_inner() {
         ACTIVE.store(false, Ordering::Release);
         return;
     };
+    recording.region_border.take();
+    ACTIVE.store(false, Ordering::Release);
     *STATUS.lock() = "Finishing video...".to_owned();
     if let Some(stdin) = recording.child.stdin.as_mut() {
         let _ = stdin.write_all(b"q\n");
@@ -340,8 +348,6 @@ fn stop_recording_inner() {
         )
     });
     let _ = fs::remove_file(&recording.audio_path);
-    recording.region_border.take();
-    ACTIVE.store(false, Ordering::Release);
     let mut status = match mux_result {
         Ok(()) => format!(
             "Saved with system audio: {}",
