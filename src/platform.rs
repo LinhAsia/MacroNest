@@ -135,12 +135,18 @@ mod windows_platform {
 
         let exe = env::current_exe()?;
         let exe_wide = widestring(exe.as_os_str().to_string_lossy().as_ref());
+        let startup_arg = env::args_os()
+            .any(|arg| arg == "--start-in-tray")
+            .then(|| widestring("--start-in-tray"));
         unsafe {
             let result = ShellExecuteW(
                 Some(HWND(std::ptr::null_mut())),
                 w!("runas"),
                 PCWSTR(exe_wide.as_ptr()),
-                PCWSTR::null(),
+                startup_arg
+                    .as_ref()
+                    .map(|arg| PCWSTR(arg.as_ptr()))
+                    .unwrap_or(PCWSTR::null()),
                 PCWSTR::null(),
                 SW_SHOWNORMAL,
             );

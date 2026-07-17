@@ -19,6 +19,8 @@ use std::os::windows::process::CommandExt;
 const GITHUB_RELEASES_PAGE_URL: &str = "https://github.com/LinhAsia/MacroNest/releases/latest";
 const UPDATE_MANIFEST_URL: &str =
     "https://github.com/LinhAsia/MacroNest/raw/master/update.json";
+const WINDOWS_STARTUP_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const WINDOWS_STARTUP_VALUE: &str = "MacroNest";
 
 #[derive(Debug, Deserialize)]
 struct UpdateManifest {
@@ -30,6 +32,44 @@ struct UpdateManifest {
 }
 
 impl CrosshairApp {
+    fn sync_windows_startup(&self) -> Result<()> {
+        let mut command = Command::new("reg.exe");
+        command.creation_flags(0x08000000);
+        if self.state.start_with_windows {
+            let exe = std::env::current_exe()?;
+            let tray_arg = if self.state.start_hidden_to_tray {
+                " --start-in-tray"
+            } else {
+                ""
+            };
+            let value = format!("\"{}\"{tray_arg}", exe.display());
+            command.args([
+                "add",
+                WINDOWS_STARTUP_KEY,
+                "/v",
+                WINDOWS_STARTUP_VALUE,
+                "/t",
+                "REG_SZ",
+                "/d",
+                &value,
+                "/f",
+            ]);
+        } else {
+            command.args([
+                "delete",
+                WINDOWS_STARTUP_KEY,
+                "/v",
+                WINDOWS_STARTUP_VALUE,
+                "/f",
+            ]);
+        }
+        let output = command.output()?;
+        if self.state.start_with_windows && !output.status.success() {
+            bail!(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        }
+        Ok(())
+    }
+
     fn update_download_file_stem(version: &str) -> String {
         let sanitized: String = version
             .chars()
@@ -221,6 +261,64 @@ impl CrosshairApp {
                         self.persist();
                     }
 
+                    ui.add_space(12.0);
+                    Self::show_settings_card_at_width(ui, content_width, |ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Windows startup",
+                                    "Khởi động cùng Windows",
+                                ))
+                                .strong()
+                                .size(14.0),
+                            );
+                            ui.add_space(8.0);
+                            let previous_start = self.state.start_with_windows;
+                            let previous_tray = self.state.start_hidden_to_tray;
+                            let start_changed = ui
+                                .checkbox(
+                                    &mut self.state.start_with_windows,
+                                    Self::tr_lang(
+                                        language,
+                                        "Start MacroNest with Windows",
+                                        "Khởi động MacroNest cùng Windows",
+                                    ),
+                                )
+                                .changed();
+                            let mut tray_changed = false;
+                            if self.state.start_with_windows {
+                                tray_changed = ui
+                                    .checkbox(
+                                        &mut self.state.start_hidden_to_tray,
+                                        Self::tr_lang(
+                                            language,
+                                            "Start hidden in system tray",
+                                            "Khởi động ẩn trong khay hệ thống",
+                                        ),
+                                    )
+                                    .changed();
+                            } else if self.state.start_hidden_to_tray {
+                                self.state.start_hidden_to_tray = false;
+                                tray_changed = true;
+                            }
+                            if start_changed || tray_changed {
+                                if let Err(error) = self.sync_windows_startup() {
+                                    self.state.start_with_windows = previous_start;
+                                    self.state.start_hidden_to_tray = previous_tray;
+                                    self.status = format!(
+                                        "{}: {error}",
+                                        Self::tr_lang(
+                                            language,
+                                            "Could not update Windows startup",
+                                            "Không thể cập nhật khởi động cùng Windows",
+                                        )
+                                    );
+                                }
+                                self.persist();
+                            }
+                        });
+                    });
                     ui.add_space(12.0);
                     Self::show_settings_card_at_width(ui, content_width, |ui| {
                         ui.vertical(|ui| {

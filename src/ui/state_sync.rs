@@ -457,6 +457,7 @@ impl CrosshairApp {
         startup_state_needs_cjk_fallback: bool,
     ) {
         self.state = state;
+        self.state.show_window = !self.startup_hide_to_tray_pending;
         self.startup_state_needs_cjk_fallback = startup_state_needs_cjk_fallback;
         self.save_name = self.state.selected_profile.clone().unwrap_or_default();
         self.last_active_panel = self.state.active_panel;

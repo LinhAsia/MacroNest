@@ -454,6 +454,8 @@ pub struct AppState {
     pub vietnamese_input_enabled: bool,
     pub vietnamese_input_mode: VietnameseInputMode,
     pub ui_theme: UiThemeMode,
+    pub start_with_windows: bool,
+    pub start_hidden_to_tray: bool,
     pub window_presets: Vec<WindowPreset>,
     pub next_preset_id: u32,
     #[serde(default)]
@@ -858,6 +860,8 @@ impl Default for AppState {
             vietnamese_input_enabled: false,
             vietnamese_input_mode: VietnameseInputMode::Telex,
             ui_theme: UiThemeMode::Dark,
+            start_with_windows: false,
+            start_hidden_to_tray: false,
             window_presets: Vec::new(),
             next_preset_id: 1,
             window_layouts: Vec::new(),

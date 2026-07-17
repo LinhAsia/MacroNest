@@ -767,6 +767,7 @@ pub struct CrosshairApp {
     native_shadow_applied: bool,
     native_transitions_disabled_applied: bool,
     startup_show_pending: bool,
+    startup_hide_to_tray_pending: bool,
     startup_gate_release_pending: bool,
     startup_gate_frames_remaining: u8,
     startup_shell_frames_remaining: u8,
@@ -888,6 +889,7 @@ impl CrosshairApp {
         ui_rx: Receiver<UiCommand>,
         startup_state_dirty: bool,
         startup_gate: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+        start_hidden_to_tray: bool,
     ) -> Self {
         let save_name = state.selected_profile.clone().unwrap_or_default();
         let initial_active_panel = state.active_panel;
@@ -1077,6 +1079,7 @@ impl CrosshairApp {
             native_shadow_applied: false,
             native_transitions_disabled_applied: false,
             startup_show_pending: true,
+            startup_hide_to_tray_pending: start_hidden_to_tray,
             startup_gate_release_pending: false,
             startup_gate_frames_remaining: 1,
             startup_shell_frames_remaining: 0,
@@ -12165,6 +12168,11 @@ impl CrosshairApp {
         if self.startup_show_pending {
             return;
         }
+        if self.startup_hide_to_tray_pending {
+            self.startup_hide_to_tray_pending = false;
+            self.hide_to_tray(ctx);
+            return;
+        }
         if self.startup_gate_release_pending {
             if self.startup_gate_frames_remaining > 0 {
                 self.startup_gate_frames_remaining -= 1;
@@ -15394,14 +15402,13 @@ impl eframe::App for CrosshairApp {
                 });
         }
 
-        if self.startup_show_pending
-            && self.state.show_window
-            && self.startup_shell_frames_remaining == 0
-        {
+        if self.startup_show_pending && self.startup_shell_frames_remaining == 0 {
             self.startup_show_pending = false;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            if !self.startup_hide_to_tray_pending {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
             self.startup_gate_release_pending = true;
             self.startup_gate_frames_remaining = 1;
             ctx.request_repaint();

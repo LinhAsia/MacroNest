@@ -326,6 +326,7 @@ fn apply_process_startup_tuning(paths: &AppPaths) {
 }
 
 fn main() -> Result<()> {
+    let start_hidden_to_tray = std::env::args_os().any(|arg| arg == "--start-in-tray");
     let args = std::env::args().collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--already-running-popup") {
         return run_popup_blob(PopupBlobKind::AlreadyRunning);
@@ -509,6 +510,7 @@ fn main() -> Result<()> {
                 ui_rx,
                 false,
                 startup_gate,
+                start_hidden_to_tray,
             )))
         }),
     )
