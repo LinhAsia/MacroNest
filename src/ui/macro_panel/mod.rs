@@ -1696,7 +1696,9 @@ impl CrosshairApp {
                 ui.ctx().data(|data| data.get_temp::<egui::Rect>(rect_id))
             })
             .zip(ui.ctx().pointer_hover_pos())
-            .is_some_and(|(rect, pos)| rect.expand(2.0).contains(pos));
+            .is_some_and(|(rect, pos)| {
+                rect.expand2(egui::vec2(18.0, 16.0)).contains(pos)
+            });
         let mut open = ui
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
@@ -1741,7 +1743,7 @@ impl CrosshairApp {
                 let popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
-                    .align(egui::RectAlign::TOP_START)
+                    .align(egui::RectAlign::RIGHT_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(140.0)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)

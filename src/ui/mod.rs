@@ -6090,12 +6090,16 @@ impl CrosshairApp {
                                     } else {
                                         ui.visuals().widgets.inactive.bg_stroke.color
                                     };
+                                    let mut capture_button = Button::new(hotkey_label);
+                                    if capture_active {
+                                        capture_button = capture_button
+                                            .fill(capture_fill)
+                                            .stroke(egui::Stroke::new(1.0, capture_stroke));
+                                    }
                                     if ui
                                         .add_sized(
                                             [164.0, 22.0],
-                                            Button::new(hotkey_label)
-                                                .fill(capture_fill)
-                                                .stroke(egui::Stroke::new(1.0, capture_stroke)),
+                                            capture_button,
                                         )
                                         .on_hover_text(if capture_active {
                                             Self::tr_lang(
@@ -6428,12 +6432,16 @@ impl CrosshairApp {
                                     } else {
                                         ui.visuals().widgets.inactive.bg_stroke.color
                                     };
+                                    let mut capture_button = Button::new(label);
+                                    if capture_active {
+                                        capture_button = capture_button
+                                            .fill(capture_fill)
+                                            .stroke(egui::Stroke::new(1.0, capture_stroke));
+                                    }
                                     if ui
                                         .add_sized(
                                             [186.0, 22.0],
-                                            Button::new(label)
-                                                .fill(capture_fill)
-                                                .stroke(egui::Stroke::new(1.0, capture_stroke)),
+                                            capture_button,
                                         )
                                         .on_hover_text(Self::tr_lang(
                                             self.state.ui_language,
