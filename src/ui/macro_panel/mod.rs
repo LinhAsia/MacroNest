@@ -1774,17 +1774,6 @@ impl CrosshairApp {
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(popup_rect_id, popup.response.rect));
                 }
-                let active_popup_key = ui
-                    .ctx()
-                    .data(|data| {
-                        data.get_temp::<Option<&'static str>>(active_mouse_click_popup_key_id)
-                    })
-                    .flatten();
-                if let Some(active_popup_key) = active_popup_key {
-                    if active_popup_key != popup_key {
-                        open = false;
-                    }
-                }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
                 ui.label(
                     RichText::new(Self::macro_action_short_label(base_action, language))
@@ -2071,42 +2060,6 @@ impl CrosshairApp {
                     id_source,
                     active_mouse_click_popup_key,
                 );
-                let popup_rect: Option<egui::Rect> =
-                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
-                if open {
-                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                        let mut keep_open_rect = tile_rect.expand2(egui::vec2(22.0, 18.0));
-                        if let Some(rect) = popup_rect {
-                            keep_open_rect =
-                                keep_open_rect.union(rect.expand2(egui::vec2(16.0, 14.0)));
-                            if rect.contains(pointer_pos) {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(owner_id, MacroActionSubmenuKind::Mouse)
-                                });
-                            }
-                        }
-                        for (_, _, _, popup_key) in
-                            Self::mouse_click_action_groups().iter().copied()
-                        {
-                            let child_popup_rect_id =
-                                ui.make_persistent_id((id_source, popup_key, "rect"));
-                            if let Some(rect) = ui
-                                .ctx()
-                                .data(|data| data.get_temp::<egui::Rect>(child_popup_rect_id))
-                            {
-                                keep_open_rect =
-                                    keep_open_rect.union(rect.expand2(egui::vec2(16.0, 14.0)));
-                            }
-                        }
-                        if !keep_open_rect.contains(pointer_pos) {
-                            open = false;
-                            Self::clear_macro_action_submenus(ui, id_source);
-                        }
-                    } else {
-                        open = false;
-                        Self::clear_macro_action_submenus(ui, id_source);
-                    }
-                }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
                 let label_color = if selected {
                     ui.visuals().strong_text_color()
