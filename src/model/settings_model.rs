@@ -22,6 +22,10 @@ fn default_focus_mode_dim_percent() -> u8 {
     60
 }
 
+fn default_window_opacity_percent() -> u8 {
+    75
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum GlobalConstantStoredValue {
@@ -494,6 +498,14 @@ pub struct AppState {
     #[serde(default)]
     pub focus_mode_include_taskbar: bool,
     #[serde(default)]
+    pub window_opacity_enabled: bool,
+    #[serde(default = "default_true")]
+    pub window_opacity_follow_focused_window: bool,
+    #[serde(default)]
+    pub window_opacity_target_window: String,
+    #[serde(default = "default_window_opacity_percent")]
+    pub window_opacity_percent: u8,
+    #[serde(default)]
     pub protractor_enabled: bool,
     #[serde(default = "default_protractor_scale")]
     pub protractor_scale: f32,
@@ -854,6 +866,10 @@ impl Default for AppState {
             focus_mode_target_window: String::new(),
             focus_mode_dim_percent: default_focus_mode_dim_percent(),
             focus_mode_include_taskbar: false,
+            window_opacity_enabled: false,
+            window_opacity_follow_focused_window: true,
+            window_opacity_target_window: String::new(),
+            window_opacity_percent: default_window_opacity_percent(),
             protractor_enabled: false,
             protractor_scale: 1.0,
             protractor_needle1_angle: 0.0,

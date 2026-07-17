@@ -1823,6 +1823,12 @@ mod windows_overlay {
             dim_percent: u8,
             include_taskbar: bool,
         },
+        SetWindowOpacityConfig {
+            enabled: bool,
+            follow_focused_window: bool,
+            target_window: String,
+            opacity_percent: u8,
+        },
         SetProtractorEnabled(bool),
         UpdateProtractorConfig {
             scale: f32,
@@ -2869,6 +2875,11 @@ mod windows_overlay {
         focus_mode_dim_percent: u8,
         focus_mode_include_taskbar: bool,
         active_focus_mode_hwnd: Option<HWND>,
+        window_opacity_enabled: bool,
+        window_opacity_follow_focused_window: bool,
+        window_opacity_target_window: String,
+        window_opacity_percent: u8,
+        window_opacity_restore: Option<WindowOpacityRestore>,
         protractor_hwnd: HWND,
         active_focus_highlight_hwnd: Option<HWND>,
         cached_search_overlay_regions: Vec<VisionRegion>,
@@ -2877,6 +2888,13 @@ mod windows_overlay {
         cached_search_overlay_capture_region_mode: bool,
         search_area_overlay_visible: bool,
         dynamic_geometry_overlay_visible: bool,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct WindowOpacityRestore {
+        hwnd: HWND,
+        process_id: u32,
+        ex_style: i32,
     }
 
     struct MouseRecordingSession {
@@ -3687,6 +3705,11 @@ mod windows_overlay {
                 focus_mode_dim_percent: 60,
                 focus_mode_include_taskbar: false,
                 active_focus_mode_hwnd: None,
+                window_opacity_enabled: false,
+                window_opacity_follow_focused_window: true,
+                window_opacity_target_window: String::new(),
+                window_opacity_percent: 75,
+                window_opacity_restore: None,
                 protractor_hwnd,
                 active_focus_highlight_hwnd: None,
                 cached_search_overlay_regions: Vec::new(),
@@ -4248,6 +4271,7 @@ mod windows_overlay {
                 if let Some(runtime) = runtime_mut(hwnd) {
                     update_native_focus_highlight(runtime, foreground);
                     update_focus_mode(runtime, foreground);
+                    update_window_opacity(runtime, foreground);
                     let ui_foreground = is_app_ui_currently_foreground();
                     UI_WINDOW_FOREGROUND.store(ui_foreground, Ordering::Relaxed);
                     apply_ui_foreground_state(runtime, ui_foreground);
@@ -10033,6 +10057,19 @@ mod windows_overlay {
                     runtime.focus_mode_dim_percent = dim_percent.min(100);
                     runtime.focus_mode_include_taskbar = include_taskbar;
                     update_focus_mode(runtime, GetForegroundWindow());
+                }
+
+                OverlayCommand::SetWindowOpacityConfig {
+                    enabled,
+                    follow_focused_window,
+                    target_window,
+                    opacity_percent,
+                } => {
+                    runtime.window_opacity_enabled = enabled;
+                    runtime.window_opacity_follow_focused_window = follow_focused_window;
+                    runtime.window_opacity_target_window = target_window;
+                    runtime.window_opacity_percent = opacity_percent.clamp(10, 100);
+                    update_window_opacity(runtime, GetForegroundWindow());
                 }
 
                 OverlayCommand::UpdateQuickKeyDisplayConfig {
@@ -18012,6 +18049,100 @@ mod windows_overlay {
         runtime.active_focus_mode_hwnd = Some(target);
         ACTIVE_FOCUS_MODE_HWND.store(target.0 as isize, Ordering::Relaxed);
         sync_window_location_hook_state(runtime);
+    }
+
+    unsafe fn restore_window_opacity(runtime: &mut Runtime) {
+        let Some(restore) = runtime.window_opacity_restore.take() else {
+            return;
+        };
+        if restore.hwnd.0.is_null() {
+            return;
+        }
+        let mut process_id = 0;
+        let _ = GetWindowThreadProcessId(restore.hwnd, Some(&mut process_id));
+        if process_id == 0 || process_id != restore.process_id {
+            return;
+        }
+        let _ = SetLayeredWindowAttributes(restore.hwnd, COLORREF(0), 255, LWA_ALPHA);
+        let _ = SetWindowLongW(restore.hwnd, GWL_EXSTYLE, restore.ex_style);
+        let _ = SetWindowPos(
+            restore.hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+    }
+
+    unsafe fn apply_window_opacity(runtime: &mut Runtime, target: HWND) {
+        let opacity = runtime.window_opacity_percent.clamp(10, 100);
+        if opacity == 100 {
+            restore_window_opacity(runtime);
+            return;
+        }
+
+        if runtime
+            .window_opacity_restore
+            .is_some_and(|restore| restore.hwnd == target)
+        {
+            let alpha = ((u16::from(opacity) * 255) / 100) as u8;
+            let _ = SetLayeredWindowAttributes(target, COLORREF(0), alpha, LWA_ALPHA);
+            return;
+        }
+
+        restore_window_opacity(runtime);
+        if !is_native_focus_highlight_target(target) {
+            return;
+        }
+
+        let ex_style = GetWindowLongW(target, GWL_EXSTYLE);
+        if ex_style & WS_EX_LAYERED.0 as i32 != 0 {
+            return;
+        }
+        let _ = SetWindowLongW(target, GWL_EXSTYLE, ex_style | WS_EX_LAYERED.0 as i32);
+        let alpha = ((u16::from(opacity) * 255) / 100) as u8;
+        if SetLayeredWindowAttributes(target, COLORREF(0), alpha, LWA_ALPHA).is_err() {
+            let _ = SetWindowLongW(target, GWL_EXSTYLE, ex_style);
+            return;
+        }
+        let _ = SetWindowPos(
+            target,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
+        let mut process_id = 0;
+        let _ = GetWindowThreadProcessId(target, Some(&mut process_id));
+        runtime.window_opacity_restore = Some(WindowOpacityRestore {
+            hwnd: target,
+            process_id,
+            ex_style,
+        });
+    }
+
+    unsafe fn update_window_opacity(runtime: &mut Runtime, foreground: HWND) {
+        if !runtime.window_opacity_enabled {
+            restore_window_opacity(runtime);
+            return;
+        }
+        let target = if runtime.window_opacity_follow_focused_window {
+            normalize_native_focus_highlight_target(foreground)
+        } else if runtime.window_opacity_target_window.trim().is_empty() {
+            HWND::default()
+        } else {
+            resolve_window_target(
+                Some(runtime.window_opacity_target_window.trim()),
+                &[],
+                true,
+                false,
+            )
+        };
+        apply_window_opacity(runtime, target);
     }
 
     fn angle_between(angle: f32, start: f32, end: f32) -> bool {
@@ -35300,7 +35431,7 @@ mod windows_overlay {
         if hwnd.0.is_null() { None } else { Some(hwnd) }
     }
 
-    fn shutdown_application(hwnd: HWND, runtime: &Runtime) -> Result<()> {
+    fn shutdown_application(hwnd: HWND, runtime: &mut Runtime) -> Result<()> {
         let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &notify_icon(hwnd)) };
         let _ = crate::platform::show_taskbar();
         let _ = restore_mouse_sensitivity_on_exit();
@@ -35310,6 +35441,7 @@ mod windows_overlay {
         let _ = unsafe { ShowWindow(runtime.hud_hwnd, SW_HIDE) };
         let _ = unsafe { ShowWindow(runtime.pin_hwnd, SW_HIDE) };
         unsafe { hide_focus_highlight_windows(runtime) };
+        unsafe { restore_window_opacity(runtime) };
         if let Some(active) = &runtime.active_pin_thumbnail {
             if let Some(thumbnail_id) = active.thumbnail_id {
                 let _ = unsafe { DwmUnregisterThumbnail(thumbnail_id) };

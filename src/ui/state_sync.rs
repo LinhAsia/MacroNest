@@ -44,6 +44,7 @@ impl CrosshairApp {
         self.sync_native_focus_highlight_enabled();
         self.sync_focus_highlight_config();
         self.sync_focus_mode_config();
+        self.sync_window_opacity_config();
         self.sync_protractor_state();
         self.sync_quick_key_display_config();
         self.sync_quick_screen_draw_config();
@@ -249,6 +250,26 @@ impl CrosshairApp {
                 target_window: config.2.clone(),
                 dim_percent: config.3,
                 include_taskbar: config.4,
+            },
+        );
+    }
+
+    pub(crate) fn sync_window_opacity_config(&mut self) {
+        let config = (
+            self.state.window_opacity_enabled,
+            self.state.window_opacity_follow_focused_window,
+            self.state.window_opacity_target_window.clone(),
+            self.state.window_opacity_percent,
+        );
+        Self::sync_overlay_command_with_state_if_changed(
+            &self.overlay_tx,
+            config,
+            &mut self.last_synced_window_opacity_config,
+            |config| OverlayCommand::SetWindowOpacityConfig {
+                enabled: config.0,
+                follow_focused_window: config.1,
+                target_window: config.2.clone(),
+                opacity_percent: config.3,
             },
         );
     }
