@@ -1737,9 +1737,16 @@ impl CrosshairApp {
                     *live_sync = true;
                     ui.close();
                 }
+                if open {
+                    egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                        state.open_item = Some(popup_id);
+                    });
+                }
                 let popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
+                    .kind(egui::PopupKind::Menu)
+                    .info(egui::UiStackInfo::new(egui::UiKind::Menu))
                     .align(egui::RectAlign::TOP_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(140.0)
@@ -1979,10 +1986,17 @@ impl CrosshairApp {
                         data.insert_temp(active_mouse_click_popup_key_id, None::<&'static str>)
                     });
                 }
+                if open {
+                    egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                        state.open_item = Some(popup_id);
+                    });
+                }
                 let popup_rect_id = ui.make_persistent_id((id_source, "mouse-submenu-rect"));
                 let popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
+                    .kind(egui::PopupKind::Menu)
+                    .info(egui::UiStackInfo::new(egui::UiKind::Menu))
                     .align(egui::RectAlign::BOTTOM_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(372.0)
