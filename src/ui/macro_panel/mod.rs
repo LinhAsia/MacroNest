@@ -1743,7 +1743,7 @@ impl CrosshairApp {
                 let popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
-                    .align(egui::RectAlign::BOTTOM_START)
+                    .align(egui::RectAlign::TOP_START)
                     .layout(egui::Layout::top_down_justified(egui::Align::Min))
                     .width(140.0)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
@@ -1769,40 +1769,6 @@ impl CrosshairApp {
                 if let Some(popup) = &popup_response {
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(popup_rect_id, popup.response.rect));
-                }
-                let popup_rect: Option<egui::Rect> =
-                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
-                if open {
-                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
-                        let mut keep_open_rect = tile_rect.expand2(egui::vec2(28.0, 22.0));
-                        if let Some(rect) = popup_rect {
-                            keep_open_rect =
-                                keep_open_rect.union(rect.expand2(egui::vec2(18.0, 16.0)));
-                            let bridge_min = egui::pos2(
-                                tile_rect.min.x.min(rect.min.x) - 18.0,
-                                tile_rect.min.y.min(rect.max.y) - 18.0,
-                            );
-                            let bridge_max = egui::pos2(
-                                tile_rect.max.x.max(rect.max.x) + 18.0,
-                                tile_rect.max.y.max(rect.min.y) + 18.0,
-                            );
-                            keep_open_rect = keep_open_rect
-                                .union(egui::Rect::from_min_max(bridge_min, bridge_max));
-                            if rect.contains(pointer_pos) {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(
-                                        active_mouse_click_popup_key_id,
-                                        Some(popup_key),
-                                    )
-                                });
-                            }
-                        }
-                        if !keep_open_rect.contains(pointer_pos) {
-                            open = false;
-                        }
-                    } else {
-                        open = false;
-                    }
                 }
                 let active_popup_key = ui
                     .ctx()
