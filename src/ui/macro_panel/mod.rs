@@ -771,15 +771,27 @@ impl CrosshairApp {
         let Some(pointer_pos) = ui.ctx().pointer_hover_pos() else {
             return false;
         };
-        Self::mouse_click_action_groups()
-            .iter()
-            .copied()
-            .any(|(_, _, _, popup_key)| {
-                let popup_rect_id = egui::Id::new((id_source, popup_key, "rect"));
-                ui.ctx()
-                    .data(|data| data.get_temp::<egui::Rect>(popup_rect_id))
-                    .is_some_and(|rect| rect.expand2(egui::vec2(6.0, 6.0)).contains(pointer_pos))
-            })
+        let active_key_id =
+            egui::Id::new((id_source, "mouse-click-active-submenu-key"));
+        let Some(active_key) = ui
+            .ctx()
+            .data(|data| data.get_temp::<Option<&'static str>>(active_key_id))
+            .flatten()
+        else {
+            return false;
+        };
+        let popup_id = egui::Id::new((id_source, active_key, "popup"));
+        let popup_open = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
+        if !popup_open {
+            return false;
+        }
+        let popup_rect_id = egui::Id::new((id_source, active_key, "rect"));
+        ui.ctx()
+            .data(|data| data.get_temp::<egui::Rect>(popup_rect_id))
+            .is_some_and(|rect| rect.expand2(egui::vec2(6.0, 6.0)).contains(pointer_pos))
     }
 
     fn forward_action_popup_scroll(ui: &egui::Ui) {
