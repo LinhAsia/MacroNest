@@ -717,6 +717,7 @@ impl CrosshairApp {
                 );
                 if !is_submenu_item && !hover_blocked && (response.hovered() || response.clicked())
                 {
+                    Self::clear_macro_action_submenus(ui, action_hover_id);
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(action_hover_id, true));
                     Self::set_macro_action_submenu_owner(ui, None);
@@ -1813,11 +1814,12 @@ impl CrosshairApp {
     fn render_if_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
+        _id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let id_source = action_hover_id;
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = matches!(
             *current,
@@ -1944,11 +1946,12 @@ impl CrosshairApp {
     fn render_mouse_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
+        _id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let id_source = action_hover_id;
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_mouse(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
@@ -2173,6 +2176,7 @@ impl CrosshairApp {
                     Button::new(Self::material_icon_text(0xe1ba, 18.0)).selected(selected),
                 );
                 if !hover_blocked && response.hovered() {
+                    Self::clear_macro_action_submenus(ui, action_hover_id);
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(action_hover_id, true));
                     Self::set_macro_action_submenu_owner(ui, None);
@@ -2212,15 +2216,16 @@ impl CrosshairApp {
     fn render_image_search_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
+        _id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let id_source = action_hover_id;
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_image_search(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
-        let popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
+        let popup_id = egui::Id::new((id_source, "image-search-submenu-popup"));
         let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
         let timer_popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
         let active_owner = ui
@@ -2399,15 +2404,16 @@ impl CrosshairApp {
     fn render_timer_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
+        _id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let id_source = action_hover_id;
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_timer(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
-        let popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
+        let popup_id = egui::Id::new((id_source, "timer-submenu-popup"));
         let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
         let image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
         let active_owner = ui
@@ -6819,7 +6825,7 @@ impl CrosshairApp {
                                                 let block_top_level_hover =
                                                     Self::pointer_in_mouse_click_child_popup(
                                                         ui,
-                                                        mouse_group_id,
+                                                        action_hover_id,
                                                     );
                                                 ui.ctx().data_mut(|data| {
                                                     data.insert_temp(action_hover_id, false);
@@ -9146,7 +9152,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 let block_top_level_hover =
                                                     Self::pointer_in_mouse_click_child_popup(
                                                         ui,
-                                                        mouse_group_id,
+                                                        action_hover_id,
                                                     );
                                                 ui.ctx().data_mut(|data| {
                                                     data.insert_temp(action_hover_id, false);
@@ -12351,7 +12357,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     let block_top_level_hover =
                                                         Self::pointer_in_mouse_click_child_popup(
                                                             ui,
-                                                            mouse_group_id,
+                                                            action_hover_id,
                                                         );
                                                     ui.ctx().data_mut(|data| {
                                                         data.insert_temp(action_hover_id, false);
@@ -17063,15 +17069,16 @@ if supports_move_mouse || show_detection_tuning {
     fn render_trigger_macro_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
+        _id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let id_source = action_hover_id;
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_trigger_macro(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
-        let popup_id = ui.make_persistent_id((id_source, "macro-submenu-popup"));
+        let popup_id = egui::Id::new((id_source, "macro-submenu-popup"));
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
@@ -17216,15 +17223,16 @@ if supports_move_mouse || show_detection_tuning {
     fn render_geometry_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
+        _id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let id_source = action_hover_id;
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_geometry(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
-        let popup_id = ui.make_persistent_id((id_source, "geometry-submenu-popup"));
+        let popup_id = egui::Id::new((id_source, "geometry-submenu-popup"));
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
@@ -17355,15 +17363,16 @@ if supports_move_mouse || show_detection_tuning {
     fn render_audio_sense_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
+        _id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let id_source = action_hover_id;
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_audio_sense(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
-        let popup_id = ui.make_persistent_id((id_source, "audiosense-submenu-popup"));
+        let popup_id = egui::Id::new((id_source, "audiosense-submenu-popup"));
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
@@ -17648,15 +17657,16 @@ if supports_move_mouse || show_detection_tuning {
     fn render_funny_action_group_option(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
+        _id_source: impl std::hash::Hash + Copy,
         current: &mut MacroAction,
         live_sync: &mut bool,
         action_hover_id: egui::Id,
     ) {
+        let id_source = action_hover_id;
         let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
         let selected = Self::macro_action_is_funny(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
-        let popup_id = ui.make_persistent_id((id_source, "funny-submenu-popup"));
+        let popup_id = egui::Id::new((id_source, "funny-submenu-popup"));
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
