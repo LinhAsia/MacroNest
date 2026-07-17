@@ -1774,6 +1774,15 @@ impl CrosshairApp {
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(popup_rect_id, popup.response.rect));
                 }
+                let active_popup_key = ui
+                    .ctx()
+                    .data(|data| {
+                        data.get_temp::<Option<&'static str>>(active_mouse_click_popup_key_id)
+                    })
+                    .flatten();
+                if active_popup_key != Some(popup_key) {
+                    open = false;
+                }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
                 ui.label(
                     RichText::new(Self::macro_action_short_label(base_action, language))
@@ -1943,12 +1952,22 @@ impl CrosshairApp {
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
+        let top_level_hovered = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(action_hover_id))
+            .unwrap_or(false);
         let mut open = ui
             .ctx()
             .data(|data| data.get_temp::<bool>(popup_id))
             .unwrap_or(false);
         if active_owner.is_some_and(|kind| kind != MacroActionSubmenuKind::Mouse) {
             open = false;
+        }
+        if top_level_hovered {
+            open = false;
+            Self::clear_mouse_click_submenus(ui, id_source);
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
         }
         if open {
             let parent_layer = ui.layer_id();
@@ -2060,6 +2079,30 @@ impl CrosshairApp {
                     id_source,
                     active_mouse_click_popup_key,
                 );
+                if open {
+                    let pointer_layer = ui
+                        .ctx()
+                        .pointer_hover_pos()
+                        .and_then(|pos| ui.ctx().layer_id_at(pos));
+                    let mouse_popup_layer =
+                        egui::LayerId::new(egui::Order::Foreground, popup_id);
+                    let child_popup_layer = active_mouse_click_popup_key.map(|popup_key| {
+                        egui::LayerId::new(
+                            egui::Order::Foreground,
+                            ui.make_persistent_id((id_source, popup_key, "popup")),
+                        )
+                    });
+                    let pointer_in_mouse_menu = pointer_layer == Some(mouse_popup_layer)
+                        || child_popup_layer.is_some_and(|layer| pointer_layer == Some(layer));
+                    let pointer_on_mouse_tile = ui
+                        .ctx()
+                        .pointer_hover_pos()
+                        .is_some_and(|pos| tile_rect.expand(8.0).contains(pos));
+                    if !pointer_on_mouse_tile && !pointer_in_mouse_menu {
+                        open = false;
+                        Self::clear_macro_action_submenus(ui, id_source);
+                    }
+                }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
                 let label_color = if selected {
                     ui.visuals().strong_text_color()
