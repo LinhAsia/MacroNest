@@ -8,6 +8,7 @@
 - Added panning for zoomed Pin and Source Crop previews.
 - Added native opacity control for Pin presets.
 - Added native Focus Mode with focused or selected window targeting and adjustable dimming.
+- Added native Window Opacity Quick Action with focused or selected window targeting.
 
 ## Improvements
 

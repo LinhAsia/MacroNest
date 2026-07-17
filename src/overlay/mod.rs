@@ -10068,7 +10068,7 @@ mod windows_overlay {
                     runtime.window_opacity_enabled = enabled;
                     runtime.window_opacity_follow_focused_window = follow_focused_window;
                     runtime.window_opacity_target_window = target_window;
-                    runtime.window_opacity_percent = opacity_percent.clamp(10, 100);
+                    runtime.window_opacity_percent = opacity_percent.min(100);
                     update_window_opacity(runtime, GetForegroundWindow());
                 }
 
@@ -18077,7 +18077,7 @@ mod windows_overlay {
     }
 
     unsafe fn apply_window_opacity(runtime: &mut Runtime, target: HWND) {
-        let opacity = runtime.window_opacity_percent.clamp(10, 100);
+        let opacity = runtime.window_opacity_percent.min(100);
         if opacity == 100 {
             restore_window_opacity(runtime);
             return;

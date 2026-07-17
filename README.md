@@ -40,6 +40,8 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Windows Key | Lock or unlock the Windows key |
 | Window Pin | Keep a selected window always on top |
 | Focus Highlight | Outline the active window with a configurable border and decoration |
+| Focus Mode | Dim everything outside the focused or selected window |
+| Window Opacity | Change the selected window's native opacity directly from 0% to 100% |
 | Protractor | Show a draggable protractor overlay for angle checking |
 | Ruler | Measure the distance between two screen points and optionally copy the result |
 | Get Coordinates | Pick a screen point and optionally copy X and Y |

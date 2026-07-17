@@ -5325,7 +5325,7 @@ impl CrosshairApp {
                                     .add(
                                         egui::Slider::new(
                                             &mut self.state.window_opacity_percent,
-                                            10..=100,
+                                            0..=100,
                                         )
                                         .text(Self::tr_lang(
                                             self.state.ui_language,
