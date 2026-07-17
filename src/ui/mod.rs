@@ -6043,15 +6043,31 @@ impl CrosshairApp {
                                         self.capture_target.as_ref().is_some_and(|target| {
                                             matches!(target, CaptureRequest::QuickScreenDrawHotkey)
                                         });
-                                    let preview_binding = if capture_active {
-                                        self.capture_hotkey_combo_keys
-                                            .as_ref()
-                                            .map(|keys| {
-                                                Self::hotkey_binding_from_combo_keys(keys.clone())
-                                            })
-                                            .or_else(|| self.state.quick_screen_draw_hotkey.clone())
+                                    let hotkey_label = if capture_active {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Capturing...",
+                                            "Đang bắt phím...",
+                                        )
+                                        .to_owned()
                                     } else {
-                                        self.state.quick_screen_draw_hotkey.clone()
+                                        self.state
+                                            .quick_screen_draw_hotkey
+                                            .as_ref()
+                                            .map(|binding| {
+                                                Self::format_binding_ui(
+                                                    self.state.ui_language,
+                                                    Some(binding),
+                                                )
+                                            })
+                                            .unwrap_or_else(|| {
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Set trigger key",
+                                                    "Đặt phím trigger",
+                                                )
+                                                .to_owned()
+                                            })
                                     };
                                     let capture_time = ui.ctx().input(|input| input.time) as f32;
                                     let pulse = if capture_active {
@@ -6077,7 +6093,7 @@ impl CrosshairApp {
                                     if ui
                                         .add_sized(
                                             [164.0, 22.0],
-                                            Button::new(Self::material_icon_text(0xe312, 14.0))
+                                            Button::new(hotkey_label)
                                                 .fill(capture_fill)
                                                 .stroke(egui::Stroke::new(1.0, capture_stroke)),
                                         )
@@ -6098,6 +6114,12 @@ impl CrosshairApp {
                                     {
                                         if capture_active {
                                             self.cancel_capture();
+                                        } else if self.state.quick_screen_draw_hotkey.is_some() {
+                                            self.state.quick_screen_draw_hotkey = None;
+                                            self.sync_quick_screen_draw_config();
+                                            self.persist();
+                                            self.status =
+                                                "Cleared screen draw toggle key.".to_owned();
                                         } else {
                                             self.begin_capture(
                                                 CaptureRequest::QuickScreenDrawHotkey,
@@ -6105,65 +6127,6 @@ impl CrosshairApp {
                                                     .to_owned(),
                                             );
                                         }
-                                    }
-
-                                    ui.add_space(4.0);
-                                    if let Some(binding) = preview_binding.as_ref() {
-                                        let label = Self::format_binding_ui(
-                                            self.state.ui_language,
-                                            Some(binding),
-                                        );
-                                        let chip = if capture_active
-                                            && self.capture_hotkey_combo_keys.is_some()
-                                        {
-                                            Button::new(RichText::new(label).monospace())
-                                                .min_size(vec2(164.0, 22.0))
-                                                .fill(Color32::from_rgba_premultiplied(
-                                                    72, 156, 116, 120,
-                                                ))
-                                                .stroke(egui::Stroke::new(
-                                                    1.0,
-                                                    Color32::from_rgb(126, 224, 182),
-                                                ))
-                                        } else {
-                                            Button::new(RichText::new(label).monospace())
-                                                .min_size(vec2(164.0, 22.0))
-                                        };
-                                        let chip_response = ui
-                                            .add_sized([164.0, 22.0], chip)
-                                            .on_hover_text(if capture_active {
-                                                Self::tr_lang(
-                                                    self.state.ui_language,
-                                                    "Captured key preview",
-                                                    "Xem trước phím vừa bắt",
-                                                )
-                                            } else {
-                                                Self::tr_lang(
-                                                    self.state.ui_language,
-                                                    "Click to clear this hotkey",
-                                                    "Bấm để xóa phím tắt này",
-                                                )
-                                            });
-                                        if chip_response.clicked() && !capture_active {
-                                            self.state.quick_screen_draw_hotkey = None;
-                                            self.sync_quick_screen_draw_config();
-                                            self.persist();
-                                            self.status =
-                                                "Cleared screen draw toggle key.".to_owned();
-                                        }
-                                    } else {
-                                        ui.add_sized(
-                                            [164.0, 22.0],
-                                            egui::Label::new(
-                                                RichText::new(Self::tr_lang(
-                                                    self.state.ui_language,
-                                                    "Not set",
-                                                    "Not set",
-                                                ))
-                                                .size(10.0)
-                                                .weak(),
-                                            ),
-                                        );
                                     }
 
                                     ui.add_space(4.0);
@@ -6418,34 +6381,60 @@ impl CrosshairApp {
                                                 CaptureRequest::QuickVideoRecordHotkey
                                             )
                                         });
-                                    let hotkey_label = self
-                                        .capture_hotkey_combo_keys
-                                        .as_ref()
-                                        .filter(|_| capture_active)
-                                        .map(|keys| {
-                                            Self::hotkey_binding_from_combo_keys(keys.clone())
-                                        })
-                                        .or_else(|| {
-                                            self.state.quick_video_record_hotkey.clone()
-                                        });
-                                    let label = hotkey_label
-                                        .as_ref()
-                                        .map(|binding| {
-                                            Self::format_binding_ui(
-                                                self.state.ui_language,
-                                                Some(binding),
-                                            )
-                                        })
-                                        .unwrap_or_else(|| {
-                                            Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Set trigger key",
-                                                "??t ph?m trigger",
-                                            )
-                                            .to_owned()
-                                        });
+                                    let label = if capture_active {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Capturing...",
+                                            "Đang bắt phím...",
+                                        )
+                                        .to_owned()
+                                    } else {
+                                        self.state
+                                            .quick_video_record_hotkey
+                                            .as_ref()
+                                            .map(|binding| {
+                                                Self::format_binding_ui(
+                                                    self.state.ui_language,
+                                                    Some(binding),
+                                                )
+                                            })
+                                            .unwrap_or_else(|| {
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Set trigger key",
+                                                    "Đặt phím trigger",
+                                                )
+                                                .to_owned()
+                                            })
+                                    };
+                                    let capture_time = ui.ctx().input(|input| input.time) as f32;
+                                    let pulse = if capture_active {
+                                        0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                                    } else {
+                                        0.0
+                                    };
+                                    let capture_fill = if capture_active {
+                                        Color32::from_rgba_premultiplied(
+                                            (88.0 + pulse * 28.0) as u8,
+                                            (84.0 + pulse * 28.0) as u8,
+                                            (44.0 + pulse * 10.0) as u8,
+                                            255,
+                                        )
+                                    } else {
+                                        ui.visuals().widgets.inactive.bg_fill
+                                    };
+                                    let capture_stroke = if capture_active {
+                                        Color32::from_rgb(255, 232, 96)
+                                    } else {
+                                        ui.visuals().widgets.inactive.bg_stroke.color
+                                    };
                                     if ui
-                                        .add_sized([186.0, 22.0], Button::new(label))
+                                        .add_sized(
+                                            [186.0, 22.0],
+                                            Button::new(label)
+                                                .fill(capture_fill)
+                                                .stroke(egui::Stroke::new(1.0, capture_stroke)),
+                                        )
                                         .on_hover_text(Self::tr_lang(
                                             self.state.ui_language,
                                             "Press to start or stop. Hold while idle to select a region, then release to record it.",
