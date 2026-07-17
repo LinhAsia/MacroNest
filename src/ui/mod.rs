@@ -13257,6 +13257,8 @@ impl eframe::App for CrosshairApp {
 
         let drawing_active = crate::overlay::screen_draw_active();
         let capturing_region = crate::overlay::screen_draw_get_capturing_region();
+        let trigger_pending_from_inactive =
+            crate::overlay::screen_draw_trigger_pending_from_inactive();
         let color_pick_mode = crate::overlay::screen_draw_get_color_pick_mode();
         let crosshair_draw_mode = crate::overlay::screen_draw_is_crosshair_draw();
         if drawing_active {
@@ -13287,6 +13289,7 @@ impl eframe::App for CrosshairApp {
             color_pick_pending = false;
         }
         let toolbar_visible = !capturing_region
+            && !trigger_pending_from_inactive
             && (!color_pick_mode || crosshair_draw_mode)
             && !(color_pick_pending && !crosshair_draw_mode);
         let was_active = ctx.data(|d| {

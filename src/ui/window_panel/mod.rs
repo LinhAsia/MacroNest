@@ -3546,6 +3546,58 @@ impl CrosshairApp {
                             let mut snap_preview = None;
                             let mut merge_action = None;
                             let cells_to_draw = layout.cells.clone();
+                            let merge_preview_bounds = self.drag_start_layout_cell.and_then(
+                                |(drag_layout, drag_row, drag_col)| {
+                                    if drag_layout != layout.id
+                                        || !ui.input(|input| input.pointer.primary_down())
+                                    {
+                                        return None;
+                                    }
+                                    let pointer = ui.input(|input| input.pointer.latest_pos())?;
+                                    let source = cells_to_draw.iter().find(|cell| {
+                                        (cell.row, cell.col) == (drag_row, drag_col)
+                                    })?;
+                                    let target = cells_to_draw.iter().find(|cell| {
+                                        let end_row =
+                                            (cell.row + cell.row_span).min(layout.rows);
+                                        let end_col =
+                                            (cell.col + cell.col_span).min(layout.cols);
+                                        let rect = egui::Rect::from_min_max(
+                                            egui::pos2(
+                                                grid_rect.min.x
+                                                    + (col_starts[cell.col] + cell.adjust_left)
+                                                        * grid_w,
+                                                grid_rect.min.y
+                                                    + (row_starts[cell.row] + cell.adjust_top)
+                                                        * grid_h,
+                                            ),
+                                            egui::pos2(
+                                                grid_rect.min.x
+                                                    + (col_starts[end_col] + cell.adjust_right)
+                                                        * grid_w,
+                                                grid_rect.min.y
+                                                    + (row_starts[end_row] + cell.adjust_bottom)
+                                                        * grid_h,
+                                            ),
+                                        )
+                                        .shrink(2.0);
+                                        rect.contains(pointer)
+                                    })?;
+                                    if (source.row, source.col) == (target.row, target.col) {
+                                        return None;
+                                    }
+                                    Some((
+                                        source.row.min(target.row),
+                                        (source.row + source.row_span)
+                                            .max(target.row + target.row_span)
+                                            .min(layout.rows),
+                                        source.col.min(target.col),
+                                        (source.col + source.col_span)
+                                            .max(target.col + target.col_span)
+                                            .min(layout.cols),
+                                    ))
+                                },
+                            );
                             for cell in &cells_to_draw {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
                                     continue;
@@ -3574,14 +3626,17 @@ impl CrosshairApp {
                                 let is_merge_source = self.drag_start_layout_cell
                                     == Some((layout.id, cell.row, cell.col))
                                     && ui.input(|input| input.pointer.primary_down());
-                                let is_merge_target = self.drag_start_layout_cell
-                                    .is_some_and(|(drag_layout, drag_row, drag_col)| {
-                                        drag_layout == layout.id
-                                            && (drag_row, drag_col) != (cell.row, cell.col)
-                                            && ui.input(|input| input.pointer.primary_down())
-                                            && ui.input(|input| input.pointer.latest_pos())
-                                                .is_some_and(|pointer| cell_rect.contains(pointer))
-                                    });
+                                let is_merge_target = !is_merge_source
+                                    && merge_preview_bounds.is_some_and(
+                                        |(start_row, end_row, start_col, end_col)| {
+                                            cell.row < end_row
+                                                && end_row > start_row
+                                                && cell.col < end_col
+                                                && end_col > start_col
+                                                && (cell.row + cell.row_span) > start_row
+                                                && (cell.col + cell.col_span) > start_col
+                                        },
+                                    );
 
                                 let cell_id =
                                     ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));

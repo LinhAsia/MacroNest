@@ -2148,6 +2148,7 @@ mod windows_overlay {
         suppress_next_trigger_hold: bool,
         last_toolbar_interaction_at: Option<Instant>,
         capture_trigger_release_point: Option<(i32, i32)>,
+        capture_deactivate_on_finish: bool,
         capture_session_id: u64,
         last_present_at: Option<Instant>,
         dirty_rect: Option<ScreenDrawDirtyRect>,
@@ -2227,6 +2228,7 @@ mod windows_overlay {
                 suppress_next_trigger_hold: false,
                 last_toolbar_interaction_at: None,
                 capture_trigger_release_point: None,
+                capture_deactivate_on_finish: false,
                 capture_session_id: 0,
                 last_present_at: None,
                 dirty_rect: None,
@@ -9455,7 +9457,7 @@ mod windows_overlay {
                 }
             } else {
                 activate_screen_draw(&mut state, captured_frame);
-                state.trigger_pressed_at = None;
+                state.trigger_pressed_at = Some(press_started_at);
                 state.trigger_started_from_inactive = true;
                 state.trigger_release_should_keep_open = true;
             }
@@ -9613,7 +9615,7 @@ mod windows_overlay {
             state.trigger_started_from_inactive = false;
             state.trigger_release_should_keep_open = false;
         }
-        let trigger = {
+        let (trigger, deactivate_on_finish) = {
             let mut state = SCREEN_DRAW_STATE.lock();
             if !state.active || state.capturing_region || state.text_session.is_some() {
                 state.trigger_pressed_at = None;
@@ -9643,7 +9645,7 @@ mod windows_overlay {
             if elapsed < Duration::from_millis(hold_threshold_ms) {
                 return;
             }
-            configured_trigger
+            (configured_trigger, state.trigger_started_from_inactive)
         };
         {
             let mut state = SCREEN_DRAW_STATE.lock();
@@ -9651,6 +9653,7 @@ mod windows_overlay {
             state.trigger_started_from_inactive = false;
             state.trigger_release_should_keep_open = false;
             state.capture_trigger_release_point = None;
+            state.capture_deactivate_on_finish = deactivate_on_finish;
         }
         begin_screen_draw_capture_from_trigger(trigger);
     }
@@ -11338,6 +11341,7 @@ mod windows_overlay {
     fn screen_draw_toolbar_visible(state: &ScreenDrawState) -> bool {
         state.active
             && !state.capturing_region
+            && !(state.trigger_started_from_inactive && state.trigger_is_down)
             && (!state.screen_color_pick_mode || state.crosshair_draw_target.is_some())
     }
 
@@ -11440,6 +11444,11 @@ mod windows_overlay {
     pub fn screen_draw_get_capturing_region() -> bool {
         let state = SCREEN_DRAW_STATE.lock();
         state.active && state.capturing_region
+    }
+
+    pub fn screen_draw_trigger_pending_from_inactive() -> bool {
+        let state = SCREEN_DRAW_STATE.lock();
+        state.active && state.trigger_started_from_inactive && state.trigger_is_down
     }
 
     pub fn screen_draw_hwnd() -> Option<windows::Win32::Foundation::HWND> {
@@ -12124,6 +12133,7 @@ mod windows_overlay {
         state.trigger_started_from_inactive = false;
         state.trigger_release_should_keep_open = false;
         state.capture_trigger_release_point = None;
+        state.capture_deactivate_on_finish = false;
         state.strokes.clear();
         state.redo_strokes.clear();
         reset_screen_draw_buffers(state);
@@ -12178,6 +12188,7 @@ mod windows_overlay {
         state.capturing_region = false;
         state.capture_trigger = None;
         state.capture_trigger_release_point = None;
+        state.capture_deactivate_on_finish = false;
         state.current_stroke = None;
         state.current_stroke_updated_at = None;
         state.current_stroke_release_seen_at = None;
@@ -13175,7 +13186,10 @@ mod windows_overlay {
             state.trigger_started_from_inactive = false;
             state.trigger_release_should_keep_open = false;
             state.suppress_next_trigger_hold = true;
-            if state.active {
+            if state.capture_deactivate_on_finish {
+                deactivate_screen_draw(&mut state);
+                state.suppress_next_trigger_hold = true;
+            } else if state.active {
                 state.pending_repaint = true;
                 let toolbar_rect = screen_draw_toolbar_rect(&state);
                 mark_screen_draw_dirty(&mut state, toolbar_rect);
