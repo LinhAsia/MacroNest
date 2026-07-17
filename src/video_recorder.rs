@@ -26,6 +26,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone)]
 pub struct VideoRecorderConfig {
+    pub enabled: bool,
     pub hotkey: Option<HotkeyBinding>,
     pub mode: QuickVideoRecordMode,
     pub target_window: String,
@@ -37,6 +38,7 @@ pub struct VideoRecorderConfig {
 impl Default for VideoRecorderConfig {
     fn default() -> Self {
         Self {
+            enabled: false,
             hotkey: None,
             mode: QuickVideoRecordMode::FullScreen,
             target_window: String::new(),
@@ -101,11 +103,13 @@ pub fn stop_blocking() {
 }
 
 pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -> bool {
-    let matches = CONFIG
-        .lock()
-        .hotkey
-        .as_ref()
-        .is_some_and(|trigger| hotkey::binding_matches(trigger, binding));
+    let config = CONFIG.lock();
+    let matches = config.enabled
+        && config
+            .hotkey
+            .as_ref()
+            .is_some_and(|trigger| hotkey::binding_matches(trigger, binding));
+    drop(config);
     if !matches {
         return false;
     }
@@ -154,6 +158,8 @@ fn start_recording_inner() -> Result<(), String> {
             "lavfi",
             "-i",
             &source,
+            "-vf",
+            "hwdownload,format=bgra,format=nv12",
             "-an",
             "-c:v",
             "h264_mf",
@@ -236,7 +242,7 @@ fn spawn_exit_watchdog(session_id: u64) {
                     *STATUS.lock() = if error.trim().is_empty() {
                         "Video recording stopped unexpectedly.".to_owned()
                     } else {
-                        format!("Video recording failed: {}", error.trim())
+                        format!("Video recording failed: {}", concise_ffmpeg_error(&error))
                     };
                 }
                 ACTIVE.store(false, Ordering::Release);
@@ -245,6 +251,19 @@ fn spawn_exit_watchdog(session_id: u64) {
             thread::sleep(Duration::from_millis(500));
         }
     });
+}
+
+fn concise_ffmpeg_error(log: &str) -> String {
+    let detail = log
+        .lines()
+        .find(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower.contains("error") || lower.contains("failed")
+        })
+        .or_else(|| log.lines().find(|line| !line.trim().is_empty()))
+        .unwrap_or("FFmpeg stopped unexpectedly")
+        .trim();
+    detail.chars().take(180).collect()
 }
 
 fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>), String> {

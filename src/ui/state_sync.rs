@@ -377,6 +377,7 @@ impl CrosshairApp {
 
     pub(crate) fn sync_quick_video_record_config(&self) {
         crate::video_recorder::set_config(crate::video_recorder::VideoRecorderConfig {
+            enabled: self.state.quick_video_record_enabled,
             hotkey: self.state.quick_video_record_hotkey.clone(),
             mode: self.state.quick_video_record_mode,
             target_window: self.state.quick_video_record_target_window.clone(),

@@ -627,6 +627,8 @@ pub struct AppState {
     #[serde(default)]
     pub quick_screen_draw_text_border: bool,
     #[serde(default)]
+    pub quick_video_record_enabled: bool,
+    #[serde(default)]
     pub quick_video_record_hotkey: Option<HotkeyBinding>,
     #[serde(default)]
     pub quick_video_record_mode: QuickVideoRecordMode,
@@ -951,6 +953,7 @@ impl Default for AppState {
             quick_screen_draw_freeze: default_screen_draw_freeze(),
             quick_screen_draw_tool: QuickScreenDrawTool::Brush,
             quick_screen_draw_text_border: false,
+            quick_video_record_enabled: false,
             quick_video_record_hotkey: None,
             quick_video_record_mode: QuickVideoRecordMode::FullScreen,
             quick_video_record_target_window: String::new(),

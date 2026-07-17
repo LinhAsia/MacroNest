@@ -6215,15 +6215,20 @@ impl CrosshairApp {
                         let button_response = self.titlebar_quick_action_button(
                             ui,
                             TitlebarQuickActionKind::VideoRecord,
-                            recording,
+                            self.state.quick_video_record_enabled,
                         );
                         if button_response.clicked() && !recorder_busy {
+                            self.state.quick_video_record_enabled =
+                                !self.state.quick_video_record_enabled;
                             self.sync_quick_video_record_config();
-                            if self.ffmpeg_installed {
+                            if !self.state.quick_video_record_enabled && recording {
                                 crate::video_recorder::toggle_async();
-                            } else {
+                            } else if self.state.quick_video_record_enabled
+                                && !self.ffmpeg_installed
+                            {
                                 self.start_ffmpeg_download();
                             }
+                            self.persist();
                         }
 
                         ui.add_space(6.0);
@@ -6535,37 +6540,6 @@ impl CrosshairApp {
                                     {
                                         self.start_ffmpeg_download();
                                         keep_open = true;
-                                    }
-                                } else {
-                                    let action_label = if recorder_busy {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Please wait...",
-                                            "Vui l?ng ch?...",
-                                        )
-                                    } else if recording {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Stop recording",
-                                            "D?ng quay",
-                                        )
-                                    } else {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Start recording",
-                                            "B?t ??u quay",
-                                        )
-                                    };
-                                    if ui
-                                        .add_enabled(
-                                            !recorder_busy,
-                                            Button::new(action_label)
-                                                .min_size(vec2(186.0, 22.0)),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.sync_quick_video_record_config();
-                                        crate::video_recorder::toggle_async();
                                     }
                                 }
                                 ui.label(
@@ -14801,11 +14775,11 @@ impl eframe::App for CrosshairApp {
                         if self.state.quick_screen_draw_enabled {
                             active_count += 1;
                         }
-                        if self.state.quick_key_sound_enabled {
-                            active_count += 1;
-                        if crate::video_recorder::is_recording() {
+                        if self.state.quick_video_record_enabled {
                             active_count += 1;
                         }
+                        if self.state.quick_key_sound_enabled {
+                            active_count += 1;
                         }
                         if active_count > 0 {
                             let badge_center =
