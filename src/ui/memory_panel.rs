@@ -124,6 +124,7 @@ struct AddressDialog {
     offsets: String,
     pointer: bool,
     position: egui::Pos2,
+    dismiss_on_outside: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -638,18 +639,25 @@ impl CrosshairApp {
                     vec2(cell_width, 26.0),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
+                        ui.set_width(cell_width);
                         if let Some(action) = action {
                             self.memory_action_button(ui, action, true);
                         } else if reset_last && index == 2 {
-                            if ui
-                                .add_enabled_ui(!self.memory_panel.scanning, |ui| {
-                                    ui.add_sized([ui.available_width(), 26.0], Button::new("Reset"))
-                                })
-                                .inner
-                                .clicked()
-                            {
-                                self.reset_memory_scan("New scan");
-                            }
+                            let width = ui.available_width();
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                if ui
+                                    .add_enabled(
+                                        !self.memory_panel.scanning,
+                                        Button::new("Reset")
+                                            .min_size(vec2((width - 34.0).max(52.0), 26.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    self.reset_memory_scan("New scan");
+                                }
+                                ui.allocate_space(vec2(26.0, 26.0));
+                            });
                         }
                     },
                 );
@@ -1137,6 +1145,9 @@ impl CrosshairApp {
                                             .halign(egui::Align::Min)
                                             .truncate(),
                                     );
+                                    type_response
+                                        .clone()
+                                        .on_hover_cursor(egui::CursorIcon::Default);
                                     row_hits.push(type_response);
                                     if self.memory_panel.edit_value_index == Some(index) {
                                         let response = ui.add_sized(
@@ -1172,9 +1183,13 @@ impl CrosshairApp {
                                                     })
                                                     .unwrap_or_else(|| "?".to_owned()),
                                             )
+                                            .selectable(false)
                                             .halign(egui::Align::Min)
                                             .sense(Sense::click()),
                                         );
+                                        value_response
+                                            .clone()
+                                            .on_hover_cursor(egui::CursorIcon::Default);
                                         row_hits.push(value_response.clone());
                                         if value_response.double_clicked() {
                                             edit_value = true;
@@ -1212,6 +1227,9 @@ impl CrosshairApp {
                                                 .truncate()
                                                 .sense(Sense::click()),
                                         );
+                                        description_response
+                                            .clone()
+                                            .on_hover_cursor(egui::CursorIcon::Default);
                                         row_hits.push(description_response.clone());
                                         if description_response.double_clicked() {
                                             self.memory_panel.edit_description_index = Some(index);
@@ -1233,6 +1251,19 @@ impl CrosshairApp {
                             );
                             for hit in row_hits {
                                 response = response.union(hit);
+                            }
+                            if response.double_clicked()
+                                && let Some(pointer) = ui.ctx().pointer_latest_pos()
+                            {
+                                let column = ((pointer.x - full_row_rect.left() - 21.0)
+                                    / column_width)
+                                    .floor() as isize;
+                                match column {
+                                    0 => open_address = true,
+                                    2 => edit_value = true,
+                                    3 => self.memory_panel.edit_description_index = Some(index),
+                                    _ => {}
+                                }
                             }
                             if response.clicked() || checkbox_changed {
                                 self.memory_panel.saved_list_active = true;
@@ -1320,6 +1351,7 @@ impl CrosshairApp {
                                         .pointer_latest_pos()
                                         .unwrap_or(full_row_rect.left_bottom())
                                         + vec2(12.0, 20.0),
+                                    dismiss_on_outside: false,
                                 });
                             }
                             if edit_value {
@@ -1853,9 +1885,12 @@ impl CrosshairApp {
                     }
                 });
             });
-        if window.is_some_and(|window| window.response.clicked_elsewhere()) {
+        if dialog.dismiss_on_outside
+            && window.is_some_and(|window| window.response.clicked_elsewhere())
+        {
             open = false;
         }
+        dialog.dismiss_on_outside = true;
         if save {
             self.apply_memory_address_dialog(&dialog);
             open = false;

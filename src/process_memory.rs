@@ -232,10 +232,25 @@ pub fn scan_memory_with_progress(
         .is_none()
         .then(|| slots.div_ceil(result_limit).max(1))
         .unwrap_or(1);
-    let worker_count = regions.len().clamp(1, 2);
+    // ponytail: Memory reads become bandwidth-bound quickly; raise this cap only after profiling.
+    let worker_count = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(2)
+        .clamp(2, 8)
+        .min(regions.len().max(1));
     let mut buckets = vec![Vec::new(); worker_count];
-    for (index, region) in regions.into_iter().enumerate() {
-        buckets[index % worker_count].push(region);
+    let mut bucket_sizes = vec![0usize; worker_count];
+    let mut regions = regions;
+    regions.sort_unstable_by_key(|region| std::cmp::Reverse(region.size));
+    for region in regions {
+        let index = bucket_sizes
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, size)| **size)
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        bucket_sizes[index] = bucket_sizes[index].saturating_add(region.size);
+        buckets[index].push(region);
     }
     let workers = buckets
         .into_iter()
