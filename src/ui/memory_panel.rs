@@ -150,6 +150,7 @@ struct MemoryViewDialog {
     kind: MemoryViewKind,
     display_type: MemoryDisplayType,
     relative_addresses: bool,
+    pinned: bool,
 }
 
 #[cfg(windows)]
@@ -185,6 +186,7 @@ struct InstructionWatchDialog {
     selected: Option<usize>,
     rx: Receiver<WatchEvent>,
     active: Option<ActiveInstructionWatch>,
+    pinned: bool,
 }
 
 struct ScanJobResult {
@@ -352,6 +354,7 @@ impl CrosshairApp {
             .with_inner_size(vec2(560.0, 430.0))
             .with_min_inner_size(vec2(400.0, 260.0))
             .with_decorations(false)
+            .with_resizable(true)
             .with_always_on_top();
         let mut unpin = false;
         ctx.show_viewport_immediate(
@@ -393,6 +396,9 @@ impl CrosshairApp {
                             }
                         });
                     });
+                egui::TopBottomPanel::bottom("memory-pinned-resize")
+                    .exact_height(12.0)
+                    .show(ctx, |ui| Self::memory_pinned_resize_grip(ui));
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let count = if self.memory_panel.scanning {
                         self.memory_panel
@@ -422,6 +428,55 @@ impl CrosshairApp {
         }
     }
 
+    fn memory_pinned_resize_grip(ui: &mut egui::Ui) {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let grip = ui
+                .add_sized([24.0, 10.0], egui::Label::new("◢").sense(Sense::drag()))
+                .on_hover_cursor(egui::CursorIcon::ResizeNwSe);
+            if grip.drag_started() {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::BeginResize(
+                        egui::viewport::ResizeDirection::SouthEast,
+                    ));
+            }
+        });
+    }
+
+    fn render_memory_popup_titlebar(ctx: &egui::Context, title: &str, unpin: &mut bool) {
+        egui::TopBottomPanel::top("memory-tool-pinned-titlebar")
+            .exact_height(38.0)
+            .frame(
+                Frame::new()
+                    .fill(Color32::from_rgb(16, 20, 26))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(34, 42, 56)))
+                    .inner_margin(egui::Margin::symmetric(8, 4)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(Self::material_icon_text(0xe30c, 17.0));
+                    ui.label(RichText::new("MacroNest").strong());
+                    ui.label(RichText::new(title).weak().small());
+                    let drag = ui.allocate_response(
+                        vec2((ui.available_width() - 36.0).max(0.0), 28.0),
+                        Sense::click_and_drag(),
+                    );
+                    if drag.drag_started() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                    if ui
+                        .add_sized(
+                            [32.0, 28.0],
+                            Button::new(Self::material_icon_text(0xe5cd, 17.0)),
+                        )
+                        .on_hover_text("Unpin")
+                        .clicked()
+                    {
+                        *unpin = true;
+                    }
+                });
+            });
+    }
+
     fn render_memory_scan_controls(&mut self, ui: &mut egui::Ui) {
         let size = ui.available_size();
         Frame::group(ui.style())
@@ -437,7 +492,7 @@ impl CrosshairApp {
                         .find(|window| window.selector == self.memory_panel.process_selector)
                         .map(|window| Self::simplify_window_title(&window.title))
                         .unwrap_or_else(|| "Select process".to_owned());
-                    egui::ComboBox::from_id_salt("memory-process")
+                    let process_combo = egui::ComboBox::from_id_salt("memory-process")
                         .width(ui.available_width())
                         .selected_text(Self::truncate_window_title(&process_label, 52))
                         .show_ui(ui, |ui| {
@@ -455,16 +510,24 @@ impl CrosshairApp {
                                     .clicked()
                                 {
                                     let selector = window.selector;
+                                    self.memory_panel.process_selector = selector.clone();
                                     let pid = window_list::process_id_for_window(Some(&selector));
                                     if self.memory_panel.process_pid != pid {
                                         self.reset_memory_scan("Process changed");
                                         self.memory_panel.saved.clear();
                                     }
-                                    self.memory_panel.process_selector = selector;
                                     self.memory_panel.process_pid = pid;
+                                    self.memory_panel.status = pid.map_or_else(
+                                        || "Unable to open selected process".to_owned(),
+                                        |pid| format!("Process selected — PID {pid}"),
+                                    );
+                                    ui.ctx().request_repaint();
                                 }
                             }
                         });
+                    if process_combo.response.clicked() {
+                        self.ensure_open_windows_ready(true);
+                    }
                 });
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
@@ -769,7 +832,19 @@ impl CrosshairApp {
                         let candidate = self.memory_panel.candidates[index];
                         let selected = self.memory_panel.selected_results.contains(&index);
                         let row_width = ui.available_width();
-                        let row = ui.allocate_ui_with_layout(
+                        let full_row_rect = egui::Rect::from_min_size(
+                            ui.next_widget_position(),
+                            vec2(row_width, 22.0),
+                        );
+                        let response = ui
+                            .interact(
+                                full_row_rect,
+                                ui.id()
+                                    .with(("memory-result-row", pinned, candidate.address)),
+                                Sense::click(),
+                            )
+                            .on_hover_cursor(egui::CursorIcon::Default);
+                        ui.allocate_ui_with_layout(
                             vec2(row_width, 22.0),
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
@@ -806,18 +881,6 @@ impl CrosshairApp {
                                 );
                             },
                         );
-                        let full_row_rect = egui::Rect::from_min_max(
-                            row.response.rect.min,
-                            egui::pos2(ui.clip_rect().right(), row.response.rect.bottom()),
-                        );
-                        let response = ui
-                            .interact(
-                                full_row_rect,
-                                ui.id()
-                                    .with(("memory-result-row", pinned, candidate.address)),
-                                Sense::click(),
-                            )
-                            .on_hover_cursor(egui::CursorIcon::Default);
                         if response.hovered() || selected {
                             ui.painter().rect_filled(
                                 response.rect,
@@ -1001,7 +1064,18 @@ impl CrosshairApp {
                             let mut checkbox_changed = false;
                             let row_width = ui.available_width();
                             let column_width = ((row_width - 70.0) / 4.0).max(80.0);
-                            let row = ui.allocate_ui_with_layout(
+                            let full_row_rect = egui::Rect::from_min_size(
+                                ui.next_widget_position(),
+                                vec2(row_width, row_height),
+                            );
+                            let mut response = ui
+                                .interact(
+                                    full_row_rect,
+                                    ui.id().with(("saved-memory-row", index)),
+                                    Sense::click(),
+                                )
+                                .on_hover_cursor(egui::CursorIcon::Default);
+                            ui.allocate_ui_with_layout(
                                 vec2(row_width, row_height),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
@@ -1118,17 +1192,6 @@ impl CrosshairApp {
                                     }
                                 },
                             );
-                            let full_row_rect = egui::Rect::from_min_max(
-                                row.response.rect.min,
-                                egui::pos2(ui.clip_rect().right(), row.response.rect.bottom()),
-                            );
-                            let mut response = ui
-                                .interact(
-                                    full_row_rect,
-                                    ui.id().with(("saved-memory-row", index)),
-                                    Sense::click(),
-                                )
-                                .on_hover_cursor(egui::CursorIcon::Default);
                             for hit in row_hits {
                                 response = response.union(hit);
                             }
@@ -1169,6 +1232,7 @@ impl CrosshairApp {
                                         kind: MemoryViewKind::Bytes,
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
+                                        pinned: false,
                                     });
                                     ui.close();
                                 }
@@ -1178,6 +1242,7 @@ impl CrosshairApp {
                                         kind: MemoryViewKind::Structure,
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
+                                        pinned: false,
                                     });
                                     ui.close();
                                 }
@@ -1275,6 +1340,7 @@ impl CrosshairApp {
             selected: None,
             rx,
             active,
+            pinned: false,
         });
     }
 
@@ -1332,59 +1398,101 @@ impl CrosshairApp {
             },
             dialog.address
         );
-        egui::Window::new(title)
-            .default_size(vec2(760.0, 500.0))
-            .collapsible(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(&dialog.status);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if dialog.active.is_some() && ui.button("Stop").clicked() {
-                            if let Some(active) = dialog.active.as_mut() {
-                                active.stop();
-                            }
-                            dialog.active = None;
-                            dialog.status = "Debugger stopped".to_owned();
-                        }
+        if dialog.pinned {
+            let builder = egui::ViewportBuilder::default()
+                .with_title(&title)
+                .with_inner_size(vec2(760.0, 500.0))
+                .with_min_inner_size(vec2(520.0, 300.0))
+                .with_decorations(false)
+                .with_resizable(true)
+                .with_always_on_top();
+            let mut unpin = false;
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of((
+                    "memory-instruction-watch",
+                    dialog.address,
+                    dialog.writes_only,
+                )),
+                builder,
+                |ctx, _| {
+                    if ctx.input(|input| input.viewport().close_requested()) {
+                        unpin = true;
+                    }
+                    Self::render_memory_popup_titlebar(ctx, &title, &mut unpin);
+                    egui::TopBottomPanel::bottom("memory-watch-resize")
+                        .exact_height(12.0)
+                        .show(ctx, |ui| Self::memory_pinned_resize_grip(ui));
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        Self::render_instruction_watch_body(ui, &mut dialog);
                     });
+                },
+            );
+            if unpin {
+                dialog.pinned = false;
+            }
+        } else {
+            egui::Window::new(title)
+                .default_size(vec2(760.0, 500.0))
+                .collapsible(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    if ui.button("Pin").clicked() {
+                        dialog.pinned = true;
+                    }
+                    Self::render_instruction_watch_body(ui, &mut dialog);
                 });
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .max_height(210.0)
-                    .show(ui, |ui| {
-                        for (index, hit) in dialog.hits.iter().enumerate() {
-                            if ui
-                                .selectable_label(
-                                    dialog.selected == Some(index),
-                                    format!(
-                                        "0x{:016X}   {:<40}   {} hit(s)",
-                                        hit.address, hit.instruction, hit.count
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                dialog.selected = Some(index);
-                            }
-                        }
-                    });
-                ui.separator();
-                egui::ScrollArea::both().show(ui, |ui| {
-                    ui.monospace(
-                        dialog
-                            .selected
-                            .and_then(|index| dialog.hits.get(index))
-                            .map(|hit| hit.details.as_str())
-                            .unwrap_or("Interact with the target process to capture instructions."),
-                    );
-                });
-            });
+        }
         if open {
             self.memory_panel.instruction_watch_dialog = Some(dialog);
             ctx.request_repaint_after(Duration::from_millis(35));
         } else if let Some(mut active) = dialog.active {
             active.stop();
         }
+    }
+
+    #[cfg(windows)]
+    fn render_instruction_watch_body(ui: &mut egui::Ui, dialog: &mut InstructionWatchDialog) {
+        ui.horizontal(|ui| {
+            ui.label(&dialog.status);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if dialog.active.is_some() && ui.button("Stop").clicked() {
+                    if let Some(active) = dialog.active.as_mut() {
+                        active.stop();
+                    }
+                    dialog.active = None;
+                    dialog.status = "Debugger stopped".to_owned();
+                }
+            });
+        });
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .max_height(210.0)
+            .show(ui, |ui| {
+                for (index, hit) in dialog.hits.iter().enumerate() {
+                    if ui
+                        .selectable_label(
+                            dialog.selected == Some(index),
+                            format!(
+                                "0x{:016X}   {:<40}   {} hit(s)",
+                                hit.address, hit.instruction, hit.count
+                            ),
+                        )
+                        .clicked()
+                    {
+                        dialog.selected = Some(index);
+                    }
+                }
+            });
+        ui.separator();
+        egui::ScrollArea::both().show(ui, |ui| {
+            ui.monospace(
+                dialog
+                    .selected
+                    .and_then(|index| dialog.hits.get(index))
+                    .map(|hit| hit.details.as_str())
+                    .unwrap_or("Interact with the target process to capture instructions."),
+            );
+        });
     }
 
     fn render_memory_view_dialog(&mut self, ctx: &egui::Context) {
@@ -1402,11 +1510,50 @@ impl CrosshairApp {
             .process_pid
             .and_then(|pid| read_memory_bytes(pid, address, 512).ok());
         let mut open = true;
+        if dialog.pinned {
+            let builder = egui::ViewportBuilder::default()
+                .with_title(&title)
+                .with_inner_size(vec2(720.0, 430.0))
+                .with_min_inner_size(vec2(520.0, 280.0))
+                .with_decorations(false)
+                .with_resizable(true)
+                .with_always_on_top();
+            let mut unpin = false;
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of((
+                    "memory-tool-view",
+                    address,
+                    matches!(kind, MemoryViewKind::Structure),
+                )),
+                builder,
+                |ctx, _| {
+                    if ctx.input(|input| input.viewport().close_requested()) {
+                        unpin = true;
+                    }
+                    Self::render_memory_popup_titlebar(ctx, &title, &mut unpin);
+                    egui::TopBottomPanel::bottom("memory-tool-resize")
+                        .exact_height(12.0)
+                        .show(ctx, |ui| Self::memory_pinned_resize_grip(ui));
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        Self::render_memory_view_body(ui, &mut dialog, bytes.as_deref());
+                    });
+                },
+            );
+            if unpin {
+                dialog.pinned = false;
+            }
+            self.memory_panel.memory_view_dialog = Some(dialog);
+            ctx.request_repaint_after(Duration::from_millis(250));
+            return;
+        }
         egui::Window::new(title)
             .default_size(vec2(720.0, 430.0))
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
+                if ui.button("Pin").clicked() {
+                    dialog.pinned = true;
+                }
                 let Some(bytes) = bytes.as_deref() else {
                     ui.label("Unable to read this memory region");
                     return;
@@ -1520,6 +1667,113 @@ impl CrosshairApp {
             self.memory_panel.memory_view_dialog = Some(dialog);
             ctx.request_repaint_after(Duration::from_millis(250));
         }
+    }
+
+    fn render_memory_view_body(
+        ui: &mut egui::Ui,
+        dialog: &mut MemoryViewDialog,
+        bytes: Option<&[u8]>,
+    ) {
+        let Some(bytes) = bytes else {
+            ui.label("Unable to read this memory region");
+            return;
+        };
+        let address = dialog.address;
+        let body = egui::ScrollArea::both().show(ui, |ui| match dialog.kind {
+            MemoryViewKind::Bytes => {
+                ui.horizontal(|ui| {
+                    Self::memory_view_cell(ui, 152.0, "Address");
+                    Self::memory_view_cell(ui, 360.0, "Data");
+                    Self::memory_view_cell(ui, 130.0, "ASCII");
+                });
+                ui.separator();
+                for (row, chunk) in bytes.chunks(16).enumerate() {
+                    let ascii = chunk
+                        .iter()
+                        .map(|byte| {
+                            if byte.is_ascii_graphic() {
+                                *byte as char
+                            } else {
+                                '.'
+                            }
+                        })
+                        .collect::<String>();
+                    ui.horizontal(|ui| {
+                        let shown_address = if dialog.relative_addresses {
+                            format!("+{:04X}", row * 16)
+                        } else {
+                            format!("{:016X}", address + row * 16)
+                        };
+                        Self::memory_view_cell(ui, 152.0, &shown_address);
+                        Self::memory_view_cell(
+                            ui,
+                            360.0,
+                            &format_memory_display(chunk, dialog.display_type),
+                        );
+                        Self::memory_view_cell(ui, 130.0, &ascii);
+                    });
+                }
+            }
+            MemoryViewKind::Structure => {
+                ui.horizontal(|ui| {
+                    Self::memory_view_cell(ui, 72.0, "Offset");
+                    Self::memory_view_cell(ui, 152.0, "Address");
+                    Self::memory_view_cell(ui, 116.0, "Bytes");
+                    Self::memory_view_cell(ui, 112.0, "i32");
+                    Self::memory_view_cell(ui, 150.0, "Float");
+                });
+                ui.separator();
+                for (offset, chunk) in bytes.chunks_exact(4).enumerate() {
+                    let raw = [chunk[0], chunk[1], chunk[2], chunk[3]];
+                    ui.horizontal(|ui| {
+                        Self::memory_view_cell(ui, 72.0, &format!("+{:04X}", offset * 4));
+                        Self::memory_view_cell(
+                            ui,
+                            152.0,
+                            &format!("{:016X}", address + offset * 4),
+                        );
+                        Self::memory_view_cell(
+                            ui,
+                            116.0,
+                            &format!(
+                                "{:02X} {:02X} {:02X} {:02X}",
+                                raw[0], raw[1], raw[2], raw[3]
+                            ),
+                        );
+                        Self::memory_view_cell(ui, 112.0, &i32::from_le_bytes(raw).to_string());
+                        Self::memory_view_cell(
+                            ui,
+                            150.0,
+                            &format_compact_float(f32::from_le_bytes(raw) as f64, 6),
+                        );
+                    });
+                }
+            }
+        });
+        ui.interact(
+            body.inner_rect,
+            ui.id().with("memory-region-context-menu-pinned"),
+            Sense::click(),
+        )
+        .context_menu(|ui| {
+            ui.menu_button("Display Type", |ui| {
+                for (display_type, label) in memory_display_types() {
+                    if ui
+                        .selectable_value(&mut dialog.display_type, display_type, label)
+                        .clicked()
+                    {
+                        ui.close();
+                    }
+                }
+            });
+            ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
+            if matches!(dialog.kind, MemoryViewKind::Bytes)
+                && ui.button("Open in dissect data/structure").clicked()
+            {
+                dialog.kind = MemoryViewKind::Structure;
+                ui.close();
+            }
+        });
     }
 
     fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) {
