@@ -7413,6 +7413,7 @@ impl CrosshairApp {
             MacroAction::Else => "Else",
             MacroAction::IfEnd => "IfEnd",
             MacroAction::SetVariable => "SetVariable",
+            MacroAction::ReadMemory => "ReadMemory",
             MacroAction::OcrSearch => "OcrSearch",
             MacroAction::DrawGeometry => "DrawGeometry",
             MacroAction::ShowGeometryPreset => "ShowGeometry",
@@ -7707,6 +7708,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.set_variable",
                 "Set a variable to a numeric value or copy from another variable.",
             ),
+            MacroAction::ReadMemory => (
+                "macro_action_tooltip.read_memory",
+                "Read one value from an address in the selected process and store it in a variable.",
+            ),
             MacroAction::ReadTimerPreset => (
                 "macro_action_tooltip.read_timer_preset",
                 "Read one running timer value and store it into a variable.",
@@ -7827,6 +7832,7 @@ impl CrosshairApp {
             MacroAction::Else => 0xe3ec,
             MacroAction::IfEnd => 0xe040,
             MacroAction::SetVariable => 0xe150,
+            MacroAction::ReadMemory => 0xe30a,
             MacroAction::OcrSearch => 0xe8b6,
             MacroAction::DrawGeometry => 0xe85b,
             MacroAction::ShowGeometryPreset => 0xe8f4,
@@ -7986,6 +7992,7 @@ impl CrosshairApp {
             MacroAction::Else => ("macro_action_short_label.else", "Else"),
             MacroAction::IfEnd => ("macro_action_short_label.if_end", "IfEnd"),
             MacroAction::SetVariable => ("macro_action_short_label.set_variable", "SetVar"),
+            MacroAction::ReadMemory => ("macro_action_short_label.read_memory", "ReadRAM"),
             MacroAction::DrawGeometry => ("macro_action_short_label.draw_geometry", "DrawGeo"),
             MacroAction::ShowGeometryPreset => {
                 ("macro_action_short_label.show_geometry_preset", "ShowGeo")
@@ -8266,6 +8273,7 @@ impl CrosshairApp {
                 | MacroAction::Else
                 | MacroAction::IfEnd
                 | MacroAction::SetVariable
+                | MacroAction::ReadMemory
                 | MacroAction::FunnyMemeReply
                 | MacroAction::AiResponse
                 | MacroAction::DisableCrosshair

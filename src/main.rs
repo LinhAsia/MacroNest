@@ -11,6 +11,7 @@ mod model;
 mod ocr;
 mod overlay;
 mod platform;
+mod process_memory;
 mod protractor;
 mod render;
 mod storage;

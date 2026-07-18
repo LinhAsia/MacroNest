@@ -99,6 +99,7 @@ pub enum MacroAction {
     Else,
     IfEnd,
     SetVariable,
+    ReadMemory,
     StartTimerPreset,
     PauseTimerPreset,
     StopTimerPreset,
@@ -114,6 +115,14 @@ pub enum MacroAction {
     JumpToStep,
     #[serde(other)]
     Legacy,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum MemoryValueType {
+    #[default]
+    I32,
+    F32,
+    I64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -301,6 +310,10 @@ pub struct MacroStep {
     #[serde(default)]
     pub if_variable_name: String,
     #[serde(default)]
+    pub memory_target_window: Option<String>,
+    #[serde(default)]
+    pub memory_value_type: MemoryValueType,
+    #[serde(default)]
     pub ai_response_provider: AiResponseProvider,
     #[serde(default)]
     pub ai_response_web_search: bool,
@@ -439,6 +452,8 @@ impl Default for MacroStep {
             toggle_enabled_on_run: false,
             loop_finish_iteration_on_stop: false,
             if_variable_name: String::new(),
+            memory_target_window: None,
+            memory_value_type: MemoryValueType::default(),
             ai_response_provider: AiResponseProvider::Groq,
             ai_response_web_search: false,
             ai_response_use_default_prompt: true,

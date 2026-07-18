@@ -14,7 +14,8 @@ mod windows_impl {
             UI::WindowsAndMessaging::{
                 BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetClientRect, GetForegroundWindow,
                 GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
-                GetWindowTextW, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindow, IsWindowVisible,
+                GetWindowTextW, GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic,
+                IsWindow, IsWindowVisible,
                 PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
                 SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
                 SetForegroundWindow, SetWindowPos, ShowWindow, WS_EX_TOPMOST,
@@ -95,6 +96,15 @@ mod windows_impl {
         }
         windows.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
         windows
+    }
+
+    pub fn process_id_for_window(selector: Option<&str>) -> Option<u32> {
+        let hwnd = find_window_handle(selector)?;
+        let mut process_id = 0;
+        unsafe {
+            let _ = GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+        }
+        (process_id != 0).then_some(process_id)
     }
 
     pub fn capture_window_preview_with_candidates(
@@ -1223,6 +1233,10 @@ mod fallback {
 
     pub fn set_window_topmost(_selector: &str, _topmost: bool) -> bool {
         false
+    }
+
+    pub fn process_id_for_window(_selector: Option<&str>) -> Option<u32> {
+        None
     }
 
     pub(crate) fn close_window_capture_session() {}

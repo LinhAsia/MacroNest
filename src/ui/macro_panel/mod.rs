@@ -48,6 +48,100 @@ enum TextHighlightMode {
 }
 
 impl CrosshairApp {
+    fn render_read_memory_step_fields(
+        ui: &mut egui::Ui,
+        step: &mut MacroStep,
+        open_windows: &[crate::window_list::WindowInfo],
+        language: UiLanguage,
+    ) -> bool {
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            let process_label = step
+                .memory_target_window
+                .as_deref()
+                .map(|selector| Self::display_title_for_selector(selector, open_windows))
+                .unwrap_or_else(|| {
+                    Self::tr_lang(language, "Focused process", "Process đang focus").to_owned()
+                });
+            egui::ComboBox::from_id_salt(ui.id().with("read-memory-process"))
+                .width(145.0)
+                .selected_text(Self::truncate_window_title(&process_label, 22))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            step.memory_target_window.is_none(),
+                            Self::tr_lang(language, "Focused process", "Process đang focus"),
+                        )
+                        .clicked()
+                    {
+                        step.memory_target_window = None;
+                        changed = true;
+                    }
+                    for window in open_windows {
+                        if ui
+                            .selectable_label(
+                                step.memory_target_window.as_deref()
+                                    == Some(window.selector.as_str()),
+                                Self::truncate_window_title(
+                                    &Self::simplify_window_title(&window.title),
+                                    40,
+                                ),
+                            )
+                            .on_hover_text(&window.selector)
+                            .clicked()
+                        {
+                            step.memory_target_window = Some(window.selector.clone());
+                            changed = true;
+                        }
+                    }
+                });
+            egui::ComboBox::from_id_salt(ui.id().with("read-memory-type"))
+                .width(48.0)
+                .selected_text(match step.memory_value_type {
+                    MemoryValueType::I32 => "I32",
+                    MemoryValueType::F32 => "F32",
+                    MemoryValueType::I64 => "I64",
+                })
+                .show_ui(ui, |ui| {
+                    changed |= ui
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::I32, "I32")
+                        .changed();
+                    changed |= ui
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::F32, "F32")
+                        .changed();
+                    changed |= ui
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::I64, "I64")
+                        .changed();
+                });
+            changed |= ui
+                .add_sized(
+                    [150.0, 21.0],
+                    egui::TextEdit::singleline(&mut step.key).hint_text("0x... / {variable}"),
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Memory address. Decimal, hexadecimal, expressions, and variables are supported.",
+                    "Địa chỉ RAM. Hỗ trợ số thập phân, thập lục phân, biểu thức và biến.",
+                ))
+                .changed();
+            ui.label("→");
+            changed |= ui
+                .add_sized(
+                    [100.0, 21.0],
+                    egui::TextEdit::singleline(&mut step.if_variable_name)
+                        .hint_text(Self::tr_lang(language, "variable", "biến")),
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Output variable",
+                    "Biến nhận kết quả",
+                ))
+                .changed();
+        });
+        changed
+    }
+
     fn default_macro_step_hud_preset(text_override: &str) -> HudPreset {
         let mut preset = HudPreset::default_step_preview();
         if !text_override.trim().is_empty() {
@@ -6867,6 +6961,7 @@ impl CrosshairApp {
                                                                 MacroAction::EnableStep,
                                                                 MacroAction::DisableStep,
                                                              MacroAction::SetVariable,
+                                                             MacroAction::ReadMemory,
                                                              MacroAction::OcrSearch,
                                                              MacroAction::JumpToStep,
                                                         ]
@@ -8699,7 +8794,14 @@ if supports_move_mouse || show_detection_tuning {
                                                                   true,
                                                               );
                                                           });
-                                                      });} else if step.action == MacroAction::SetVariable {
+                                                      });} else if step.action == MacroAction::ReadMemory {
+                                                          live_sync |= Self::render_read_memory_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                          );
+                                                      } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
                                                         ui.spacing_mut().interact_size.y = 18.0;
@@ -9194,6 +9296,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 MacroAction::EnableStep,
                                                                 MacroAction::DisableStep,
                                                              MacroAction::SetVariable,
+                                                             MacroAction::ReadMemory,
                                                              MacroAction::OcrSearch,
                                                              MacroAction::JumpToStep,
                                                         ]
@@ -11027,7 +11130,14 @@ if supports_move_mouse || show_detection_tuning {
                                                                   true,
                                                               );
                                                           });
-                                                      });} else if step.action == MacroAction::SetVariable {
+                                                      });} else if step.action == MacroAction::ReadMemory {
+                                                          live_sync |= Self::render_read_memory_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                          );
+                                                      } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
                                                         ui.spacing_mut().interact_size.y = 18.0;
@@ -12399,6 +12509,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 MacroAction::EnableStep,
                                                                 MacroAction::DisableStep,
                                                                 MacroAction::SetVariable,
+                                                                MacroAction::ReadMemory,
                                                                 MacroAction::OcrSearch,
                                                                 MacroAction::JumpToStep,
                                                             ] {
@@ -14473,7 +14584,14 @@ if supports_move_mouse || show_detection_tuning {
                                             {
                                                 step.vision_move_cursor_on_match = false;
                                             }
-                                                      });} else if step.action == MacroAction::SetVariable {
+                                                      });} else if step.action == MacroAction::ReadMemory {
+                                                          live_sync |= Self::render_read_memory_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                          );
+                                                      } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
                                                         ui.spacing_mut().interact_size.y = 18.0;
@@ -16343,6 +16461,13 @@ if supports_move_mouse || show_detection_tuning {
                     Self::extract_vars_from_expression(&step.key, vars);
                 }
             }
+        }
+        if step.action == MacroAction::ReadMemory {
+            let name = step.if_variable_name.trim();
+            if !name.is_empty() {
+                vars.insert(name.to_owned());
+            }
+            Self::extract_braced_vars(&step.key, vars);
         }
         if step.action == MacroAction::IfStart
             && matches!(step.if_condition_type, IfConditionType::Variable)
