@@ -14,6 +14,7 @@ dependencies = [
  "directories",
  "eframe",
  "flate2",
+ "iced-x86",
  "image",
  "libloading",
  "native-tls",
@@ -36,6 +37,7 @@ dependencies = [
  "vi",
  "wasapi",
  "windows 0.61.3",
+ "windows-sys 0.61.2",
  "zip",
 ]
 
@@ -1871,6 +1873,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31827a206f56af32e590ba56d5d2d085f558508192593743f16b2306495269f"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "iced-x86"
+version = "1.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c447cff8c7f384a7d4f741cfcff32f75f3ad02b406432e8d6c878d56b1edf6b"
+dependencies = [
+ "lazy_static",
 ]
 
 [[package]]

@@ -7,6 +7,8 @@ mod audiosense;
 mod hotkey;
 mod lang;
 mod macro_code;
+#[cfg(windows)]
+mod memory_debugger;
 mod model;
 mod ocr;
 mod overlay;

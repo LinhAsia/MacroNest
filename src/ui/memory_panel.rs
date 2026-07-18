@@ -22,6 +22,9 @@ use crate::{
     window_list,
 };
 
+#[cfg(windows)]
+use crate::memory_debugger::debugger::{AddressAccessWatch, WatchEvent, WriteWatch};
+
 use super::CrosshairApp;
 
 const DEFAULT_SCAN_LIMIT: usize = 10_000_000;
@@ -128,9 +131,60 @@ enum MemoryViewKind {
     Structure,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MemoryDisplayType {
+    ByteHex,
+    ByteDecimal,
+    I16Hex,
+    I16Decimal,
+    I32Hex,
+    I32Decimal,
+    I64Hex,
+    I64Decimal,
+    Float,
+    Double,
+}
+
 struct MemoryViewDialog {
     address: usize,
     kind: MemoryViewKind,
+    display_type: MemoryDisplayType,
+    relative_addresses: bool,
+}
+
+#[cfg(windows)]
+enum ActiveInstructionWatch {
+    Accesses(AddressAccessWatch),
+    Writes(WriteWatch),
+}
+
+#[cfg(windows)]
+impl ActiveInstructionWatch {
+    fn stop(&mut self) {
+        match self {
+            Self::Accesses(watch) => watch.stop(),
+            Self::Writes(watch) => watch.stop(),
+        }
+    }
+}
+
+#[cfg(windows)]
+struct InstructionHit {
+    address: usize,
+    instruction: String,
+    details: String,
+    count: usize,
+}
+
+#[cfg(windows)]
+struct InstructionWatchDialog {
+    address: usize,
+    writes_only: bool,
+    status: String,
+    hits: Vec<InstructionHit>,
+    selected: Option<usize>,
+    rx: Receiver<WatchEvent>,
+    active: Option<ActiveInstructionWatch>,
 }
 
 struct ScanJobResult {
@@ -151,6 +205,7 @@ pub(crate) struct MemoryPanelState {
     selection_anchor: Option<usize>,
     saved: Vec<SavedMemoryAddress>,
     selected_saved: HashSet<usize>,
+    saved_selection_anchor: Option<usize>,
     manual_address: String,
     status: String,
     last_action: String,
@@ -165,8 +220,11 @@ pub(crate) struct MemoryPanelState {
     pending_hotkey_modifiers: Option<HotkeyBinding>,
     edit_value_index: Option<usize>,
     edit_value_input: String,
+    edit_description_index: Option<usize>,
     address_dialog: Option<AddressDialog>,
     memory_view_dialog: Option<MemoryViewDialog>,
+    #[cfg(windows)]
+    instruction_watch_dialog: Option<InstructionWatchDialog>,
     last_refresh: Instant,
 }
 
@@ -184,6 +242,7 @@ impl Default for MemoryPanelState {
             selection_anchor: None,
             saved: Vec::new(),
             selected_saved: HashSet::new(),
+            saved_selection_anchor: None,
             manual_address: String::new(),
             status: "Ready".to_owned(),
             last_action: "Ready".to_owned(),
@@ -198,8 +257,11 @@ impl Default for MemoryPanelState {
             pending_hotkey_modifiers: None,
             edit_value_index: None,
             edit_value_input: String::new(),
+            edit_description_index: None,
             address_dialog: None,
             memory_view_dialog: None,
+            #[cfg(windows)]
+            instruction_watch_dialog: None,
             last_refresh: Instant::now(),
         }
     }
@@ -274,6 +336,8 @@ impl CrosshairApp {
 
         self.render_memory_address_dialog(ui.ctx());
         self.render_memory_view_dialog(ui.ctx());
+        #[cfg(windows)]
+        self.render_instruction_watch_dialog(ui.ctx());
     }
 
     pub(crate) fn render_memory_pinned_viewport(&mut self, ctx: &egui::Context) {
@@ -525,10 +589,7 @@ impl CrosshairApp {
                         } else if reset_last && index == 2 {
                             if ui
                                 .add_enabled_ui(!self.memory_panel.scanning, |ui| {
-                                    ui.add_sized(
-                                        [(ui.available_width() - 34.0).max(0.0), 26.0],
-                                        Button::new("Reset"),
-                                    )
+                                    ui.add_sized([ui.available_width(), 26.0], Button::new("Reset"))
                                 })
                                 .inner
                                 .clicked()
@@ -572,7 +633,7 @@ impl CrosshairApp {
                 let capturing = self.memory_panel.capturing_hotkey == Some(action);
                 let content = assigned_label
                     .as_ref()
-                    .map(|label| RichText::new(label).size(10.0))
+                    .map(|_| RichText::new(""))
                     .unwrap_or_else(|| Self::material_icon_text(0xe312, 15.0));
                 let mut button = Button::new(content);
                 if capturing {
@@ -588,6 +649,13 @@ impl CrosshairApp {
                             "Click to assign hotkey"
                         });
                 if let Some(label) = assigned_label.as_deref() {
+                    ui.painter().with_clip_rect(response.rect).text(
+                        response.rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        compact_hotkey_label(label),
+                        egui::FontId::proportional(9.5),
+                        ui.visuals().strong_text_color(),
+                    );
                     Self::paint_expanded_hotkey(ui, &response, label);
                 }
                 if response.clicked() {
@@ -682,6 +750,12 @@ impl CrosshairApp {
             {
                 self.memory_panel.selected_results = (0..visible_count).collect();
             }
+            if self.memory_panel.candidates.is_empty() && !self.memory_panel.scanning {
+                ui.centered_and_justified(|ui| {
+                    ui.label(RichText::new("No scan results").weak());
+                });
+                return;
+            }
             egui::ScrollArea::vertical()
                 .id_salt(if pinned {
                     "pinned-memory-results"
@@ -732,9 +806,13 @@ impl CrosshairApp {
                                 );
                             },
                         );
+                        let full_row_rect = egui::Rect::from_min_max(
+                            row.response.rect.min,
+                            egui::pos2(ui.clip_rect().right(), row.response.rect.bottom()),
+                        );
                         let response = ui
                             .interact(
-                                row.response.rect,
+                                full_row_rect,
                                 ui.id()
                                     .with(("memory-result-row", pinned, candidate.address)),
                                 Sense::click(),
@@ -753,7 +831,13 @@ impl CrosshairApp {
                             );
                         }
                         if !pinned && response.clicked() && !response.double_clicked() {
-                            self.select_memory_result(index, !selected, ui);
+                            let toggle =
+                                ui.input(|input| input.modifiers.ctrl || input.modifiers.command);
+                            self.select_memory_result(
+                                index,
+                                if toggle { !selected } else { true },
+                                ui,
+                            );
                         }
                         if response.double_clicked() {
                             self.memory_panel.selected_results.clear();
@@ -772,29 +856,28 @@ impl CrosshairApp {
                     .weak(),
                 );
             }
-            if self.memory_panel.candidates.is_empty() && !self.memory_panel.scanning {
-                ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new("No scan results").weak());
-                });
-            }
         });
     }
 
     fn memory_table_cell(ui: &mut egui::Ui, width: f32, text: RichText) {
-        ui.allocate_ui_with_layout(
-            vec2(width, 18.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.add(egui::Label::new(text).selectable(false))
-                    .on_hover_cursor(egui::CursorIcon::Default);
-            },
-        );
+        ui.add_sized(
+            [width, 18.0],
+            egui::Label::new(text).selectable(false).truncate(),
+        )
+        .on_hover_cursor(egui::CursorIcon::Default);
     }
 
     fn select_memory_result(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
-        if ui.input(|input| input.modifiers.shift)
-            && let Some(anchor) = self.memory_panel.selection_anchor
-        {
+        let (shift, additive) = ui.input(|input| {
+            (
+                input.modifiers.shift,
+                input.modifiers.ctrl || input.modifiers.command,
+            )
+        });
+        if shift && let Some(anchor) = self.memory_panel.selection_anchor {
+            if !additive {
+                self.memory_panel.selected_results.clear();
+            }
             let (start, end) = if anchor <= index {
                 (anchor, index)
             } else {
@@ -807,12 +890,47 @@ impl CrosshairApp {
                     self.memory_panel.selected_results.remove(&row);
                 }
             }
-        } else if selected {
-            self.memory_panel.selected_results.insert(index);
         } else {
-            self.memory_panel.selected_results.remove(&index);
+            if !additive {
+                self.memory_panel.selected_results.clear();
+            }
+            if selected {
+                self.memory_panel.selected_results.insert(index);
+            } else {
+                self.memory_panel.selected_results.remove(&index);
+            }
         }
         self.memory_panel.selection_anchor = Some(index);
+    }
+
+    fn select_saved_memory_row(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
+        let (shift, additive) = ui.input(|input| {
+            (
+                input.modifiers.shift,
+                input.modifiers.ctrl || input.modifiers.command,
+            )
+        });
+        if shift && let Some(anchor) = self.memory_panel.saved_selection_anchor {
+            if !additive {
+                self.memory_panel.selected_saved.clear();
+            }
+            let (start, end) = if anchor <= index {
+                (anchor, index)
+            } else {
+                (index, anchor)
+            };
+            self.memory_panel.selected_saved.extend(start..=end);
+        } else {
+            if !additive {
+                self.memory_panel.selected_saved.clear();
+            }
+            if additive && selected {
+                self.memory_panel.selected_saved.remove(&index);
+            } else {
+                self.memory_panel.selected_saved.insert(index);
+            }
+        }
+        self.memory_panel.saved_selection_anchor = Some(index);
     }
 
     fn render_saved_memory_addresses(&mut self, ui: &mut egui::Ui) {
@@ -837,6 +955,31 @@ impl CrosshairApp {
                     }
                 });
                 ui.separator();
+                let header_column_width = ((ui.available_width() - 70.0) / 4.0).max(80.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(31.0);
+                    Self::memory_table_cell(
+                        ui,
+                        header_column_width,
+                        RichText::new("Address").strong(),
+                    );
+                    Self::memory_table_cell(
+                        ui,
+                        header_column_width,
+                        RichText::new("Type").strong(),
+                    );
+                    Self::memory_table_cell(
+                        ui,
+                        header_column_width,
+                        RichText::new("Value").strong(),
+                    );
+                    Self::memory_table_cell(
+                        ui,
+                        header_column_width,
+                        RichText::new("Description").strong(),
+                    );
+                });
+                ui.separator();
                 let row_height = 26.0;
                 let count = self.memory_panel.saved.len();
                 egui::ScrollArea::vertical()
@@ -853,9 +996,11 @@ impl CrosshairApp {
                             let mut open_address = false;
                             let mut edit_value = false;
                             let mut delete = false;
-                            let mut tool_message = None;
+                            let mut instruction_watch = None;
                             let mut row_hits = Vec::new();
+                            let mut checkbox_changed = false;
                             let row_width = ui.available_width();
+                            let column_width = ((row_width - 70.0) / 4.0).max(80.0);
                             let row = ui.allocate_ui_with_layout(
                                 vec2(row_width, row_height),
                                 egui::Layout::left_to_right(egui::Align::Center),
@@ -865,6 +1010,7 @@ impl CrosshairApp {
                                     let checked_response = ui.checkbox(&mut checked, "");
                                     row_hits.push(checked_response.clone());
                                     if checked_response.changed() {
+                                        checkbox_changed = true;
                                         if checked {
                                             self.memory_panel.selected_saved.insert(index);
                                         } else {
@@ -872,7 +1018,7 @@ impl CrosshairApp {
                                         }
                                     }
                                     let address_response = ui.add_sized(
-                                        [172.0, 20.0],
+                                        [column_width, 20.0],
                                         egui::Label::new(format!("0x{:016X}", saved.address))
                                             .selectable(false)
                                             .sense(Sense::click()),
@@ -884,10 +1030,16 @@ impl CrosshairApp {
                                     if address_response.double_clicked() {
                                         open_address = true;
                                     }
-                                    row_hits.push(ui.label(memory_type_label(saved.value_type)));
+                                    let type_response = ui.add_sized(
+                                        [column_width, 20.0],
+                                        egui::Label::new(memory_type_label(saved.value_type))
+                                            .selectable(false)
+                                            .truncate(),
+                                    );
+                                    row_hits.push(type_response);
                                     if self.memory_panel.edit_value_index == Some(index) {
                                         let response = ui.add_sized(
-                                            [120.0, 20.0],
+                                            [column_width, 20.0],
                                             egui::TextEdit::singleline(
                                                 &mut self.memory_panel.edit_value_input,
                                             ),
@@ -903,7 +1055,7 @@ impl CrosshairApp {
                                         }
                                     } else {
                                         let value_response = ui.add_sized(
-                                            [120.0, 20.0],
+                                            [column_width, 20.0],
                                             egui::Label::new(
                                                 saved
                                                     .current
@@ -922,17 +1074,40 @@ impl CrosshairApp {
                                             edit_value = true;
                                         }
                                     }
-                                    let description_response = ui.add_sized(
-                                        [
-                                            160.0_f32.min((ui.available_width() - 32.0).max(70.0)),
-                                            20.0,
-                                        ],
-                                        egui::TextEdit::singleline(
-                                            &mut self.memory_panel.saved[index].description,
-                                        )
-                                        .hint_text("description"),
-                                    );
-                                    row_hits.push(description_response);
+                                    if self.memory_panel.edit_description_index == Some(index) {
+                                        let description_response = ui.add_sized(
+                                            [column_width, 20.0],
+                                            egui::TextEdit::singleline(
+                                                &mut self.memory_panel.saved[index].description,
+                                            ),
+                                        );
+                                        row_hits.push(description_response.clone());
+                                        if description_response.lost_focus()
+                                            || ui.input(|input| {
+                                                input.key_pressed(egui::Key::Enter)
+                                                    || input.key_pressed(egui::Key::Escape)
+                                            })
+                                        {
+                                            self.memory_panel.edit_description_index = None;
+                                        }
+                                    } else {
+                                        let description = if saved.description.is_empty() {
+                                            RichText::new("description").weak()
+                                        } else {
+                                            RichText::new(&saved.description)
+                                        };
+                                        let description_response = ui.add_sized(
+                                            [column_width, 20.0],
+                                            egui::Label::new(description)
+                                                .selectable(false)
+                                                .truncate()
+                                                .sense(Sense::click()),
+                                        );
+                                        row_hits.push(description_response.clone());
+                                        if description_response.double_clicked() {
+                                            self.memory_panel.edit_description_index = Some(index);
+                                        }
+                                    }
                                     let mut frozen = saved.frozen.is_some();
                                     let frozen_response =
                                         ui.checkbox(&mut frozen, "").on_hover_text("Freeze");
@@ -943,15 +1118,23 @@ impl CrosshairApp {
                                     }
                                 },
                             );
+                            let full_row_rect = egui::Rect::from_min_max(
+                                row.response.rect.min,
+                                egui::pos2(ui.clip_rect().right(), row.response.rect.bottom()),
+                            );
                             let mut response = ui
                                 .interact(
-                                    row.response.rect,
+                                    full_row_rect,
                                     ui.id().with(("saved-memory-row", index)),
                                     Sense::click(),
                                 )
                                 .on_hover_cursor(egui::CursorIcon::Default);
                             for hit in row_hits {
                                 response = response.union(hit);
+                            }
+                            if response.clicked() && !response.double_clicked() && !checkbox_changed
+                            {
+                                self.select_saved_memory_row(index, selected, ui);
                             }
                             if response.hovered() || selected {
                                 ui.painter().rect_filled(
@@ -970,22 +1153,22 @@ impl CrosshairApp {
                                     .button("Find instructions accessing this address (x64)")
                                     .clicked()
                                 {
-                                    tool_message =
-                                        Some("Instruction access tracing is not available yet");
+                                    instruction_watch = Some(true);
                                     ui.close();
                                 }
                                 if ui
                                     .button("Find instructions writing this address (x64)")
                                     .clicked()
                                 {
-                                    tool_message =
-                                        Some("Instruction write tracing is not available yet");
+                                    instruction_watch = Some(false);
                                     ui.close();
                                 }
                                 if ui.button("Browse this memory region").clicked() {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
                                         kind: MemoryViewKind::Bytes,
+                                        display_type: MemoryDisplayType::ByteHex,
+                                        relative_addresses: false,
                                     });
                                     ui.close();
                                 }
@@ -993,6 +1176,8 @@ impl CrosshairApp {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
                                         kind: MemoryViewKind::Structure,
+                                        display_type: MemoryDisplayType::ByteHex,
+                                        relative_addresses: false,
                                     });
                                     ui.close();
                                 }
@@ -1010,8 +1195,9 @@ impl CrosshairApp {
                                     ui.close();
                                 }
                             });
-                            if let Some(message) = tool_message {
-                                self.memory_panel.status = message.to_owned();
+                            #[cfg(windows)]
+                            if let Some(reads_and_writes) = instruction_watch {
+                                self.open_instruction_watch(saved.address, reads_and_writes);
                             }
                             if open_address {
                                 let (address, offsets, pointer) =
@@ -1057,8 +1243,152 @@ impl CrosshairApp {
             });
     }
 
+    #[cfg(windows)]
+    fn open_instruction_watch(&mut self, address: usize, reads_and_writes: bool) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process".to_owned();
+            return;
+        };
+        if let Some(dialog) = self.memory_panel.instruction_watch_dialog.as_mut()
+            && let Some(active) = dialog.active.as_mut()
+        {
+            active.stop();
+        }
+        let (tx, rx) = mpsc::channel();
+        let notify = move |event| {
+            let _ = tx.send(event);
+        };
+        let started = if reads_and_writes {
+            AddressAccessWatch::start(pid, address, notify).map(ActiveInstructionWatch::Accesses)
+        } else {
+            WriteWatch::start(pid, address, notify).map(ActiveInstructionWatch::Writes)
+        };
+        let (active, status) = match started {
+            Ok(active) => (Some(active), "Attaching debugger…".to_owned()),
+            Err(error) => (None, format!("Unable to start debugger: {error}")),
+        };
+        self.memory_panel.instruction_watch_dialog = Some(InstructionWatchDialog {
+            address,
+            writes_only: !reads_and_writes,
+            status,
+            hits: Vec::new(),
+            selected: None,
+            rx,
+            active,
+        });
+    }
+
+    #[cfg(windows)]
+    fn render_instruction_watch_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.memory_panel.instruction_watch_dialog.take() else {
+            return;
+        };
+        while let Ok(event) = dialog.rx.try_recv() {
+            match event {
+                WatchEvent::Started => dialog.status = "Debugger running".to_owned(),
+                WatchEvent::AddressHit {
+                    instruction_address,
+                    instruction,
+                    details,
+                    ..
+                } => {
+                    if let Some(hit) = dialog
+                        .hits
+                        .iter_mut()
+                        .find(|hit| hit.address == instruction_address)
+                    {
+                        hit.count += 1;
+                        hit.details = details;
+                    } else {
+                        dialog.hits.push(InstructionHit {
+                            address: instruction_address,
+                            instruction,
+                            details,
+                            count: 1,
+                        });
+                        dialog.hits.sort_unstable_by_key(|hit| hit.address);
+                    }
+                    let total: usize = dialog.hits.iter().map(|hit| hit.count).sum();
+                    dialog.status = format!("{total} hit(s), {} instruction(s)", dialog.hits.len());
+                }
+                WatchEvent::AccessHit { .. } => {}
+                WatchEvent::Error(error) => {
+                    dialog.status = format!("Debugger stopped: {error}");
+                    dialog.active = None;
+                }
+                WatchEvent::Stopped => {
+                    dialog.status = "Debugger stopped".to_owned();
+                    dialog.active = None;
+                }
+            }
+        }
+        let mut open = true;
+        let title = format!(
+            "Find instructions {} — 0x{:016X}",
+            if dialog.writes_only {
+                "writing"
+            } else {
+                "accessing"
+            },
+            dialog.address
+        );
+        egui::Window::new(title)
+            .default_size(vec2(760.0, 500.0))
+            .collapsible(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(&dialog.status);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if dialog.active.is_some() && ui.button("Stop").clicked() {
+                            if let Some(active) = dialog.active.as_mut() {
+                                active.stop();
+                            }
+                            dialog.active = None;
+                            dialog.status = "Debugger stopped".to_owned();
+                        }
+                    });
+                });
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .max_height(210.0)
+                    .show(ui, |ui| {
+                        for (index, hit) in dialog.hits.iter().enumerate() {
+                            if ui
+                                .selectable_label(
+                                    dialog.selected == Some(index),
+                                    format!(
+                                        "0x{:016X}   {:<40}   {} hit(s)",
+                                        hit.address, hit.instruction, hit.count
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                dialog.selected = Some(index);
+                            }
+                        }
+                    });
+                ui.separator();
+                egui::ScrollArea::both().show(ui, |ui| {
+                    ui.monospace(
+                        dialog
+                            .selected
+                            .and_then(|index| dialog.hits.get(index))
+                            .map(|hit| hit.details.as_str())
+                            .unwrap_or("Interact with the target process to capture instructions."),
+                    );
+                });
+            });
+        if open {
+            self.memory_panel.instruction_watch_dialog = Some(dialog);
+            ctx.request_repaint_after(Duration::from_millis(35));
+        } else if let Some(mut active) = dialog.active {
+            active.stop();
+        }
+    }
+
     fn render_memory_view_dialog(&mut self, ctx: &egui::Context) {
-        let Some(dialog) = self.memory_panel.memory_view_dialog.as_ref() else {
+        let Some(mut dialog) = self.memory_panel.memory_view_dialog.take() else {
             return;
         };
         let address = dialog.address;
@@ -1074,20 +1404,22 @@ impl CrosshairApp {
         let mut open = true;
         egui::Window::new(title)
             .default_size(vec2(720.0, 430.0))
+            .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
                 let Some(bytes) = bytes.as_deref() else {
                     ui.label("Unable to read this memory region");
                     return;
                 };
-                egui::ScrollArea::both().show(ui, |ui| match kind {
+                let body = egui::ScrollArea::both().show(ui, |ui| match kind {
                     MemoryViewKind::Bytes => {
+                        ui.horizontal(|ui| {
+                            Self::memory_view_cell(ui, 152.0, "Address");
+                            Self::memory_view_cell(ui, 360.0, "Data");
+                            Self::memory_view_cell(ui, 130.0, "ASCII");
+                        });
+                        ui.separator();
                         for (row, chunk) in bytes.chunks(16).enumerate() {
-                            let hex = chunk
-                                .iter()
-                                .map(|byte| format!("{byte:02X}"))
-                                .collect::<Vec<_>>()
-                                .join(" ");
                             let ascii = chunk
                                 .iter()
                                 .map(|byte| {
@@ -1098,41 +1430,105 @@ impl CrosshairApp {
                                     }
                                 })
                                 .collect::<String>();
-                            ui.monospace(format!(
-                                "{:016X}  {:<47}  {ascii}",
-                                address + row * 16,
-                                hex
-                            ));
+                            ui.horizontal(|ui| {
+                                let shown_address = if dialog.relative_addresses {
+                                    format!("+{:04X}", row * 16)
+                                } else {
+                                    format!("{:016X}", address + row * 16)
+                                };
+                                Self::memory_view_cell(ui, 152.0, &shown_address);
+                                Self::memory_view_cell(
+                                    ui,
+                                    360.0,
+                                    &format_memory_display(chunk, dialog.display_type),
+                                );
+                                Self::memory_view_cell(ui, 130.0, &ascii);
+                            });
                         }
                     }
                     MemoryViewKind::Structure => {
-                        ui.monospace("Offset   Address             Bytes                    i32          Float");
+                        ui.horizontal(|ui| {
+                            Self::memory_view_cell(ui, 72.0, "Offset");
+                            Self::memory_view_cell(ui, 152.0, "Address");
+                            Self::memory_view_cell(ui, 116.0, "Bytes");
+                            Self::memory_view_cell(ui, 112.0, "i32");
+                            Self::memory_view_cell(ui, 150.0, "Float");
+                        });
                         ui.separator();
                         for (offset, chunk) in bytes.chunks(4).enumerate() {
                             if chunk.len() < 4 {
                                 break;
                             }
                             let raw = [chunk[0], chunk[1], chunk[2], chunk[3]];
-                            ui.monospace(format!(
-                                "+{:04X}   {:016X}    {:02X} {:02X} {:02X} {:02X}    {:>11}   {:>12.5}",
-                                offset * 4,
-                                address + offset * 4,
-                                raw[0],
-                                raw[1],
-                                raw[2],
-                                raw[3],
-                                i32::from_le_bytes(raw),
-                                f32::from_le_bytes(raw),
-                            ));
+                            ui.horizontal(|ui| {
+                                Self::memory_view_cell(ui, 72.0, &format!("+{:04X}", offset * 4));
+                                Self::memory_view_cell(
+                                    ui,
+                                    152.0,
+                                    &format!("{:016X}", address + offset * 4),
+                                );
+                                Self::memory_view_cell(
+                                    ui,
+                                    116.0,
+                                    &format!(
+                                        "{:02X} {:02X} {:02X} {:02X}",
+                                        raw[0], raw[1], raw[2], raw[3]
+                                    ),
+                                );
+                                Self::memory_view_cell(
+                                    ui,
+                                    112.0,
+                                    &i32::from_le_bytes(raw).to_string(),
+                                );
+                                Self::memory_view_cell(
+                                    ui,
+                                    150.0,
+                                    &format_compact_float(f32::from_le_bytes(raw) as f64, 6),
+                                );
+                            });
                         }
+                    }
+                });
+                ui.interact(
+                    body.inner_rect,
+                    ui.id().with("memory-region-context-menu"),
+                    Sense::click(),
+                )
+                .context_menu(|ui| {
+                    ui.menu_button("Display Type", |ui| {
+                        for (display_type, label) in memory_display_types() {
+                            if ui
+                                .selectable_value(&mut dialog.display_type, display_type, label)
+                                .clicked()
+                            {
+                                ui.close();
+                            }
+                        }
+                    });
+                    ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
+                    if matches!(dialog.kind, MemoryViewKind::Bytes)
+                        && ui.button("Open in dissect data/structure").clicked()
+                    {
+                        dialog.kind = MemoryViewKind::Structure;
+                        ui.close();
                     }
                 });
             });
         if !open {
             self.memory_panel.memory_view_dialog = None;
         } else {
+            self.memory_panel.memory_view_dialog = Some(dialog);
             ctx.request_repaint_after(Duration::from_millis(250));
         }
+    }
+
+    fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) {
+        ui.add_sized(
+            [width, 18.0],
+            egui::Label::new(RichText::new(text).monospace())
+                .selectable(false)
+                .truncate(),
+        );
     }
 
     fn render_memory_address_dialog(&mut self, ctx: &egui::Context) {
@@ -1577,6 +1973,21 @@ fn memory_type_label(value_type: ScanValueType) -> &'static str {
     }
 }
 
+fn compact_hotkey_label(label: &str) -> String {
+    let keys = hotkey::split_key_list(label);
+    if let Some(key) = keys
+        .iter()
+        .rev()
+        .find(|key| !hotkey::is_modifier_key_name(key))
+    {
+        return key.chars().take(3).collect();
+    }
+    keys.iter()
+        .filter_map(|key| key.chars().next())
+        .take(3)
+        .collect()
+}
+
 fn parse_scan_value(text: &str, value_type: ScanValueType, hex: bool) -> Option<ScanValue> {
     let text = text.trim().replace('_', "");
     match value_type {
@@ -1620,9 +2031,106 @@ fn format_scan_value(value: ScanValue, hex: bool) -> String {
         ScanValue::I32(value) if hex => format!("0x{:08X}", value as u32),
         ScanValue::I64(value) if hex => format!("0x{:016X}", value as u64),
         ScanValue::I32(value) => value.to_string(),
-        ScanValue::F32(value) => value.to_string(),
+        ScanValue::F32(value) => format_compact_float(value as f64, 6),
         ScanValue::I64(value) => value.to_string(),
-        ScanValue::F64(value) => value.to_string(),
+        ScanValue::F64(value) => format_compact_float(value, 10),
+    }
+}
+
+fn format_compact_float(value: f64, precision: usize) -> String {
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    let absolute = value.abs();
+    if !(0.001..1_000_000_000.0).contains(&absolute) {
+        return format!("{value:.precision$e}");
+    }
+    format!("{value:.precision$}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_owned()
+}
+
+fn memory_display_types() -> [(MemoryDisplayType, &'static str); 10] {
+    [
+        (MemoryDisplayType::ByteHex, "Byte hex"),
+        (MemoryDisplayType::ByteDecimal, "Byte decimal"),
+        (MemoryDisplayType::I16Hex, "2 Byte hex"),
+        (MemoryDisplayType::I16Decimal, "2 Byte decimal"),
+        (MemoryDisplayType::I32Hex, "4 Byte hex"),
+        (MemoryDisplayType::I32Decimal, "4 Byte decimal"),
+        (MemoryDisplayType::I64Hex, "8 Byte hex"),
+        (MemoryDisplayType::I64Decimal, "8 Byte decimal"),
+        (MemoryDisplayType::Float, "Float"),
+        (MemoryDisplayType::Double, "Double"),
+    ]
+}
+
+fn format_memory_display(bytes: &[u8], display_type: MemoryDisplayType) -> String {
+    match display_type {
+        MemoryDisplayType::ByteHex => bytes
+            .iter()
+            .map(|value| format!("{value:02X}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::ByteDecimal => bytes
+            .iter()
+            .map(u8::to_string)
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::I16Hex => bytes
+            .chunks_exact(2)
+            .map(|chunk| format!("{:04X}", u16::from_le_bytes([chunk[0], chunk[1]])))
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::I16Decimal => bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]).to_string())
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::I32Hex => bytes
+            .chunks_exact(4)
+            .map(|chunk| {
+                format!(
+                    "{:08X}",
+                    u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::I32Decimal => bytes
+            .chunks_exact(4)
+            .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]).to_string())
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::I64Hex => bytes
+            .chunks_exact(8)
+            .map(|chunk| format!("{:016X}", u64::from_le_bytes(chunk.try_into().unwrap())))
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::I64Decimal => bytes
+            .chunks_exact(8)
+            .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()).to_string())
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::Float => bytes
+            .chunks_exact(4)
+            .map(|chunk| {
+                format_compact_float(
+                    f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) as f64,
+                    6,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::Double => bytes
+            .chunks_exact(8)
+            .map(|chunk| format_compact_float(f64::from_le_bytes(chunk.try_into().unwrap()), 10))
+            .collect::<Vec<_>>()
+            .join(" "),
     }
 }
 

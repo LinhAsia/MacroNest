@@ -1,0 +1,754 @@
+//! x64 hardware watchpoints for an explicitly selected offline process.
+
+use super::memory::Process;
+use iced_x86::{
+    Decoder, DecoderOptions, Formatter, Instruction, InstructionInfoFactory, IntelFormatter,
+    OpAccess, OpKind, Register,
+};
+use std::{
+    collections::HashMap,
+    io,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::{self, JoinHandle},
+};
+use windows_sys::Win32::{
+    Foundation::{
+        CloseHandle, DBG_CONTINUE, DBG_EXCEPTION_NOT_HANDLED, EXCEPTION_BREAKPOINT,
+        EXCEPTION_SINGLE_STEP, HANDLE,
+    },
+    System::{
+        Diagnostics::Debug::{
+            CONTEXT, CONTEXT_CONTROL_AMD64, CONTEXT_DEBUG_REGISTERS_AMD64, CONTEXT_INTEGER_AMD64,
+            CREATE_PROCESS_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT, ContinueDebugEvent, DEBUG_EVENT,
+            DebugActiveProcess, DebugActiveProcessStop, DebugSetProcessKillOnExit,
+            EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT,
+            GetThreadContext, SetThreadContext, WaitForDebugEvent,
+        },
+        Threading::{
+            IsWow64Process, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread,
+            SuspendThread,
+        },
+    },
+};
+
+const ERROR_SEM_TIMEOUT: i32 = 121;
+const MAX_ACCESS_HITS: usize = 500;
+const RESUME_FLAG: u32 = 1 << 16;
+
+#[repr(C, align(16))]
+struct AlignedContext(CONTEXT);
+
+impl Default for AlignedContext {
+    fn default() -> Self {
+        Self(CONTEXT::default())
+    }
+}
+
+#[derive(Debug)]
+pub enum WatchEvent {
+    Started,
+    AddressHit {
+        instruction_address: usize,
+        instruction: String,
+        data_address: usize,
+        details: String,
+        likely_stack_copy: bool,
+    },
+    AccessHit {
+        data_address: usize,
+    },
+    Error(String),
+    Stopped,
+}
+
+struct WatchSession {
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl WatchSession {
+    fn start<F>(pid: u32, kind: WatchKind, notify: F) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        ensure_x64_target(pid)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
+        let worker = thread::spawn(move || watch_loop(pid, kind, worker_stop, notify));
+        Ok(Self {
+            stop,
+            worker: Some(worker),
+        })
+    }
+
+    pub fn stop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+impl Drop for WatchSession {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+pub struct WriteWatch(WatchSession);
+
+impl WriteWatch {
+    pub fn start<F>(pid: u32, address: usize, notify: F) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        if address % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "hardware watchpoint i32 requires a 4-byte aligned address",
+            ));
+        }
+        WatchSession::start(pid, WatchKind::Write { address }, notify).map(Self)
+    }
+
+    pub fn stop(&mut self) {
+        self.0.stop();
+    }
+}
+
+pub struct AddressAccessWatch(WatchSession);
+
+impl AddressAccessWatch {
+    pub fn start<F>(pid: u32, address: usize, notify: F) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        if address % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "hardware i32 access watchpoint requires a 4-byte aligned address",
+            ));
+        }
+        WatchSession::start(pid, WatchKind::ReadWrite { address }, notify).map(Self)
+    }
+
+    pub fn stop(&mut self) {
+        self.0.stop();
+    }
+}
+
+pub struct AccessWatch(WatchSession);
+
+impl AccessWatch {
+    pub fn start<F>(pid: u32, instruction_address: usize, notify: F) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        let instruction = decode_at(&Process::open(pid)?, instruction_address)?;
+        WatchSession::start(
+            pid,
+            WatchKind::Execute {
+                address: instruction_address,
+                instruction,
+            },
+            notify,
+        )
+        .map(Self)
+    }
+
+    pub fn stop(&mut self) {
+        self.0.stop();
+    }
+}
+
+enum WatchKind {
+    Write {
+        address: usize,
+    },
+    ReadWrite {
+        address: usize,
+    },
+    Execute {
+        address: usize,
+        instruction: Instruction,
+    },
+}
+
+impl WatchKind {
+    fn address(&self) -> usize {
+        match self {
+            Self::Write { address }
+            | Self::ReadWrite { address }
+            | Self::Execute { address, .. } => *address,
+        }
+    }
+
+    fn dr7(&self) -> u64 {
+        match self {
+            Self::Write { .. } => write_breakpoint_dr7(),
+            Self::ReadWrite { .. } => read_write_breakpoint_dr7(),
+            Self::Execute { .. } => 1,
+        }
+    }
+}
+
+fn ensure_x64_target(pid: u32) -> io::Result<()> {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let mut wow64 = 0;
+    let result = unsafe { IsWow64Process(process, &mut wow64) };
+    unsafe { CloseHandle(process) };
+    if result == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if wow64 != 0 {
+        // ponytail: The app is x64-only today; add Wow64*Context when 32-bit targets matter.
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "the debugger currently supports 64-bit processes only",
+        ));
+    }
+    Ok(())
+}
+
+fn watch_loop<F>(pid: u32, kind: WatchKind, stop: Arc<AtomicBool>, notify: F)
+where
+    F: Fn(WatchEvent),
+{
+    let process = match Process::open(pid) {
+        Ok(process) => process,
+        Err(error) => {
+            notify(WatchEvent::Error(error.to_string()));
+            return;
+        }
+    };
+    if unsafe { DebugActiveProcess(pid) } == 0 {
+        notify(WatchEvent::Error(io::Error::last_os_error().to_string()));
+        return;
+    }
+    unsafe { DebugSetProcessKillOnExit(0) };
+    notify(WatchEvent::Started);
+    let mut first_breakpoint = true;
+    let mut threads = HashMap::new();
+    let mut access_hits = 0usize;
+    while !stop.load(Ordering::Acquire) {
+        let mut event = DEBUG_EVENT::default();
+        if unsafe { WaitForDebugEvent(&mut event, 100) } == 0 {
+            if io::Error::last_os_error().raw_os_error() == Some(ERROR_SEM_TIMEOUT) {
+                continue;
+            }
+            notify(WatchEvent::Error(io::Error::last_os_error().to_string()));
+            break;
+        }
+
+        let mut status = DBG_CONTINUE;
+        match event.dwDebugEventCode {
+            CREATE_PROCESS_DEBUG_EVENT => unsafe {
+                let info = event.u.CreateProcessInfo;
+                if let Err(error) = arm_thread(info.hThread, &kind) {
+                    notify(WatchEvent::Error(error.to_string()));
+                    stop.store(true, Ordering::Release);
+                }
+                close_if_valid(info.hFile);
+                close_if_valid(info.hProcess);
+                threads.insert(event.dwThreadId, info.hThread);
+            },
+            CREATE_THREAD_DEBUG_EVENT => unsafe {
+                let thread = event.u.CreateThread.hThread;
+                if let Err(error) = arm_thread(thread, &kind) {
+                    notify(WatchEvent::Error(error.to_string()));
+                    stop.store(true, Ordering::Release);
+                }
+                threads.insert(event.dwThreadId, thread);
+            },
+            EXCEPTION_DEBUG_EVENT => unsafe {
+                let exception = event.u.Exception.ExceptionRecord.ExceptionCode;
+                if exception == EXCEPTION_SINGLE_STEP {
+                    if let Some(context) = threads.get(&event.dwThreadId).and_then(|&thread| {
+                        read_hit(
+                            thread,
+                            kind.address(),
+                            matches!(kind, WatchKind::Execute { .. }),
+                        )
+                    }) {
+                        match &kind {
+                            WatchKind::Write { address } | WatchKind::ReadWrite { address } => {
+                                let read_write = matches!(kind, WatchKind::ReadWrite { .. });
+                                if let Some((instruction_address, decoded, instruction)) =
+                                    decode_previous_access(
+                                        &process,
+                                        &context,
+                                        *address,
+                                        !read_write,
+                                    )
+                                {
+                                    notify(WatchEvent::AddressHit {
+                                        instruction_address,
+                                        instruction,
+                                        data_address: *address,
+                                        details: format_hit_details(
+                                            &process,
+                                            &decoded,
+                                            &context,
+                                            *address,
+                                            if read_write { "truy cáº­p" } else { "ghi" },
+                                        ),
+                                        likely_stack_copy: address.abs_diff(context.Rsp as usize)
+                                            < 8 * 1024 * 1024,
+                                    });
+                                    if read_write {
+                                        access_hits += 1;
+                                        if access_hits >= MAX_ACCESS_HITS {
+                                            notify(WatchEvent::Error(format!(
+                                                "auto-stopped after {MAX_ACCESS_HITS} address accesses to protect responsiveness"
+                                            )));
+                                            stop.store(true, Ordering::Release);
+                                        }
+                                    }
+                                }
+                            }
+                            WatchKind::Execute { instruction, .. } => {
+                                if let Some(data_address) = effective_address(instruction, &context)
+                                {
+                                    notify(WatchEvent::AccessHit { data_address });
+                                    access_hits += 1;
+                                    if access_hits >= MAX_ACCESS_HITS {
+                                        notify(WatchEvent::Error(format!(
+                                            "auto-stopped after {MAX_ACCESS_HITS} accesses to protect responsiveness"
+                                        )));
+                                        stop.store(true, Ordering::Release);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        status = DBG_EXCEPTION_NOT_HANDLED;
+                    }
+                } else if exception == EXCEPTION_BREAKPOINT && first_breakpoint {
+                    first_breakpoint = false;
+                } else {
+                    status = DBG_EXCEPTION_NOT_HANDLED;
+                }
+            },
+            EXIT_THREAD_DEBUG_EVENT => {
+                if let Some(thread) = threads.remove(&event.dwThreadId) {
+                    unsafe { close_if_valid(thread) };
+                }
+            }
+            EXIT_PROCESS_DEBUG_EVENT => stop.store(true, Ordering::Release),
+            _ => {}
+        }
+        unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
+    }
+    for (_, thread) in threads {
+        unsafe {
+            if SuspendThread(thread) != u32::MAX {
+                disarm_thread(thread);
+                ResumeThread(thread);
+            }
+            close_if_valid(thread);
+        }
+    }
+    unsafe { DebugActiveProcessStop(pid) };
+    notify(WatchEvent::Stopped);
+}
+
+unsafe fn close_if_valid(handle: HANDLE) {
+    if !handle.is_null() {
+        unsafe { CloseHandle(handle) };
+    }
+}
+
+unsafe fn arm_thread(thread: HANDLE, kind: &WatchKind) -> io::Result<()> {
+    let mut aligned = AlignedContext::default();
+    let context = &mut aligned.0;
+    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
+    if unsafe { GetThreadContext(thread, context) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    context.Dr0 = kind.address() as u64;
+    context.Dr6 = 0;
+    context.Dr7 &= !0xF0003;
+    context.Dr7 |= kind.dr7();
+    if unsafe { SetThreadContext(thread, context) } == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool) -> Option<CONTEXT> {
+    let mut aligned = AlignedContext::default();
+    let context = &mut aligned.0;
+    context.ContextFlags =
+        CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64 | CONTEXT_INTEGER_AMD64;
+    let hit = unsafe { GetThreadContext(thread, context) } != 0
+        && context.Dr6 & 1 != 0
+        && context.Dr0 == address as u64;
+    let captured = hit.then_some(*context);
+    if hit {
+        context.Dr6 = 0;
+        if execution_breakpoint {
+            context.EFlags |= RESUME_FLAG;
+        }
+        unsafe { SetThreadContext(thread, context) };
+    }
+    captured
+}
+
+fn decode_at(process: &Process, address: usize) -> io::Result<Instruction> {
+    let mut bytes = [0u8; 15];
+    let read = process.read(address, &mut bytes)?;
+    let mut decoder = Decoder::with_ip(64, &bytes[..read], address as u64, DecoderOptions::NONE);
+    let instruction = decoder.decode();
+    if instruction.is_invalid() {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid x64 instruction",
+        ))
+    } else {
+        Ok(instruction)
+    }
+}
+
+fn decode_previous_access(
+    process: &Process,
+    context: &CONTEXT,
+    data_address: usize,
+    writes_only: bool,
+) -> Option<(usize, Instruction, String)> {
+    let next_ip = context.Rip as usize;
+    for length in 1..=15usize {
+        let start = next_ip.checked_sub(length)?;
+        let mut bytes = [0u8; 15];
+        let Ok(read) = process.read(start, &mut bytes[..length]) else {
+            continue;
+        };
+        if read != length {
+            continue;
+        }
+        let mut decoder =
+            Decoder::with_ip(64, &bytes[..length], start as u64, DecoderOptions::NONE);
+        let instruction = decoder.decode();
+        if !instruction.is_invalid()
+            && instruction.len() == length
+            && instruction.next_ip() as usize == next_ip
+            && (!writes_only || writes_memory(&instruction))
+            && effective_address(&instruction, context) == Some(data_address)
+        {
+            let mut formatter = IntelFormatter::new();
+            let mut text = String::new();
+            formatter.format(&instruction, &mut text);
+            return Some((start, instruction, text));
+        }
+    }
+    None
+}
+
+fn writes_memory(instruction: &Instruction) -> bool {
+    let mut factory = InstructionInfoFactory::new();
+    factory
+        .info(instruction)
+        .used_memory()
+        .iter()
+        .any(|memory| {
+            matches!(
+                memory.access(),
+                OpAccess::Write
+                    | OpAccess::CondWrite
+                    | OpAccess::ReadWrite
+                    | OpAccess::ReadCondWrite
+            )
+        })
+}
+
+fn format_hit_details(
+    process: &Process,
+    instruction: &Instruction,
+    context: &CONTEXT,
+    data_address: usize,
+    action: &str,
+) -> String {
+    let mut text = format!(
+        "DISASSEMBLY (dÃ²ng << lÃ  instruction {action}; cÃ¡c dÃ²ng sau lÃ  code káº¿ tiáº¿p)\r\n"
+    );
+    let mut current = *instruction;
+    for index in 0..6 {
+        let mut bytes = [0u8; 15];
+        let read = process
+            .read(current.ip() as usize, &mut bytes[..current.len()])
+            .unwrap_or(0);
+        let encoded = bytes[..read]
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut formatter = IntelFormatter::new();
+        let mut assembly = String::new();
+        formatter.format(&current, &mut assembly);
+        text.push_str(&format!(
+            "0x{:016X}  {:<32}  {}{}\r\n",
+            current.ip(),
+            encoded,
+            assembly,
+            if index == 0 { "  <<" } else { "" }
+        ));
+        let Ok(next) = decode_at(process, current.next_ip() as usize) else {
+            break;
+        };
+        current = next;
+    }
+    text.push_str(&format!(
+        "\r\nSNAPSHOT SAU Láº¦N {} Gáº¦N NHáº¤T\r\n\
+RAX={:016X}  RBX={:016X}\r\n\
+RCX={:016X}  RDX={:016X}\r\n\
+RSI={:016X}  RDI={:016X}\r\n\
+RBP={:016X}  RSP={:016X}\r\n\
+R8 ={:016X}  R9 ={:016X}\r\n\
+R10={:016X}  R11={:016X}\r\n\
+R12={:016X}  R13={:016X}\r\n\
+R14={:016X}  R15={:016X}\r\n\
+RIP(sau lá»‡nh)={:016X}  RFLAGS={:08X}\r\n\
+Äá»ŠA CHá»ˆ DATA THá»°C Táº¾=0x{:016X}\r\n",
+        action.to_uppercase(),
+        context.Rax,
+        context.Rbx,
+        context.Rcx,
+        context.Rdx,
+        context.Rsi,
+        context.Rdi,
+        context.Rbp,
+        context.Rsp,
+        context.R8,
+        context.R9,
+        context.R10,
+        context.R11,
+        context.R12,
+        context.R13,
+        context.R14,
+        context.R15,
+        context.Rip,
+        context.EFlags,
+        data_address,
+    ));
+    text
+}
+
+fn effective_address(instruction: &Instruction, context: &CONTEXT) -> Option<usize> {
+    let has_memory =
+        (0..instruction.op_count()).any(|index| instruction.op_kind(index) == OpKind::Memory);
+    if !has_memory {
+        return None;
+    }
+    if instruction.is_ip_rel_memory_operand() {
+        return Some(instruction.ip_rel_memory_address() as usize);
+    }
+    let base = register_value(instruction.memory_base(), context)?;
+    let index = register_value(instruction.memory_index(), context)?;
+    Some(
+        base.wrapping_add(index.wrapping_mul(instruction.memory_index_scale() as u64))
+            .wrapping_add(instruction.memory_displacement64()) as usize,
+    )
+}
+
+fn register_value(register: Register, context: &CONTEXT) -> Option<u64> {
+    Some(match register {
+        Register::None => 0,
+        Register::RAX => context.Rax,
+        Register::RCX => context.Rcx,
+        Register::RDX => context.Rdx,
+        Register::RBX => context.Rbx,
+        Register::RSP => context.Rsp,
+        Register::RBP => context.Rbp,
+        Register::RSI => context.Rsi,
+        Register::RDI => context.Rdi,
+        Register::R8 => context.R8,
+        Register::R9 => context.R9,
+        Register::R10 => context.R10,
+        Register::R11 => context.R11,
+        Register::R12 => context.R12,
+        Register::R13 => context.R13,
+        Register::R14 => context.R14,
+        Register::R15 => context.R15,
+        Register::EAX => context.Rax as u32 as u64,
+        Register::ECX => context.Rcx as u32 as u64,
+        Register::EDX => context.Rdx as u32 as u64,
+        Register::EBX => context.Rbx as u32 as u64,
+        Register::ESP => context.Rsp as u32 as u64,
+        Register::EBP => context.Rbp as u32 as u64,
+        Register::ESI => context.Rsi as u32 as u64,
+        Register::EDI => context.Rdi as u32 as u64,
+        Register::R8D => context.R8 as u32 as u64,
+        Register::R9D => context.R9 as u32 as u64,
+        Register::R10D => context.R10 as u32 as u64,
+        Register::R11D => context.R11 as u32 as u64,
+        Register::R12D => context.R12 as u32 as u64,
+        Register::R13D => context.R13 as u32 as u64,
+        Register::R14D => context.R14 as u32 as u64,
+        Register::R15D => context.R15 as u32 as u64,
+        _ => return None,
+    })
+}
+
+unsafe fn disarm_thread(thread: HANDLE) {
+    let mut aligned = AlignedContext::default();
+    let context = &mut aligned.0;
+    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
+    if unsafe { GetThreadContext(thread, context) } != 0 {
+        context.Dr0 = 0;
+        context.Dr6 = 0;
+        context.Dr7 &= !0xF0003;
+        unsafe { SetThreadContext(thread, context) };
+    }
+}
+
+const fn write_breakpoint_dr7() -> u64 {
+    1 | (1 << 16) | (3 << 18)
+}
+
+const fn read_write_breakpoint_dr7() -> u64 {
+    1 | (3 << 16) | (3 << 18)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        io::{BufRead, BufReader},
+        process::{Command, Stdio},
+        sync::{
+            atomic::{AtomicI32, Ordering},
+            mpsc,
+        },
+        time::Duration,
+    };
+
+    #[test]
+    fn dr7_enables_local_four_byte_write_watchpoint_in_slot_zero() {
+        let dr7 = write_breakpoint_dr7();
+        assert_eq!(dr7 & 1, 1);
+        assert_eq!((dr7 >> 16) & 0b11, 0b01);
+        assert_eq!((dr7 >> 18) & 0b11, 0b11);
+    }
+
+    #[test]
+    fn dr7_read_write_watchpoint_uses_the_access_mode() {
+        let dr7 = read_write_breakpoint_dr7();
+        assert_eq!(dr7 & 1, 1);
+        assert_eq!((dr7 >> 16) & 0b11, 0b11);
+        assert_eq!((dr7 >> 18) & 0b11, 0b11);
+    }
+
+    #[test]
+    fn instruction_filter_rejects_memory_reads() {
+        let mut write_decoder = Decoder::new(64, &[0x89, 0x44, 0x24, 0x20], DecoderOptions::NONE);
+        let mut read_decoder = Decoder::new(64, &[0x8B, 0x44, 0x24, 0x20], DecoderOptions::NONE);
+        assert!(writes_memory(&write_decoder.decode()));
+        assert!(!writes_memory(&read_decoder.decode()));
+    }
+
+    #[test]
+    fn watch_child() {
+        if std::env::var_os("RAM_READER_WATCH_CHILD").is_none() {
+            return;
+        }
+        let value = AtomicI32::new(0);
+        println!("WATCH_ADDRESS={:X}", &value as *const AtomicI32 as usize);
+        std::io::Write::flush(&mut std::io::stdout()).unwrap();
+        thread::sleep(Duration::from_millis(700));
+        for next in 1..40 {
+            value.store(next, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn hardware_write_watch_reports_a_hit_from_owned_child() {
+        let executable = std::env::current_exe().unwrap();
+        let mut child = Command::new(executable)
+            .args(["--exact", "debugger::tests::watch_child", "--nocapture"])
+            .env("RAM_READER_WATCH_CHILD", "1")
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let mut reader = BufReader::new(stdout);
+        let address = loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if let Some(hex) = line.trim().strip_prefix("WATCH_ADDRESS=") {
+                break usize::from_str_radix(hex, 16).unwrap();
+            }
+        };
+        let (sender, receiver) = mpsc::channel();
+        let mut watch = WriteWatch::start(child.id(), address, move |event| {
+            let _ = sender.send(event);
+        })
+        .unwrap();
+        let (ip, assembly, details) = loop {
+            match receiver.recv_timeout(Duration::from_secs(4)).unwrap() {
+                WatchEvent::AddressHit {
+                    instruction_address,
+                    instruction,
+                    details,
+                    ..
+                } => break (instruction_address, instruction, details),
+                WatchEvent::AccessHit { .. } => {}
+                WatchEvent::Error(error) => panic!("watch failed: {error}"),
+                WatchEvent::Stopped => panic!("watch stopped before a write"),
+                WatchEvent::Started => {}
+            }
+        };
+        assert_ne!(ip, 0);
+        assert!(!assembly.is_empty());
+        assert!(details.contains("RAX="));
+        assert!(details.contains("<<"));
+        watch.stop();
+        let (sender, receiver) = mpsc::channel();
+        let mut address_access_watch =
+            AddressAccessWatch::start(child.id(), address, move |event| {
+                let _ = sender.send(event);
+            })
+            .unwrap();
+        let access_details = loop {
+            match receiver.recv_timeout(Duration::from_secs(4)).unwrap() {
+                WatchEvent::AddressHit { details, .. } => break details,
+                WatchEvent::Error(error) => panic!("address access watch failed: {error}"),
+                WatchEvent::Stopped => panic!("address access watch stopped before an access"),
+                _ => {}
+            }
+        };
+        assert!(access_details.contains("TRUY Cáº¬P"));
+        address_access_watch.stop();
+        let (sender, receiver) = mpsc::channel();
+        let mut access_watch = AccessWatch::start(child.id(), ip, move |event| {
+            let _ = sender.send(event);
+        })
+        .unwrap();
+        let accessed = loop {
+            match receiver.recv_timeout(Duration::from_secs(4)).unwrap() {
+                WatchEvent::AccessHit { data_address } => break data_address,
+                WatchEvent::Error(error) => panic!("access watch failed: {error}"),
+                WatchEvent::Stopped => panic!("access watch stopped before an access"),
+                _ => {}
+            }
+        };
+        assert_eq!(accessed, address);
+        thread::sleep(Duration::from_millis(250));
+        let extra_hits = receiver
+            .try_iter()
+            .filter(|event| matches!(event, WatchEvent::AccessHit { .. }))
+            .count();
+        assert!(
+            extra_hits <= 20,
+            "execute breakpoint retriggered without progress"
+        );
+        access_watch.stop();
+        let _ = child.wait();
+    }
+}

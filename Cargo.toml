@@ -34,6 +34,7 @@ native-tls = "0.2"
 zip = { version = "4.3", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
+iced-x86 = { version = "1.21", default-features = false, features = ["decoder", "instr_info", "intel", "std"] }
 libloading = "0.8"
 opencv = { version = "0.98.2", default-features = false, features = ["clang-runtime", "imgproc", "videoio"] }
 wasapi = "0.20"
@@ -81,6 +82,12 @@ windows = { version = "0.61", features = [
     "Win32_System_WinRT_Direct3D11",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
+] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_System_Threading",
 ] }
 
 [build-dependencies]
