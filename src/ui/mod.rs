@@ -7999,8 +7999,8 @@ impl CrosshairApp {
             MacroAction::Else => ("macro_action_short_label.else", "Else"),
             MacroAction::IfEnd => ("macro_action_short_label.if_end", "IfEnd"),
             MacroAction::SetVariable => ("macro_action_short_label.set_variable", "SetVar"),
-            MacroAction::ReadMemory => ("macro_action_short_label.read_memory", "ReadRAM"),
-            MacroAction::WriteMemory => ("macro_action_short_label.write_memory", "WriteRAM"),
+            MacroAction::ReadMemory => ("macro_action_short_label.read_memory", "ReadMemory"),
+            MacroAction::WriteMemory => ("macro_action_short_label.write_memory", "WriteMemory"),
             MacroAction::DrawGeometry => ("macro_action_short_label.draw_geometry", "DrawGeo"),
             MacroAction::ShowGeometryPreset => {
                 ("macro_action_short_label.show_geometry_preset", "ShowGeo")

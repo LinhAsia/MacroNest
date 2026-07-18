@@ -133,7 +133,7 @@ impl CrosshairApp {
                     .add_sized(
                         [120.0, 21.0],
                         egui::TextEdit::singleline(&mut step.memory_write_value)
-                            .hint_text("value/expr"),
+                            .hint_text(egui::RichText::new("value/expr").weak()),
                     )
                     .on_hover_text(Self::tr_lang(
                         language,
@@ -147,7 +147,10 @@ impl CrosshairApp {
                     .add_sized(
                         [100.0, 21.0],
                         egui::TextEdit::singleline(&mut step.if_variable_name)
-                            .hint_text(Self::tr_lang(language, "variable", "biến")),
+                            .hint_text(
+                                egui::RichText::new(Self::tr_lang(language, "variable", "biến"))
+                                    .weak(),
+                            ),
                     )
                     .on_hover_text(Self::tr_lang(
                         language,
