@@ -45,6 +45,7 @@ mod hud_panel;
 mod layout;
 mod macro_panel;
 mod macro_panel_ocr;
+mod memory_panel;
 mod mouse_panel;
 mod navigation;
 mod ocr_panel;
@@ -843,6 +844,7 @@ pub struct CrosshairApp {
     draw_geometry_step_preview_target: Option<(u32, u32, usize, bool)>,
     draw_geometry_step_preview_sent: Option<crate::model::GeometrySpec>,
     macro_step_inline_feedback: HashMap<(u32, usize), MacroStepInlineFeedback>,
+    memory_panel: memory_panel::MemoryPanelState,
 
     macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
@@ -895,6 +897,8 @@ impl CrosshairApp {
     ) -> Self {
         let save_name = state.selected_profile.clone().unwrap_or_default();
         let initial_active_panel = state.active_panel;
+        let memory_panel =
+            memory_panel::MemoryPanelState::with_hotkeys(&state.memory_scan_hotkeys);
         let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
 
         let opencv_installed = paths.opencv_dll.exists();
@@ -1160,6 +1164,7 @@ impl CrosshairApp {
             draw_geometry_step_preview_target: None,
             draw_geometry_step_preview_sent: None,
             macro_step_inline_feedback: HashMap::new(),
+            memory_panel,
             macro_referenced_variables_cache: None,
 
             variable_inspector_open: false,
@@ -2263,7 +2268,11 @@ impl CrosshairApp {
     fn active_panel_needs_open_windows(panel: AppPanel) -> bool {
         matches!(
             panel,
-            AppPanel::WindowPresets | AppPanel::Pin | AppPanel::Vision | AppPanel::Commands
+            AppPanel::WindowPresets
+                | AppPanel::Pin
+                | AppPanel::Vision
+                | AppPanel::Commands
+                | AppPanel::Memory
         )
     }
 
@@ -15093,6 +15102,7 @@ impl eframe::App for CrosshairApp {
                         AppPanel::Ocr,
                         AppPanel::Geometry,
                         AppPanel::Sound,
+                        AppPanel::Memory,
                     ];
                     for panel in panels {
                         let selected = self.state.active_panel == panel;
@@ -15232,6 +15242,7 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Hud => self.render_hud_panel(ui),
                                 AppPanel::Timer => self.render_timer_panel(ui),
                                 AppPanel::Media => self.render_media_panel(ui),
+                                AppPanel::Memory => self.render_memory_panel(ui),
                             };
                             if self.capture_target.is_some() {
                                 ctx.request_repaint_after(Duration::from_millis(16));
@@ -15243,6 +15254,8 @@ impl eframe::App for CrosshairApp {
                     ctx.request_repaint();
                 }
             });
+
+        self.render_memory_pinned_viewport(ctx);
 
         if self.settings_popup_open {
             if self.capture_target.is_none()

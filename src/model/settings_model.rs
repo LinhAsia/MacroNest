@@ -136,6 +136,7 @@ pub enum AppPanel {
     Ocr,
     Geometry,
     Timer,
+    Memory,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -450,6 +451,7 @@ pub struct AppState {
     pub selected_profile: Option<String>,
     pub show_window: bool,
     pub active_panel: AppPanel,
+    pub memory_scan_hotkeys: Vec<(String, HotkeyBinding)>,
     pub ui_language: UiLanguage,
     pub vietnamese_input_enabled: bool,
     pub vietnamese_input_mode: VietnameseInputMode,
@@ -856,6 +858,7 @@ impl Default for AppState {
             selected_profile: None,
             show_window: true,
             active_panel: AppPanel::Macros,
+            memory_scan_hotkeys: Vec::new(),
             ui_language: UiLanguage::English,
             vietnamese_input_enabled: false,
             vietnamese_input_mode: VietnameseInputMode::Telex,
