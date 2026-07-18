@@ -392,19 +392,15 @@ impl CrosshairApp {
                     ui.checkbox(&mut self.memory_panel.hex, "Hex");
                 });
                 ui.add_space(8.0);
-                ui.columns(3, |columns| {
-                    self.memory_action_button(&mut columns[0], MemoryScanAction::FirstScan, true);
-                    self.memory_action_button(&mut columns[1], MemoryScanAction::Unknown, true);
-                    if columns[2]
-                        .add_enabled_ui(!self.memory_panel.scanning, |ui| {
-                            ui.add_sized([ui.available_width(), 26.0], Button::new("Reset"))
-                        })
-                        .inner
-                        .clicked()
-                    {
-                        self.reset_memory_scan("New scan");
-                    }
-                });
+                self.memory_action_row(
+                    ui,
+                    [
+                        Some(MemoryScanAction::FirstScan),
+                        Some(MemoryScanAction::Unknown),
+                        None,
+                    ],
+                    true,
+                );
                 ui.add_space(5.0);
                 for actions in [
                     [
@@ -419,13 +415,7 @@ impl CrosshairApp {
                     ],
                     [Some(MemoryScanAction::Greater), None, None],
                 ] {
-                    ui.columns(3, |columns| {
-                        for (column, action) in columns.iter_mut().zip(actions) {
-                            if let Some(action) = action {
-                                self.memory_action_button(column, action, true);
-                            }
-                        }
-                    });
+                    self.memory_action_row(ui, actions, false);
                     ui.add_space(5.0);
                 }
                 ui.separator();
@@ -464,6 +454,40 @@ impl CrosshairApp {
                     );
                 }
             });
+    }
+
+    fn memory_action_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        actions: [Option<MemoryScanAction>; 3],
+        reset_last: bool,
+    ) {
+        const GAP: f32 = 5.0;
+        let cell_width = ((ui.available_width() - GAP * 2.0) / 3.0).floor();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = GAP;
+            for (index, action) in actions.into_iter().enumerate() {
+                ui.allocate_ui_with_layout(
+                    vec2(cell_width, 26.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        if let Some(action) = action {
+                            self.memory_action_button(ui, action, true);
+                        } else if reset_last && index == 2 {
+                            if ui
+                                .add_enabled_ui(!self.memory_panel.scanning, |ui| {
+                                    ui.add_sized([ui.available_width(), 26.0], Button::new("Reset"))
+                                })
+                                .inner
+                                .clicked()
+                            {
+                                self.reset_memory_scan("New scan");
+                            }
+                        }
+                    },
+                );
+            }
+        });
     }
 
     fn memory_action_button(&mut self, ui: &mut egui::Ui, action: MemoryScanAction, hotkey: bool) {
