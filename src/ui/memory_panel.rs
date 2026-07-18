@@ -384,11 +384,18 @@ impl CrosshairApp {
                                 }
                             }
                         });
-                    ui.add(
+                    let value_response = ui.add(
                         egui::TextEdit::singleline(&mut self.memory_panel.value_input)
                             .desired_width(120.0)
                             .hint_text("value"),
                     );
+                    if value_response.gained_focus() {
+                        Self::select_all_text(
+                            ui.ctx(),
+                            &value_response,
+                            self.memory_panel.value_input.chars().count(),
+                        );
+                    }
                     ui.checkbox(&mut self.memory_panel.hex, "Hex");
                 });
                 ui.add_space(8.0);
@@ -476,7 +483,10 @@ impl CrosshairApp {
                         } else if reset_last && index == 2 {
                             if ui
                                 .add_enabled_ui(!self.memory_panel.scanning, |ui| {
-                                    ui.add_sized([ui.available_width(), 26.0], Button::new("Reset"))
+                                    ui.add_sized(
+                                        [(ui.available_width() - 34.0).max(0.0), 26.0],
+                                        Button::new("Reset"),
+                                    )
                                 })
                                 .inner
                                 .clicked()
@@ -512,33 +522,88 @@ impl CrosshairApp {
                 self.start_memory_action(action);
             }
             if hotkey {
-                let assigned = self.memory_panel.hotkeys.get(&action);
-                let icon = if assigned.is_some() { 0xe312 } else { 0xe30c };
-                let response = ui
-                    .add_sized(
-                        [26.0, 26.0],
-                        Button::new(Self::material_icon_text(icon, 15.0)),
-                    )
-                    .on_hover_text(
-                        assigned
-                            .map(|binding| {
-                                format!(
-                                    "{} — click to reassign; right-click to clear",
-                                    hotkey::format_binding(Some(binding))
-                                )
-                            })
-                            .unwrap_or_else(|| "Assign hotkey".to_owned()),
-                    );
-                if response.clicked() {
-                    self.memory_panel.capturing_hotkey = Some(action);
+                let assigned_label = self
+                    .memory_panel
+                    .hotkeys
+                    .get(&action)
+                    .map(|binding| hotkey::format_binding(Some(binding)));
+                let capturing = self.memory_panel.capturing_hotkey == Some(action);
+                let content = assigned_label
+                    .as_ref()
+                    .map(|label| RichText::new(label).size(10.0))
+                    .unwrap_or_else(|| Self::material_icon_text(0xe312, 15.0));
+                let mut button = Button::new(content);
+                if capturing {
+                    button = button
+                        .fill(Color32::from_rgb(41, 112, 142))
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(105, 211, 255)));
                 }
-                if response.secondary_clicked() {
-                    self.memory_panel.hotkeys.remove(&action);
-                    self.memory_panel.hotkey_was_down.remove(&action);
-                    self.persist_memory_hotkeys();
+                let response =
+                    ui.add_sized([26.0, 26.0], button)
+                        .on_hover_text(if assigned_label.is_some() {
+                            "Click to clear hotkey"
+                        } else {
+                            "Click to assign hotkey"
+                        });
+                if let Some(label) = assigned_label.as_deref() {
+                    Self::paint_expanded_hotkey(ui, &response, label);
+                }
+                if response.clicked() {
+                    if assigned_label.is_some() {
+                        self.memory_panel.hotkeys.remove(&action);
+                        self.memory_panel.hotkey_was_down.remove(&action);
+                        self.memory_panel.capturing_hotkey = None;
+                        self.persist_memory_hotkeys();
+                    } else {
+                        self.memory_panel.capturing_hotkey = Some(action);
+                    }
                 }
             }
         });
+    }
+
+    fn paint_expanded_hotkey(ui: &egui::Ui, response: &egui::Response, label: &str) {
+        if !response.hovered() {
+            return;
+        }
+        let font_id = egui::FontId::proportional(11.0);
+        let text_color = ui.visuals().strong_text_color();
+        let galley = ui
+            .painter()
+            .layout_no_wrap(label.to_owned(), font_id, text_color);
+        let width = galley.size().x + 14.0;
+        if width <= response.rect.width() {
+            return;
+        }
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(response.rect.right() - width, response.rect.top()),
+            response.rect.right_bottom(),
+        );
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(
+            egui::Order::Tooltip,
+            response.id.with("expanded-hotkey"),
+        ));
+        let visuals = &ui.visuals().widgets.hovered;
+        painter.rect_filled(rect, visuals.corner_radius, visuals.bg_fill);
+        painter.rect_stroke(
+            rect,
+            visuals.corner_radius,
+            visuals.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        painter.galley(rect.center() - galley.size() * 0.5, galley, text_color);
+    }
+
+    fn select_all_text(ctx: &egui::Context, response: &egui::Response, char_count: usize) {
+        if let Some(mut state) = egui::widgets::text_edit::TextEditState::load(ctx, response.id) {
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(0),
+                    egui::text::CCursor::new(char_count),
+                )));
+            state.store(ctx, response.id);
+        }
     }
 
     fn render_memory_scan_results(&mut self, ui: &mut egui::Ui, pinned: bool) {
