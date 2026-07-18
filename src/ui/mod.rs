@@ -758,6 +758,7 @@ pub struct CrosshairApp {
     active_hud_preview_preset_id: Option<u32>,
     active_timer_preview_preset_id: Option<u32>,
     quick_action_window_selector: String,
+    quick_action_pinned_windows: HashSet<String>,
     command_ai_dialog: Option<CommandAiDialog>,
     command_ai_job: Option<CommandAiJob>,
     command_ai_next_token: u64,
@@ -1070,6 +1071,7 @@ impl CrosshairApp {
             active_hud_preview_preset_id: None,
             active_timer_preview_preset_id: None,
             quick_action_window_selector: String::new(),
+            quick_action_pinned_windows: HashSet::new(),
             command_ai_dialog: None,
             command_ai_job: None,
             command_ai_next_token: 1,
@@ -4409,6 +4411,31 @@ impl CrosshairApp {
         response
     }
 
+    fn set_quick_action_window_pinned(&mut self, selector: &str, pinned: bool) -> bool {
+        let success = window_list::set_window_topmost(selector, pinned);
+        if success {
+            if pinned {
+                self.quick_action_pinned_windows
+                    .insert(selector.to_owned());
+            } else {
+                self.quick_action_pinned_windows.remove(selector);
+            }
+        } else if !pinned {
+            self.quick_action_pinned_windows.remove(selector);
+        }
+        success
+    }
+
+    fn unpin_all_quick_action_windows(&mut self) {
+        let selectors = self
+            .quick_action_pinned_windows
+            .drain()
+            .collect::<Vec<_>>();
+        for selector in selectors {
+            let _ = window_list::set_window_topmost(&selector, false);
+        }
+    }
+
     fn render_titlebar_quick_actions_grid(
         &mut self,
         ui: &mut egui::Ui,
@@ -4416,9 +4443,7 @@ impl CrosshairApp {
     ) -> bool {
         self.prime_open_windows_if_empty();
         self.sync_quick_action_window_selection();
-        let pin_window_available = !self.quick_action_window_selector.is_empty();
-        let pinned_window_active = pin_window_available
-            && window_list::is_window_topmost(&self.quick_action_window_selector);
+        let pinned_window_active = !self.quick_action_pinned_windows.is_empty();
         let macro_visual_overlay_active = crate::overlay::has_active_macro_visual_overlay();
         let mut keep_menu_open = false;
         // Reset hover-card visibility flag each frame before render_popup calls
@@ -4729,39 +4754,19 @@ impl CrosshairApp {
                             pinned_window_active,
                         );
                         if button_response.clicked() {
-                            if pin_window_available {
-                                let next_state = !pinned_window_active;
-                                let success = window_list::set_window_topmost(
-                                    &self.quick_action_window_selector,
-                                    next_state,
-                                );
-                                self.status = if success {
-                                    if next_state {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Pinned the selected window on top.",
-                                            "Pinned the selected window on top.",
-                                        )
-                                    } else {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Removed topmost from the selected window.",
-                                            "Removed topmost from the selected window.",
-                                        )
-                                    }
-                                } else {
-                                    Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Could not update the selected window.",
-                                        "Could not update the selected window.",
-                                    )
-                                }
+                            if pinned_window_active {
+                                self.unpin_all_quick_action_windows();
+                                self.status = Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Unpinned all selected windows.",
+                                    "Đã bỏ ghim tất cả cửa sổ đã chọn.",
+                                )
                                 .to_owned();
                             } else {
                                 self.status = Self::tr_lang(
                                     self.state.ui_language,
-                                    "No window is available to pin.",
-                                    "No window is available to pin.",
+                                    "Select windows from the dropdown to pin them.",
+                                    "Chọn cửa sổ trong danh sách để ghim.",
                                 )
                                 .to_owned();
                             }
@@ -4772,11 +4777,15 @@ impl CrosshairApp {
                             if pinned_window_active {
                                 Self::tr_lang(
                                     self.state.ui_language,
-                                    "Unpin window",
-                                    "Unpin window",
+                                    "Unpin all",
+                                    "Bỏ ghim tất cả",
                                 )
                             } else {
-                                Self::tr_lang(self.state.ui_language, "Pin window", "Pin window")
+                                Self::tr_lang(
+                                    self.state.ui_language,
+                                    "Pin windows",
+                                    "Ghim cửa sổ",
+                                )
                             },
                             14,
                         );
@@ -4813,23 +4822,24 @@ impl CrosshairApp {
                                         .size(10.0),
                                     );
 
-                                    let selected_window_text =
-                                        if self.quick_action_window_selector.is_empty() {
+                                    let selected_window_text = if pinned_window_active {
+                                        format!(
+                                            "{} ({})",
                                             Self::tr_lang(
                                                 self.state.ui_language,
-                                                "Select window",
-                                                "Select window",
-                                            )
-                                            .to_owned()
-                                        } else {
-                                            Self::truncate_window_title(
-                                                &Self::quick_action_window_display(
-                                                    &self.quick_action_window_selector,
-                                                    &self.open_window_infos,
-                                                ),
-                                                16,
-                                            )
-                                        };
+                                                "Selected",
+                                                "Đã chọn",
+                                            ),
+                                            self.quick_action_pinned_windows.len()
+                                        )
+                                    } else {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Select windows",
+                                            "Chọn cửa sổ",
+                                        )
+                                        .to_owned()
+                                    };
 
                                     let selector_popup_id =
                                         ui.make_persistent_id("quick-action-window-selector-popup");
@@ -4852,7 +4862,6 @@ impl CrosshairApp {
                                         }
                                     }
 
-                                    let mut close_selector_popup = false;
                                     let selector_popup_result =
                                         egui::Popup::from_response(&selector_response)
                                             .id(selector_popup_id)
@@ -4865,11 +4874,20 @@ impl CrosshairApp {
                                             .show(|ui| {
                                                 ui.set_min_width(164.0);
                                                 ui.set_max_width(164.0);
-                                                for window in &self.open_window_infos {
-                                                    let selector = &window.selector;
+                                                let windows = self
+                                                    .open_window_infos
+                                                    .iter()
+                                                    .map(|window| {
+                                                        (
+                                                            window.selector.clone(),
+                                                            window.title.clone(),
+                                                        )
+                                                    })
+                                                    .collect::<Vec<_>>();
+                                                for (selector, title) in windows {
                                                     let display_title =
                                                         Self::quick_action_window_display(
-                                                            selector,
+                                                            &selector,
                                                             &self.open_window_infos,
                                                         );
                                                     let truncated_title =
@@ -4877,28 +4895,30 @@ impl CrosshairApp {
                                                             &display_title,
                                                             20,
                                                         );
-                                                    let selected = self
-                                                        .quick_action_window_selector
-                                                        == *selector;
-                                                    let response = ui.add_sized(
-                                                        [164.0, 20.0],
-                                                        egui::Button::new(truncated_title)
-                                                            .selected(selected),
+                                                    let mut selected = self
+                                                        .quick_action_pinned_windows
+                                                        .contains(&selector);
+                                                    let response = ui.checkbox(
+                                                        &mut selected,
+                                                        truncated_title,
                                                     );
-                                                    if response.clicked() {
-                                                        self.quick_action_window_selector =
-                                                            selector.clone();
-                                                        close_selector_popup = true;
+                                                    if response.changed()
+                                                        && !self.set_quick_action_window_pinned(
+                                                            &selector,
+                                                            selected,
+                                                        )
+                                                    {
+                                                        self.status = Self::tr_lang(
+                                                            self.state.ui_language,
+                                                            "Could not update the selected window.",
+                                                            "Không thể cập nhật cửa sổ đã chọn.",
+                                                        )
+                                                        .to_owned();
                                                     }
-                                                    response.on_hover_text(
-                                                        Self::selector_base_title(selector),
-                                                    );
+                                                    response.on_hover_text(title);
                                                 }
                                             });
                                     let _ = selector_popup_result;
-                                    if close_selector_popup {
-                                        selector_popup_open = false;
-                                    }
                                     if selector_popup_open {
                                         keep_open = true;
                                     }
@@ -14833,9 +14853,7 @@ impl eframe::App for CrosshairApp {
                                 false,
                             ),
                         );
-                        let pin_window_available = !self.quick_action_window_selector.is_empty();
-                        let pinned_window_active = pin_window_available
-                            && window_list::is_window_topmost(&self.quick_action_window_selector);
+                        let pinned_window_active = !self.quick_action_pinned_windows.is_empty();
                         let mut active_count = 0;
                         if taskbar_hidden {
                             active_count += 1;
@@ -15440,6 +15458,7 @@ impl eframe::App for CrosshairApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         crate::video_recorder::stop_blocking();
         let _ = crate::platform::show_taskbar();
+        self.unpin_all_quick_action_windows();
         self.state.reset_session_preset_visibility();
         self.sync_window_presets();
         self.sync_macro_presets();

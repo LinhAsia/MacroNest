@@ -223,7 +223,10 @@ mod windows_impl {
     }
 
     fn find_window_handle(title: Option<&str>) -> Option<HWND> {
-        find_window_handle_with_candidates(title, &[], false)
+        match title {
+            Some(selector) => find_window_by_candidate_chain(selector, false),
+            None => current_foreground_window(),
+        }
     }
 
     fn current_foreground_window() -> Option<HWND> {
