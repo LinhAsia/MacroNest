@@ -932,14 +932,27 @@ impl CrosshairApp {
     }
 
     fn memory_table_cell(ui: &mut egui::Ui, width: f32, text: RichText) {
-        ui.add_sized(
-            [width, 18.0],
-            egui::Label::new(text)
-                .selectable(false)
-                .truncate()
-                .halign(egui::Align::Min),
+        Self::memory_label_cell(
+            ui,
+            width,
+            18.0,
+            egui::Label::new(text).selectable(false).truncate(),
         )
         .on_hover_cursor(egui::CursorIcon::Default);
+    }
+
+    fn memory_label_cell(
+        ui: &mut egui::Ui,
+        width: f32,
+        height: f32,
+        label: egui::Label,
+    ) -> egui::Response {
+        ui.allocate_ui_with_layout(
+            vec2(width, height),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| ui.add(label),
+        )
+        .inner
     }
 
     fn select_memory_result(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
@@ -1078,9 +1091,11 @@ impl CrosshairApp {
                     .id_salt("saved-memory-addresses")
                     .auto_shrink([false, false])
                     .max_height(ui.available_height())
-                    .show_rows(ui, row_height, count, |ui, rows| {
+                    .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        for index in rows {
+                        // ponytail: saved addresses are user-managed; direct rows avoid stale
+                        // virtualized hitboxes when a cell switches between label and TextEdit.
+                        for index in 0..count {
                             if index >= self.memory_panel.saved.len() {
                                 continue;
                             }
@@ -1135,22 +1150,24 @@ impl CrosshairApp {
                                             self.memory_panel.selected_saved.remove(&index);
                                         }
                                     }
-                                    let address_response = ui.add_sized(
-                                        [column_width, row_height],
+                                    let address_response = Self::memory_label_cell(
+                                        ui,
+                                        column_width,
+                                        row_height,
                                         egui::Label::new(format!("0x{:016X}", saved.address))
                                             .selectable(false)
-                                            .halign(egui::Align::Min)
                                             .sense(Sense::hover()),
                                     );
                                     address_response
                                         .clone()
                                         .on_hover_cursor(egui::CursorIcon::Default);
                                     row_hits.push(address_response.clone());
-                                    let type_response = ui.add_sized(
-                                        [column_width, row_height],
+                                    let type_response = Self::memory_label_cell(
+                                        ui,
+                                        column_width,
+                                        row_height,
                                         egui::Label::new(memory_type_label(saved.value_type))
                                             .selectable(false)
-                                            .halign(egui::Align::Min)
                                             .truncate(),
                                     );
                                     type_response
@@ -1178,8 +1195,10 @@ impl CrosshairApp {
                                             self.memory_panel.edit_value_index = None;
                                         }
                                     } else {
-                                        let value_response = ui.add_sized(
-                                            [column_width, row_height],
+                                        let value_response = Self::memory_label_cell(
+                                            ui,
+                                            column_width,
+                                            row_height,
                                             egui::Label::new(
                                                 saved
                                                     .current
@@ -1192,7 +1211,6 @@ impl CrosshairApp {
                                                     .unwrap_or_else(|| "?".to_owned()),
                                             )
                                             .selectable(false)
-                                            .halign(egui::Align::Min)
                                             .sense(Sense::hover()),
                                         );
                                         value_response
@@ -1224,11 +1242,12 @@ impl CrosshairApp {
                                         } else {
                                             RichText::new(&saved.description)
                                         };
-                                        let description_response = ui.add_sized(
-                                            [column_width, 20.0],
+                                        let description_response = Self::memory_label_cell(
+                                            ui,
+                                            column_width,
+                                            row_height,
                                             egui::Label::new(description)
                                                 .selectable(false)
-                                                .halign(egui::Align::Min)
                                                 .truncate()
                                                 .sense(Sense::hover()),
                                         );
