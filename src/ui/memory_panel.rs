@@ -162,6 +162,7 @@ pub(crate) struct MemoryPanelState {
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     hotkey_was_down: HashMap<MemoryScanAction, bool>,
     capturing_hotkey: Option<MemoryScanAction>,
+    pending_hotkey_modifiers: Option<HotkeyBinding>,
     edit_value_index: Option<usize>,
     edit_value_input: String,
     address_dialog: Option<AddressDialog>,
@@ -194,6 +195,7 @@ impl Default for MemoryPanelState {
             hotkeys: HashMap::new(),
             hotkey_was_down: HashMap::new(),
             capturing_hotkey: None,
+            pending_hotkey_modifiers: None,
             edit_value_index: None,
             edit_value_input: String::new(),
             address_dialog: None,
@@ -593,9 +595,11 @@ impl CrosshairApp {
                         self.memory_panel.hotkeys.remove(&action);
                         self.memory_panel.hotkey_was_down.remove(&action);
                         self.memory_panel.capturing_hotkey = None;
+                        self.memory_panel.pending_hotkey_modifiers = None;
                         self.persist_memory_hotkeys();
                     } else {
                         self.memory_panel.capturing_hotkey = Some(action);
+                        self.memory_panel.pending_hotkey_modifiers = None;
                     }
                 }
             }
@@ -1427,7 +1431,7 @@ impl CrosshairApp {
         let Some(action) = self.memory_panel.capturing_hotkey else {
             return;
         };
-        let captured = ctx.input(|input| {
+        let captured_key = ctx.input(|input| {
             input.events.iter().find_map(|event| match event {
                 egui::Event::Key {
                     key,
@@ -1439,12 +1443,36 @@ impl CrosshairApp {
                 _ => None,
             })
         });
-        if let Some(binding) = captured {
-            self.memory_panel.hotkeys.insert(action, binding);
-            self.memory_panel.hotkey_was_down.insert(action, true);
-            self.memory_panel.capturing_hotkey = None;
-            self.persist_memory_hotkeys();
+        if let Some(binding) = captured_key {
+            self.finish_memory_hotkey_capture(action, binding);
+            return;
         }
+
+        let modifiers = ctx.input(|input| input.modifiers);
+        #[cfg(windows)]
+        let win = unsafe {
+            use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+            (GetAsyncKeyState(0x5B) as u16 & 0x8000) != 0
+                || (GetAsyncKeyState(0x5C) as u16 & 0x8000) != 0
+        };
+        #[cfg(not(windows))]
+        let win = false;
+        if let Some(binding) = hotkey::capture_modifiers_from_egui(modifiers, win) {
+            update_pending_modifier_capture(
+                &mut self.memory_panel.pending_hotkey_modifiers,
+                binding,
+            );
+        } else if let Some(binding) = self.memory_panel.pending_hotkey_modifiers.take() {
+            self.finish_memory_hotkey_capture(action, binding);
+        }
+    }
+
+    fn finish_memory_hotkey_capture(&mut self, action: MemoryScanAction, binding: HotkeyBinding) {
+        self.memory_panel.hotkeys.insert(action, binding);
+        self.memory_panel.hotkey_was_down.insert(action, true);
+        self.memory_panel.capturing_hotkey = None;
+        self.memory_panel.pending_hotkey_modifiers = None;
+        self.persist_memory_hotkeys();
     }
 
     fn poll_memory_hotkeys(&mut self, ctx: &egui::Context) {
@@ -1644,6 +1672,17 @@ fn memory_binding_is_down(_binding: &HotkeyBinding) -> bool {
     false
 }
 
+fn update_pending_modifier_capture(pending: &mut Option<HotkeyBinding>, captured: HotkeyBinding) {
+    let captured_count = hotkey::binding_key_names(&captured).len();
+    let pending_count = pending
+        .as_ref()
+        .map(hotkey::binding_key_names)
+        .map_or(0, |keys| keys.len());
+    if captured_count >= pending_count {
+        *pending = Some(captured);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1670,5 +1709,12 @@ mod tests {
         assert_eq!(parse_memory_address("0x1000"), Some(4096));
         assert_eq!(parse_memory_address("7FF6_ABCD"), Some(0x7FF6_ABCD));
         assert_eq!(parse_memory_address("0x1000+10-8"), Some(0x1008));
+    }
+
+    #[test]
+    fn modifier_capture_keeps_full_combo_while_keys_are_released() {
+        let mut pending = hotkey::parse_binding("Ctrl+Shift");
+        update_pending_modifier_capture(&mut pending, hotkey::parse_binding("Ctrl").unwrap());
+        assert_eq!(hotkey::format_binding(pending.as_ref()), "Ctrl+Shift");
     }
 }

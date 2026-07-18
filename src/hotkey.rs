@@ -23,6 +23,23 @@ pub fn capture_from_egui(key: Key, modifiers: Modifiers) -> Option<HotkeyBinding
     binding_from_keys(combo_keys)
 }
 
+pub fn capture_modifiers_from_egui(modifiers: Modifiers, win: bool) -> Option<HotkeyBinding> {
+    let mut keys = Vec::new();
+    if modifiers.ctrl || modifiers.command {
+        keys.push("Ctrl".to_owned());
+    }
+    if modifiers.alt {
+        keys.push("Alt".to_owned());
+    }
+    if modifiers.shift {
+        keys.push("Shift".to_owned());
+    }
+    if modifiers.mac_cmd || win {
+        keys.push("Win".to_owned());
+    }
+    binding_from_keys(keys)
+}
+
 pub fn format_binding(binding: Option<&HotkeyBinding>) -> String {
     let Some(binding) = binding else {
         return "Not set".to_owned();
@@ -615,4 +632,40 @@ pub fn vk_to_key_name(vk: u32) -> Option<&'static str> {
         0xDE => "'",
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captures_standalone_modifier_keys() {
+        let ctrl = capture_modifiers_from_egui(
+            Modifiers {
+                ctrl: true,
+                ..Modifiers::default()
+            },
+            false,
+        )
+        .unwrap();
+        assert_eq!(format_binding(Some(&ctrl)), "Ctrl");
+
+        let win = capture_modifiers_from_egui(Modifiers::default(), true).unwrap();
+        assert_eq!(format_binding(Some(&win)), "Win");
+    }
+
+    #[test]
+    fn captures_modifier_combinations_without_a_main_key() {
+        let binding = capture_modifiers_from_egui(
+            Modifiers {
+                ctrl: true,
+                alt: true,
+                shift: true,
+                ..Modifiers::default()
+            },
+            false,
+        )
+        .unwrap();
+        assert_eq!(format_binding(Some(&binding)), "Ctrl+Alt+Shift");
+    }
 }
