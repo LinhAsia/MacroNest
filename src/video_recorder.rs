@@ -28,6 +28,7 @@ use crate::{
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
 #[derive(Clone)]
 pub struct VideoRecorderConfig {
@@ -101,6 +102,7 @@ fn prepare_hardware_encoding_async(ffmpeg_exe: &Path) {
     *prepared = Some(signature);
     let ffmpeg_exe = ffmpeg_exe.to_owned();
     thread::spawn(move || {
+        thread::sleep(Duration::from_secs(2));
         hardware_encoding_available(&ffmpeg_exe);
     });
 }
@@ -441,7 +443,7 @@ fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
         return available;
     }
     let mut child = match Command::new(ffmpeg_exe)
-        .creation_flags(CREATE_NO_WINDOW)
+        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
