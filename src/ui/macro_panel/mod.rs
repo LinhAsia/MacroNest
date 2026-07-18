@@ -48,7 +48,7 @@ enum TextHighlightMode {
 }
 
 impl CrosshairApp {
-    fn render_read_memory_step_fields(
+    fn render_memory_step_fields(
         ui: &mut egui::Ui,
         step: &mut MacroStep,
         open_windows: &[crate::window_list::WindowInfo],
@@ -64,7 +64,7 @@ impl CrosshairApp {
                 .unwrap_or_else(|| {
                     Self::tr_lang(language, "Focused process", "Process đang focus").to_owned()
                 });
-            egui::ComboBox::from_id_salt(ui.id().with("read-memory-process"))
+            egui::ComboBox::from_id_salt(ui.id().with("memory-process"))
                 .width(145.0)
                 .selected_text(Self::truncate_window_title(&process_label, 22))
                 .show_ui(ui, |ui| {
@@ -96,7 +96,7 @@ impl CrosshairApp {
                         }
                     }
                 });
-            egui::ComboBox::from_id_salt(ui.id().with("read-memory-type"))
+            egui::ComboBox::from_id_salt(ui.id().with("memory-type"))
                 .width(48.0)
                 .selected_text(match step.memory_value_type {
                     MemoryValueType::I32 => "I32",
@@ -127,19 +127,35 @@ impl CrosshairApp {
                     "Địa chỉ RAM. Hỗ trợ số thập phân, thập lục phân, biểu thức và biến.",
                 ))
                 .changed();
-            ui.label("→");
-            changed |= ui
-                .add_sized(
-                    [100.0, 21.0],
-                    egui::TextEdit::singleline(&mut step.if_variable_name)
-                        .hint_text(Self::tr_lang(language, "variable", "biến")),
-                )
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Output variable",
-                    "Biến nhận kết quả",
-                ))
-                .changed();
+            if step.action == MacroAction::WriteMemory {
+                ui.label("=");
+                changed |= ui
+                    .add_sized(
+                        [120.0, 21.0],
+                        egui::TextEdit::singleline(&mut step.memory_write_value)
+                            .hint_text("value/expr"),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Value or expression to write",
+                        "Giá trị hoặc biểu thức cần ghi",
+                    ))
+                    .changed();
+            } else {
+                ui.label("→");
+                changed |= ui
+                    .add_sized(
+                        [100.0, 21.0],
+                        egui::TextEdit::singleline(&mut step.if_variable_name)
+                            .hint_text(Self::tr_lang(language, "variable", "biến")),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Output variable",
+                        "Biến nhận kết quả",
+                    ))
+                    .changed();
+            }
         });
         changed
     }
@@ -1352,6 +1368,7 @@ impl CrosshairApp {
         let active_mouse_click_popup_key_id =
             egui::Id::new((id_source, "mouse-click-active-submenu-key"));
         let mouse_popup_id = egui::Id::new((id_source, "mouse-submenu-popup"));
+        let memory_popup_id = egui::Id::new((id_source, "memory-submenu-popup"));
         let image_popup_id = egui::Id::new((id_source, "image-search-submenu-popup"));
         let timer_popup_id = egui::Id::new((id_source, "timer-submenu-popup"));
         let if_popup_id = egui::Id::new((id_source, "if-submenu-popup"));
@@ -1363,6 +1380,7 @@ impl CrosshairApp {
             data.insert_temp(macro_popup_id, false);
             data.insert_temp(active_mouse_click_popup_key_id, None::<&'static str>);
             data.insert_temp(mouse_popup_id, false);
+            data.insert_temp(memory_popup_id, false);
             data.insert_temp(image_popup_id, false);
             data.insert_temp(timer_popup_id, false);
             data.insert_temp(if_popup_id, false);
@@ -1372,6 +1390,7 @@ impl CrosshairApp {
         });
         egui::Popup::close_id(ui.ctx(), macro_popup_id);
         egui::Popup::close_id(ui.ctx(), mouse_popup_id);
+        egui::Popup::close_id(ui.ctx(), memory_popup_id);
         egui::Popup::close_id(ui.ctx(), image_popup_id);
         egui::Popup::close_id(ui.ctx(), timer_popup_id);
         egui::Popup::close_id(ui.ctx(), if_popup_id);
@@ -2303,6 +2322,129 @@ impl CrosshairApp {
             "One network action. Configure On/Off and Fast/Slow method in the step row.",
             "Một action Network duy nhất. Chọn On/Off và cách Fast/Slow ngay trên hàng step.",
         ));
+    }
+
+    fn memory_macro_actions() -> &'static [MacroAction] {
+        &[MacroAction::ReadMemory, MacroAction::WriteMemory]
+    }
+
+    fn macro_action_is_memory(action: MacroAction) -> bool {
+        Self::memory_macro_actions().contains(&action)
+    }
+
+    fn render_memory_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        _id_source: impl std::hash::Hash + Copy,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        let id_source = action_hover_id;
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
+        let selected = Self::macro_action_is_memory(*current);
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
+        let popup_id = egui::Id::new((id_source, "memory-submenu-popup"));
+        let active_owner = ui
+            .ctx()
+            .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
+        let top_level_hovered = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(action_hover_id))
+            .unwrap_or(false);
+        let mut open = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
+        if active_owner != Some(MacroActionSubmenuKind::Memory) {
+            open = false;
+        }
+        if top_level_hovered {
+            open = false;
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        let inner = ui.allocate_ui_with_layout(
+            vec2(58.0, 42.0),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                let response = ui.add_sized(
+                    [34.0, 24.0],
+                    Button::new(Self::material_icon_text(0xe30a, 18.0)).selected(selected),
+                );
+                if response.clicked() || (!hover_blocked && response.hovered()) {
+                    Self::clear_macro_action_submenus(ui, id_source);
+                    open = true;
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(owner_id, MacroActionSubmenuKind::Memory));
+                }
+                let popup_rect_id = ui.make_persistent_id((id_source, "memory-submenu-rect"));
+                egui::Popup::from_response(&response)
+                    .id(popup_id)
+                    .open_bool(&mut open)
+                    .align(egui::RectAlign::BOTTOM_START)
+                    .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                    .width(150.0)
+                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .show(|ui| {
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(popup_rect_id, ui.max_rect()));
+                        egui::Grid::new((id_source, "memory-action-grid"))
+                            .num_columns(2)
+                            .spacing([6.0, 6.0])
+                            .show(ui, |ui| {
+                                for action in Self::memory_macro_actions().iter().copied() {
+                                    Self::render_macro_action_option(
+                                        ui,
+                                        language,
+                                        current,
+                                        action,
+                                        live_sync,
+                                        action_hover_id,
+                                        true,
+                                    );
+                                }
+                            });
+                    });
+                let popup_rect: Option<egui::Rect> =
+                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
+                if open {
+                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+                        let keep_open = popup_rect
+                            .map(|rect| response.rect.expand(10.0).union(rect.expand(10.0)))
+                            .unwrap_or_else(|| response.rect.expand(10.0));
+                        if !keep_open.contains(pointer_pos) {
+                            open = false;
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                            });
+                        }
+                    }
+                }
+                ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
+                ui.label(
+                    RichText::new("RAM")
+                        .size(9.0)
+                        .color(if selected {
+                            ui.visuals().strong_text_color()
+                        } else {
+                            ui.visuals().text_color()
+                        }),
+                );
+                response
+            },
+        );
+        if !open {
+            Self::show_instant_hover_tooltip(
+                ui,
+                &inner.inner,
+                Self::tr_lang(
+                    language,
+                    "RAM\nRead or write one process-memory value.",
+                    "RAM\nĐọc hoặc ghi một giá trị trong bộ nhớ tiến trình.",
+                ),
+            );
+        }
     }
 
     fn macro_action_is_image_search(action: MacroAction) -> bool {
@@ -6963,7 +7105,6 @@ impl CrosshairApp {
                                                                 MacroAction::EnableStep,
                                                                 MacroAction::DisableStep,
                                                              MacroAction::SetVariable,
-                                                             MacroAction::ReadMemory,
                                                              MacroAction::OcrSearch,
                                                              MacroAction::JumpToStep,
                                                         ]
@@ -7005,6 +7146,16 @@ impl CrosshairApp {
                                                         Self::render_network_action_single_option(
                                                             ui,
                                                             language,
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
+                                                        Self::render_memory_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "hold-stop-memory-group"),
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -8796,8 +8947,8 @@ if supports_move_mouse || show_detection_tuning {
                                                                   true,
                                                               );
                                                           });
-                                                      });} else if step.action == MacroAction::ReadMemory {
-                                                          live_sync |= Self::render_read_memory_step_fields(
+                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory) {
+                                                          live_sync |= Self::render_memory_step_fields(
                                                               ui,
                                                               step,
                                                               &self.open_window_infos,
@@ -9298,7 +9449,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 MacroAction::EnableStep,
                                                                 MacroAction::DisableStep,
                                                              MacroAction::SetVariable,
-                                                             MacroAction::ReadMemory,
                                                              MacroAction::OcrSearch,
                                                              MacroAction::JumpToStep,
                                                         ]
@@ -9340,6 +9490,16 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         Self::render_network_action_single_option(
                                                             ui,
                                                             language,
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
+                                                        Self::render_memory_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "press-stop-memory-group"),
                                                             &mut step.action,
                                                             &mut live_sync,
                                                             action_hover_id,
@@ -11132,8 +11292,8 @@ if supports_move_mouse || show_detection_tuning {
                                                                   true,
                                                               );
                                                           });
-                                                      });} else if step.action == MacroAction::ReadMemory {
-                                                          live_sync |= Self::render_read_memory_step_fields(
+                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory) {
+                                                          live_sync |= Self::render_memory_step_fields(
                                                               ui,
                                                               step,
                                                               &self.open_window_infos,
@@ -12511,7 +12671,6 @@ if supports_move_mouse || show_detection_tuning {
                                                                 MacroAction::EnableStep,
                                                                 MacroAction::DisableStep,
                                                                 MacroAction::SetVariable,
-                                                                MacroAction::ReadMemory,
                                                                 MacroAction::OcrSearch,
                                                                 MacroAction::JumpToStep,
                                                             ] {
@@ -12552,6 +12711,16 @@ if supports_move_mouse || show_detection_tuning {
                                                             Self::render_network_action_single_option(
                                                                 ui,
                                                                 language,
+                                                                &mut step.action,
+                                                                &mut live_sync,
+                                                                action_hover_id,
+                                                            );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
+                                                            Self::render_memory_action_group_option(
+                                                                ui,
+                                                                language,
+                                                                (group.id, preset.id, step_index, "memory-group"),
                                                                 &mut step.action,
                                                                 &mut live_sync,
                                                                 action_hover_id,
@@ -14586,8 +14755,8 @@ if supports_move_mouse || show_detection_tuning {
                                             {
                                                 step.vision_move_cursor_on_match = false;
                                             }
-                                                      });} else if step.action == MacroAction::ReadMemory {
-                                                          live_sync |= Self::render_read_memory_step_fields(
+                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory) {
+                                                          live_sync |= Self::render_memory_step_fields(
                                                               ui,
                                                               step,
                                                               &self.open_window_infos,
@@ -16470,6 +16639,13 @@ if supports_move_mouse || show_detection_tuning {
                 vars.insert(name.to_owned());
             }
             Self::extract_braced_vars(&step.key, vars);
+        }
+        if step.action == MacroAction::WriteMemory {
+            Self::extract_braced_vars(&step.key, vars);
+            Self::extract_braced_vars(&step.memory_write_value, vars);
+            if crate::overlay::looks_like_math_expression_text(&step.memory_write_value) {
+                Self::extract_vars_from_expression(&step.memory_write_value, vars);
+            }
         }
         if step.action == MacroAction::IfStart
             && matches!(step.if_condition_type, IfConditionType::Variable)

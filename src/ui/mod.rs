@@ -578,6 +578,7 @@ impl eframe::App for PopupBlobApp {
 pub(crate) enum MacroActionSubmenuKind {
     Macro,
     Mouse,
+    Memory,
     ImageSearch,
     Timer,
     If,
@@ -7414,6 +7415,7 @@ impl CrosshairApp {
             MacroAction::IfEnd => "IfEnd",
             MacroAction::SetVariable => "SetVariable",
             MacroAction::ReadMemory => "ReadMemory",
+            MacroAction::WriteMemory => "WriteMemory",
             MacroAction::OcrSearch => "OcrSearch",
             MacroAction::DrawGeometry => "DrawGeometry",
             MacroAction::ShowGeometryPreset => "ShowGeometry",
@@ -7712,6 +7714,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.read_memory",
                 "Read one value from an address in the selected process and store it in a variable.",
             ),
+            MacroAction::WriteMemory => (
+                "macro_action_tooltip.write_memory",
+                "Write one value to an address in the selected process.",
+            ),
             MacroAction::ReadTimerPreset => (
                 "macro_action_tooltip.read_timer_preset",
                 "Read one running timer value and store it into a variable.",
@@ -7833,6 +7839,7 @@ impl CrosshairApp {
             MacroAction::IfEnd => 0xe040,
             MacroAction::SetVariable => 0xe150,
             MacroAction::ReadMemory => 0xe30a,
+            MacroAction::WriteMemory => 0xe3c9,
             MacroAction::OcrSearch => 0xe8b6,
             MacroAction::DrawGeometry => 0xe85b,
             MacroAction::ShowGeometryPreset => 0xe8f4,
@@ -7993,6 +8000,7 @@ impl CrosshairApp {
             MacroAction::IfEnd => ("macro_action_short_label.if_end", "IfEnd"),
             MacroAction::SetVariable => ("macro_action_short_label.set_variable", "SetVar"),
             MacroAction::ReadMemory => ("macro_action_short_label.read_memory", "ReadRAM"),
+            MacroAction::WriteMemory => ("macro_action_short_label.write_memory", "WriteRAM"),
             MacroAction::DrawGeometry => ("macro_action_short_label.draw_geometry", "DrawGeo"),
             MacroAction::ShowGeometryPreset => {
                 ("macro_action_short_label.show_geometry_preset", "ShowGeo")
@@ -8274,6 +8282,7 @@ impl CrosshairApp {
                 | MacroAction::IfEnd
                 | MacroAction::SetVariable
                 | MacroAction::ReadMemory
+                | MacroAction::WriteMemory
                 | MacroAction::FunnyMemeReply
                 | MacroAction::AiResponse
                 | MacroAction::DisableCrosshair

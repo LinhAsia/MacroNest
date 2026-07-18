@@ -28410,6 +28410,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
+                MacroAction::WriteMemory => execute_write_memory_action_step(step),
 
                 MacroAction::JumpToStep => {
                     let interpolated = interpolate_variables(&step.key);
@@ -29208,6 +29209,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
+                MacroAction::WriteMemory => execute_write_memory_action_step(step),
 
                 MacroAction::JumpToStep => {
                     let interpolated = interpolate_variables(&step.key);
@@ -30305,14 +30307,10 @@ mod windows_overlay {
         None
     }
 
-    fn execute_read_memory_action_step(step: &MacroStep) {
-        let target_var = step.if_variable_name.trim();
-        if target_var.is_empty() {
-            return;
-        }
-        let address_text = interpolate_variables(&step.key);
+    fn parse_memory_address(text: &str) -> Option<usize> {
+        let address_text = interpolate_variables(text);
         let address_text = address_text.trim().replace('_', "");
-        let address = address_text
+        address_text
             .strip_prefix("0x")
             .or_else(|| address_text.strip_prefix("0X"))
             .and_then(|hex| usize::from_str_radix(hex, 16).ok())
@@ -30321,8 +30319,15 @@ mod windows_overlay {
                 let value = evaluate_math_expression_f64(&address_text);
                 (value.is_finite() && value >= 0.0 && value <= usize::MAX as f64)
                     .then_some(value as usize)
-            });
-        let value = address
+            })
+    }
+
+    fn execute_read_memory_action_step(step: &MacroStep) {
+        let target_var = step.if_variable_name.trim();
+        if target_var.is_empty() {
+            return;
+        }
+        let value = parse_memory_address(&step.key)
             .and_then(|address| {
                 window_list::process_id_for_window(step.memory_target_window.as_deref())
                     .map(|pid| (pid, address))
@@ -30337,6 +30342,49 @@ mod windows_overlay {
             TEXT_VARIABLES.lock().remove(target_var);
         }
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+    }
+
+    fn execute_write_memory_action_step(step: &MacroStep) {
+        let Some(address) = parse_memory_address(&step.key) else {
+            return;
+        };
+        let Some(pid) = window_list::process_id_for_window(step.memory_target_window.as_deref())
+        else {
+            return;
+        };
+        let raw_value = interpolate_variables(&step.memory_write_value);
+        let value = match step.memory_value_type {
+            crate::model::MemoryValueType::I32 if raw_value.trim().parse::<i32>().is_ok() => raw_value,
+            crate::model::MemoryValueType::I64 if raw_value.trim().parse::<i64>().is_ok() => raw_value,
+            crate::model::MemoryValueType::F32 if raw_value.trim().parse::<f32>().is_ok() => raw_value,
+            crate::model::MemoryValueType::I32 => {
+                let value = evaluate_math_expression_f64(&raw_value);
+                if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
+                    return;
+                }
+                (value as i32).to_string()
+            }
+            crate::model::MemoryValueType::I64 => {
+                let value = evaluate_math_expression_f64(&raw_value);
+                if !value.is_finite() || value < i64::MIN as f64 || value > i64::MAX as f64 {
+                    return;
+                }
+                (value as i64).to_string()
+            }
+            crate::model::MemoryValueType::F32 => {
+                let value = evaluate_math_expression_f64(&raw_value);
+                if !value.is_finite() || value < f32::MIN as f64 || value > f32::MAX as f64 {
+                    return;
+                }
+                (value as f32).to_string()
+            }
+        };
+        let _ = crate::process_memory::write_value(
+            pid,
+            address,
+            step.memory_value_type,
+            value.trim(),
+        );
     }
 
     fn execute_ocr_action_step(step: &crate::model::MacroStep) {

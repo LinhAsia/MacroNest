@@ -100,6 +100,7 @@ pub enum MacroAction {
     IfEnd,
     SetVariable,
     ReadMemory,
+    WriteMemory,
     StartTimerPreset,
     PauseTimerPreset,
     StopTimerPreset,
@@ -314,6 +315,8 @@ pub struct MacroStep {
     #[serde(default)]
     pub memory_value_type: MemoryValueType,
     #[serde(default)]
+    pub memory_write_value: String,
+    #[serde(default)]
     pub ai_response_provider: AiResponseProvider,
     #[serde(default)]
     pub ai_response_web_search: bool,
@@ -454,6 +457,7 @@ impl Default for MacroStep {
             if_variable_name: String::new(),
             memory_target_window: None,
             memory_value_type: MemoryValueType::default(),
+            memory_write_value: String::new(),
             ai_response_provider: AiResponseProvider::Groq,
             ai_response_web_search: false,
             ai_response_use_default_prompt: true,
