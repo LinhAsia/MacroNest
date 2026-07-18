@@ -117,7 +117,9 @@ impl CrosshairApp {
             changed |= ui
                 .add_sized(
                     [150.0, 21.0],
-                    egui::TextEdit::singleline(&mut step.key).hint_text("0x... / {variable}"),
+                    egui::TextEdit::singleline(&mut step.key).hint_text(
+                        egui::RichText::new(Self::tr_lang(language, "Address", "Địa chỉ")).weak(),
+                    ),
                 )
                 .on_hover_text(Self::tr_lang(
                     language,
