@@ -694,48 +694,68 @@ impl CrosshairApp {
                     for index in rows {
                         let candidate = self.memory_panel.candidates[index];
                         let selected = self.memory_panel.selected_results.contains(&index);
-                        let row = ui.horizontal(|ui| {
-                            if !pinned {
-                                let mut checked = selected;
-                                if ui.checkbox(&mut checked, "").changed() {
-                                    self.select_memory_result(index, checked, ui);
+                        let row_width = ui.available_width();
+                        let row = ui.allocate_ui_with_layout(
+                            vec2(row_width, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                if !pinned {
+                                    ui.add_space(3.0);
+                                    let mut checked = selected;
+                                    if ui.checkbox(&mut checked, "").changed() {
+                                        self.select_memory_result(index, checked, ui);
+                                    }
                                 }
-                            }
-                            Self::memory_table_cell(
-                                ui,
-                                190.0,
-                                RichText::new(format!("0x{:016X}", candidate.address)).monospace(),
-                            );
-                            Self::memory_table_cell(
-                                ui,
-                                112.0,
-                                RichText::new(format_scan_value(
-                                    candidate.current,
-                                    self.memory_panel.hex,
-                                ))
-                                .monospace(),
-                            );
-                            Self::memory_table_cell(
-                                ui,
-                                112.0,
-                                RichText::new(format_scan_value(
-                                    candidate.previous,
-                                    self.memory_panel.hex,
-                                ))
-                                .monospace(),
-                            );
-                        });
-                        row.response
-                            .clone()
-                            .on_hover_cursor(egui::CursorIcon::Default);
-                        if row.response.hovered() {
-                            ui.painter().rect_filled(
+                                Self::memory_table_cell(
+                                    ui,
+                                    190.0,
+                                    RichText::new(format!("0x{:016X}", candidate.address))
+                                        .monospace(),
+                                );
+                                Self::memory_table_cell(
+                                    ui,
+                                    112.0,
+                                    RichText::new(format_scan_value(
+                                        candidate.current,
+                                        self.memory_panel.hex,
+                                    ))
+                                    .monospace(),
+                                );
+                                Self::memory_table_cell(
+                                    ui,
+                                    112.0,
+                                    RichText::new(format_scan_value(
+                                        candidate.previous,
+                                        self.memory_panel.hex,
+                                    ))
+                                    .monospace(),
+                                );
+                            },
+                        );
+                        let response = ui
+                            .interact(
                                 row.response.rect,
+                                ui.id()
+                                    .with(("memory-result-row", pinned, candidate.address)),
+                                Sense::click(),
+                            )
+                            .on_hover_cursor(egui::CursorIcon::Default);
+                        if response.hovered() || selected {
+                            ui.painter().rect_filled(
+                                response.rect,
                                 3.0,
-                                Color32::from_rgba_premultiplied(84, 178, 222, 38),
+                                Color32::from_rgba_premultiplied(
+                                    84,
+                                    178,
+                                    222,
+                                    if selected { 58 } else { 42 },
+                                ),
                             );
                         }
-                        if row.response.double_clicked() {
+                        if !pinned && response.clicked() && !response.double_clicked() {
+                            self.select_memory_result(index, !selected, ui);
+                        }
+                        if response.double_clicked() {
                             self.memory_panel.selected_results.clear();
                             self.memory_panel.selected_results.insert(index);
                             self.add_selected_memory_results();
@@ -834,81 +854,118 @@ impl CrosshairApp {
                             let mut edit_value = false;
                             let mut delete = false;
                             let mut tool_message = None;
-                            let row = ui.horizontal(|ui| {
-                                let mut checked = selected;
-                                if ui.checkbox(&mut checked, "").changed() {
-                                    if checked {
-                                        self.memory_panel.selected_saved.insert(index);
-                                    } else {
-                                        self.memory_panel.selected_saved.remove(&index);
+                            let mut row_hits = Vec::new();
+                            let row_width = ui.available_width();
+                            let row = ui.allocate_ui_with_layout(
+                                vec2(row_width, row_height),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.add_space(3.0);
+                                    let mut checked = selected;
+                                    let checked_response = ui.checkbox(&mut checked, "");
+                                    row_hits.push(checked_response.clone());
+                                    if checked_response.changed() {
+                                        if checked {
+                                            self.memory_panel.selected_saved.insert(index);
+                                        } else {
+                                            self.memory_panel.selected_saved.remove(&index);
+                                        }
                                     }
-                                }
-                                ui.add_sized(
-                                    [172.0, 20.0],
-                                    egui::Label::new(format!("0x{:016X}", saved.address))
-                                        .sense(Sense::click()),
-                                );
-                                ui.label(memory_type_label(saved.value_type));
-                                if self.memory_panel.edit_value_index == Some(index) {
-                                    let response = ui.add_sized(
-                                        [120.0, 20.0],
-                                        egui::TextEdit::singleline(
-                                            &mut self.memory_panel.edit_value_input,
-                                        ),
+                                    let address_response = ui.add_sized(
+                                        [172.0, 20.0],
+                                        egui::Label::new(format!("0x{:016X}", saved.address))
+                                            .selectable(false)
+                                            .sense(Sense::click()),
                                     );
-                                    if response.lost_focus()
-                                        && ui.input(|input| input.key_pressed(egui::Key::Enter))
-                                    {
-                                        self.commit_saved_memory_value(index);
+                                    address_response
+                                        .clone()
+                                        .on_hover_cursor(egui::CursorIcon::Default);
+                                    row_hits.push(address_response.clone());
+                                    if address_response.double_clicked() {
+                                        open_address = true;
                                     }
-                                    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                                        self.memory_panel.edit_value_index = None;
+                                    row_hits.push(ui.label(memory_type_label(saved.value_type)));
+                                    if self.memory_panel.edit_value_index == Some(index) {
+                                        let response = ui.add_sized(
+                                            [120.0, 20.0],
+                                            egui::TextEdit::singleline(
+                                                &mut self.memory_panel.edit_value_input,
+                                            ),
+                                        );
+                                        row_hits.push(response.clone());
+                                        if response.lost_focus()
+                                            && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                                        {
+                                            self.commit_saved_memory_value(index);
+                                        }
+                                        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                                            self.memory_panel.edit_value_index = None;
+                                        }
+                                    } else {
+                                        let value_response = ui.add_sized(
+                                            [120.0, 20.0],
+                                            egui::Label::new(
+                                                saved
+                                                    .current
+                                                    .map(|value| {
+                                                        format_scan_value(
+                                                            value,
+                                                            self.memory_panel.hex,
+                                                        )
+                                                    })
+                                                    .unwrap_or_else(|| "?".to_owned()),
+                                            )
+                                            .sense(Sense::click()),
+                                        );
+                                        row_hits.push(value_response.clone());
+                                        if value_response.double_clicked() {
+                                            edit_value = true;
+                                        }
                                     }
-                                } else if ui
-                                    .add_sized(
-                                        [120.0, 20.0],
-                                        egui::Label::new(
-                                            saved
-                                                .current
-                                                .map(|value| {
-                                                    format_scan_value(value, self.memory_panel.hex)
-                                                })
-                                                .unwrap_or_else(|| "?".to_owned()),
+                                    let description_response = ui.add_sized(
+                                        [
+                                            160.0_f32.min((ui.available_width() - 32.0).max(70.0)),
+                                            20.0,
+                                        ],
+                                        egui::TextEdit::singleline(
+                                            &mut self.memory_panel.saved[index].description,
                                         )
-                                        .sense(Sense::click()),
-                                    )
-                                    .double_clicked()
-                                {
-                                    edit_value = true;
-                                }
-                                ui.add_sized(
-                                    [ui.available_width().max(80.0) - 50.0, 20.0],
-                                    egui::TextEdit::singleline(
-                                        &mut self.memory_panel.saved[index].description,
-                                    )
-                                    .hint_text("description"),
-                                );
-                                let mut frozen = saved.frozen.is_some();
-                                if ui
-                                    .checkbox(&mut frozen, "")
-                                    .on_hover_text("Freeze")
-                                    .changed()
-                                {
-                                    self.memory_panel.saved[index].frozen =
-                                        if frozen { saved.current } else { None };
-                                }
-                            });
-                            row.response
-                                .clone()
-                                .on_hover_cursor(egui::CursorIcon::Default);
-                            if row.response.hovered() {
-                                ui.painter().rect_filled(
+                                        .hint_text("description"),
+                                    );
+                                    row_hits.push(description_response);
+                                    let mut frozen = saved.frozen.is_some();
+                                    let frozen_response =
+                                        ui.checkbox(&mut frozen, "").on_hover_text("Freeze");
+                                    row_hits.push(frozen_response.clone());
+                                    if frozen_response.changed() {
+                                        self.memory_panel.saved[index].frozen =
+                                            if frozen { saved.current } else { None };
+                                    }
+                                },
+                            );
+                            let mut response = ui
+                                .interact(
                                     row.response.rect,
+                                    ui.id().with(("saved-memory-row", index)),
+                                    Sense::click(),
+                                )
+                                .on_hover_cursor(egui::CursorIcon::Default);
+                            for hit in row_hits {
+                                response = response.union(hit);
+                            }
+                            if response.hovered() || selected {
+                                ui.painter().rect_filled(
+                                    response.rect,
                                     3.0,
-                                    Color32::from_rgba_premultiplied(84, 178, 222, 42),
+                                    Color32::from_rgba_premultiplied(
+                                        84,
+                                        178,
+                                        222,
+                                        if selected { 60 } else { 44 },
+                                    ),
                                 );
                             }
-                            row.response.context_menu(|ui| {
+                            response.context_menu(|ui| {
                                 if ui
                                     .button("Find instructions accessing this address (x64)")
                                     .clicked()
