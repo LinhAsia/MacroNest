@@ -828,6 +828,7 @@ impl CrosshairApp {
                 .auto_shrink([false, false])
                 .max_height(ui.available_height())
                 .show_rows(ui, 22.0, visible_count, |ui, rows| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     for index in rows {
                         let candidate = self.memory_panel.candidates[index];
                         let selected = self.memory_panel.selected_results.contains(&index);
@@ -902,7 +903,15 @@ impl CrosshairApp {
                                 ui,
                             );
                         }
-                        if response.double_clicked() {
+                        if ui.input(|input| {
+                            input
+                                .pointer
+                                .button_double_clicked(egui::PointerButton::Primary)
+                        }) && ui
+                            .ctx()
+                            .pointer_latest_pos()
+                            .is_some_and(|pointer| full_row_rect.contains(pointer))
+                        {
                             self.memory_panel.selected_results.clear();
                             self.memory_panel.selected_results.insert(index);
                             self.add_selected_memory_results();
@@ -1070,6 +1079,7 @@ impl CrosshairApp {
                     .auto_shrink([false, false])
                     .max_height(ui.available_height())
                     .show_rows(ui, row_height, count, |ui, rows| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         for index in rows {
                             if index >= self.memory_panel.saved.len() {
                                 continue;
@@ -1103,7 +1113,7 @@ impl CrosshairApp {
                                     Sense::click(),
                                 )
                                 .on_hover_cursor(egui::CursorIcon::Default);
-                            let mut response = row_response;
+                            let mut response = row_response.clone();
                             ui.allocate_ui_with_layout(
                                 vec2(row_width, row_height),
                                 egui::Layout::left_to_right(egui::Align::Center),
@@ -1130,15 +1140,12 @@ impl CrosshairApp {
                                         egui::Label::new(format!("0x{:016X}", saved.address))
                                             .selectable(false)
                                             .halign(egui::Align::Min)
-                                            .sense(Sense::click()),
+                                            .sense(Sense::hover()),
                                     );
                                     address_response
                                         .clone()
                                         .on_hover_cursor(egui::CursorIcon::Default);
                                     row_hits.push(address_response.clone());
-                                    if address_response.double_clicked() {
-                                        open_address = true;
-                                    }
                                     let type_response = ui.add_sized(
                                         [column_width, row_height],
                                         egui::Label::new(memory_type_label(saved.value_type))
@@ -1186,15 +1193,12 @@ impl CrosshairApp {
                                             )
                                             .selectable(false)
                                             .halign(egui::Align::Min)
-                                            .sense(Sense::click()),
+                                            .sense(Sense::hover()),
                                         );
                                         value_response
                                             .clone()
                                             .on_hover_cursor(egui::CursorIcon::Default);
                                         row_hits.push(value_response.clone());
-                                        if value_response.double_clicked() {
-                                            edit_value = true;
-                                        }
                                     }
                                     if self.memory_panel.edit_description_index == Some(index) {
                                         let description_response = ui.add_sized(
@@ -1226,15 +1230,12 @@ impl CrosshairApp {
                                                 .selectable(false)
                                                 .halign(egui::Align::Min)
                                                 .truncate()
-                                                .sense(Sense::click()),
+                                                .sense(Sense::hover()),
                                         );
                                         description_response
                                             .clone()
                                             .on_hover_cursor(egui::CursorIcon::Default);
                                         row_hits.push(description_response.clone());
-                                        if description_response.double_clicked() {
-                                            self.memory_panel.edit_description_index = Some(index);
-                                        }
                                     }
                                     let mut frozen = saved.frozen.is_some();
                                     let frozen_response = ui
@@ -1270,10 +1271,12 @@ impl CrosshairApp {
                                     _ => {}
                                 }
                             }
-                            if response.clicked() || checkbox_changed {
+                            if row_response.clicked() || checkbox_changed {
                                 self.memory_panel.saved_list_active = true;
                             }
-                            if response.clicked() && !response.double_clicked() && !checkbox_changed
+                            if row_response.clicked()
+                                && !row_response.double_clicked()
+                                && !checkbox_changed
                             {
                                 self.select_saved_memory_row(index, selected, ui);
                             }
@@ -1525,7 +1528,7 @@ impl CrosshairApp {
     #[cfg(windows)]
     fn render_instruction_watch_body(ui: &mut egui::Ui, dialog: &mut InstructionWatchDialog) {
         ui.horizontal(|ui| {
-            ui.label(&dialog.status);
+            ui.add(egui::Label::new(&dialog.status).selectable(true));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if dialog.active.is_some() && ui.button("Stop").clicked() {
                     if let Some(active) = dialog.active.as_mut() {
@@ -1541,28 +1544,29 @@ impl CrosshairApp {
             .max_height(210.0)
             .show(ui, |ui| {
                 for (index, hit) in dialog.hits.iter().enumerate() {
-                    if ui
-                        .selectable_label(
-                            dialog.selected == Some(index),
-                            format!(
-                                "0x{:016X}   {:<40}   {} hit(s)",
-                                hit.address, hit.instruction, hit.count
-                            ),
-                        )
-                        .clicked()
-                    {
+                    let text = format!(
+                        "0x{:016X}   {:<40}   {} hit(s)",
+                        hit.address, hit.instruction, hit.count
+                    );
+                    if ui.add(egui::Label::new(text).selectable(true)).clicked() {
                         dialog.selected = Some(index);
                     }
                 }
             });
         ui.separator();
         egui::ScrollArea::both().show(ui, |ui| {
-            ui.monospace(
-                dialog
-                    .selected
-                    .and_then(|index| dialog.hits.get(index))
-                    .map(|hit| hit.details.as_str())
-                    .unwrap_or("Interact with the target process to capture instructions."),
+            ui.add(
+                egui::Label::new(
+                    RichText::new(
+                        dialog
+                            .selected
+                            .and_then(|index| dialog.hits.get(index))
+                            .map(|hit| hit.details.as_str())
+                            .unwrap_or("Interact with the target process to capture instructions."),
+                    )
+                    .monospace(),
+                )
+                .selectable(true),
             );
         });
     }
@@ -1851,9 +1855,7 @@ impl CrosshairApp {
     fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) {
         ui.add_sized(
             [width, 18.0],
-            egui::Label::new(RichText::new(text).monospace())
-                .selectable(false)
-                .truncate(),
+            egui::Label::new(RichText::new(text).monospace()).selectable(true),
         );
     }
 
