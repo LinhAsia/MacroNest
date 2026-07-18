@@ -1096,13 +1096,14 @@ impl CrosshairApp {
                                     egui::StrokeKind::Inside,
                                 );
                             }
-                            let mut response = ui
+                            let row_response = ui
                                 .interact(
                                     full_row_rect,
                                     ui.id().with(("saved-memory-row", index)),
                                     Sense::click(),
                                 )
                                 .on_hover_cursor(egui::CursorIcon::Default);
+                            let mut response = row_response;
                             ui.allocate_ui_with_layout(
                                 vec2(row_width, row_height),
                                 egui::Layout::left_to_right(egui::Align::Center),
@@ -1125,7 +1126,7 @@ impl CrosshairApp {
                                         }
                                     }
                                     let address_response = ui.add_sized(
-                                        [column_width, 20.0],
+                                        [column_width, row_height],
                                         egui::Label::new(format!("0x{:016X}", saved.address))
                                             .selectable(false)
                                             .halign(egui::Align::Min)
@@ -1139,7 +1140,7 @@ impl CrosshairApp {
                                         open_address = true;
                                     }
                                     let type_response = ui.add_sized(
-                                        [column_width, 20.0],
+                                        [column_width, row_height],
                                         egui::Label::new(memory_type_label(saved.value_type))
                                             .selectable(false)
                                             .halign(egui::Align::Min)
@@ -1171,7 +1172,7 @@ impl CrosshairApp {
                                         }
                                     } else {
                                         let value_response = ui.add_sized(
-                                            [column_width, 20.0],
+                                            [column_width, row_height],
                                             egui::Label::new(
                                                 saved
                                                     .current
@@ -1197,7 +1198,7 @@ impl CrosshairApp {
                                     }
                                     if self.memory_panel.edit_description_index == Some(index) {
                                         let description_response = ui.add_sized(
-                                            [column_width, 20.0],
+                                            [column_width, row_height],
                                             egui::TextEdit::singleline(
                                                 &mut self.memory_panel.saved[index].description,
                                             ),
@@ -1252,8 +1253,12 @@ impl CrosshairApp {
                             for hit in row_hits {
                                 response = response.union(hit);
                             }
-                            if response.double_clicked()
-                                && let Some(pointer) = ui.ctx().pointer_latest_pos()
+                            if ui.input(|input| {
+                                input
+                                    .pointer
+                                    .button_double_clicked(egui::PointerButton::Primary)
+                            }) && let Some(pointer) = ui.ctx().pointer_latest_pos()
+                                && full_row_rect.contains(pointer)
                             {
                                 let column = ((pointer.x - full_row_rect.left() - 21.0)
                                     / column_width)
