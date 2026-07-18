@@ -82,9 +82,27 @@ static REGION_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PRESS_HANDLED_ON_DOWN: AtomicBool = AtomicBool::new(false);
 static SESSION_ID: AtomicU64 = AtomicU64::new(0);
 static HARDWARE_ENCODING: Lazy<Mutex<Option<(String, bool)>>> = Lazy::new(|| Mutex::new(None));
+static PREPARED_FFMPEG: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn set_config(config: VideoRecorderConfig) {
+    prepare_hardware_encoding_async(&config.ffmpeg_exe);
     *CONFIG.lock() = config;
+}
+
+fn prepare_hardware_encoding_async(ffmpeg_exe: &Path) {
+    if !ffmpeg_exe.exists() {
+        return;
+    }
+    let signature = ffmpeg_signature(ffmpeg_exe);
+    let mut prepared = PREPARED_FFMPEG.lock();
+    if prepared.as_ref() == Some(&signature) {
+        return;
+    }
+    *prepared = Some(signature);
+    let ffmpeg_exe = ffmpeg_exe.to_owned();
+    thread::spawn(move || {
+        hardware_encoding_available(&ffmpeg_exe);
+    });
 }
 
 pub fn status() -> String {
