@@ -185,6 +185,14 @@ pub fn read_scan_value(
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid value"))
 }
 
+pub fn read_memory_bytes(pid: u32, address: usize, length: usize) -> io::Result<Vec<u8>> {
+    let process = ScanProcess::open(pid, false)?;
+    let mut bytes = vec![0; length];
+    let read = process.read(address, &mut bytes)?;
+    bytes.truncate(read);
+    Ok(bytes)
+}
+
 pub fn write_scan_value(pid: u32, address: usize, value: ScanValue) -> io::Result<()> {
     let process = ScanProcess::open(pid, true)?;
     let bytes = value.bytes();

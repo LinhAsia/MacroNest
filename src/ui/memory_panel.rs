@@ -16,7 +16,8 @@ use crate::{
     model::HotkeyBinding,
     process_memory::{
         ScanCandidate, ScanComparison, ScanValue, ScanValueType, filter_scan_candidates,
-        read_scan_value, refresh_scan_candidates, scan_memory_with_progress, write_scan_value,
+        read_memory_bytes, read_scan_value, refresh_scan_candidates, scan_memory_with_progress,
+        write_scan_value,
     },
     window_list,
 };
@@ -121,6 +122,17 @@ struct AddressDialog {
     pointer: bool,
 }
 
+#[derive(Clone, Copy)]
+enum MemoryViewKind {
+    Bytes,
+    Structure,
+}
+
+struct MemoryViewDialog {
+    address: usize,
+    kind: MemoryViewKind,
+}
+
 struct ScanJobResult {
     pid: u32,
     action: MemoryScanAction,
@@ -153,6 +165,7 @@ pub(crate) struct MemoryPanelState {
     edit_value_index: Option<usize>,
     edit_value_input: String,
     address_dialog: Option<AddressDialog>,
+    memory_view_dialog: Option<MemoryViewDialog>,
     last_refresh: Instant,
 }
 
@@ -184,6 +197,7 @@ impl Default for MemoryPanelState {
             edit_value_index: None,
             edit_value_input: String::new(),
             address_dialog: None,
+            memory_view_dialog: None,
             last_refresh: Instant::now(),
         }
     }
@@ -257,6 +271,7 @@ impl CrosshairApp {
         );
 
         self.render_memory_address_dialog(ui.ctx());
+        self.render_memory_view_dialog(ui.ctx());
     }
 
     pub(crate) fn render_memory_pinned_viewport(&mut self, ctx: &egui::Context) {
@@ -270,6 +285,7 @@ impl CrosshairApp {
             .with_title("MacroNest — Scan results")
             .with_inner_size(vec2(560.0, 430.0))
             .with_min_inner_size(vec2(400.0, 260.0))
+            .with_decorations(false)
             .with_always_on_top();
         let mut unpin = false;
         ctx.show_viewport_immediate(
@@ -279,15 +295,39 @@ impl CrosshairApp {
                 if ctx.input(|input| input.viewport().close_requested()) {
                     unpin = true;
                 }
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Scan results").strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Unpin").clicked() {
+                egui::TopBottomPanel::top("memory-pinned-titlebar")
+                    .exact_height(38.0)
+                    .frame(
+                        Frame::new()
+                            .fill(Color32::from_rgb(16, 20, 26))
+                            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(34, 42, 56)))
+                            .inner_margin(egui::Margin::symmetric(8, 4)),
+                    )
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(Self::material_icon_text(0xe30c, 17.0));
+                            ui.label(RichText::new("MacroNest").strong());
+                            ui.label(RichText::new("Scan results").weak());
+                            let drag = ui.allocate_response(
+                                vec2((ui.available_width() - 36.0).max(0.0), 28.0),
+                                Sense::click_and_drag(),
+                            );
+                            if drag.drag_started() {
+                                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                            }
+                            if ui
+                                .add_sized(
+                                    [32.0, 28.0],
+                                    Button::new(Self::material_icon_text(0xe5cd, 17.0)),
+                                )
+                                .on_hover_text("Unpin")
+                                .clicked()
+                            {
                                 unpin = true;
                             }
                         });
                     });
+                egui::CentralPanel::default().show(ctx, |ui| {
                     let count = if self.memory_panel.scanning {
                         self.memory_panel
                             .scan_progress
@@ -623,16 +663,12 @@ impl CrosshairApp {
                 });
             }
             ui.horizontal(|ui| {
-                ui.add_space(22.0);
-                ui.add_sized(
-                    [190.0, 18.0],
-                    egui::Label::new(RichText::new("Address").strong()),
-                );
-                ui.add_sized(
-                    [112.0, 18.0],
-                    egui::Label::new(RichText::new("Current").strong()),
-                );
-                ui.label(RichText::new("Previous").strong());
+                if !pinned {
+                    ui.add_space(22.0);
+                }
+                Self::memory_table_cell(ui, 190.0, RichText::new("Address").strong());
+                Self::memory_table_cell(ui, 112.0, RichText::new("Current").strong());
+                Self::memory_table_cell(ui, 112.0, RichText::new("Previous").strong());
             });
             ui.separator();
             let visible_count = self.memory_panel.candidates.len().min(MAX_VISIBLE_RESULTS);
@@ -654,35 +690,52 @@ impl CrosshairApp {
                     for index in rows {
                         let candidate = self.memory_panel.candidates[index];
                         let selected = self.memory_panel.selected_results.contains(&index);
-                        ui.horizontal(|ui| {
+                        let row = ui.horizontal(|ui| {
                             if !pinned {
                                 let mut checked = selected;
                                 if ui.checkbox(&mut checked, "").changed() {
                                     self.select_memory_result(index, checked, ui);
                                 }
                             }
-                            let address_response = ui.add_sized(
-                                [190.0, 18.0],
-                                egui::Label::new(format!("0x{:016X}", candidate.address))
-                                    .sense(Sense::click()),
+                            Self::memory_table_cell(
+                                ui,
+                                190.0,
+                                RichText::new(format!("0x{:016X}", candidate.address)).monospace(),
                             );
-                            ui.add_sized(
-                                [112.0, 18.0],
-                                egui::Label::new(format_scan_value(
+                            Self::memory_table_cell(
+                                ui,
+                                112.0,
+                                RichText::new(format_scan_value(
                                     candidate.current,
                                     self.memory_panel.hex,
-                                )),
+                                ))
+                                .monospace(),
                             );
-                            ui.monospace(format_scan_value(
-                                candidate.previous,
-                                self.memory_panel.hex,
-                            ));
-                            if !pinned && address_response.double_clicked() {
-                                self.memory_panel.selected_results.clear();
-                                self.memory_panel.selected_results.insert(index);
-                                self.add_selected_memory_results();
-                            }
+                            Self::memory_table_cell(
+                                ui,
+                                112.0,
+                                RichText::new(format_scan_value(
+                                    candidate.previous,
+                                    self.memory_panel.hex,
+                                ))
+                                .monospace(),
+                            );
                         });
+                        row.response
+                            .clone()
+                            .on_hover_cursor(egui::CursorIcon::Default);
+                        if row.response.hovered() {
+                            ui.painter().rect_filled(
+                                row.response.rect,
+                                3.0,
+                                Color32::from_rgba_premultiplied(84, 178, 222, 38),
+                            );
+                        }
+                        if row.response.double_clicked() {
+                            self.memory_panel.selected_results.clear();
+                            self.memory_panel.selected_results.insert(index);
+                            self.add_selected_memory_results();
+                        }
                     }
                 });
             if self.memory_panel.candidates.len() > MAX_VISIBLE_RESULTS {
@@ -701,6 +754,17 @@ impl CrosshairApp {
                 });
             }
         });
+    }
+
+    fn memory_table_cell(ui: &mut egui::Ui, width: f32, text: RichText) {
+        ui.allocate_ui_with_layout(
+            vec2(width, 18.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add(egui::Label::new(text).selectable(false))
+                    .on_hover_cursor(egui::CursorIcon::Default);
+            },
+        );
     }
 
     fn select_memory_result(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
@@ -765,6 +829,7 @@ impl CrosshairApp {
                             let mut open_address = false;
                             let mut edit_value = false;
                             let mut delete = false;
+                            let mut tool_message = None;
                             let row = ui.horizontal(|ui| {
                                 let mut checked = selected;
                                 if ui.checkbox(&mut checked, "").changed() {
@@ -829,7 +894,48 @@ impl CrosshairApp {
                                         if frozen { saved.current } else { None };
                                 }
                             });
+                            row.response
+                                .clone()
+                                .on_hover_cursor(egui::CursorIcon::Default);
+                            if row.response.hovered() {
+                                ui.painter().rect_filled(
+                                    row.response.rect,
+                                    3.0,
+                                    Color32::from_rgba_premultiplied(84, 178, 222, 42),
+                                );
+                            }
                             row.response.context_menu(|ui| {
+                                if ui
+                                    .button("Find instructions accessing this address (x64)")
+                                    .clicked()
+                                {
+                                    tool_message =
+                                        Some("Instruction access tracing is not available yet");
+                                    ui.close();
+                                }
+                                if ui
+                                    .button("Find instructions writing this address (x64)")
+                                    .clicked()
+                                {
+                                    tool_message =
+                                        Some("Instruction write tracing is not available yet");
+                                    ui.close();
+                                }
+                                if ui.button("Browse this memory region").clicked() {
+                                    self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                                        address: saved.address,
+                                        kind: MemoryViewKind::Bytes,
+                                    });
+                                    ui.close();
+                                }
+                                if ui.button("Dissect data/structure").clicked() {
+                                    self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                                        address: saved.address,
+                                        kind: MemoryViewKind::Structure,
+                                    });
+                                    ui.close();
+                                }
+                                ui.separator();
                                 if ui.button("Change address / Pointer").clicked() {
                                     open_address = true;
                                     ui.close();
@@ -843,6 +949,9 @@ impl CrosshairApp {
                                     ui.close();
                                 }
                             });
+                            if let Some(message) = tool_message {
+                                self.memory_panel.status = message.to_owned();
+                            }
                             if open_address {
                                 let (address, offsets, pointer) =
                                     saved.pointer.as_ref().map_or_else(
@@ -885,6 +994,84 @@ impl CrosshairApp {
                     });
                 }
             });
+    }
+
+    fn render_memory_view_dialog(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = self.memory_panel.memory_view_dialog.as_ref() else {
+            return;
+        };
+        let address = dialog.address;
+        let kind = dialog.kind;
+        let title = match kind {
+            MemoryViewKind::Bytes => format!("Memory region — 0x{address:016X}"),
+            MemoryViewKind::Structure => format!("Dissect data/structure — 0x{address:016X}"),
+        };
+        let bytes = self
+            .memory_panel
+            .process_pid
+            .and_then(|pid| read_memory_bytes(pid, address, 512).ok());
+        let mut open = true;
+        egui::Window::new(title)
+            .default_size(vec2(720.0, 430.0))
+            .open(&mut open)
+            .show(ctx, |ui| {
+                let Some(bytes) = bytes.as_deref() else {
+                    ui.label("Unable to read this memory region");
+                    return;
+                };
+                egui::ScrollArea::both().show(ui, |ui| match kind {
+                    MemoryViewKind::Bytes => {
+                        for (row, chunk) in bytes.chunks(16).enumerate() {
+                            let hex = chunk
+                                .iter()
+                                .map(|byte| format!("{byte:02X}"))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            let ascii = chunk
+                                .iter()
+                                .map(|byte| {
+                                    if byte.is_ascii_graphic() {
+                                        *byte as char
+                                    } else {
+                                        '.'
+                                    }
+                                })
+                                .collect::<String>();
+                            ui.monospace(format!(
+                                "{:016X}  {:<47}  {ascii}",
+                                address + row * 16,
+                                hex
+                            ));
+                        }
+                    }
+                    MemoryViewKind::Structure => {
+                        ui.monospace("Offset   Address             Bytes                    i32          Float");
+                        ui.separator();
+                        for (offset, chunk) in bytes.chunks(4).enumerate() {
+                            if chunk.len() < 4 {
+                                break;
+                            }
+                            let raw = [chunk[0], chunk[1], chunk[2], chunk[3]];
+                            ui.monospace(format!(
+                                "+{:04X}   {:016X}    {:02X} {:02X} {:02X} {:02X}    {:>11}   {:>12.5}",
+                                offset * 4,
+                                address + offset * 4,
+                                raw[0],
+                                raw[1],
+                                raw[2],
+                                raw[3],
+                                i32::from_le_bytes(raw),
+                                f32::from_le_bytes(raw),
+                            ));
+                        }
+                    }
+                });
+            });
+        if !open {
+            self.memory_panel.memory_view_dialog = None;
+        } else {
+            ctx.request_repaint_after(Duration::from_millis(250));
+        }
     }
 
     fn render_memory_address_dialog(&mut self, ctx: &egui::Context) {
