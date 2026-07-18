@@ -11,7 +11,7 @@ use std::{
         mpsc::{Receiver, SyncSender, sync_channel},
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 use once_cell::sync::Lazy;
@@ -81,7 +81,7 @@ static HOTKEY_PRESS_ID: AtomicU64 = AtomicU64::new(0);
 static REGION_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PRESS_HANDLED_ON_DOWN: AtomicBool = AtomicBool::new(false);
 static SESSION_ID: AtomicU64 = AtomicU64::new(0);
-static HARDWARE_ENCODING: Lazy<Mutex<Option<bool>>> = Lazy::new(|| Mutex::new(None));
+static HARDWARE_ENCODING: Lazy<Mutex<Option<(String, bool)>>> = Lazy::new(|| Mutex::new(None));
 
 pub fn set_config(config: VideoRecorderConfig) {
     *CONFIG.lock() = config;
@@ -406,8 +406,20 @@ fn concise_ffmpeg_error(log: &str) -> String {
 }
 
 fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
+    let signature = ffmpeg_signature(ffmpeg_exe);
     let mut cached = HARDWARE_ENCODING.lock();
-    if let Some(available) = *cached {
+    if let Some((cached_signature, available)) = cached.as_ref()
+        && cached_signature == &signature
+    {
+        return *available;
+    }
+    let cache_path = ffmpeg_exe.with_file_name("ffmpeg-hardware-encoding.cache");
+    if let Ok(value) = fs::read_to_string(&cache_path)
+        && let Some((cached_signature, available)) = value.trim().rsplit_once('|')
+        && cached_signature == signature
+        && let Ok(available) = available.parse::<bool>()
+    {
+        *cached = Some((signature, available));
         return available;
     }
     let mut child = match Command::new(ffmpeg_exe)
@@ -439,7 +451,8 @@ fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
     {
         Ok(child) => child,
         Err(_) => {
-            *cached = Some(false);
+            cache_hardware_encoding(&cache_path, &signature, false);
+            *cached = Some((signature, false));
             return false;
         }
     };
@@ -456,8 +469,25 @@ fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
             Err(_) => break false,
         }
     };
-    *cached = Some(available);
+    cache_hardware_encoding(&cache_path, &signature, available);
+    *cached = Some((signature, available));
     available
+}
+
+fn ffmpeg_signature(ffmpeg_exe: &Path) -> String {
+    let Ok(metadata) = fs::metadata(ffmpeg_exe) else {
+        return ffmpeg_exe.display().to_string();
+    };
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |duration| duration.as_secs());
+    format!("{}:{}:{}", ffmpeg_exe.display(), metadata.len(), modified)
+}
+
+fn cache_hardware_encoding(cache_path: &Path, signature: &str, available: bool) {
+    let _ = fs::write(cache_path, format!("{signature}|{available}"));
 }
 
 fn start_system_audio_capture(
