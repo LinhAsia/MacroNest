@@ -15212,9 +15212,12 @@ impl eframe::App for CrosshairApp {
                 } else if active_panel == AppPanel::Macros
                     || active_panel == AppPanel::Modes
                     || active_panel == AppPanel::Mouse
+                    || active_panel == AppPanel::Memory
                 {
                     if active_panel == AppPanel::Mouse {
                         self.render_mouse_panel(ui);
+                    } else if active_panel == AppPanel::Memory {
+                        self.render_memory_panel(ui);
                     } else {
                         self.render_macro_panel(ui);
                     }
@@ -15242,7 +15245,7 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Hud => self.render_hud_panel(ui),
                                 AppPanel::Timer => self.render_timer_panel(ui),
                                 AppPanel::Media => self.render_media_panel(ui),
-                                AppPanel::Memory => self.render_memory_panel(ui),
+                                AppPanel::Memory => unreachable!(),
                             };
                             if self.capture_target.is_some() {
                                 ctx.request_repaint_after(Duration::from_millis(16));
