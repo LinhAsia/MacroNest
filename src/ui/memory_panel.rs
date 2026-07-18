@@ -602,16 +602,6 @@ impl CrosshairApp {
                         egui::TextEdit::singleline(&mut self.memory_panel.result_limit_input)
                             .desired_width(110.0),
                     );
-                    let selected = self.memory_panel.selected_results.len();
-                    if ui
-                        .add_enabled(
-                            selected > 0,
-                            Button::new(format!("Add selected ({selected})")),
-                        )
-                        .clicked()
-                    {
-                        self.add_selected_memory_results();
-                    }
                 });
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
@@ -809,6 +799,7 @@ impl CrosshairApp {
             ui.separator();
             let visible_count = self.memory_panel.candidates.len().min(MAX_VISIBLE_RESULTS);
             if !pinned
+                && !self.memory_panel.saved_list_active
                 && ui.ctx().memory(|memory| memory.focused().is_none())
                 && ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::A))
             {
@@ -1038,9 +1029,10 @@ impl CrosshairApp {
                 {
                     self.delete_selected_saved_memory();
                 }
-                let header_column_width = ((ui.available_width() - 70.0) / 4.0).max(80.0);
+                let header_column_width = ((ui.available_width() - 42.0) / 4.0).max(80.0);
                 ui.horizontal(|ui| {
-                    ui.add_space(31.0);
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.add_space(21.0);
                     Self::memory_table_cell(
                         ui,
                         header_column_width,
@@ -1083,7 +1075,7 @@ impl CrosshairApp {
                             let mut row_hits = Vec::new();
                             let mut checkbox_changed = false;
                             let row_width = ui.available_width();
-                            let column_width = ((row_width - 70.0) / 4.0).max(80.0);
+                            let column_width = ((row_width - 42.0) / 4.0).max(80.0);
                             let full_row_rect = egui::Rect::from_min_size(
                                 ui.next_widget_position(),
                                 vec2(row_width, row_height),
@@ -1094,14 +1086,6 @@ impl CrosshairApp {
                                     3.0,
                                     egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
                                     egui::StrokeKind::Inside,
-                                );
-                            } else if full_row_rect.contains(
-                                ui.input(|input| input.pointer.hover_pos().unwrap_or_default()),
-                            ) {
-                                ui.painter().rect_filled(
-                                    full_row_rect,
-                                    3.0,
-                                    Color32::from_rgba_premultiplied(84, 178, 222, 28),
                                 );
                             }
                             let mut response = ui
@@ -1115,9 +1099,14 @@ impl CrosshairApp {
                                 vec2(row_width, row_height),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
+                                    ui.spacing_mut().item_spacing.x = 0.0;
+                                    ui.set_width(row_width);
                                     ui.add_space(3.0);
                                     let mut checked = selected;
-                                    let checked_response = ui.checkbox(&mut checked, "");
+                                    let checked_response = ui.add_sized(
+                                        [18.0, 18.0],
+                                        egui::Checkbox::without_text(&mut checked),
+                                    );
                                     row_hits.push(checked_response.clone());
                                     if checked_response.changed() {
                                         checkbox_changed = true;
@@ -1156,9 +1145,13 @@ impl CrosshairApp {
                                                 &mut self.memory_panel.edit_value_input,
                                             ),
                                         );
+                                        response.request_focus();
                                         row_hits.push(response.clone());
-                                        if response.lost_focus()
-                                            && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                                        if response.clicked_elsewhere()
+                                            || (response.lost_focus()
+                                                && ui.input(|input| {
+                                                    input.key_pressed(egui::Key::Enter)
+                                                }))
                                         {
                                             self.commit_saved_memory_value(index);
                                         }
@@ -1194,8 +1187,10 @@ impl CrosshairApp {
                                                 &mut self.memory_panel.saved[index].description,
                                             ),
                                         );
+                                        description_response.request_focus();
                                         row_hits.push(description_response.clone());
-                                        if description_response.lost_focus()
+                                        if description_response.clicked_elsewhere()
+                                            || description_response.lost_focus()
                                             || ui.input(|input| {
                                                 input.key_pressed(egui::Key::Enter)
                                                     || input.key_pressed(egui::Key::Escape)
@@ -1223,8 +1218,12 @@ impl CrosshairApp {
                                         }
                                     }
                                     let mut frozen = saved.frozen.is_some();
-                                    let frozen_response =
-                                        ui.checkbox(&mut frozen, "").on_hover_text("Freeze");
+                                    let frozen_response = ui
+                                        .add_sized(
+                                            [18.0, 18.0],
+                                            egui::Checkbox::without_text(&mut frozen),
+                                        )
+                                        .on_hover_text("Freeze");
                                     row_hits.push(frozen_response.clone());
                                     if frozen_response.changed() {
                                         self.memory_panel.saved[index].frozen =
@@ -1234,6 +1233,9 @@ impl CrosshairApp {
                             );
                             for hit in row_hits {
                                 response = response.union(hit);
+                            }
+                            if response.clicked() || checkbox_changed {
+                                self.memory_panel.saved_list_active = true;
                             }
                             if response.clicked() && !response.double_clicked() && !checkbox_changed
                             {
@@ -1825,7 +1827,7 @@ impl CrosshairApp {
         let mut open = true;
         let mut save = false;
         let mut cancel = false;
-        egui::Window::new("Change address")
+        let window = egui::Window::new("Change address")
             .collapsible(false)
             .resizable(false)
             .default_pos(dialog.position)
@@ -1851,6 +1853,9 @@ impl CrosshairApp {
                     }
                 });
             });
+        if window.is_some_and(|window| window.response.clicked_elsewhere()) {
+            open = false;
+        }
         if save {
             self.apply_memory_address_dialog(&dialog);
             open = false;
