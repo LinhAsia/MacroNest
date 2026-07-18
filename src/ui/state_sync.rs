@@ -387,7 +387,6 @@ impl CrosshairApp {
             copy_after_recording: self.state.quick_video_copy_after_recording,
             ffmpeg_exe: self.paths.ffmpeg_exe.clone(),
         });
-        crate::video_recorder::warm_up_async();
     }
 
     pub(crate) fn sync_quick_key_sound_config(&mut self) {

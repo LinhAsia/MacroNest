@@ -82,24 +82,9 @@ static REGION_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PRESS_HANDLED_ON_DOWN: AtomicBool = AtomicBool::new(false);
 static SESSION_ID: AtomicU64 = AtomicU64::new(0);
 static HARDWARE_ENCODING: Lazy<Mutex<Option<bool>>> = Lazy::new(|| Mutex::new(None));
-static HARDWARE_PROBE_BUSY: AtomicBool = AtomicBool::new(false);
 
 pub fn set_config(config: VideoRecorderConfig) {
     *CONFIG.lock() = config;
-}
-
-pub fn warm_up_async() {
-    let ffmpeg_exe = CONFIG.lock().ffmpeg_exe.clone();
-    if !ffmpeg_exe.exists()
-        || HARDWARE_ENCODING.lock().is_some()
-        || HARDWARE_PROBE_BUSY.swap(true, Ordering::AcqRel)
-    {
-        return;
-    }
-    thread::spawn(move || {
-        let _ = hardware_encoding_available(&ffmpeg_exe);
-        HARDWARE_PROBE_BUSY.store(false, Ordering::Release);
-    });
 }
 
 pub fn status() -> String {
@@ -425,7 +410,7 @@ fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
     if let Some(available) = *cached {
         return available;
     }
-    let available = Command::new(ffmpeg_exe)
+    let mut child = match Command::new(ffmpeg_exe)
         .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -450,8 +435,27 @@ fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
             "null",
             "-",
         ])
-        .status()
-        .is_ok_and(|status| status.success());
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => {
+            *cached = Some(false);
+            return false;
+        }
+    };
+    let deadline = Instant::now() + Duration::from_millis(1500);
+    let available = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+            Err(_) => break false,
+        }
+    };
     *cached = Some(available);
     available
 }
