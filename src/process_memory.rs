@@ -24,6 +24,7 @@ const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
 const PAGE_GUARD: u32 = 0x100;
 const SCAN_CHUNK_BYTES: usize = 4 * 1024 * 1024;
+const SCAN_BUCKET_BYTES: usize = 64 * 1024 * 1024;
 const PAGE_BYTES: usize = 4096;
 
 #[repr(C)]
@@ -266,7 +267,17 @@ pub fn scan_memory_with_progress(
 ) -> io::Result<Vec<ScanCandidate>> {
     let result_limit = result_limit.max(1);
     let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(&process);
+    let regions = scan_regions_for(&process)
+        .into_iter()
+        .flat_map(|region| {
+            (0..region.size)
+                .step_by(SCAN_BUCKET_BYTES)
+                .map(move |offset| ScanRegion {
+                    base: region.base + offset,
+                    size: (region.size - offset).min(SCAN_BUCKET_BYTES),
+                })
+        })
+        .collect::<Vec<_>>();
     let slots = regions
         .iter()
         .map(|region| region.size / value_type.width())
@@ -281,19 +292,21 @@ pub fn scan_memory_with_progress(
         .unwrap_or(2)
         .clamp(2, 8)
         .min(regions.len().max(1));
+    let total_bytes = regions
+        .iter()
+        .map(|region| region.size)
+        .fold(0usize, usize::saturating_add);
+    let target_bytes = total_bytes.div_ceil(worker_count).max(1);
     let mut buckets = vec![Vec::new(); worker_count];
-    let mut bucket_sizes = vec![0usize; worker_count];
-    let mut regions = regions;
-    regions.sort_unstable_by_key(|region| std::cmp::Reverse(region.size));
+    let mut bucket_index = 0;
+    let mut bucket_bytes = 0usize;
     for region in regions {
-        let index = bucket_sizes
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, size)| **size)
-            .map(|(index, _)| index)
-            .unwrap_or(0);
-        bucket_sizes[index] = bucket_sizes[index].saturating_add(region.size);
-        buckets[index].push(region);
+        if bucket_bytes >= target_bytes && bucket_index + 1 < worker_count {
+            bucket_index += 1;
+            bucket_bytes = 0;
+        }
+        bucket_bytes = bucket_bytes.saturating_add(region.size);
+        buckets[bucket_index].push(region);
     }
     let workers = buckets
         .into_iter()
@@ -304,13 +317,13 @@ pub fn scan_memory_with_progress(
             })
         })
         .collect::<Vec<_>>();
-    let mut found = Vec::new();
-    for worker in workers {
-        if let Ok(Ok(mut bucket)) = worker.join() {
-            found.append(&mut bucket);
-        }
+    let mut completed = workers
+        .into_iter()
+        .filter_map(|worker| worker.join().ok()?.ok());
+    let mut found = completed.next().unwrap_or_default();
+    for mut bucket in completed {
+        found.append(&mut bucket);
     }
-    found.sort_unstable_by_key(|candidate| candidate.address);
     found.truncate(result_limit);
     Ok(found)
 }
@@ -321,11 +334,50 @@ pub fn filter_scan_candidates(
     comparison: ScanComparison,
     exact: Option<ScanValue>,
 ) -> io::Result<Vec<ScanCandidate>> {
+    if candidates.is_empty() {
+        return Ok(candidates);
+    }
+    let worker_count = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(2)
+        .clamp(1, 8)
+        .min(candidates.len().div_ceil(100_000).max(1));
+    let chunk_len = candidates.len().div_ceil(worker_count);
+    let kept = thread::scope(|scope| {
+        candidates
+            .chunks_mut(chunk_len)
+            .map(|chunk| scope.spawn(move || filter_candidate_slice(pid, chunk, comparison, exact)))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|worker| {
+                worker
+                    .join()
+                    .map_err(|_| io::Error::other("memory filter worker panicked"))?
+            })
+            .collect::<io::Result<Vec<_>>>()
+    })?;
+    let mut write = 0;
+    for (chunk_index, kept) in kept.into_iter().enumerate() {
+        let start = chunk_index * chunk_len;
+        if start != write {
+            candidates.copy_within(start..start + kept, write);
+        }
+        write += kept;
+    }
+    candidates.truncate(write);
+    Ok(candidates)
+}
+
+fn filter_candidate_slice(
+    pid: u32,
+    candidates: &mut [ScanCandidate],
+    comparison: ScanComparison,
+    exact: Option<ScanValue>,
+) -> io::Result<usize> {
     let process = ScanProcess::open(pid, false)?;
-    candidates.sort_unstable_by_key(|candidate| candidate.address);
-    let mut kept = Vec::with_capacity(candidates.len());
     let mut page = [0; PAGE_BYTES];
     let mut index = 0;
+    let mut write = 0;
     while index < candidates.len() {
         let page_base = candidates[index].address & !(PAGE_BYTES - 1);
         let mut end = index + 1;
@@ -333,7 +385,8 @@ pub fn filter_scan_candidates(
             end += 1;
         }
         if let Ok(count) = process.read(page_base, &mut page) {
-            for candidate in &candidates[index..end] {
+            for read in index..end {
+                let candidate = candidates[read];
                 let offset = candidate.address - page_base;
                 let value_type = candidate.current.value_type();
                 if offset + value_type.width() > count {
@@ -343,17 +396,18 @@ pub fn filter_scan_candidates(
                     continue;
                 };
                 if scan_value_matches(comparison, current, candidate.previous, exact) {
-                    kept.push(ScanCandidate {
+                    candidates[write] = ScanCandidate {
                         address: candidate.address,
                         previous: current,
                         current,
-                    });
+                    };
+                    write += 1;
                 }
             }
         }
         index = end;
     }
-    Ok(kept)
+    Ok(write)
 }
 
 pub fn refresh_scan_candidates(pid: u32, candidates: &mut [ScanCandidate]) -> io::Result<()> {
@@ -499,12 +553,8 @@ fn scan_region_bucket(
                     for offset in (0..=count - width).step_by(step) {
                         let value = value_type.decode(&buffer[offset..]).expect("value width");
                         if exact.is_none() || exact == Some(value) {
-                            if total
-                                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                                    (current < result_limit).then_some(current + 1)
-                                })
-                                .is_err()
-                            {
+                            if total.fetch_add(1, Ordering::Relaxed) >= result_limit {
+                                total.fetch_sub(1, Ordering::Relaxed);
                                 break 'regions;
                             }
                             found.push(ScanCandidate {
