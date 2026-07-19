@@ -1,8 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, Receiver},
     },
     thread,
@@ -298,6 +298,59 @@ struct ScanJobResult {
     result: Result<Vec<ScanCandidate>, String>,
 }
 
+#[derive(Clone)]
+struct FreezeTarget {
+    address: usize,
+    value: ScanValue,
+    pointer: Option<PointerSpec>,
+}
+
+struct MemoryFreezeWorker {
+    config: Arc<Mutex<(Option<u32>, Vec<FreezeTarget>)>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl Default for MemoryFreezeWorker {
+    fn default() -> Self {
+        let config = Arc::new(Mutex::new((None, Vec::<FreezeTarget>::new())));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_config = Arc::clone(&config);
+        let worker_stop = Arc::clone(&stop);
+        let worker = thread::spawn(move || {
+            while !worker_stop.load(Ordering::Acquire) {
+                let (pid, targets) = worker_config
+                    .lock()
+                    .map(|config| (config.0, config.1.clone()))
+                    .unwrap_or_default();
+                if let Some(pid) = pid {
+                    for target in targets {
+                        let address =
+                            resolve_memory_address(pid, target.address, target.pointer.as_ref())
+                                .unwrap_or(target.address);
+                        let _ = write_scan_value(pid, address, target.value);
+                    }
+                }
+                thread::sleep(Duration::from_millis(if pid.is_some() { 25 } else { 100 }));
+            }
+        });
+        Self {
+            config,
+            stop,
+            worker: Some(worker),
+        }
+    }
+}
+
+impl Drop for MemoryFreezeWorker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 pub(crate) struct MemoryPanelState {
     process_selector: String,
     process_pid: Option<u32>,
@@ -338,6 +391,7 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     code_access_dialog: Option<CodeAccessDialog>,
     last_refresh: Instant,
+    freeze_worker: MemoryFreezeWorker,
 }
 
 impl Default for MemoryPanelState {
@@ -382,6 +436,7 @@ impl Default for MemoryPanelState {
             #[cfg(windows)]
             code_access_dialog: None,
             last_refresh: Instant::now(),
+            freeze_worker: MemoryFreezeWorker::default(),
         }
     }
 }
@@ -483,6 +538,7 @@ impl CrosshairApp {
         self.render_instruction_watch_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_code_access_dialog(ui.ctx());
+        self.sync_memory_freeze_targets();
     }
 
     pub(crate) fn render_memory_pinned_viewport(&mut self, ctx: &egui::Context) {
@@ -492,6 +548,7 @@ impl CrosshairApp {
         self.poll_memory_job();
         self.poll_memory_hotkeys(ctx);
         self.refresh_memory_values();
+        self.sync_memory_freeze_targets();
         let builder = egui::ViewportBuilder::default()
             .with_title("MacroNest — Scan results")
             .with_position(egui::pos2(0.0, 0.0))
@@ -3183,12 +3240,28 @@ impl CrosshairApp {
             {
                 saved.address = address;
             }
-            if let Some(value) = saved.frozen {
-                if write_scan_value(pid, saved.address, value).is_err() {
-                    saved.frozen = None;
-                }
-            }
             saved.current = read_scan_value(pid, saved.address, saved.value_type).ok();
+        }
+    }
+
+    fn sync_memory_freeze_targets(&mut self) {
+        let targets = self
+            .memory_panel
+            .saved
+            .iter()
+            .filter_map(|saved| {
+                saved.frozen.map(|value| FreezeTarget {
+                    address: saved.address,
+                    value,
+                    pointer: saved.pointer.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        if let Ok(mut config) = self.memory_panel.freeze_worker.config.lock() {
+            config.0 = (!targets.is_empty())
+                .then_some(self.memory_panel.process_pid)
+                .flatten();
+            config.1 = targets;
         }
     }
 
