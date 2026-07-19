@@ -25,7 +25,7 @@ use crate::{
 #[cfg(windows)]
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, WatchEvent, WriteWatch, module_offset_for_address,
-    list_processes, process_modules, resolve_module_offset,
+    instruction_writes_memory, list_processes, process_modules, resolve_module_offset,
 };
 
 use super::CrosshairApp;
@@ -2032,6 +2032,21 @@ impl CrosshairApp {
         if !self.memory_panel.code_list_open {
             return;
         }
+        let mut corrected_actions = false;
+        if let Some(pid) = self.memory_panel.process_pid {
+            for entry in &mut self.state.memory_code_list {
+                if let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset)
+                    && let Ok(writes) = instruction_writes_memory(pid, address)
+                    && entry.writes != writes
+                {
+                    entry.writes = writes;
+                    corrected_actions = true;
+                }
+            }
+        }
+        if corrected_actions {
+            self.persist();
+        }
         let mut open = true;
         let mut start = None;
         let mut delete = None;
@@ -2104,6 +2119,7 @@ impl CrosshairApp {
             self.memory_panel.status = "Instruction is already in the code list".to_owned();
             return;
         }
+        let writes = instruction_writes_memory(pid, address).unwrap_or(writes);
         self.state.memory_code_list.push(MemoryCodeEntry {
             name: instruction.to_owned(),
             module,

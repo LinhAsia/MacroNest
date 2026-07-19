@@ -561,6 +561,10 @@ fn writes_memory(instruction: &Instruction) -> bool {
         })
 }
 
+pub fn instruction_writes_memory(pid: u32, address: usize) -> io::Result<bool> {
+    Ok(writes_memory(&decode_at(&Process::open(pid)?, address)?))
+}
+
 fn format_hit_details(
     process: &Process,
     instruction: &Instruction,
