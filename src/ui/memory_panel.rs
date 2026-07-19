@@ -1015,7 +1015,9 @@ impl CrosshairApp {
                 self.memory_panel.selected_results.remove(&index);
             }
         }
-        self.memory_panel.selection_anchor = Some(index);
+        if !shift {
+            self.memory_panel.selection_anchor = Some(index);
+        }
     }
 
     fn select_saved_memory_row(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
@@ -1046,7 +1048,9 @@ impl CrosshairApp {
                 self.memory_panel.selected_saved.insert(index);
             }
         }
-        self.memory_panel.saved_selection_anchor = Some(index);
+        if !shift {
+            self.memory_panel.saved_selection_anchor = Some(index);
+        }
     }
 
     fn render_saved_memory_addresses(&mut self, ui: &mut egui::Ui) {
