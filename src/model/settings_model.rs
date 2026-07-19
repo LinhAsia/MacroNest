@@ -443,6 +443,22 @@ impl Default for GroqSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum MemoryDebuggerMethod {
+    #[default]
+    Windows,
+    Veh,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct MemoryCodeEntry {
+    pub name: String,
+    pub module: String,
+    pub offset: usize,
+    pub instruction: String,
+    pub writes: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppState {
@@ -452,6 +468,8 @@ pub struct AppState {
     pub show_window: bool,
     pub active_panel: AppPanel,
     pub memory_scan_hotkeys: Vec<(String, HotkeyBinding)>,
+    pub memory_debugger_method: MemoryDebuggerMethod,
+    pub memory_code_list: Vec<MemoryCodeEntry>,
     pub ui_language: UiLanguage,
     pub vietnamese_input_enabled: bool,
     pub vietnamese_input_mode: VietnameseInputMode,
@@ -859,6 +877,8 @@ impl Default for AppState {
             show_window: true,
             active_panel: AppPanel::Macros,
             memory_scan_hotkeys: Vec::new(),
+            memory_debugger_method: MemoryDebuggerMethod::Windows,
+            memory_code_list: Vec::new(),
             ui_language: UiLanguage::English,
             vietnamese_input_enabled: false,
             vietnamese_input_mode: VietnameseInputMode::Telex,

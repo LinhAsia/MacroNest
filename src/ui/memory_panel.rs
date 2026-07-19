@@ -13,7 +13,7 @@ use eframe::egui::{self, Button, Color32, Frame, RichText, Sense, vec2};
 
 use crate::{
     hotkey,
-    model::HotkeyBinding,
+    model::{HotkeyBinding, MemoryCodeEntry, MemoryDebuggerMethod},
     process_memory::{
         MemoryRegionInfo, ScanCandidate, ScanComparison, ScanValue, ScanValueType,
         filter_scan_candidates, query_memory_region, read_memory_bytes, read_scan_value,
@@ -23,7 +23,10 @@ use crate::{
 };
 
 #[cfg(windows)]
-use crate::memory_debugger::debugger::{AddressAccessWatch, WatchEvent, WriteWatch};
+use crate::memory_debugger::debugger::{
+    AccessWatch, AddressAccessWatch, WatchEvent, WriteWatch, module_offset_for_address,
+    resolve_module_offset,
+};
 
 use super::CrosshairApp;
 
@@ -247,6 +250,20 @@ struct InstructionWatchDialog {
     rx: Receiver<WatchEvent>,
     active: Option<ActiveInstructionWatch>,
     pinned: bool,
+    pending_code_add: Option<usize>,
+}
+
+#[cfg(windows)]
+struct CodeAccessDialog {
+    code_index: usize,
+    instruction_address: usize,
+    status: String,
+    addresses: Vec<(usize, usize)>,
+    rx: Receiver<WatchEvent>,
+    active: Option<AccessWatch>,
+    pinned: bool,
+    selected: Option<usize>,
+    value_type: ScanValueType,
 }
 
 struct ScanJobResult {
@@ -287,8 +304,12 @@ pub(crate) struct MemoryPanelState {
     edit_description_index: Option<usize>,
     address_dialog: Option<AddressDialog>,
     memory_view_dialog: Option<MemoryViewDialog>,
+    memory_settings_open: bool,
+    code_list_open: bool,
     #[cfg(windows)]
     instruction_watch_dialog: Option<InstructionWatchDialog>,
+    #[cfg(windows)]
+    code_access_dialog: Option<CodeAccessDialog>,
     last_refresh: Instant,
 }
 
@@ -326,8 +347,12 @@ impl Default for MemoryPanelState {
             edit_description_index: None,
             address_dialog: None,
             memory_view_dialog: None,
+            memory_settings_open: false,
+            code_list_open: false,
             #[cfg(windows)]
             instruction_watch_dialog: None,
+            #[cfg(windows)]
+            code_access_dialog: None,
             last_refresh: Instant::now(),
         }
     }
@@ -387,6 +412,12 @@ impl CrosshairApp {
                 if ui.button(pin_label).clicked() {
                     self.memory_panel.pinned = !self.memory_panel.pinned;
                 }
+                if ui.button("Memory settings").clicked() {
+                    self.memory_panel.memory_settings_open = true;
+                }
+                if ui.button("Advanced options").clicked() {
+                    self.memory_panel.code_list_open = true;
+                }
             });
         });
         ui.add_space(6.0);
@@ -417,8 +448,12 @@ impl CrosshairApp {
 
         self.render_memory_address_dialog(ui.ctx());
         self.render_memory_view_dialog(ui.ctx());
+        self.render_memory_settings(ui.ctx());
+        self.render_memory_code_list(ui.ctx());
         #[cfg(windows)]
         self.render_instruction_watch_dialog(ui.ctx());
+        #[cfg(windows)]
+        self.render_code_access_dialog(ui.ctx());
     }
 
     pub(crate) fn render_memory_pinned_viewport(&mut self, ctx: &egui::Context) {
@@ -1611,12 +1646,192 @@ impl CrosshairApp {
             });
     }
 
+    fn render_memory_settings(&mut self, ctx: &egui::Context) {
+        if !self.memory_panel.memory_settings_open {
+            return;
+        }
+        let mut open = true;
+        let mut changed = false;
+        egui::Window::new("Memory settings")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label("Debugger method");
+                changed |= ui
+                    .radio_value(
+                        &mut self.state.memory_debugger_method,
+                        MemoryDebuggerMethod::Windows,
+                        "Windows debugger",
+                    )
+                    .changed();
+                changed |= ui
+                    .radio_value(
+                        &mut self.state.memory_debugger_method,
+                        MemoryDebuggerMethod::Veh,
+                        "VEH debugger",
+                    )
+                    .changed();
+                if self.state.memory_debugger_method == MemoryDebuggerMethod::Veh {
+                    ui.label(
+                        RichText::new("Requires an injected VEH helper; not available yet")
+                            .small()
+                            .weak(),
+                    );
+                }
+            });
+        self.memory_panel.memory_settings_open = open;
+        if changed {
+            self.persist();
+        }
+    }
+
+    fn render_memory_code_list(&mut self, ctx: &egui::Context) {
+        if !self.memory_panel.code_list_open {
+            return;
+        }
+        let mut open = true;
+        let mut start = None;
+        let mut delete = None;
+        egui::Window::new("Advanced options — Code list")
+            .default_size(vec2(720.0, 360.0))
+            .collapsible(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    Self::memory_view_cell(ui, 190.0, "Module + offset");
+                    Self::memory_view_cell(ui, 310.0, "Instruction");
+                    Self::memory_view_cell(ui, 150.0, "Action");
+                });
+                ui.separator();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (index, entry) in self.state.memory_code_list.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            Self::memory_view_cell(
+                                ui,
+                                190.0,
+                                &format!("{}+{:X}", entry.module, entry.offset),
+                            );
+                            Self::memory_view_cell(ui, 310.0, &entry.instruction);
+                            let action = if entry.writes {
+                                "Find written addresses"
+                            } else {
+                                "Find accessed addresses"
+                            };
+                            if ui.button(action).clicked() {
+                                start = Some(index);
+                            }
+                            if ui.small_button("Delete").clicked() {
+                                delete = Some(index);
+                            }
+                        });
+                    }
+                });
+                if self.state.memory_code_list.is_empty() {
+                    ui.centered_and_justified(|ui| {
+                        ui.label(RichText::new("No saved instructions").weak());
+                    });
+                }
+            });
+        self.memory_panel.code_list_open = open;
+        if let Some(index) = delete {
+            self.state.memory_code_list.remove(index);
+            self.persist();
+        }
+        #[cfg(windows)]
+        if let Some(index) = start {
+            self.open_code_access_watch(index);
+        }
+    }
+
+    #[cfg(windows)]
+    fn add_instruction_to_code_list(&mut self, address: usize, instruction: &str, writes: bool) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            return;
+        };
+        let Ok((module, offset)) = module_offset_for_address(pid, address) else {
+            self.memory_panel.status = "Instruction is not inside a loaded module".to_owned();
+            return;
+        };
+        if self
+            .state
+            .memory_code_list
+            .iter()
+            .any(|entry| entry.module.eq_ignore_ascii_case(&module) && entry.offset == offset)
+        {
+            self.memory_panel.status = "Instruction is already in the code list".to_owned();
+            return;
+        }
+        self.state.memory_code_list.push(MemoryCodeEntry {
+            name: instruction.to_owned(),
+            module,
+            offset,
+            instruction: instruction.to_owned(),
+            writes,
+        });
+        self.memory_panel.code_list_open = true;
+        self.memory_panel.status = "Instruction added to code list".to_owned();
+        self.persist();
+    }
+
+    #[cfg(windows)]
+    fn open_code_access_watch(&mut self, code_index: usize) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process".to_owned();
+            return;
+        };
+        if self.state.memory_debugger_method == MemoryDebuggerMethod::Veh {
+            self.memory_panel.status =
+                "VEH debugger requires the injected helper and is not available yet".to_owned();
+            return;
+        }
+        let Some(entry) = self.state.memory_code_list.get(code_index) else {
+            return;
+        };
+        let instruction_address = match resolve_module_offset(pid, &entry.module, entry.offset) {
+            Ok(address) => address,
+            Err(error) => {
+                self.memory_panel.status = format!("Unable to resolve saved code: {error}");
+                return;
+            }
+        };
+        if let Some(dialog) = self.memory_panel.code_access_dialog.as_mut()
+            && let Some(active) = dialog.active.as_mut()
+        {
+            active.stop();
+        }
+        let (tx, rx) = mpsc::channel();
+        let started = AccessWatch::start(pid, instruction_address, move |event| {
+            let _ = tx.send(event);
+        });
+        let (active, status) = match started {
+            Ok(active) => (Some(active), "Attaching debugger…".to_owned()),
+            Err(error) => (None, format!("Unable to start debugger: {error}")),
+        };
+        self.memory_panel.code_access_dialog = Some(CodeAccessDialog {
+            code_index,
+            instruction_address,
+            status,
+            addresses: Vec::new(),
+            rx,
+            active,
+            pinned: true,
+            selected: None,
+            value_type: self.memory_panel.value_type,
+        });
+    }
+
     #[cfg(windows)]
     fn open_instruction_watch(&mut self, address: usize, reads_and_writes: bool) {
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process".to_owned();
             return;
         };
+        if self.state.memory_debugger_method == MemoryDebuggerMethod::Veh {
+            self.memory_panel.status =
+                "VEH debugger requires the injected helper and is not available yet".to_owned();
+            return;
+        }
         if let Some(dialog) = self.memory_panel.instruction_watch_dialog.as_mut()
             && let Some(active) = dialog.active.as_mut()
         {
@@ -1644,6 +1859,7 @@ impl CrosshairApp {
             rx,
             active,
             pinned: true,
+            pending_code_add: None,
         });
     }
 
@@ -1751,6 +1967,11 @@ impl CrosshairApp {
                     Self::render_instruction_watch_body(ui, &mut dialog);
                 });
         }
+        if let Some(index) = dialog.pending_code_add.take()
+            && let Some(hit) = dialog.hits.get(index)
+        {
+            self.add_instruction_to_code_list(hit.address, &hit.instruction, dialog.writes_only);
+        }
         if open {
             self.memory_panel.instruction_watch_dialog = Some(dialog);
             ctx.request_repaint_after(Duration::from_millis(35));
@@ -1764,6 +1985,12 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             ui.add(egui::Label::new(&dialog.status).selectable(true));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add_enabled(dialog.selected.is_some(), Button::new("Add to code list"))
+                    .clicked()
+                {
+                    dialog.pending_code_add = dialog.selected;
+                }
                 if dialog.active.is_some() && ui.button("Stop").clicked() {
                     if let Some(active) = dialog.active.as_mut() {
                         active.stop();
@@ -1831,6 +2058,181 @@ impl CrosshairApp {
                 .selectable(true),
             );
         });
+    }
+
+    #[cfg(windows)]
+    fn render_code_access_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.memory_panel.code_access_dialog.take() else {
+            return;
+        };
+        while let Ok(event) = dialog.rx.try_recv() {
+            match event {
+                WatchEvent::Started => dialog.status = "Debugger running".to_owned(),
+                WatchEvent::AccessHit { data_address } => {
+                    if let Some((_, count)) = dialog
+                        .addresses
+                        .iter_mut()
+                        .find(|(address, _)| *address == data_address)
+                    {
+                        *count += 1;
+                    } else {
+                        dialog.addresses.push((data_address, 1));
+                        dialog
+                            .addresses
+                            .sort_unstable_by_key(|(address, _)| *address);
+                    }
+                    let total: usize = dialog.addresses.iter().map(|(_, count)| count).sum();
+                    dialog.status =
+                        format!("{total} hit(s), {} address(es)", dialog.addresses.len());
+                }
+                WatchEvent::Error(error) => {
+                    dialog.status = format!("Debugger stopped: {error}");
+                    dialog.active = None;
+                }
+                WatchEvent::Stopped => {
+                    dialog.status = "Debugger stopped".to_owned();
+                    dialog.active = None;
+                }
+                WatchEvent::AddressHit { .. } => {}
+            }
+        }
+        let entry = self.state.memory_code_list.get(dialog.code_index);
+        let title = entry.map_or_else(
+            || format!("Find addresses — 0x{:X}", dialog.instruction_address),
+            |entry| format!("Find addresses — {}+{:X}", entry.module, entry.offset),
+        );
+        let mut open = true;
+        let mut unpin = false;
+        let mut add = None;
+        if dialog.pinned {
+            let builder = egui::ViewportBuilder::default()
+                .with_title(&title)
+                .with_position(egui::pos2(0.0, 0.0))
+                .with_inner_size(vec2(620.0, 520.0))
+                .with_min_inner_size(vec2(420.0, 280.0))
+                .with_clamp_size_to_monitor_size(true)
+                .with_decorations(false)
+                .with_resizable(true)
+                .with_always_on_top();
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of(("memory-code-access", dialog.code_index)),
+                builder,
+                |ctx, _| {
+                    Self::constrain_memory_popup_to_monitor(ctx);
+                    if ctx.input(|input| input.viewport().close_requested()) {
+                        open = false;
+                    }
+                    Self::render_memory_popup_titlebar(ctx, &title, &mut unpin, &mut open);
+                    egui::CentralPanel::default()
+                        .frame(Self::memory_popup_frame(ctx))
+                        .show(ctx, |ui| {
+                            add = Self::render_code_access_body(ui, &mut dialog);
+                        });
+                    Self::render_memory_popup_resize_handles(ctx);
+                },
+            );
+            if unpin {
+                dialog.pinned = false;
+            }
+        } else {
+            egui::Window::new(&title)
+                .default_size(vec2(620.0, 440.0))
+                .collapsible(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    if ui.button("Pin").clicked() {
+                        dialog.pinned = true;
+                    }
+                    add = Self::render_code_access_body(ui, &mut dialog);
+                });
+        }
+        if let Some(address) = add {
+            self.add_code_access_address(address, dialog.value_type);
+        }
+        if open {
+            self.memory_panel.code_access_dialog = Some(dialog);
+            ctx.request_repaint_after(Duration::from_millis(35));
+        } else if let Some(mut active) = dialog.active {
+            active.stop();
+        }
+    }
+
+    #[cfg(windows)]
+    fn render_code_access_body(ui: &mut egui::Ui, dialog: &mut CodeAccessDialog) -> Option<usize> {
+        let mut add = None;
+        ui.horizontal(|ui| {
+            ui.add(egui::Label::new(&dialog.status).selectable(true));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add_enabled(dialog.selected.is_some(), Button::new("Add selected"))
+                    .clicked()
+                {
+                    add = dialog
+                        .selected
+                        .and_then(|index| dialog.addresses.get(index))
+                        .map(|(address, _)| *address);
+                }
+                if dialog.active.is_some() && ui.button("Stop").clicked() {
+                    if let Some(active) = dialog.active.as_mut() {
+                        active.stop();
+                    }
+                    dialog.active = None;
+                    dialog.status = "Debugger stopped".to_owned();
+                }
+            });
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            Self::memory_view_cell(ui, 240.0, "Address");
+            Self::memory_view_cell(ui, 120.0, "Hits");
+        });
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (index, (address, count)) in dialog.addresses.iter().enumerate() {
+                let response = ui
+                    .horizontal(|ui| {
+                        Self::memory_view_cell(ui, 240.0, &format!("0x{address:X}"));
+                        Self::memory_view_cell(ui, 120.0, &count.to_string());
+                    })
+                    .response;
+                if response.clicked() {
+                    dialog.selected = Some(index);
+                }
+                if response.double_clicked() {
+                    add = Some(*address);
+                }
+            }
+        });
+        if dialog.addresses.is_empty() {
+            ui.centered_and_justified(|ui| {
+                ui.label("Interact with the game to capture addresses");
+            });
+        }
+        add
+    }
+
+    #[cfg(windows)]
+    fn add_code_access_address(&mut self, address: usize, value_type: ScanValueType) {
+        if self
+            .memory_panel
+            .saved
+            .iter()
+            .any(|saved| saved.address == address && saved.value_type == value_type)
+        {
+            return;
+        }
+        let current = self
+            .memory_panel
+            .process_pid
+            .and_then(|pid| read_scan_value(pid, address, value_type).ok());
+        self.memory_panel.saved.push(SavedMemoryAddress {
+            address,
+            value_type,
+            current,
+            description: String::new(),
+            pointer: None,
+            frozen: None,
+        });
+        self.memory_panel.status = format!("Address 0x{address:X} added");
     }
 
     fn render_memory_view_dialog(&mut self, ctx: &egui::Context) {

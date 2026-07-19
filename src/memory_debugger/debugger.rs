@@ -17,7 +17,7 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, DBG_CONTINUE, DBG_EXCEPTION_NOT_HANDLED, EXCEPTION_BREAKPOINT,
-        EXCEPTION_SINGLE_STEP, HANDLE,
+        EXCEPTION_SINGLE_STEP, HANDLE, INVALID_HANDLE_VALUE,
     },
     System::{
         Diagnostics::Debug::{
@@ -27,12 +27,66 @@ use windows_sys::Win32::{
             EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT,
             GetThreadContext, SetThreadContext, WaitForDebugEvent,
         },
+        Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW,
+            TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32,
+        },
         Threading::{
             IsWow64Process, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread,
             SuspendThread,
         },
     },
 };
+
+pub fn module_offset_for_address(pid: u32, address: usize) -> io::Result<(String, usize)> {
+    for (name, base, size) in process_modules(pid)? {
+        if (base..base.saturating_add(size)).contains(&address) {
+            return Ok((name, address - base));
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "instruction is not inside a loaded module",
+    ))
+}
+
+pub fn resolve_module_offset(pid: u32, module: &str, offset: usize) -> io::Result<usize> {
+    process_modules(pid)?
+        .into_iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case(module))
+        .and_then(|(_, base, size)| (offset < size).then_some(base + offset))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "module is not loaded"))
+}
+
+fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
+    let snapshot =
+        unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut modules = Vec::new();
+    let mut entry = MODULEENTRY32W {
+        dwSize: std::mem::size_of::<MODULEENTRY32W>() as u32,
+        ..MODULEENTRY32W::default()
+    };
+    let mut ok = unsafe { Module32FirstW(snapshot, &mut entry) };
+    while ok != 0 {
+        let end = entry
+            .szModule
+            .iter()
+            .position(|character| *character == 0)
+            .unwrap_or(entry.szModule.len());
+        modules.push((
+            String::from_utf16_lossy(&entry.szModule[..end]),
+            entry.modBaseAddr as usize,
+            entry.modBaseSize as usize,
+        ));
+        entry.dwSize = std::mem::size_of::<MODULEENTRY32W>() as u32;
+        ok = unsafe { Module32NextW(snapshot, &mut entry) };
+    }
+    unsafe { CloseHandle(snapshot) };
+    Ok(modules)
+}
 
 const ERROR_SEM_TIMEOUT: i32 = 121;
 const MAX_ACCESS_HITS: usize = 100;
