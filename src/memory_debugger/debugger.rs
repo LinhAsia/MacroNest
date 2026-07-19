@@ -474,6 +474,79 @@ fn format_hit_details(
     data_address: usize,
     action: &str,
 ) -> String {
+    let action = if action == "ghi" { "write" } else { "access" };
+    let mut text = format!(
+        "DISASSEMBLY (<< marks the {action} instruction; following lines are subsequent code)\r\n"
+    );
+    let mut current = *instruction;
+    for index in 0..6 {
+        let mut bytes = [0u8; 15];
+        let read = process
+            .read(current.ip() as usize, &mut bytes[..current.len()])
+            .unwrap_or(0);
+        let encoded = bytes[..read]
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut formatter = IntelFormatter::new();
+        let mut assembly = String::new();
+        formatter.format(&current, &mut assembly);
+        text.push_str(&format!(
+            "0x{:016X}  {:<32}  {}{}\r\n",
+            current.ip(),
+            encoded,
+            assembly,
+            if index == 0 { "  <<" } else { "" }
+        ));
+        let Ok(next) = decode_at(process, current.next_ip() as usize) else {
+            break;
+        };
+        current = next;
+    }
+    text.push_str(&format!(
+        "\r\nREGISTER SNAPSHOT AFTER MOST RECENT {}\r\n\
+RAX={:016X}  RBX={:016X}\r\n\
+RCX={:016X}  RDX={:016X}\r\n\
+RSI={:016X}  RDI={:016X}\r\n\
+RBP={:016X}  RSP={:016X}\r\n\
+R8 ={:016X}  R9 ={:016X}\r\n\
+R10={:016X}  R11={:016X}\r\n\
+R12={:016X}  R13={:016X}\r\n\
+R14={:016X}  R15={:016X}\r\n\
+RIP(after instruction)={:016X}  RFLAGS={:08X}\r\n\
+ACTUAL DATA ADDRESS=0x{:016X}\r\n",
+        action.to_uppercase(),
+        context.Rax,
+        context.Rbx,
+        context.Rcx,
+        context.Rdx,
+        context.Rsi,
+        context.Rdi,
+        context.Rbp,
+        context.Rsp,
+        context.R8,
+        context.R9,
+        context.R10,
+        context.R11,
+        context.R12,
+        context.R13,
+        context.R14,
+        context.R15,
+        context.Rip,
+        context.EFlags,
+        data_address,
+    ));
+    text
+}
+
+fn format_hit_details_legacy(
+    process: &Process,
+    instruction: &Instruction,
+    context: &CONTEXT,
+    data_address: usize,
+    action: &str,
+) -> String {
     let mut text = format!(
         "DISASSEMBLY (dÃ²ng << lÃ  instruction {action}; cÃ¡c dÃ²ng sau lÃ  code káº¿ tiáº¿p)\r\n"
     );

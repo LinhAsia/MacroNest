@@ -461,6 +461,21 @@ impl CrosshairApp {
         }
     }
 
+    fn constrain_memory_popup_to_monitor(ctx: &egui::Context) {
+        let Some((rect, monitor)) =
+            ctx.input(|input| Some((input.viewport().outer_rect?, input.viewport().monitor_size?)))
+        else {
+            return;
+        };
+        let position = egui::pos2(
+            rect.min.x.clamp(0.0, (monitor.x - rect.width()).max(0.0)),
+            rect.min.y.clamp(0.0, (monitor.y - rect.height()).max(0.0)),
+        );
+        if position != rect.min {
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));
+        }
+    }
+
     fn render_memory_popup_titlebar(ctx: &egui::Context, title: &str, unpin: &mut bool) {
         egui::TopBottomPanel::top("memory-tool-pinned-titlebar")
             .exact_height(38.0)
@@ -1362,7 +1377,7 @@ impl CrosshairApp {
                                         kind: MemoryViewKind::Bytes,
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
-                                        pinned: false,
+                                        pinned: true,
                                     });
                                     ui.close();
                                 }
@@ -1372,7 +1387,7 @@ impl CrosshairApp {
                                         kind: MemoryViewKind::Structure,
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
-                                        pinned: false,
+                                        pinned: true,
                                     });
                                     ui.close();
                                 }
@@ -1476,7 +1491,7 @@ impl CrosshairApp {
             selected: None,
             rx,
             active,
-            pinned: false,
+            pinned: true,
         });
     }
 
@@ -1535,10 +1550,15 @@ impl CrosshairApp {
             dialog.address
         );
         if dialog.pinned {
+            let monitor_height = ctx
+                .input(|input| input.viewport().monitor_size)
+                .map_or(900.0, |size| size.y);
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
-                .with_inner_size(vec2(760.0, 500.0))
+                .with_position(egui::pos2(0.0, 0.0))
+                .with_inner_size(vec2(760.0, monitor_height))
                 .with_min_inner_size(vec2(520.0, 300.0))
+                .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_always_on_top();
@@ -1551,6 +1571,7 @@ impl CrosshairApp {
                 )),
                 builder,
                 |ctx, _| {
+                    Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         unpin = true;
                     }
@@ -1605,11 +1626,39 @@ impl CrosshairApp {
             .max_height(210.0)
             .show(ui, |ui| {
                 for (index, hit) in dialog.hits.iter().enumerate() {
-                    let text = format!(
-                        "0x{:016X}   {:<40}   {} hit(s)",
-                        hit.address, hit.instruction, hit.count
-                    );
-                    if ui.add(egui::Label::new(text).selectable(true)).clicked() {
+                    let instruction_width = (ui.available_width() - 290.0).max(180.0);
+                    let response = ui
+                        .horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            let address = Self::memory_label_cell(
+                                ui,
+                                190.0,
+                                22.0,
+                                egui::Label::new(
+                                    RichText::new(format!("0x{:016X}", hit.address)).monospace(),
+                                )
+                                .selectable(true),
+                            );
+                            let instruction = Self::memory_label_cell(
+                                ui,
+                                instruction_width,
+                                22.0,
+                                egui::Label::new(RichText::new(&hit.instruction).monospace())
+                                    .selectable(true),
+                            );
+                            let count = Self::memory_label_cell(
+                                ui,
+                                100.0,
+                                22.0,
+                                egui::Label::new(
+                                    RichText::new(format!("{} hit(s)", hit.count)).monospace(),
+                                )
+                                .selectable(true),
+                            );
+                            address.union(instruction).union(count)
+                        })
+                        .inner;
+                    if response.clicked() {
                         dialog.selected = Some(index);
                     }
                 }
@@ -1648,10 +1697,15 @@ impl CrosshairApp {
             .and_then(|pid| read_memory_bytes(pid, address, 512).ok());
         let mut open = true;
         if dialog.pinned {
+            let monitor_height = ctx
+                .input(|input| input.viewport().monitor_size)
+                .map_or(900.0, |size| size.y);
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
-                .with_inner_size(vec2(720.0, 430.0))
+                .with_position(egui::pos2(0.0, 0.0))
+                .with_inner_size(vec2(720.0, monitor_height))
                 .with_min_inner_size(vec2(520.0, 280.0))
+                .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_always_on_top();
@@ -1664,6 +1718,7 @@ impl CrosshairApp {
                 )),
                 builder,
                 |ctx, _| {
+                    Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         unpin = true;
                     }
