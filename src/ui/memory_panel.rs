@@ -15,9 +15,9 @@ use crate::{
     hotkey,
     model::{HotkeyBinding, MemoryCodeEntry, MemoryDebuggerMethod},
     process_memory::{
-        MemoryRegionInfo, ScanCandidate, ScanComparison, ScanValue, ScanValueType,
+        MemoryRegionInfo, PointerPath, ScanCandidate, ScanComparison, ScanValue, ScanValueType,
         filter_scan_candidates, query_memory_region, read_memory_bytes, read_scan_value,
-        refresh_scan_candidates, scan_memory_with_progress, write_scan_value,
+        refresh_scan_candidates, scan_memory_with_progress, scan_pointer_paths, write_scan_value,
     },
     window_list,
 };
@@ -25,7 +25,7 @@ use crate::{
 #[cfg(windows)]
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, WatchEvent, WriteWatch, module_offset_for_address,
-    resolve_module_offset,
+    process_modules, resolve_module_offset,
 };
 
 use super::CrosshairApp;
@@ -119,7 +119,31 @@ struct SavedMemoryAddress {
 #[derive(Clone)]
 struct PointerSpec {
     base: usize,
+    module: Option<(String, usize)>,
     offsets: Vec<usize>,
+}
+
+struct StablePointerCandidate {
+    path: PointerPath,
+    valid: Option<bool>,
+    resolved_base: Option<usize>,
+}
+
+struct StablePointerJobResult {
+    pid: u32,
+    result: Result<Vec<PointerPath>, String>,
+}
+
+struct StablePointerDialog {
+    source_address: usize,
+    source_pid: u32,
+    value_type: ScanValueType,
+    expected_value: ScanValue,
+    status: String,
+    candidates: Vec<StablePointerCandidate>,
+    selected: Option<usize>,
+    rx: Option<Receiver<StablePointerJobResult>>,
+    progress: Arc<AtomicUsize>,
 }
 
 struct AddressDialog {
@@ -305,6 +329,7 @@ pub(crate) struct MemoryPanelState {
     memory_view_dialog: Option<MemoryViewDialog>,
     memory_settings_open: bool,
     code_list_open: bool,
+    stable_pointer_dialog: Option<StablePointerDialog>,
     #[cfg(windows)]
     instruction_watch_dialog: Option<InstructionWatchDialog>,
     #[cfg(windows)]
@@ -347,6 +372,7 @@ impl Default for MemoryPanelState {
             memory_view_dialog: None,
             memory_settings_open: false,
             code_list_open: false,
+            stable_pointer_dialog: None,
             #[cfg(windows)]
             instruction_watch_dialog: None,
             #[cfg(windows)]
@@ -448,6 +474,7 @@ impl CrosshairApp {
         self.render_memory_view_dialog(ui.ctx());
         self.render_memory_settings(ui.ctx());
         self.render_memory_code_list(ui.ctx());
+        self.render_stable_pointer_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_instruction_watch_dialog(ui.ctx());
         #[cfg(windows)]
@@ -1334,6 +1361,7 @@ impl CrosshairApp {
                             let mut edit_value = false;
                             let mut delete = false;
                             let mut instruction_watch = None;
+                            let mut find_stable_pointer = false;
                             let mut row_hits = Vec::new();
                             let mut checkbox_changed = false;
                             let row_width = ui.available_width();
@@ -1555,6 +1583,10 @@ impl CrosshairApp {
                                     instruction_watch = Some(false);
                                     ui.close();
                                 }
+                                if ui.button("Find stable pointer automatically").clicked() {
+                                    find_stable_pointer = true;
+                                    ui.close();
+                                }
                                 if ui.button("Browse this memory region").clicked() {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
@@ -1596,6 +1628,9 @@ impl CrosshairApp {
                             #[cfg(windows)]
                             if let Some(reads_and_writes) = instruction_watch {
                                 self.open_instruction_watch(saved.address, reads_and_writes);
+                            }
+                            if find_stable_pointer {
+                                self.start_stable_pointer_scan(&saved);
                             }
                             if open_address {
                                 let (address, offsets, pointer) =
@@ -1820,6 +1855,251 @@ impl CrosshairApp {
             selected: None,
             value_type: self.memory_panel.value_type,
         });
+    }
+
+    #[cfg(windows)]
+    fn start_stable_pointer_scan(&mut self, saved: &SavedMemoryAddress) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process".to_owned();
+            return;
+        };
+        let Some(expected_value) = saved.current else {
+            self.memory_panel.status = "Unable to read this address".to_owned();
+            return;
+        };
+        let modules = match process_modules(pid) {
+            Ok(modules) => modules,
+            Err(error) => {
+                self.memory_panel.status = format!("Unable to list process modules: {error}");
+                return;
+            }
+        };
+        let target = saved.address;
+        let progress = Arc::new(AtomicUsize::new(0));
+        let worker_progress = Arc::clone(&progress);
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let result = scan_pointer_paths(pid, target, &modules, 0x1000, 5, 128, worker_progress)
+                .map_err(|error| error.to_string());
+            let _ = tx.send(StablePointerJobResult { pid, result });
+        });
+        self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
+            source_address: target,
+            source_pid: pid,
+            value_type: saved.value_type,
+            expected_value,
+            status: "Scanning pointer paths…".to_owned(),
+            candidates: Vec::new(),
+            selected: None,
+            rx: Some(rx),
+            progress,
+        });
+    }
+
+    #[cfg(not(windows))]
+    fn start_stable_pointer_scan(&mut self, _saved: &SavedMemoryAddress) {
+        self.memory_panel.status = "Stable pointer scan is available on Windows only".to_owned();
+    }
+
+    fn render_stable_pointer_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.memory_panel.stable_pointer_dialog.take() else {
+            return;
+        };
+        if let Some(rx) = dialog.rx.as_ref()
+            && let Ok(outcome) = rx.try_recv()
+        {
+            dialog.rx = None;
+            if outcome.pid != dialog.source_pid {
+                dialog.status = "The source process changed during pointer scan".to_owned();
+            } else {
+                match outcome.result {
+                    Ok(paths) => {
+                        dialog.candidates = paths
+                            .into_iter()
+                            .map(|path| StablePointerCandidate {
+                                path,
+                                valid: None,
+                                resolved_base: None,
+                            })
+                            .collect();
+                        dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+                        dialog.status = if dialog.candidates.is_empty() {
+                            "No module-based pointer paths found".to_owned()
+                        } else {
+                            format!(
+                                "{} candidate(s). Restart the game, restore the target value, select the new process, then Validate.",
+                                dialog.candidates.len()
+                            )
+                        };
+                    }
+                    Err(error) => dialog.status = format!("Pointer scan failed: {error}"),
+                }
+            }
+        }
+
+        let mut open = true;
+        let mut validate = false;
+        let mut add = false;
+        egui::Window::new(format!(
+            "Find stable pointer — 0x{:X}",
+            dialog.source_address
+        ))
+        .default_size(vec2(720.0, 430.0))
+        .min_size(vec2(520.0, 300.0))
+        .collapsible(false)
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.label(&dialog.status);
+            if dialog.rx.is_some() {
+                let scanned = dialog.progress.load(Ordering::Relaxed);
+                ui.label(format!("Read {:.1} MB", scanned as f64 / 1_048_576.0));
+                ui.spinner();
+                return;
+            }
+            ui.horizontal(|ui| {
+                let new_process = self
+                    .memory_panel
+                    .process_pid
+                    .is_some_and(|pid| pid != dialog.source_pid);
+                if ui
+                    .add_enabled(
+                        new_process && !dialog.candidates.is_empty(),
+                        Button::new("Validate after restart"),
+                    )
+                    .clicked()
+                {
+                    validate = true;
+                }
+                if ui
+                    .add_enabled(
+                        dialog.selected.is_some(),
+                        Button::new("Add selected pointer"),
+                    )
+                    .clicked()
+                {
+                    add = true;
+                }
+            });
+            ui.separator();
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for (index, candidate) in dialog.candidates.iter().enumerate() {
+                    let state = match candidate.valid {
+                        Some(true) => "✓",
+                        Some(false) => "×",
+                        None => "?",
+                    };
+                    let offsets = candidate
+                        .path
+                        .offsets
+                        .iter()
+                        .map(|offset| format!("{offset:X}"))
+                        .collect::<Vec<_>>()
+                        .join(" → ");
+                    let text = format!(
+                        "{state}  {}+{:X}    [{}]",
+                        candidate.path.module, candidate.path.module_offset, offsets
+                    );
+                    if ui
+                        .selectable_label(dialog.selected == Some(index), text)
+                        .clicked()
+                    {
+                        dialog.selected = Some(index);
+                    }
+                }
+            });
+        });
+
+        if validate {
+            self.validate_stable_pointer_candidates(&mut dialog);
+        }
+        if add {
+            self.add_stable_pointer_candidate(&dialog);
+        }
+        if open {
+            if dialog.rx.is_some() {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            self.memory_panel.stable_pointer_dialog = Some(dialog);
+        }
+    }
+
+    #[cfg(windows)]
+    fn validate_stable_pointer_candidates(&mut self, dialog: &mut StablePointerDialog) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            return;
+        };
+        let mut valid = 0usize;
+        for candidate in &mut dialog.candidates {
+            let Ok(base) =
+                resolve_module_offset(pid, &candidate.path.module, candidate.path.module_offset)
+            else {
+                candidate.valid = Some(false);
+                continue;
+            };
+            let spec = PointerSpec {
+                base,
+                module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
+                offsets: candidate.path.offsets.clone(),
+            };
+            let resolved = resolve_memory_address(pid, base, Some(&spec)).ok();
+            candidate.resolved_base = Some(base);
+            candidate.valid = Some(
+                resolved.and_then(|address| read_scan_value(pid, address, dialog.value_type).ok())
+                    == Some(dialog.expected_value),
+            );
+            valid += usize::from(candidate.valid == Some(true));
+        }
+        dialog
+            .candidates
+            .sort_by_key(|candidate| candidate.valid != Some(true));
+        dialog.selected = (valid > 0).then_some(0);
+        dialog.status = format!("Validated {valid} stable candidate(s) in PID {pid}");
+    }
+
+    #[cfg(not(windows))]
+    fn validate_stable_pointer_candidates(&mut self, _dialog: &mut StablePointerDialog) {}
+
+    fn add_stable_pointer_candidate(&mut self, dialog: &StablePointerDialog) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            return;
+        };
+        let Some(candidate) = dialog
+            .selected
+            .and_then(|index| dialog.candidates.get(index))
+        else {
+            return;
+        };
+        #[cfg(windows)]
+        let Ok(base) =
+            resolve_module_offset(pid, &candidate.path.module, candidate.path.module_offset)
+        else {
+            self.memory_panel.status = "Pointer module is not loaded".to_owned();
+            return;
+        };
+        #[cfg(not(windows))]
+        let base = candidate.resolved_base.unwrap_or_default();
+        let pointer = PointerSpec {
+            base,
+            module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
+            offsets: candidate.path.offsets.clone(),
+        };
+        let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) else {
+            self.memory_panel.status = "Unable to resolve pointer".to_owned();
+            return;
+        };
+        let current = read_scan_value(pid, address, dialog.value_type).ok();
+        self.memory_panel.saved.push(SavedMemoryAddress {
+            address,
+            value_type: dialog.value_type,
+            current,
+            description: format!(
+                "{}+{:X}",
+                candidate.path.module, candidate.path.module_offset
+            ),
+            pointer: Some(pointer),
+            frozen: None,
+        });
+        self.memory_panel.status = "Stable pointer added to Address list".to_owned();
     }
 
     #[cfg(windows)]
@@ -2591,7 +2871,11 @@ impl CrosshairApp {
                 self.memory_panel.status = "Invalid pointer offsets".to_owned();
                 return;
             };
-            Some(PointerSpec { base, offsets })
+            Some(PointerSpec {
+                base,
+                module: None,
+                offsets,
+            })
         } else {
             None
         };
@@ -3262,6 +3546,14 @@ fn resolve_memory_address(
     let Some(pointer) = pointer else {
         return Ok(base);
     };
+    #[cfg(windows)]
+    let mut address = pointer
+        .module
+        .as_ref()
+        .map_or(Ok(pointer.base), |(module, offset)| {
+            resolve_module_offset(pid, module, *offset)
+        })?;
+    #[cfg(not(windows))]
     let mut address = pointer.base;
     for offset in &pointer.offsets {
         let value = read_scan_value(pid, address, ScanValueType::I64)?;

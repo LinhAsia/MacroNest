@@ -58,7 +58,7 @@ pub fn resolve_module_offset(pid: u32, module: &str, offset: usize) -> io::Resul
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "module is not loaded"))
 }
 
-fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
+pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
     let snapshot =
         unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid) };
     if snapshot == INVALID_HANDLE_VALUE {

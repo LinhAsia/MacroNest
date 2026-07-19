@@ -123,6 +123,119 @@ pub struct ScanCandidate {
     pub current: ScanValue,
 }
 
+#[derive(Clone, Debug)]
+pub struct PointerPath {
+    pub module: String,
+    pub module_offset: usize,
+    pub offsets: Vec<usize>,
+}
+
+pub fn scan_pointer_paths(
+    pid: u32,
+    target: usize,
+    modules: &[(String, usize, usize)],
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+    progress: Arc<AtomicUsize>,
+) -> io::Result<Vec<PointerPath>> {
+    // ponytail: these caps keep a pathological process from exhausting app memory; a disk-backed
+    // pointer map is the upgrade path for larger scans.
+    const MAX_POINTERS: usize = 8_000_000;
+    let process = ScanProcess::open(pid, false)?;
+    let regions = scan_regions_for(&process);
+    let mut pointers = Vec::new();
+    let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
+    for region in regions {
+        for offset in (0..region.size).step_by(SCAN_CHUNK_BYTES) {
+            let address = region.base + offset;
+            let wanted = (region.size - offset).min(SCAN_CHUNK_BYTES);
+            let Ok(read) = process.read(address, &mut buffer[..wanted]) else {
+                continue;
+            };
+            for byte_offset in (0..read.saturating_sub(7)).step_by(size_of::<usize>()) {
+                let value = usize::from_le_bytes(
+                    buffer[byte_offset..byte_offset + size_of::<usize>()]
+                        .try_into()
+                        .unwrap(),
+                );
+                if (0x1_0000..=0x0000_7FFF_FFFF_FFFF).contains(&value) {
+                    pointers.push((value, address + byte_offset));
+                    if pointers.len() >= MAX_POINTERS {
+                        break;
+                    }
+                }
+            }
+            progress.fetch_add(read, Ordering::Relaxed);
+            if pointers.len() >= MAX_POINTERS {
+                break;
+            }
+        }
+        if pointers.len() >= MAX_POINTERS {
+            break;
+        }
+    }
+    Ok(find_pointer_paths(
+        pointers,
+        target,
+        modules,
+        max_offset,
+        max_depth,
+        result_limit,
+    ))
+}
+
+fn find_pointer_paths(
+    mut pointers: Vec<(usize, usize)>,
+    target: usize,
+    modules: &[(String, usize, usize)],
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+) -> Vec<PointerPath> {
+    const MAX_FRONTIER: usize = 50_000;
+    pointers.sort_unstable_by_key(|(value, _)| *value);
+    let mut results = Vec::new();
+    let mut frontier = vec![(target, Vec::<usize>::new())];
+    for _ in 0..max_depth.max(1) {
+        let mut next = Vec::new();
+        for (node, suffix) in frontier {
+            let minimum = node.saturating_sub(max_offset);
+            let start = pointers.partition_point(|(value, _)| *value < minimum);
+            let end = pointers.partition_point(|(value, _)| *value <= node);
+            for &(value, location) in &pointers[start..end] {
+                let mut reverse_offsets = suffix.clone();
+                reverse_offsets.push(node - value);
+                if let Some((module, base, _)) = modules
+                    .iter()
+                    .find(|(_, base, size)| (*base..base.saturating_add(*size)).contains(&location))
+                {
+                    let mut offsets = reverse_offsets.clone();
+                    offsets.reverse();
+                    results.push(PointerPath {
+                        module: module.clone(),
+                        module_offset: location - *base,
+                        offsets,
+                    });
+                    if results.len() >= result_limit.max(1) {
+                        return results;
+                    }
+                }
+                if next.len() < MAX_FRONTIER {
+                    next.push((location, reverse_offsets));
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        next.sort_unstable_by_key(|(address, _)| *address);
+        next.dedup_by_key(|(address, _)| *address);
+        frontier = next;
+    }
+    results
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScanComparison {
     Exact,
@@ -738,5 +851,21 @@ mod tests {
             ScanValue::F32(nan),
             None,
         ));
+    }
+
+    #[test]
+    fn pointer_paths_keep_offsets_in_dereference_order() {
+        let paths = find_pointer_paths(
+            vec![(0x2FE0, 0x2000), (0x1FF0, 0x1010)],
+            0x3000,
+            &[("game.exe".to_owned(), 0x1000, 0x100)],
+            0x100,
+            3,
+            8,
+        );
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].module, "game.exe");
+        assert_eq!(paths[0].module_offset, 0x10);
+        assert_eq!(paths[0].offsets, vec![0x10, 0x20]);
     }
 }
