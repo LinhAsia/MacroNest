@@ -1455,7 +1455,7 @@ impl CrosshairApp {
                                         response.request_focus();
                                         row_hits.push(response.clone());
                                         if response.clicked_elsewhere()
-                                            || (response.lost_focus()
+                                            || (response.has_focus()
                                                 && ui.input(|input| {
                                                     input.key_pressed(egui::Key::Enter)
                                                 }))
@@ -1499,11 +1499,11 @@ impl CrosshairApp {
                                         description_response.request_focus();
                                         row_hits.push(description_response.clone());
                                         if description_response.clicked_elsewhere()
-                                            || description_response.lost_focus()
-                                            || ui.input(|input| {
-                                                input.key_pressed(egui::Key::Enter)
-                                                    || input.key_pressed(egui::Key::Escape)
-                                            })
+                                            || (description_response.has_focus()
+                                                && ui.input(|input| {
+                                                    input.key_pressed(egui::Key::Enter)
+                                                        || input.key_pressed(egui::Key::Escape)
+                                                }))
                                         {
                                             self.memory_panel.edit_description_index = None;
                                         }
@@ -2000,7 +2000,33 @@ impl CrosshairApp {
                 }
             });
             ui.separator();
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            const STATUS_WIDTH: f32 = 108.0;
+            const ROOT_WIDTH: f32 = 195.0;
+            const OFFSETS_WIDTH: f32 = 170.0;
+            const ADDRESS_WIDTH: f32 = 145.0;
+            const VALUE_WIDTH: f32 = 92.0;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for (width, title) in [
+                    (STATUS_WIDTH, "Status"),
+                    (ROOT_WIDTH, "Root"),
+                    (OFFSETS_WIDTH, "Offsets"),
+                    (ADDRESS_WIDTH, "Resolved"),
+                    (VALUE_WIDTH, "Value"),
+                ] {
+                    Self::memory_label_cell(
+                        ui,
+                        width,
+                        20.0,
+                        egui::Label::new(RichText::new(title).strong()).truncate(),
+                    );
+                }
+            });
+            ui.separator();
+            egui::ScrollArea::both().show(ui, |ui| {
+                ui.set_min_width(
+                    STATUS_WIDTH + ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH,
+                );
                 for (index, candidate) in dialog.candidates.iter().enumerate() {
                     let state = match candidate.valid {
                         Some(true) => "VERIFIED",
@@ -2015,23 +2041,54 @@ impl CrosshairApp {
                         .map(|offset| format!("{offset:X}"))
                         .collect::<Vec<_>>()
                         .join(" → ");
-                    let resolved = candidate
-                        .resolved_address
-                        .map_or_else(String::new, |address| {
-                            let value = candidate.observed_value.map_or_else(
-                                || "unreadable".to_owned(),
-                                |value| editable_scan_value(value, false),
-                            );
-                            format!("    => 0x{address:X}, value {value}")
-                        });
-                    let text = format!(
-                        "{state}  {}+{:X}    [{}]{resolved}",
-                        candidate.path.module, candidate.path.module_offset, offsets
+                    let root = format!(
+                        "{}+{:X}",
+                        candidate.path.module, candidate.path.module_offset
                     );
-                    if ui
-                        .selectable_label(dialog.selected == Some(index), text)
-                        .clicked()
-                    {
+                    let address = candidate
+                        .resolved_address
+                        .map_or_else(|| "—".to_owned(), |address| format!("0x{address:X}"));
+                    let value = candidate
+                        .observed_value
+                        .map_or_else(|| "—".to_owned(), |value| editable_scan_value(value, false));
+                    let row_rect = egui::Rect::from_min_size(
+                        ui.next_widget_position(),
+                        vec2(ui.available_width(), 24.0),
+                    );
+                    let response = ui.interact(
+                        row_rect,
+                        ui.id().with(("stable-pointer-row", index)),
+                        Sense::click(),
+                    );
+                    if dialog.selected == Some(index) {
+                        ui.painter().rect_filled(
+                            row_rect,
+                            2.0,
+                            ui.visuals().selection.bg_fill.gamma_multiply(0.55),
+                        );
+                    }
+                    ui.allocate_ui_with_layout(
+                        row_rect.size(),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            for (width, text) in [
+                                (STATUS_WIDTH, state.to_owned()),
+                                (ROOT_WIDTH, root),
+                                (OFFSETS_WIDTH, offsets),
+                                (ADDRESS_WIDTH, address),
+                                (VALUE_WIDTH, value),
+                            ] {
+                                Self::memory_label_cell(
+                                    ui,
+                                    width,
+                                    24.0,
+                                    egui::Label::new(text).truncate().selectable(false),
+                                );
+                            }
+                        },
+                    );
+                    if response.clicked() {
                         dialog.selected = Some(index);
                     }
                 }
