@@ -3289,7 +3289,7 @@ fn compact_hotkey_label(label: &str) -> String {
 
 fn parse_scan_value(text: &str, value_type: ScanValueType, hex: bool) -> Option<ScanValue> {
     let text = text.trim().replace('_', "");
-    match value_type {
+    let direct = match value_type {
         ScanValueType::F32 => text
             .parse::<f32>()
             .ok()
@@ -3314,6 +3314,41 @@ fn parse_scan_value(text: &str, value_type: ScanValueType, hex: bool) -> Option<
         ScanValueType::I16 => text.parse().ok().map(ScanValue::I16),
         ScanValueType::I32 => text.parse().ok().map(ScanValue::I32),
         ScanValueType::I64 => text.parse().ok().map(ScanValue::I64),
+    };
+    if direct.is_some() || hex {
+        return direct;
+    }
+    if !text.chars().any(|character| "+-*/^()".contains(character))
+        || !text.chars().all(|character| {
+            character.is_ascii_digit()
+                || character.is_ascii_whitespace()
+                || ".+-*/^()".contains(character)
+        })
+    {
+        return None;
+    }
+    let value = crate::overlay::evaluate_math_expression_f64(&text);
+    if !value.is_finite() {
+        return None;
+    }
+    match value_type {
+        ScanValueType::F32 if value >= f32::MIN as f64 && value <= f32::MAX as f64 => {
+            Some(ScanValue::F32(value as f32))
+        }
+        ScanValueType::F64 => Some(ScanValue::F64(value)),
+        ScanValueType::I8 if value >= i8::MIN as f64 && value <= i8::MAX as f64 => {
+            Some(ScanValue::I8(value.trunc() as i8))
+        }
+        ScanValueType::I16 if value >= i16::MIN as f64 && value <= i16::MAX as f64 => {
+            Some(ScanValue::I16(value.trunc() as i16))
+        }
+        ScanValueType::I32 if value >= i32::MIN as f64 && value <= i32::MAX as f64 => {
+            Some(ScanValue::I32(value.trunc() as i32))
+        }
+        ScanValueType::I64 if value >= i64::MIN as f64 && value <= i64::MAX as f64 => {
+            Some(ScanValue::I64(value.trunc() as i64))
+        }
+        _ => None,
     }
 }
 
@@ -3645,6 +3680,18 @@ mod tests {
         assert_eq!(
             parse_scan_value("FFFFFFFF", ScanValueType::I32, true),
             Some(ScanValue::I32(-1))
+        );
+        assert_eq!(
+            parse_scan_value("4532324+2", ScanValueType::I32, false),
+            Some(ScanValue::I32(4532326))
+        );
+        assert_eq!(
+            parse_scan_value("3232/3", ScanValueType::I32, false),
+            Some(ScanValue::I32(1077))
+        );
+        assert_eq!(
+            parse_scan_value("443*8", ScanValueType::F64, false),
+            Some(ScanValue::F64(3544.0))
         );
     }
 
