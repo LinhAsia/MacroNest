@@ -421,9 +421,6 @@ impl CrosshairApp {
                             }
                         });
                     });
-                egui::TopBottomPanel::bottom("memory-pinned-resize")
-                    .exact_height(12.0)
-                    .show(ctx, |ui| Self::memory_pinned_resize_grip(ui));
                 egui::CentralPanel::default().show(ctx, |ui| {
                     let count = if self.memory_panel.scanning {
                         self.memory_panel
@@ -445,6 +442,7 @@ impl CrosshairApp {
                     ui.separator();
                     self.render_memory_scan_results(ui, true);
                 });
+                Self::render_memory_popup_resize_handles(ctx);
                 ctx.request_repaint_after(Duration::from_millis(50));
             },
         );
@@ -453,15 +451,85 @@ impl CrosshairApp {
         }
     }
 
-    fn memory_pinned_resize_grip(ui: &mut egui::Ui) {
-        let grip = ui
-            .allocate_response(vec2(ui.available_width(), 10.0), Sense::drag())
-            .on_hover_cursor(egui::CursorIcon::ResizeVertical);
-        if grip.drag_started() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::BeginResize(
-                    egui::viewport::ResizeDirection::South,
-                ));
+    fn render_memory_popup_resize_handles(ctx: &egui::Context) {
+        let rect = ctx.content_rect();
+        let edge = 8.0;
+        let corner = 18.0;
+        let handles = [
+            (
+                "n",
+                egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + edge)),
+                egui::viewport::ResizeDirection::North,
+                egui::CursorIcon::ResizeVertical,
+            ),
+            (
+                "s",
+                egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - edge), rect.max),
+                egui::viewport::ResizeDirection::South,
+                egui::CursorIcon::ResizeVertical,
+            ),
+            (
+                "w",
+                egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + edge, rect.max.y)),
+                egui::viewport::ResizeDirection::West,
+                egui::CursorIcon::ResizeHorizontal,
+            ),
+            (
+                "e",
+                egui::Rect::from_min_max(egui::pos2(rect.max.x - edge, rect.min.y), rect.max),
+                egui::viewport::ResizeDirection::East,
+                egui::CursorIcon::ResizeHorizontal,
+            ),
+            (
+                "nw",
+                egui::Rect::from_min_size(rect.min, vec2(corner, corner)),
+                egui::viewport::ResizeDirection::NorthWest,
+                egui::CursorIcon::ResizeNwSe,
+            ),
+            (
+                "ne",
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.max.x - corner, rect.min.y),
+                    egui::pos2(rect.max.x, rect.min.y + corner),
+                ),
+                egui::viewport::ResizeDirection::NorthEast,
+                egui::CursorIcon::ResizeNeSw,
+            ),
+            (
+                "sw",
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.min.x, rect.max.y - corner),
+                    egui::pos2(rect.min.x + corner, rect.max.y),
+                ),
+                egui::viewport::ResizeDirection::SouthWest,
+                egui::CursorIcon::ResizeNeSw,
+            ),
+            (
+                "se",
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.max.x - corner, rect.max.y - corner),
+                    rect.max,
+                ),
+                egui::viewport::ResizeDirection::SouthEast,
+                egui::CursorIcon::ResizeNwSe,
+            ),
+        ];
+
+        for (id, handle_rect, direction, cursor) in handles {
+            egui::Area::new(egui::Id::new(("memory-popup-resize", id)))
+                .order(egui::Order::Foreground)
+                .fixed_pos(handle_rect.min)
+                .interactable(true)
+                .show(ctx, |ui| {
+                    let (_, response) =
+                        ui.allocate_exact_size(handle_rect.size(), Sense::click_and_drag());
+                    if response.hovered() {
+                        ui.ctx().set_cursor_icon(cursor);
+                    }
+                    if response.drag_started() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+                    }
+                });
         }
     }
 
@@ -1588,12 +1656,10 @@ impl CrosshairApp {
                         open = false;
                     }
                     Self::render_memory_popup_titlebar(ctx, &title, &mut unpin, &mut open);
-                    egui::TopBottomPanel::bottom("memory-watch-resize")
-                        .exact_height(12.0)
-                        .show(ctx, |ui| Self::memory_pinned_resize_grip(ui));
                     egui::CentralPanel::default().show(ctx, |ui| {
                         Self::render_instruction_watch_body(ui, &mut dialog);
                     });
+                    Self::render_memory_popup_resize_handles(ctx);
                 },
             );
             if unpin {
@@ -1735,12 +1801,10 @@ impl CrosshairApp {
                         open = false;
                     }
                     Self::render_memory_popup_titlebar(ctx, &title, &mut unpin, &mut open);
-                    egui::TopBottomPanel::bottom("memory-tool-resize")
-                        .exact_height(12.0)
-                        .show(ctx, |ui| Self::memory_pinned_resize_grip(ui));
                     egui::CentralPanel::default().show(ctx, |ui| {
                         Self::render_memory_view_body(ui, &mut dialog, bytes.as_deref());
                     });
+                    Self::render_memory_popup_resize_handles(ctx);
                 },
             );
             if unpin {
