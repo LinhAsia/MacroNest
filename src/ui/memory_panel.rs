@@ -148,12 +148,67 @@ enum MemoryDisplayType {
     Double,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StructureElementType {
+    Byte,
+    I16,
+    I32,
+    I64,
+    Float,
+    Double,
+    Pointer,
+}
+
+impl StructureElementType {
+    const ALL: [(Self, &'static str); 7] = [
+        (Self::Byte, "Byte"),
+        (Self::I16, "2 Bytes"),
+        (Self::I32, "4 Bytes"),
+        (Self::I64, "8 Bytes"),
+        (Self::Float, "Float"),
+        (Self::Double, "Double"),
+        (Self::Pointer, "Pointer"),
+    ];
+
+    fn label(self) -> &'static str {
+        Self::ALL
+            .iter()
+            .find_map(|(kind, label)| (*kind == self).then_some(*label))
+            .unwrap()
+    }
+
+    fn width(self) -> usize {
+        match self {
+            Self::Byte => 1,
+            Self::I16 => 2,
+            Self::I32 | Self::Float => 4,
+            Self::I64 | Self::Double | Self::Pointer => 8,
+        }
+    }
+
+    fn scan_type(self) -> ScanValueType {
+        match self {
+            Self::Float => ScanValueType::F32,
+            Self::Double => ScanValueType::F64,
+            Self::I64 | Self::Pointer => ScanValueType::I64,
+            Self::Byte | Self::I16 | Self::I32 => ScanValueType::I32,
+        }
+    }
+}
+
+struct StructureElement {
+    offset: usize,
+    value_type: StructureElementType,
+}
+
 struct MemoryViewDialog {
     address: usize,
     kind: MemoryViewKind,
     display_type: MemoryDisplayType,
     relative_addresses: bool,
     pinned: bool,
+    elements: Vec<StructureElement>,
+    pending_add: Option<(usize, ScanValueType)>,
 }
 
 #[cfg(windows)]
@@ -1458,6 +1513,8 @@ impl CrosshairApp {
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
                                         pinned: true,
+                                        elements: default_structure_elements(),
+                                        pending_add: None,
                                     });
                                     ui.close();
                                 }
@@ -1468,6 +1525,8 @@ impl CrosshairApp {
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
                                         pinned: true,
+                                        elements: default_structure_elements(),
+                                        pending_add: None,
                                     });
                                     ui.close();
                                 }
@@ -1766,8 +1825,8 @@ impl CrosshairApp {
         let address = dialog.address;
         let kind = dialog.kind;
         let title = match kind {
-            MemoryViewKind::Bytes => format!("Memory region — 0x{address:016X}"),
-            MemoryViewKind::Structure => format!("Dissect data/structure — 0x{address:016X}"),
+            MemoryViewKind::Bytes => format!("Memory region — 0x{address:X}"),
+            MemoryViewKind::Structure => format!("Dissect data/structure — 0x{address:X}"),
         };
         let bytes = self
             .memory_panel
@@ -1810,6 +1869,7 @@ impl CrosshairApp {
             if unpin {
                 dialog.pinned = false;
             }
+            self.add_pending_structure_address(&mut dialog);
             if open {
                 self.memory_panel.memory_view_dialog = Some(dialog);
                 ctx.request_repaint_after(Duration::from_millis(250));
@@ -1851,7 +1911,7 @@ impl CrosshairApp {
                                 let shown_address = if dialog.relative_addresses {
                                     format!("+{:04X}", row * 16)
                                 } else {
-                                    format!("{:016X}", address + row * 16)
+                                    format!("{:X}", address + row * 16)
                                 };
                                 Self::memory_view_cell(ui, 152.0, &shown_address);
                                 Self::memory_view_cell(
@@ -1864,76 +1924,38 @@ impl CrosshairApp {
                         }
                     }
                     MemoryViewKind::Structure => {
-                        ui.horizontal(|ui| {
-                            Self::memory_view_cell(ui, 72.0, "Offset");
-                            Self::memory_view_cell(ui, 152.0, "Address");
-                            Self::memory_view_cell(ui, 116.0, "Bytes");
-                            Self::memory_view_cell(ui, 112.0, "i32");
-                            Self::memory_view_cell(ui, 150.0, "Float");
-                        });
-                        ui.separator();
-                        for (offset, chunk) in bytes.chunks(4).enumerate() {
-                            if chunk.len() < 4 {
-                                break;
-                            }
-                            let raw = [chunk[0], chunk[1], chunk[2], chunk[3]];
-                            ui.horizontal(|ui| {
-                                Self::memory_view_cell(ui, 72.0, &format!("+{:04X}", offset * 4));
-                                Self::memory_view_cell(
-                                    ui,
-                                    152.0,
-                                    &format!("{:016X}", address + offset * 4),
-                                );
-                                Self::memory_view_cell(
-                                    ui,
-                                    116.0,
-                                    &format!(
-                                        "{:02X} {:02X} {:02X} {:02X}",
-                                        raw[0], raw[1], raw[2], raw[3]
-                                    ),
-                                );
-                                Self::memory_view_cell(
-                                    ui,
-                                    112.0,
-                                    &i32::from_le_bytes(raw).to_string(),
-                                );
-                                Self::memory_view_cell(
-                                    ui,
-                                    150.0,
-                                    &format_compact_float(f32::from_le_bytes(raw) as f64, 6),
-                                );
-                            });
-                        }
+                        Self::render_structure_elements(ui, &mut dialog, bytes);
                     }
                 });
-                ui.interact(
-                    body.inner_rect,
-                    ui.id().with("memory-region-context-menu"),
-                    Sense::click(),
-                )
-                .context_menu(|ui| {
-                    ui.menu_button("Display Type", |ui| {
-                        for (display_type, label) in memory_display_types() {
-                            if ui
-                                .selectable_value(&mut dialog.display_type, display_type, label)
-                                .clicked()
-                            {
-                                ui.close();
+                if matches!(dialog.kind, MemoryViewKind::Bytes) {
+                    ui.interact(
+                        body.inner_rect,
+                        ui.id().with("memory-region-context-menu"),
+                        Sense::click(),
+                    )
+                    .context_menu(|ui| {
+                        ui.menu_button("Display Type", |ui| {
+                            for (display_type, label) in memory_display_types() {
+                                if ui
+                                    .selectable_value(&mut dialog.display_type, display_type, label)
+                                    .clicked()
+                                {
+                                    ui.close();
+                                }
                             }
+                        });
+                        ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
+                        if ui.button("Open in dissect data/structure").clicked() {
+                            dialog.kind = MemoryViewKind::Structure;
+                            ui.close();
                         }
                     });
-                    ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
-                    if matches!(dialog.kind, MemoryViewKind::Bytes)
-                        && ui.button("Open in dissect data/structure").clicked()
-                    {
-                        dialog.kind = MemoryViewKind::Structure;
-                        ui.close();
-                    }
-                });
+                }
             });
         if !open {
             self.memory_panel.memory_view_dialog = None;
         } else {
+            self.add_pending_structure_address(&mut dialog);
             self.memory_panel.memory_view_dialog = Some(dialog);
             ctx.request_repaint_after(Duration::from_millis(250));
         }
@@ -1972,7 +1994,7 @@ impl CrosshairApp {
                         let shown_address = if dialog.relative_addresses {
                             format!("+{:04X}", row * 16)
                         } else {
-                            format!("{:016X}", address + row * 16)
+                            format!("{:X}", address + row * 16)
                         };
                         Self::memory_view_cell(ui, 152.0, &shown_address);
                         Self::memory_view_cell(
@@ -1985,74 +2007,126 @@ impl CrosshairApp {
                 }
             }
             MemoryViewKind::Structure => {
-                ui.horizontal(|ui| {
-                    Self::memory_view_cell(ui, 72.0, "Offset");
-                    Self::memory_view_cell(ui, 152.0, "Address");
-                    Self::memory_view_cell(ui, 116.0, "Bytes");
-                    Self::memory_view_cell(ui, 112.0, "i32");
-                    Self::memory_view_cell(ui, 150.0, "Float");
-                });
-                ui.separator();
-                for (offset, chunk) in bytes.chunks_exact(4).enumerate() {
-                    let raw = [chunk[0], chunk[1], chunk[2], chunk[3]];
-                    ui.horizontal(|ui| {
-                        Self::memory_view_cell(ui, 72.0, &format!("+{:04X}", offset * 4));
-                        Self::memory_view_cell(
-                            ui,
-                            152.0,
-                            &format!("{:016X}", address + offset * 4),
-                        );
-                        Self::memory_view_cell(
-                            ui,
-                            116.0,
-                            &format!(
-                                "{:02X} {:02X} {:02X} {:02X}",
-                                raw[0], raw[1], raw[2], raw[3]
-                            ),
-                        );
-                        Self::memory_view_cell(ui, 112.0, &i32::from_le_bytes(raw).to_string());
-                        Self::memory_view_cell(
-                            ui,
-                            150.0,
-                            &format_compact_float(f32::from_le_bytes(raw) as f64, 6),
-                        );
-                    });
-                }
+                Self::render_structure_elements(ui, dialog, bytes);
             }
         });
-        ui.interact(
-            body.inner_rect,
-            ui.id().with("memory-region-context-menu-pinned"),
-            Sense::click(),
-        )
-        .context_menu(|ui| {
-            ui.menu_button("Display Type", |ui| {
-                for (display_type, label) in memory_display_types() {
-                    if ui
-                        .selectable_value(&mut dialog.display_type, display_type, label)
-                        .clicked()
-                    {
-                        ui.close();
+        if matches!(dialog.kind, MemoryViewKind::Bytes) {
+            ui.interact(
+                body.inner_rect,
+                ui.id().with("memory-region-context-menu-pinned"),
+                Sense::click(),
+            )
+            .context_menu(|ui| {
+                ui.menu_button("Display Type", |ui| {
+                    for (display_type, label) in memory_display_types() {
+                        if ui
+                            .selectable_value(&mut dialog.display_type, display_type, label)
+                            .clicked()
+                        {
+                            ui.close();
+                        }
                     }
+                });
+                ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
+                if ui.button("Open in dissect data/structure").clicked() {
+                    dialog.kind = MemoryViewKind::Structure;
+                    ui.close();
                 }
             });
-            ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
-            if matches!(dialog.kind, MemoryViewKind::Bytes)
-                && ui.button("Open in dissect data/structure").clicked()
-            {
-                dialog.kind = MemoryViewKind::Structure;
-                ui.close();
-            }
-        });
+        }
     }
 
-    fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) {
+    fn render_structure_elements(ui: &mut egui::Ui, dialog: &mut MemoryViewDialog, bytes: &[u8]) {
+        ui.horizontal(|ui| {
+            Self::memory_view_cell(ui, 72.0, "Offset");
+            Self::memory_view_cell(ui, 110.0, "Type");
+            Self::memory_view_cell(ui, 152.0, "Address");
+            Self::memory_view_cell(ui, 260.0, "Value");
+        });
+        ui.separator();
+        for element in &mut dialog.elements {
+            let width = element.value_type.width();
+            let Some(raw) = bytes.get(element.offset..element.offset.saturating_add(width)) else {
+                continue;
+            };
+            let element_address = dialog.address.saturating_add(element.offset);
+            let mut add_request = None;
+            let row = ui
+                .horizontal(|ui| {
+                    Self::memory_view_cell(ui, 72.0, &format!("+{:04X}", element.offset));
+                    Self::memory_view_cell(ui, 110.0, element.value_type.label());
+                    let address_response =
+                        Self::memory_view_cell(ui, 152.0, &format!("{element_address:X}"));
+                    Self::memory_view_cell(
+                        ui,
+                        260.0,
+                        &format_structure_value(raw, element.value_type),
+                    );
+                    if address_response.double_clicked() {
+                        add_request = Some((element_address, element.value_type.scan_type()));
+                    }
+                })
+                .response;
+            row.context_menu(|ui| {
+                ui.menu_button("Change element", |ui| {
+                    for (value_type, label) in StructureElementType::ALL {
+                        if ui
+                            .selectable_value(&mut element.value_type, value_type, label)
+                            .clicked()
+                        {
+                            ui.close();
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Offset");
+                    ui.add(
+                        egui::DragValue::new(&mut element.offset)
+                            .hexadecimal(4, false, true)
+                            .speed(1),
+                    );
+                });
+            });
+            if add_request.is_some() {
+                dialog.pending_add = add_request;
+            }
+        }
+    }
+
+    fn add_pending_structure_address(&mut self, dialog: &mut MemoryViewDialog) {
+        let Some((address, value_type)) = dialog.pending_add.take() else {
+            return;
+        };
+        if self
+            .memory_panel
+            .saved
+            .iter()
+            .any(|saved| saved.address == address && saved.value_type == value_type)
+        {
+            return;
+        }
+        let current = self
+            .memory_panel
+            .process_pid
+            .and_then(|pid| read_scan_value(pid, address, value_type).ok());
+        self.memory_panel.saved.push(SavedMemoryAddress {
+            address,
+            value_type,
+            current,
+            description: String::new(),
+            pointer: None,
+            frozen: None,
+        });
+        self.memory_panel.status = format!("Address 0x{address:X} added");
+    }
+
+    fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) -> egui::Response {
         Self::memory_label_cell(
             ui,
             width,
             18.0,
             egui::Label::new(RichText::new(text).monospace()).selectable(true),
-        );
+        )
     }
 
     fn render_memory_address_dialog(&mut self, ctx: &egui::Context) {
@@ -2580,6 +2654,34 @@ fn format_compact_float(value: f64, precision: usize) -> String {
         .trim_end_matches('0')
         .trim_end_matches('.')
         .to_owned()
+}
+
+fn default_structure_elements() -> Vec<StructureElement> {
+    (0..512)
+        .step_by(4)
+        .map(|offset| StructureElement {
+            offset,
+            value_type: StructureElementType::I32,
+        })
+        .collect()
+}
+
+fn format_structure_value(bytes: &[u8], value_type: StructureElementType) -> String {
+    match value_type {
+        StructureElementType::Byte => format!("{:02X}", bytes[0]),
+        StructureElementType::I16 => i16::from_le_bytes(bytes.try_into().unwrap()).to_string(),
+        StructureElementType::I32 => i32::from_le_bytes(bytes.try_into().unwrap()).to_string(),
+        StructureElementType::I64 => i64::from_le_bytes(bytes.try_into().unwrap()).to_string(),
+        StructureElementType::Float => {
+            format_compact_float(f32::from_le_bytes(bytes.try_into().unwrap()) as f64, 6)
+        }
+        StructureElementType::Double => {
+            format_compact_float(f64::from_le_bytes(bytes.try_into().unwrap()), 10)
+        }
+        StructureElementType::Pointer => {
+            format!("P->0x{:X}", u64::from_le_bytes(bytes.try_into().unwrap()))
+        }
+    }
 }
 
 fn memory_display_types() -> [(MemoryDisplayType, &'static str); 10] {
