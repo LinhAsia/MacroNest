@@ -897,8 +897,11 @@ impl CrosshairApp {
     ) -> Self {
         let save_name = state.selected_profile.clone().unwrap_or_default();
         let initial_active_panel = state.active_panel;
-        let memory_panel =
-            memory_panel::MemoryPanelState::with_hotkeys(&state.memory_scan_hotkeys);
+        crate::overlay::set_memory_pointer_entries(&state.memory_pointer_list);
+        let memory_panel = memory_panel::MemoryPanelState::with_hotkeys(
+            &state.memory_scan_hotkeys,
+            &state.memory_pointer_list,
+        );
         let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
 
         let opencv_installed = paths.opencv_dll.exists();

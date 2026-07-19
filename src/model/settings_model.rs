@@ -459,6 +459,15 @@ pub struct MemoryCodeEntry {
     pub writes: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct MemoryPointerEntry {
+    pub name: String,
+    pub module: String,
+    pub module_offset: usize,
+    pub offsets: Vec<usize>,
+    pub value_type: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppState {
@@ -470,6 +479,7 @@ pub struct AppState {
     pub memory_scan_hotkeys: Vec<(String, HotkeyBinding)>,
     pub memory_debugger_method: MemoryDebuggerMethod,
     pub memory_code_list: Vec<MemoryCodeEntry>,
+    pub memory_pointer_list: Vec<MemoryPointerEntry>,
     pub ui_language: UiLanguage,
     pub vietnamese_input_enabled: bool,
     pub vietnamese_input_mode: VietnameseInputMode,
@@ -879,6 +889,7 @@ impl Default for AppState {
             memory_scan_hotkeys: Vec::new(),
             memory_debugger_method: MemoryDebuggerMethod::Windows,
             memory_code_list: Vec::new(),
+            memory_pointer_list: Vec::new(),
             ui_language: UiLanguage::English,
             vietnamese_input_enabled: false,
             vietnamese_input_mode: VietnameseInputMode::Telex,

@@ -117,14 +117,13 @@ impl CrosshairApp {
             changed |= ui
                 .add_sized(
                     [150.0, 21.0],
-                    egui::TextEdit::singleline(&mut step.key).hint_text(
-                        egui::RichText::new(Self::tr_lang(language, "Address", "Địa chỉ")).weak(),
-                    ),
+                    egui::TextEdit::singleline(&mut step.key)
+                        .hint_text("address / module+offset [offsets] / @name"),
                 )
                 .on_hover_text(Self::tr_lang(
                     language,
-                    "Memory address. Decimal, hexadecimal, expressions, and variables are supported.",
-                    "Địa chỉ RAM. Hỗ trợ số thập phân, thập lục phân, biểu thức và biến.",
+                    "Memory address, module pointer (game.exe+1234 [20, 8]), saved alias (@Health), expression, or variable.",
+                    "Địa chỉ RAM, pointer module (game.exe+1234 [20, 8]), tên đã lưu (@Máu), biểu thức hoặc biến.",
                 ))
                 .changed();
             if step.action == MacroAction::WriteMemory {

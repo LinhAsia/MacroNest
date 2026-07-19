@@ -13,7 +13,7 @@ use eframe::egui::{self, Button, Color32, Frame, RichText, Sense, vec2};
 
 use crate::{
     hotkey,
-    model::{HotkeyBinding, MemoryCodeEntry, MemoryDebuggerMethod},
+    model::{HotkeyBinding, MemoryCodeEntry, MemoryDebuggerMethod, MemoryPointerEntry},
     process_memory::{
         MemoryRegionInfo, PointerPath, ScanCandidate, ScanComparison, ScanValue, ScanValueType,
         filter_scan_candidates, query_memory_region, read_memory_bytes, read_scan_value,
@@ -442,12 +442,32 @@ impl Default for MemoryPanelState {
 }
 
 impl MemoryPanelState {
-    pub(crate) fn with_hotkeys(stored: &[(String, HotkeyBinding)]) -> Self {
+    pub(crate) fn with_hotkeys(
+        stored: &[(String, HotkeyBinding)],
+        pointers: &[MemoryPointerEntry],
+    ) -> Self {
         let mut state = Self::default();
         state.hotkeys = stored
             .iter()
             .filter_map(|(key, binding)| {
                 MemoryScanAction::from_config_key(key).map(|action| (action, binding.clone()))
+            })
+            .collect();
+        state.saved = pointers
+            .iter()
+            .filter_map(|entry| {
+                Some(SavedMemoryAddress {
+                    address: 0,
+                    value_type: memory_type_from_config(&entry.value_type)?,
+                    current: None,
+                    description: entry.name.clone(),
+                    pointer: Some(PointerSpec {
+                        base: 0,
+                        module: Some((entry.module.clone(), entry.module_offset)),
+                        offsets: entry.offsets.clone(),
+                    }),
+                    frozen: None,
+                })
             })
             .collect();
         state
@@ -815,7 +835,22 @@ impl CrosshairApp {
                                     let pid = window_list::process_id_for_window(Some(&selector));
                                     if self.memory_panel.process_pid != pid {
                                         self.reset_memory_scan("Process changed");
-                                        self.memory_panel.saved.clear();
+                                        self.memory_panel.saved.retain_mut(|saved| {
+                                            let portable = saved
+                                                .pointer
+                                                .as_ref()
+                                                .is_some_and(|pointer| pointer.module.is_some());
+                                            if portable {
+                                                saved.current = None;
+                                                saved.frozen = None;
+                                            }
+                                            portable
+                                        });
+                                        self.memory_panel.selected_saved.clear();
+                                        self.memory_panel.saved_selection_anchor = None;
+                                        self.memory_panel.edit_value_index = None;
+                                        self.memory_panel.edit_description_index = None;
+                                        self.memory_panel.address_dialog = None;
                                     }
                                     self.memory_panel.process_pid = pid;
                                     self.memory_panel.status = pid.map_or_else(
@@ -1433,6 +1468,7 @@ impl CrosshairApp {
                             let mut delete = false;
                             let mut instruction_watch = None;
                             let mut find_stable_pointer = false;
+                            let mut persist_pointer_changes = false;
                             let mut row_hits = Vec::new();
                             let mut checkbox_changed = false;
                             let row_width = ui.available_width();
@@ -1563,6 +1599,7 @@ impl CrosshairApp {
                                                 }))
                                         {
                                             self.memory_panel.edit_description_index = None;
+                                            persist_pointer_changes = true;
                                         }
                                     } else {
                                         let description = if saved.description.is_empty() {
@@ -1598,6 +1635,9 @@ impl CrosshairApp {
                                     }
                                 },
                             );
+                            if persist_pointer_changes {
+                                self.persist_memory_pointers();
+                            }
                             for hit in row_hits {
                                 response = response.union(hit);
                             }
@@ -1682,6 +1722,13 @@ impl CrosshairApp {
                                     });
                                     ui.close();
                                 }
+                                if let Some(pointer) = saved.pointer.as_ref()
+                                    && pointer.module.is_some()
+                                    && ui.button("Copy pointer for Macro").clicked()
+                                {
+                                    ui.ctx().copy_text(format_pointer_expression(pointer));
+                                    ui.close();
+                                }
                                 ui.separator();
                                 if ui.button("Change address / Pointer").clicked() {
                                     open_address = true;
@@ -1742,6 +1789,7 @@ impl CrosshairApp {
                             if delete {
                                 self.memory_panel.saved.remove(index);
                                 self.reindex_saved_selection_after_delete(index);
+                                self.persist_memory_pointers();
                             }
                         }
                     });
@@ -2269,6 +2317,7 @@ impl CrosshairApp {
             frozen: None,
         });
         self.memory_panel.status = "Stable pointer added to Address list".to_owned();
+        self.persist_memory_pointers();
     }
 
     #[cfg(windows)]
@@ -3058,6 +3107,7 @@ impl CrosshairApp {
             saved.pointer = pointer;
             saved.frozen = None;
         }
+        self.persist_memory_pointers();
     }
 
     fn start_memory_action(&mut self, action: MemoryScanAction) {
@@ -3336,6 +3386,7 @@ impl CrosshairApp {
             .filter_map(|(index, saved)| (!selected.contains(&index)).then_some(saved))
             .collect();
         self.memory_panel.selected_saved.clear();
+        self.persist_memory_pointers();
     }
 
     fn reindex_saved_selection_after_delete(&mut self, deleted: usize) {
@@ -3405,6 +3456,27 @@ impl CrosshairApp {
         self.state.memory_scan_hotkeys = hotkeys;
         self.persist();
     }
+
+    fn persist_memory_pointers(&mut self) {
+        self.state.memory_pointer_list = self
+            .memory_panel
+            .saved
+            .iter()
+            .filter_map(|saved| {
+                let pointer = saved.pointer.as_ref()?;
+                let (module, module_offset) = pointer.module.as_ref()?;
+                Some(MemoryPointerEntry {
+                    name: saved.description.clone(),
+                    module: module.clone(),
+                    module_offset: *module_offset,
+                    offsets: pointer.offsets.clone(),
+                    value_type: memory_type_config(saved.value_type).to_owned(),
+                })
+            })
+            .collect();
+        crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+        self.persist();
+    }
 }
 
 fn memory_type_label(value_type: ScanValueType) -> &'static str {
@@ -3416,6 +3488,43 @@ fn memory_type_label(value_type: ScanValueType) -> &'static str {
         ScanValueType::I64 => "8 Bytes",
         ScanValueType::F64 => "Double",
     }
+}
+
+fn memory_type_config(value_type: ScanValueType) -> &'static str {
+    match value_type {
+        ScanValueType::I8 => "i8",
+        ScanValueType::I16 => "i16",
+        ScanValueType::I32 => "i32",
+        ScanValueType::F32 => "f32",
+        ScanValueType::I64 => "i64",
+        ScanValueType::F64 => "f64",
+    }
+}
+
+fn memory_type_from_config(value_type: &str) -> Option<ScanValueType> {
+    Some(match value_type {
+        "i8" => ScanValueType::I8,
+        "i16" => ScanValueType::I16,
+        "i32" => ScanValueType::I32,
+        "f32" => ScanValueType::F32,
+        "i64" => ScanValueType::I64,
+        "f64" => ScanValueType::F64,
+        _ => return None,
+    })
+}
+
+fn format_pointer_expression(pointer: &PointerSpec) -> String {
+    let root = pointer.module.as_ref().map_or_else(
+        || format!("0x{:X}", pointer.base),
+        |(module, offset)| format!("{module}+{offset:X}"),
+    );
+    let offsets = pointer
+        .offsets
+        .iter()
+        .map(|offset| format!("{offset:X}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{root} [{offsets}]")
 }
 
 fn compact_hotkey_label(label: &str) -> String {

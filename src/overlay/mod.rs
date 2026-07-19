@@ -290,6 +290,12 @@ mod windows_overlay {
     const MENU_EXIT: usize = 2003;
     static SUPPRESSED_MACRO_HOTKEYS: Lazy<Mutex<HashSet<i32>>> =
         Lazy::new(|| Mutex::new(HashSet::new()));
+    static MEMORY_POINTER_ENTRIES: Lazy<Mutex<Vec<crate::model::MemoryPointerEntry>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
+
+    pub(crate) fn set_memory_pointer_entries(entries: &[crate::model::MemoryPointerEntry]) {
+        *MEMORY_POINTER_ENTRIES.lock() = entries.to_vec();
+    }
     static STOP_REQUESTED_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
         Lazy::new(|| Mutex::new(HashSet::new()));
     static FORCE_STOP_REQUESTED_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
@@ -30322,15 +30328,91 @@ mod windows_overlay {
             })
     }
 
+    fn resolve_memory_pointer_entry(
+        pid: u32,
+        module: &str,
+        module_offset: usize,
+        offsets: &[usize],
+    ) -> Option<usize> {
+        let mut address =
+            crate::memory_debugger::debugger::resolve_module_offset(pid, module, module_offset)
+                .ok()?;
+        for offset in offsets {
+            let crate::process_memory::ScanValue::I64(next) =
+                crate::process_memory::read_scan_value(
+                    pid,
+                    address,
+                    crate::process_memory::ScanValueType::I64,
+                )
+                .ok()?
+            else {
+                return None;
+            };
+            address = usize::try_from(next).ok()?.checked_add(*offset)?;
+        }
+        Some(address)
+    }
+
+    fn parse_pointer_offsets(text: &str) -> Option<Vec<usize>> {
+        text.replace("->", ",")
+            .replace('?', ",")
+            .split([',', ';', ' '])
+            .filter(|part| !part.trim().is_empty())
+            .map(|part| {
+                let digits = part
+                    .trim()
+                    .strip_prefix("0x")
+                    .or_else(|| part.trim().strip_prefix("0X"))
+                    .unwrap_or(part.trim());
+                usize::from_str_radix(digits, 16).ok()
+            })
+            .collect()
+    }
+
+    fn resolve_memory_action_address(pid: u32, text: &str) -> Option<usize> {
+        let text = interpolate_variables(text);
+        let text = text.trim();
+        if let Some(alias) = text.strip_prefix('@') {
+            let entry = MEMORY_POINTER_ENTRIES
+                .lock()
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case(alias.trim()))
+                .cloned()?;
+            return resolve_memory_pointer_entry(
+                pid,
+                &entry.module,
+                entry.module_offset,
+                &entry.offsets,
+            );
+        }
+        if let Some(open) = text.rfind('[')
+            && text.ends_with(']')
+        {
+            let root = text[..open].trim();
+            let (module, module_offset) = root.rsplit_once('+')?;
+            let module_offset = usize::from_str_radix(
+                module_offset
+                    .trim()
+                    .strip_prefix("0x")
+                    .or_else(|| module_offset.trim().strip_prefix("0X"))
+                    .unwrap_or(module_offset.trim()),
+                16,
+            )
+            .ok()?;
+            let offsets = parse_pointer_offsets(&text[open + 1..text.len() - 1])?;
+            return resolve_memory_pointer_entry(pid, module.trim(), module_offset, &offsets);
+        }
+        parse_memory_address(text)
+    }
+
     fn execute_read_memory_action_step(step: &MacroStep) {
         let target_var = step.if_variable_name.trim();
         if target_var.is_empty() {
             return;
         }
-        let value = parse_memory_address(&step.key)
-            .and_then(|address| {
-                window_list::process_id_for_window(step.memory_target_window.as_deref())
-                    .map(|pid| (pid, address))
+        let value = window_list::process_id_for_window(step.memory_target_window.as_deref())
+            .and_then(|pid| {
+                resolve_memory_action_address(pid, &step.key).map(|address| (pid, address))
             })
             .and_then(|(pid, address)| {
                 crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
@@ -30345,18 +30427,24 @@ mod windows_overlay {
     }
 
     fn execute_write_memory_action_step(step: &MacroStep) {
-        let Some(address) = parse_memory_address(&step.key) else {
-            return;
-        };
         let Some(pid) = window_list::process_id_for_window(step.memory_target_window.as_deref())
         else {
             return;
         };
+        let Some(address) = resolve_memory_action_address(pid, &step.key) else {
+            return;
+        };
         let raw_value = interpolate_variables(&step.memory_write_value);
         let value = match step.memory_value_type {
-            crate::model::MemoryValueType::I32 if raw_value.trim().parse::<i32>().is_ok() => raw_value,
-            crate::model::MemoryValueType::I64 if raw_value.trim().parse::<i64>().is_ok() => raw_value,
-            crate::model::MemoryValueType::F32 if raw_value.trim().parse::<f32>().is_ok() => raw_value,
+            crate::model::MemoryValueType::I32 if raw_value.trim().parse::<i32>().is_ok() => {
+                raw_value
+            }
+            crate::model::MemoryValueType::I64 if raw_value.trim().parse::<i64>().is_ok() => {
+                raw_value
+            }
+            crate::model::MemoryValueType::F32 if raw_value.trim().parse::<f32>().is_ok() => {
+                raw_value
+            }
             crate::model::MemoryValueType::I32 => {
                 let value = evaluate_math_expression_f64(&raw_value);
                 if !value.is_finite() || value < i32::MIN as f64 || value > i32::MAX as f64 {
@@ -30499,6 +30587,15 @@ mod windows_overlay {
     mod tests {
         use super::*;
         static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+        #[test]
+        fn parses_macro_pointer_offsets_in_dereference_order() {
+            assert_eq!(
+                parse_pointer_offsets("494 -> 140"),
+                Some(vec![0x494, 0x140])
+            );
+            assert_eq!(parse_pointer_offsets("0x20, 8"), Some(vec![0x20, 0x8]));
+        }
 
         #[test]
         fn test_evaluate_math_expression() {
