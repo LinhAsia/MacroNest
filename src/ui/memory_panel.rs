@@ -320,6 +320,7 @@ pub(crate) struct MemoryPanelState {
     scanning: bool,
     scan_progress: Arc<AtomicUsize>,
     scan_input_count: usize,
+    has_scan_session: bool,
     pinned: bool,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     hotkey_was_down: HashMap<MemoryScanAction, bool>,
@@ -363,6 +364,7 @@ impl Default for MemoryPanelState {
             scanning: false,
             scan_progress: Arc::new(AtomicUsize::new(0)),
             scan_input_count: 0,
+            has_scan_session: false,
             pinned: false,
             hotkeys: HashMap::new(),
             hotkey_was_down: HashMap::new(),
@@ -808,6 +810,16 @@ impl CrosshairApp {
                             &value_response,
                             self.memory_panel.value_input.chars().count(),
                         );
+                    }
+                    if (value_response.has_focus() || value_response.lost_focus())
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                    {
+                        let action = if self.memory_panel.has_scan_session {
+                            MemoryScanAction::Exact
+                        } else {
+                            MemoryScanAction::FirstScan
+                        };
+                        self.start_memory_action(action);
                     }
                     ui.checkbox(&mut self.memory_panel.hex, "Hex");
                 });
@@ -2988,6 +3000,9 @@ impl CrosshairApp {
         let progress = Arc::clone(&self.memory_panel.scan_progress);
         let (tx, rx) = mpsc::channel();
         self.memory_panel.scanning = true;
+        if action.comparison().is_none() {
+            self.memory_panel.has_scan_session = true;
+        }
         self.memory_panel.status = format!("{} — loading…", action.label());
         self.memory_panel.last_action = action.label().to_owned();
         self.memory_panel.selected_results.clear();
@@ -3038,6 +3053,7 @@ impl CrosshairApp {
         self.memory_panel.candidates.clear();
         self.memory_panel.selected_results.clear();
         self.memory_panel.selection_anchor = None;
+        self.memory_panel.has_scan_session = false;
         self.memory_panel.status = status.to_owned();
         self.memory_panel.last_action = status.to_owned();
     }
