@@ -35,7 +35,7 @@ use windows_sys::Win32::{
 };
 
 const ERROR_SEM_TIMEOUT: i32 = 121;
-const MAX_ACCESS_HITS: usize = 500;
+const MAX_ACCESS_HITS: usize = 100;
 const RESUME_FLAG: u32 = 1 << 16;
 
 #[repr(C, align(16))]
@@ -231,7 +231,14 @@ where
         notify(WatchEvent::Error(io::Error::last_os_error().to_string()));
         return;
     }
-    unsafe { DebugSetProcessKillOnExit(0) };
+    if unsafe { DebugSetProcessKillOnExit(0) } == 0 {
+        let error = io::Error::last_os_error();
+        unsafe { DebugActiveProcessStop(pid) };
+        notify(WatchEvent::Error(format!(
+            "unable to protect the target process from debugger shutdown: {error}"
+        )));
+        return;
+    }
     notify(WatchEvent::Started);
     let mut first_breakpoint = true;
     let mut threads = HashMap::new();

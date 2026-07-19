@@ -30,6 +30,7 @@ use super::CrosshairApp;
 const DEFAULT_SCAN_LIMIT: usize = 10_000_000;
 // ponytail: keep live polling bounded; add paged candidate refresh before raising this ceiling.
 const MAX_VISIBLE_RESULTS: usize = 1_000;
+const MAX_VISIBLE_INSTRUCTIONS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum MemoryScanAction {
@@ -479,7 +480,12 @@ impl CrosshairApp {
         }
     }
 
-    fn render_memory_popup_titlebar(ctx: &egui::Context, title: &str, unpin: &mut bool) {
+    fn render_memory_popup_titlebar(
+        ctx: &egui::Context,
+        title: &str,
+        unpin: &mut bool,
+        open: &mut bool,
+    ) {
         egui::TopBottomPanel::top("memory-tool-pinned-titlebar")
             .exact_height(38.0)
             .frame(
@@ -494,21 +500,24 @@ impl CrosshairApp {
                     ui.label(RichText::new("MacroNest").strong());
                     ui.label(RichText::new(title).weak().small());
                     let drag = ui.allocate_response(
-                        vec2((ui.available_width() - 36.0).max(0.0), 28.0),
+                        vec2((ui.available_width() - 98.0).max(0.0), 28.0),
                         Sense::click_and_drag(),
                     );
                     if drag.drag_started() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                    if ui.add_sized([58.0, 28.0], Button::new("Unpin")).clicked() {
+                        *unpin = true;
                     }
                     if ui
                         .add_sized(
                             [32.0, 28.0],
                             Button::new(Self::material_icon_text(0xe5cd, 17.0)),
                         )
-                        .on_hover_text("Unpin")
+                        .on_hover_text("Close")
                         .clicked()
                     {
-                        *unpin = true;
+                        *open = false;
                     }
                 });
             });
@@ -1519,7 +1528,7 @@ impl CrosshairApp {
                     {
                         hit.count += 1;
                         hit.details = details;
-                    } else {
+                    } else if dialog.hits.len() < MAX_VISIBLE_INSTRUCTIONS {
                         dialog.hits.push(InstructionHit {
                             address: instruction_address,
                             instruction,
@@ -1578,7 +1587,7 @@ impl CrosshairApp {
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
                     }
-                    Self::render_memory_popup_titlebar(ctx, &title, &mut unpin);
+                    Self::render_memory_popup_titlebar(ctx, &title, &mut unpin, &mut open);
                     egui::TopBottomPanel::bottom("memory-watch-resize")
                         .exact_height(12.0)
                         .show(ctx, |ui| Self::memory_pinned_resize_grip(ui));
@@ -1725,7 +1734,7 @@ impl CrosshairApp {
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
                     }
-                    Self::render_memory_popup_titlebar(ctx, &title, &mut unpin);
+                    Self::render_memory_popup_titlebar(ctx, &title, &mut unpin, &mut open);
                     egui::TopBottomPanel::bottom("memory-tool-resize")
                         .exact_height(12.0)
                         .show(ctx, |ui| Self::memory_pinned_resize_grip(ui));
