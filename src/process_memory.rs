@@ -41,6 +41,8 @@ struct MemoryBasicInformation {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScanValueType {
+    I8,
+    I16,
     I32,
     F32,
     I64,
@@ -58,6 +60,8 @@ pub struct MemoryRegionInfo {
 impl ScanValueType {
     pub const fn width(self) -> usize {
         match self {
+            Self::I8 => 1,
+            Self::I16 => 2,
             Self::I32 | Self::F32 => 4,
             Self::I64 | Self::F64 => 8,
         }
@@ -65,6 +69,8 @@ impl ScanValueType {
 
     fn decode(self, bytes: &[u8]) -> Option<ScanValue> {
         Some(match self {
+            Self::I8 => ScanValue::I8(i8::from_le_bytes(bytes.get(..1)?.try_into().ok()?)),
+            Self::I16 => ScanValue::I16(i16::from_le_bytes(bytes.get(..2)?.try_into().ok()?)),
             Self::I32 => ScanValue::I32(i32::from_le_bytes(bytes.get(..4)?.try_into().ok()?)),
             Self::F32 => ScanValue::F32(f32::from_le_bytes(bytes.get(..4)?.try_into().ok()?)),
             Self::I64 => ScanValue::I64(i64::from_le_bytes(bytes.get(..8)?.try_into().ok()?)),
@@ -75,6 +81,8 @@ impl ScanValueType {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScanValue {
+    I8(i8),
+    I16(i16),
     I32(i32),
     F32(f32),
     I64(i64),
@@ -84,6 +92,8 @@ pub enum ScanValue {
 impl ScanValue {
     pub const fn value_type(self) -> ScanValueType {
         match self {
+            Self::I8(_) => ScanValueType::I8,
+            Self::I16(_) => ScanValueType::I16,
             Self::I32(_) => ScanValueType::I32,
             Self::F32(_) => ScanValueType::F32,
             Self::I64(_) => ScanValueType::I64,
@@ -94,6 +104,8 @@ impl ScanValue {
     fn bytes(self) -> [u8; 8] {
         let mut bytes = [0; 8];
         match self {
+            Self::I8(value) => bytes[..1].copy_from_slice(&value.to_le_bytes()),
+            Self::I16(value) => bytes[..2].copy_from_slice(&value.to_le_bytes()),
             Self::I32(value) => bytes[..4].copy_from_slice(&value.to_le_bytes()),
             Self::F32(value) => bytes[..4].copy_from_slice(&value.to_le_bytes()),
             Self::I64(value) => bytes.copy_from_slice(&value.to_le_bytes()),
@@ -394,6 +406,12 @@ fn scan_value_matches(
         }};
     }
     match (current, previous) {
+        (ScanValue::I8(current), ScanValue::I8(previous)) => {
+            compare!(current, previous, ScanValue::I8)
+        }
+        (ScanValue::I16(current), ScanValue::I16(previous)) => {
+            compare!(current, previous, ScanValue::I16)
+        }
         (ScanValue::I32(current), ScanValue::I32(previous)) => {
             compare!(current, previous, ScanValue::I32)
         }

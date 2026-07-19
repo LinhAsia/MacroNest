@@ -191,7 +191,9 @@ impl StructureElementType {
             Self::Float => ScanValueType::F32,
             Self::Double => ScanValueType::F64,
             Self::I64 | Self::Pointer => ScanValueType::I64,
-            Self::Byte | Self::I16 | Self::I32 => ScanValueType::I32,
+            Self::Byte => ScanValueType::I8,
+            Self::I16 => ScanValueType::I16,
+            Self::I32 => ScanValueType::I32,
         }
     }
 }
@@ -476,27 +478,29 @@ impl CrosshairApp {
                             }
                         });
                     });
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    let count = if self.memory_panel.scanning {
-                        self.memory_panel
-                            .scan_progress
-                            .load(Ordering::Relaxed)
-                            .max(self.memory_panel.scan_input_count)
-                    } else {
-                        self.memory_panel.candidates.len()
-                    };
-                    ui.label(format!(
-                        "{}  •  {count} address(es){}",
-                        self.memory_panel.last_action,
-                        if self.memory_panel.scanning {
-                            "  •  Loading…"
+                egui::CentralPanel::default()
+                    .frame(Self::memory_popup_frame(ctx))
+                    .show(ctx, |ui| {
+                        let count = if self.memory_panel.scanning {
+                            self.memory_panel
+                                .scan_progress
+                                .load(Ordering::Relaxed)
+                                .max(self.memory_panel.scan_input_count)
                         } else {
-                            ""
-                        }
-                    ));
-                    ui.separator();
-                    self.render_memory_scan_results(ui, true);
-                });
+                            self.memory_panel.candidates.len()
+                        };
+                        ui.label(format!(
+                            "{}  •  {count} address(es){}",
+                            self.memory_panel.last_action,
+                            if self.memory_panel.scanning {
+                                "  •  Loading…"
+                            } else {
+                                ""
+                            }
+                        ));
+                        ui.separator();
+                        self.render_memory_scan_results(ui, true);
+                    });
                 Self::render_memory_popup_resize_handles(ctx);
                 ctx.request_repaint_after(Duration::from_millis(50));
             },
@@ -586,6 +590,13 @@ impl CrosshairApp {
                     }
                 });
         }
+    }
+
+    fn memory_popup_frame(ctx: &egui::Context) -> Frame {
+        Frame::new()
+            .fill(ctx.style().visuals.panel_fill)
+            .stroke(egui::Stroke::new(1.5, Color32::from_rgb(78, 92, 112)))
+            .inner_margin(egui::Margin::same(7))
     }
 
     fn constrain_memory_popup_to_monitor(ctx: &egui::Context) {
@@ -705,6 +716,8 @@ impl CrosshairApp {
                         .selected_text(memory_type_label(self.memory_panel.value_type))
                         .show_ui(ui, |ui| {
                             for value_type in [
+                                ScanValueType::I8,
+                                ScanValueType::I16,
                                 ScanValueType::I32,
                                 ScanValueType::F32,
                                 ScanValueType::I64,
@@ -1715,9 +1728,11 @@ impl CrosshairApp {
                         open = false;
                     }
                     Self::render_memory_popup_titlebar(ctx, &title, &mut unpin, &mut open);
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        Self::render_instruction_watch_body(ui, &mut dialog);
-                    });
+                    egui::CentralPanel::default()
+                        .frame(Self::memory_popup_frame(ctx))
+                        .show(ctx, |ui| {
+                            Self::render_instruction_watch_body(ui, &mut dialog);
+                        });
                     Self::render_memory_popup_resize_handles(ctx);
                 },
             );
@@ -1864,9 +1879,16 @@ impl CrosshairApp {
                         open = false;
                     }
                     Self::render_memory_popup_titlebar(ctx, &title, &mut unpin, &mut open);
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        Self::render_memory_view_body(ui, &mut dialog, bytes.as_deref(), region);
-                    });
+                    egui::CentralPanel::default()
+                        .frame(Self::memory_popup_frame(ctx))
+                        .show(ctx, |ui| {
+                            Self::render_memory_view_body(
+                                ui,
+                                &mut dialog,
+                                bytes.as_deref(),
+                                region,
+                            );
+                        });
                     Self::render_memory_popup_resize_handles(ctx);
                 },
             );
@@ -1924,7 +1946,7 @@ impl CrosshairApp {
                 ui.separator();
             }
         }
-        let body = egui::ScrollArea::both().show(ui, |ui| match dialog.kind {
+        egui::ScrollArea::both().show(ui, |ui| match dialog.kind {
             MemoryViewKind::Bytes => {
                 Self::render_memory_region_grid(ui, dialog, bytes);
             }
@@ -1932,33 +1954,9 @@ impl CrosshairApp {
                 Self::render_structure_elements(ui, dialog, bytes);
             }
         });
-        if matches!(dialog.kind, MemoryViewKind::Bytes) {
-            ui.interact(
-                body.inner_rect,
-                ui.id().with("memory-region-context-menu-pinned"),
-                Sense::click(),
-            )
-            .context_menu(|ui| {
-                ui.menu_button("Display Type", |ui| {
-                    for (display_type, label) in memory_display_types() {
-                        if ui
-                            .selectable_value(&mut dialog.display_type, display_type, label)
-                            .clicked()
-                        {
-                            ui.close();
-                        }
-                    }
-                });
-                ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
-                if ui.button("Open in dissect data/structure").clicked() {
-                    dialog.kind = MemoryViewKind::Structure;
-                    ui.close();
-                }
-            });
-        }
     }
 
-    fn render_memory_region_grid(ui: &mut egui::Ui, dialog: &MemoryViewDialog, bytes: &[u8]) {
+    fn render_memory_region_grid(ui: &mut egui::Ui, dialog: &mut MemoryViewDialog, bytes: &[u8]) {
         let unit = memory_display_width(dialog.display_type);
         let value_width = memory_display_cell_width(dialog.display_type);
         let address_width = 145.0;
@@ -1987,11 +1985,35 @@ impl CrosshairApp {
                     format!("{row_address:X}")
                 };
                 Self::memory_view_cell(ui, address_width, &shown_address);
-                for value in chunk.chunks(unit).take(columns) {
+                for (column, value) in chunk.chunks(unit).take(columns).enumerate() {
                     let text = (value.len() == unit)
                         .then(|| format_memory_display(value, dialog.display_type))
                         .unwrap_or_default();
-                    Self::memory_view_cell(ui, value_width, &text);
+                    let cell = Self::memory_view_cell(ui, value_width, &text);
+                    let cell_address = row_address.saturating_add(column * unit);
+                    cell.context_menu(|ui| {
+                        if ui.button("Add this address to the list").clicked() {
+                            dialog.pending_add =
+                                Some((cell_address, memory_display_scan_type(dialog.display_type)));
+                            ui.close();
+                        }
+                        ui.separator();
+                        ui.menu_button("Display Type", |ui| {
+                            for (display_type, label) in memory_display_types() {
+                                if ui
+                                    .selectable_value(&mut dialog.display_type, display_type, label)
+                                    .clicked()
+                                {
+                                    ui.close();
+                                }
+                            }
+                        });
+                        ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
+                        if ui.button("Open in dissect data/structure").clicked() {
+                            dialog.kind = MemoryViewKind::Structure;
+                            ui.close();
+                        }
+                    });
                 }
                 let ascii = chunk
                     .iter()
@@ -2540,6 +2562,8 @@ impl CrosshairApp {
 
 fn memory_type_label(value_type: ScanValueType) -> &'static str {
     match value_type {
+        ScanValueType::I8 => "Byte",
+        ScanValueType::I16 => "2 Bytes",
         ScanValueType::I32 => "4 Bytes",
         ScanValueType::F32 => "Float",
         ScanValueType::I64 => "8 Bytes",
@@ -2575,10 +2599,18 @@ fn parse_scan_value(text: &str, value_type: ScanValueType, hex: bool) -> Option<
             .ok()
             .filter(|value| value.is_finite())
             .map(ScanValue::F64),
+        ScanValueType::I8 if hex => {
+            parse_hex_signed(&text, 8).map(|value| ScanValue::I8(value as i8))
+        }
+        ScanValueType::I16 if hex => {
+            parse_hex_signed(&text, 16).map(|value| ScanValue::I16(value as i16))
+        }
         ScanValueType::I32 if hex => {
             parse_hex_signed(&text, 32).map(|value| ScanValue::I32(value as i32))
         }
         ScanValueType::I64 if hex => parse_hex_signed(&text, 64).map(ScanValue::I64),
+        ScanValueType::I8 => text.parse().ok().map(ScanValue::I8),
+        ScanValueType::I16 => text.parse().ok().map(ScanValue::I16),
         ScanValueType::I32 => text.parse().ok().map(ScanValue::I32),
         ScanValueType::I64 => text.parse().ok().map(ScanValue::I64),
     }
@@ -2593,17 +2625,18 @@ fn parse_hex_signed(text: &str, bits: u32) -> Option<i64> {
         return i64::from_str_radix(digits, 16).ok()?.checked_neg();
     }
     let unsigned = u64::from_str_radix(text, 16).ok()?;
-    Some(if bits == 32 {
-        unsigned as u32 as i32 as i64
-    } else {
-        unsigned as i64
-    })
+    let shift = 64u32.checked_sub(bits)?;
+    Some(((unsigned << shift) as i64) >> shift)
 }
 
 fn format_scan_value(value: ScanValue, hex: bool) -> String {
     match value {
+        ScanValue::I8(value) if hex => format!("0x{:02X}", value as u8),
+        ScanValue::I16(value) if hex => format!("0x{:04X}", value as u16),
         ScanValue::I32(value) if hex => format!("0x{:08X}", value as u32),
         ScanValue::I64(value) if hex => format!("0x{:016X}", value as u64),
+        ScanValue::I8(value) => value.to_string(),
+        ScanValue::I16(value) => value.to_string(),
         ScanValue::I32(value) => value.to_string(),
         ScanValue::F32(value) => format_compact_float(value as f64, 6),
         ScanValue::I64(value) => value.to_string(),
@@ -2662,6 +2695,17 @@ fn memory_display_width(display_type: MemoryDisplayType) -> usize {
         MemoryDisplayType::I16Hex | MemoryDisplayType::I16Decimal => 2,
         MemoryDisplayType::I32Hex | MemoryDisplayType::I32Decimal | MemoryDisplayType::Float => 4,
         MemoryDisplayType::I64Hex | MemoryDisplayType::I64Decimal | MemoryDisplayType::Double => 8,
+    }
+}
+
+fn memory_display_scan_type(display_type: MemoryDisplayType) -> ScanValueType {
+    match display_type {
+        MemoryDisplayType::ByteHex | MemoryDisplayType::ByteDecimal => ScanValueType::I8,
+        MemoryDisplayType::I16Hex | MemoryDisplayType::I16Decimal => ScanValueType::I16,
+        MemoryDisplayType::I32Hex | MemoryDisplayType::I32Decimal => ScanValueType::I32,
+        MemoryDisplayType::I64Hex | MemoryDisplayType::I64Decimal => ScanValueType::I64,
+        MemoryDisplayType::Float => ScanValueType::F32,
+        MemoryDisplayType::Double => ScanValueType::F64,
     }
 }
 
