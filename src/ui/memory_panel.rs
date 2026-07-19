@@ -15,9 +15,9 @@ use crate::{
     hotkey,
     model::HotkeyBinding,
     process_memory::{
-        ScanCandidate, ScanComparison, ScanValue, ScanValueType, filter_scan_candidates,
-        read_memory_bytes, read_scan_value, refresh_scan_candidates, scan_memory_with_progress,
-        write_scan_value,
+        MemoryRegionInfo, ScanCandidate, ScanComparison, ScanValue, ScanValueType,
+        filter_scan_candidates, query_memory_region, read_memory_bytes, read_scan_value,
+        refresh_scan_candidates, scan_memory_with_progress, write_scan_value,
     },
     window_list,
 };
@@ -1832,6 +1832,10 @@ impl CrosshairApp {
             .memory_panel
             .process_pid
             .and_then(|pid| read_memory_bytes(pid, address, 512).ok());
+        let region = self
+            .memory_panel
+            .process_pid
+            .and_then(|pid| query_memory_region(pid, address).ok());
         let mut open = true;
         if dialog.pinned {
             let monitor_height = ctx
@@ -1861,7 +1865,7 @@ impl CrosshairApp {
                     }
                     Self::render_memory_popup_titlebar(ctx, &title, &mut unpin, &mut open);
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        Self::render_memory_view_body(ui, &mut dialog, bytes.as_deref());
+                        Self::render_memory_view_body(ui, &mut dialog, bytes.as_deref(), region);
                     });
                     Self::render_memory_popup_resize_handles(ctx);
                 },
@@ -1884,73 +1888,7 @@ impl CrosshairApp {
                 if ui.button("Pin").clicked() {
                     dialog.pinned = true;
                 }
-                let Some(bytes) = bytes.as_deref() else {
-                    ui.label("Unable to read this memory region");
-                    return;
-                };
-                let body = egui::ScrollArea::both().show(ui, |ui| match kind {
-                    MemoryViewKind::Bytes => {
-                        ui.horizontal(|ui| {
-                            Self::memory_view_cell(ui, 152.0, "Address");
-                            Self::memory_view_cell(ui, 360.0, "Data");
-                            Self::memory_view_cell(ui, 130.0, "ASCII");
-                        });
-                        ui.separator();
-                        for (row, chunk) in bytes.chunks(16).enumerate() {
-                            let ascii = chunk
-                                .iter()
-                                .map(|byte| {
-                                    if byte.is_ascii_graphic() {
-                                        *byte as char
-                                    } else {
-                                        '.'
-                                    }
-                                })
-                                .collect::<String>();
-                            ui.horizontal(|ui| {
-                                let shown_address = if dialog.relative_addresses {
-                                    format!("+{:04X}", row * 16)
-                                } else {
-                                    format!("{:X}", address + row * 16)
-                                };
-                                Self::memory_view_cell(ui, 152.0, &shown_address);
-                                Self::memory_view_cell(
-                                    ui,
-                                    360.0,
-                                    &format_memory_display(chunk, dialog.display_type),
-                                );
-                                Self::memory_view_cell(ui, 130.0, &ascii);
-                            });
-                        }
-                    }
-                    MemoryViewKind::Structure => {
-                        Self::render_structure_elements(ui, &mut dialog, bytes);
-                    }
-                });
-                if matches!(dialog.kind, MemoryViewKind::Bytes) {
-                    ui.interact(
-                        body.inner_rect,
-                        ui.id().with("memory-region-context-menu"),
-                        Sense::click(),
-                    )
-                    .context_menu(|ui| {
-                        ui.menu_button("Display Type", |ui| {
-                            for (display_type, label) in memory_display_types() {
-                                if ui
-                                    .selectable_value(&mut dialog.display_type, display_type, label)
-                                    .clicked()
-                                {
-                                    ui.close();
-                                }
-                            }
-                        });
-                        ui.checkbox(&mut dialog.relative_addresses, "Show relative addresses");
-                        if ui.button("Open in dissect data/structure").clicked() {
-                            dialog.kind = MemoryViewKind::Structure;
-                            ui.close();
-                        }
-                    });
-                }
+                Self::render_memory_view_body(ui, &mut dialog, bytes.as_deref(), region);
             });
         if !open {
             self.memory_panel.memory_view_dialog = None;
@@ -1965,46 +1903,30 @@ impl CrosshairApp {
         ui: &mut egui::Ui,
         dialog: &mut MemoryViewDialog,
         bytes: Option<&[u8]>,
+        region: Option<MemoryRegionInfo>,
     ) {
         let Some(bytes) = bytes else {
             ui.label("Unable to read this memory region");
             return;
         };
-        let address = dialog.address;
+        if matches!(dialog.kind, MemoryViewKind::Bytes) {
+            if let Some(region) = region {
+                ui.label(
+                    RichText::new(format!(
+                        "Protect:{}   AllocationBase={:X}   Base={:X}   Size={:X}",
+                        format_memory_protection(region.protect),
+                        region.allocation_base,
+                        region.base,
+                        region.size,
+                    ))
+                    .monospace(),
+                );
+                ui.separator();
+            }
+        }
         let body = egui::ScrollArea::both().show(ui, |ui| match dialog.kind {
             MemoryViewKind::Bytes => {
-                ui.horizontal(|ui| {
-                    Self::memory_view_cell(ui, 152.0, "Address");
-                    Self::memory_view_cell(ui, 360.0, "Data");
-                    Self::memory_view_cell(ui, 130.0, "ASCII");
-                });
-                ui.separator();
-                for (row, chunk) in bytes.chunks(16).enumerate() {
-                    let ascii = chunk
-                        .iter()
-                        .map(|byte| {
-                            if byte.is_ascii_graphic() {
-                                *byte as char
-                            } else {
-                                '.'
-                            }
-                        })
-                        .collect::<String>();
-                    ui.horizontal(|ui| {
-                        let shown_address = if dialog.relative_addresses {
-                            format!("+{:04X}", row * 16)
-                        } else {
-                            format!("{:X}", address + row * 16)
-                        };
-                        Self::memory_view_cell(ui, 152.0, &shown_address);
-                        Self::memory_view_cell(
-                            ui,
-                            360.0,
-                            &format_memory_display(chunk, dialog.display_type),
-                        );
-                        Self::memory_view_cell(ui, 130.0, &ascii);
-                    });
-                }
+                Self::render_memory_region_grid(ui, dialog, bytes);
             }
             MemoryViewKind::Structure => {
                 Self::render_structure_elements(ui, dialog, bytes);
@@ -2032,6 +1954,56 @@ impl CrosshairApp {
                     dialog.kind = MemoryViewKind::Structure;
                     ui.close();
                 }
+            });
+        }
+    }
+
+    fn render_memory_region_grid(ui: &mut egui::Ui, dialog: &MemoryViewDialog, bytes: &[u8]) {
+        let unit = memory_display_width(dialog.display_type);
+        let value_width = memory_display_cell_width(dialog.display_type);
+        let address_width = 145.0;
+        let ascii_width = 210.0;
+        let columns = (((ui.available_width() - address_width - ascii_width) / value_width).floor()
+            as usize)
+            .clamp(1, 32 / unit);
+        let row_bytes = columns * unit;
+
+        ui.horizontal(|ui| {
+            Self::memory_view_cell(ui, address_width, "Address");
+            for column in 0..columns {
+                let low_byte = dialog.address.wrapping_add(column * unit) & 0xFF;
+                Self::memory_view_cell(ui, value_width, &format!("{low_byte:02X}"));
+            }
+            Self::memory_view_cell(ui, ascii_width, "0123456789ABCDEF0123456789ABCDEF");
+        });
+        ui.separator();
+
+        for (row, chunk) in bytes.chunks(row_bytes).enumerate() {
+            let row_address = dialog.address.saturating_add(row * row_bytes);
+            ui.horizontal(|ui| {
+                let shown_address = if dialog.relative_addresses {
+                    format!("+{:04X}", row * row_bytes)
+                } else {
+                    format!("{row_address:X}")
+                };
+                Self::memory_view_cell(ui, address_width, &shown_address);
+                for value in chunk.chunks(unit).take(columns) {
+                    let text = (value.len() == unit)
+                        .then(|| format_memory_display(value, dialog.display_type))
+                        .unwrap_or_default();
+                    Self::memory_view_cell(ui, value_width, &text);
+                }
+                let ascii = chunk
+                    .iter()
+                    .map(|byte| {
+                        if byte.is_ascii_graphic() {
+                            *byte as char
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect::<String>();
+                Self::memory_view_cell(ui, ascii_width, &ascii);
             });
         }
     }
@@ -2681,6 +2653,42 @@ fn format_structure_value(bytes: &[u8], value_type: StructureElementType) -> Str
         StructureElementType::Pointer => {
             format!("P->0x{:X}", u64::from_le_bytes(bytes.try_into().unwrap()))
         }
+    }
+}
+
+fn memory_display_width(display_type: MemoryDisplayType) -> usize {
+    match display_type {
+        MemoryDisplayType::ByteHex | MemoryDisplayType::ByteDecimal => 1,
+        MemoryDisplayType::I16Hex | MemoryDisplayType::I16Decimal => 2,
+        MemoryDisplayType::I32Hex | MemoryDisplayType::I32Decimal | MemoryDisplayType::Float => 4,
+        MemoryDisplayType::I64Hex | MemoryDisplayType::I64Decimal | MemoryDisplayType::Double => 8,
+    }
+}
+
+fn memory_display_cell_width(display_type: MemoryDisplayType) -> f32 {
+    match display_type {
+        MemoryDisplayType::ByteHex => 32.0,
+        MemoryDisplayType::ByteDecimal => 42.0,
+        MemoryDisplayType::I16Hex => 54.0,
+        MemoryDisplayType::I16Decimal => 66.0,
+        MemoryDisplayType::I32Hex => 82.0,
+        MemoryDisplayType::I32Decimal | MemoryDisplayType::Float => 100.0,
+        MemoryDisplayType::I64Hex => 142.0,
+        MemoryDisplayType::I64Decimal | MemoryDisplayType::Double => 154.0,
+    }
+}
+
+fn format_memory_protection(protect: u32) -> &'static str {
+    match protect & 0xFF {
+        0x01 => "NoAccess",
+        0x02 => "ReadOnly",
+        0x04 => "Read/Write",
+        0x08 => "WriteCopy",
+        0x10 => "Execute",
+        0x20 => "Execute/Read",
+        0x40 => "Execute/Read/Write",
+        0x80 => "Execute/WriteCopy",
+        _ => "Unknown",
     }
 }
 

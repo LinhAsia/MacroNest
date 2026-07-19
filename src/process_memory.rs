@@ -47,6 +47,14 @@ pub enum ScanValueType {
     F64,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct MemoryRegionInfo {
+    pub allocation_base: usize,
+    pub base: usize,
+    pub size: usize,
+    pub protect: u32,
+}
+
 impl ScanValueType {
     pub const fn width(self) -> usize {
         match self {
@@ -183,6 +191,29 @@ pub fn read_scan_value(
     value_type
         .decode(&bytes)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid value"))
+}
+
+pub fn query_memory_region(pid: u32, address: usize) -> io::Result<MemoryRegionInfo> {
+    let process = ScanProcess::open(pid, false)?;
+    let mut information = MaybeUninit::<MemoryBasicInformation>::zeroed();
+    let queried = unsafe {
+        VirtualQueryEx(
+            process.handle,
+            address as *const c_void,
+            information.as_mut_ptr(),
+            size_of::<MemoryBasicInformation>(),
+        )
+    };
+    if queried == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let information = unsafe { information.assume_init() };
+    Ok(MemoryRegionInfo {
+        allocation_base: information.allocation_base as usize,
+        base: information.base_address as usize,
+        size: information.region_size,
+        protect: information.protect,
+    })
 }
 
 pub fn read_memory_bytes(pid: u32, address: usize, length: usize) -> io::Result<Vec<u8>> {
