@@ -749,8 +749,10 @@ pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::
 
     let mut bytes = [0u8; 8];
     let width = match value_type {
+        MemoryValueType::I8 => 1,
+        MemoryValueType::I16 => 2,
         MemoryValueType::I32 | MemoryValueType::F32 => 4,
-        MemoryValueType::I64 => 8,
+        MemoryValueType::I64 | MemoryValueType::F64 => 8,
     };
     let mut read = 0;
     let succeeded = unsafe {
@@ -774,9 +776,12 @@ pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::
     }
 
     Ok(match value_type {
+        MemoryValueType::I8 => i8::from_le_bytes(bytes[..1].try_into().unwrap()).to_string(),
+        MemoryValueType::I16 => i16::from_le_bytes(bytes[..2].try_into().unwrap()).to_string(),
         MemoryValueType::I32 => i32::from_le_bytes(bytes[..4].try_into().unwrap()).to_string(),
         MemoryValueType::F32 => f32::from_le_bytes(bytes[..4].try_into().unwrap()).to_string(),
         MemoryValueType::I64 => i64::from_le_bytes(bytes).to_string(),
+        MemoryValueType::F64 => f64::from_le_bytes(bytes).to_string(),
     })
 }
 
@@ -788,6 +793,22 @@ pub fn write_value(
 ) -> io::Result<()> {
     let mut bytes = [0u8; 8];
     let width = match value_type {
+        MemoryValueType::I8 => {
+            bytes[0] = value
+                .parse::<i8>()
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
+                .to_le_bytes()[0];
+            1
+        }
+        MemoryValueType::I16 => {
+            bytes[..2].copy_from_slice(
+                &value
+                    .parse::<i16>()
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
+                    .to_le_bytes(),
+            );
+            2
+        }
         MemoryValueType::I32 => {
             bytes[..4].copy_from_slice(
                 &value
@@ -810,6 +831,15 @@ pub fn write_value(
             bytes.copy_from_slice(
                 &value
                     .parse::<i64>()
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
+                    .to_le_bytes(),
+            );
+            8
+        }
+        MemoryValueType::F64 => {
+            bytes.copy_from_slice(
+                &value
+                    .parse::<f64>()
                     .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
                     .to_le_bytes(),
             );

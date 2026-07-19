@@ -146,6 +146,8 @@ struct StablePointerDialog {
     selected: Option<usize>,
     rx: Option<Receiver<StablePointerJobResult>>,
     progress: Arc<AtomicUsize>,
+    filter: String,
+    exe_only: bool,
 }
 
 struct AddressDialog {
@@ -2012,6 +2014,8 @@ impl CrosshairApp {
             selected: None,
             rx: Some(rx),
             progress,
+            filter: String::new(),
+            exe_only: false,
         });
     }
 
@@ -2043,6 +2047,9 @@ impl CrosshairApp {
                                 observed_value: None,
                             })
                             .collect();
+                        dialog.candidates.sort_by_key(|candidate| {
+                            !candidate.path.module.to_ascii_lowercase().ends_with(".exe")
+                        });
                         dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
                         dialog.status = if dialog.candidates.is_empty() {
                             format!(
@@ -2097,12 +2104,18 @@ impl CrosshairApp {
                 if ui
                     .add_enabled(
                         dialog.selected.is_some(),
-                        Button::new("Add selected pointer"),
+                        Button::new("Save selected pointer"),
                     )
                     .clicked()
                 {
                     add = true;
                 }
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.filter)
+                        .desired_width(150.0)
+                        .hint_text(RichText::new("Search module...").weak()),
+                );
+                ui.checkbox(&mut dialog.exe_only, "EXE only");
             });
             ui.separator();
             const STATUS_WIDTH: f32 = 108.0;
@@ -2132,7 +2145,14 @@ impl CrosshairApp {
                 ui.set_min_width(
                     STATUS_WIDTH + ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH,
                 );
+                let filter = dialog.filter.trim().to_ascii_lowercase();
                 for (index, candidate) in dialog.candidates.iter().enumerate() {
+                    let module_lower = candidate.path.module.to_ascii_lowercase();
+                    if (dialog.exe_only && !module_lower.ends_with(".exe"))
+                        || (!filter.is_empty() && !module_lower.contains(&filter))
+                    {
+                        continue;
+                    }
                     let state = match candidate.valid {
                         Some(true) => "VERIFIED",
                         Some(false) => "BROKEN",

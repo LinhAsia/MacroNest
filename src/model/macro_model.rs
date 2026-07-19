@@ -120,10 +120,13 @@ pub enum MacroAction {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum MemoryValueType {
+    I8,
+    I16,
     #[default]
     I32,
     F32,
     I64,
+    F64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]

@@ -30436,6 +30436,8 @@ mod windows_overlay {
         };
         let raw_value = interpolate_variables(&step.memory_write_value);
         let value = match step.memory_value_type {
+            crate::model::MemoryValueType::I8 if raw_value.trim().parse::<i8>().is_ok() => raw_value,
+            crate::model::MemoryValueType::I16 if raw_value.trim().parse::<i16>().is_ok() => raw_value,
             crate::model::MemoryValueType::I32 if raw_value.trim().parse::<i32>().is_ok() => {
                 raw_value
             }
@@ -30444,6 +30446,21 @@ mod windows_overlay {
             }
             crate::model::MemoryValueType::F32 if raw_value.trim().parse::<f32>().is_ok() => {
                 raw_value
+            }
+            crate::model::MemoryValueType::F64 if raw_value.trim().parse::<f64>().is_ok() => raw_value,
+            crate::model::MemoryValueType::I8 => {
+                let value = evaluate_math_expression_f64(&raw_value);
+                if !value.is_finite() || value < i8::MIN as f64 || value > i8::MAX as f64 {
+                    return;
+                }
+                (value as i8).to_string()
+            }
+            crate::model::MemoryValueType::I16 => {
+                let value = evaluate_math_expression_f64(&raw_value);
+                if !value.is_finite() || value < i16::MIN as f64 || value > i16::MAX as f64 {
+                    return;
+                }
+                (value as i16).to_string()
             }
             crate::model::MemoryValueType::I32 => {
                 let value = evaluate_math_expression_f64(&raw_value);
@@ -30466,13 +30483,16 @@ mod windows_overlay {
                 }
                 (value as f32).to_string()
             }
+            crate::model::MemoryValueType::F64 => {
+                let value = evaluate_math_expression_f64(&raw_value);
+                if !value.is_finite() {
+                    return;
+                }
+                value.to_string()
+            }
         };
-        let _ = crate::process_memory::write_value(
-            pid,
-            address,
-            step.memory_value_type,
-            value.trim(),
-        );
+        let _ =
+            crate::process_memory::write_value(pid, address, step.memory_value_type, value.trim());
     }
 
     fn execute_ocr_action_step(step: &crate::model::MacroStep) {

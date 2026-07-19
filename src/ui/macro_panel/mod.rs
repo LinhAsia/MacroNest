@@ -97,28 +97,41 @@ impl CrosshairApp {
                     }
                 });
             egui::ComboBox::from_id_salt(ui.id().with("memory-type"))
-                .width(48.0)
+                .width(105.0)
                 .selected_text(match step.memory_value_type {
-                    MemoryValueType::I32 => "I32",
-                    MemoryValueType::F32 => "F32",
-                    MemoryValueType::I64 => "I64",
+                    MemoryValueType::I8 => "1 Byte (integer)",
+                    MemoryValueType::I16 => "2 Bytes (integer)",
+                    MemoryValueType::I32 => "4 Bytes (integer)",
+                    MemoryValueType::F32 => "Float (4 Bytes)",
+                    MemoryValueType::I64 => "8 Bytes (integer)",
+                    MemoryValueType::F64 => "Double (8 Bytes)",
                 })
                 .show_ui(ui, |ui| {
+                    changed |= ui.selectable_value(&mut step.memory_value_type, MemoryValueType::I8, "1 Byte (integer)").changed();
+                    changed |= ui.selectable_value(&mut step.memory_value_type, MemoryValueType::I16, "2 Bytes (integer)").changed();
                     changed |= ui
-                        .selectable_value(&mut step.memory_value_type, MemoryValueType::I32, "I32")
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::I32, "4 Bytes (integer)")
                         .changed();
                     changed |= ui
-                        .selectable_value(&mut step.memory_value_type, MemoryValueType::F32, "F32")
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::F32, "Float (4 Bytes)")
                         .changed();
                     changed |= ui
-                        .selectable_value(&mut step.memory_value_type, MemoryValueType::I64, "I64")
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::I64, "8 Bytes (integer)")
+                        .changed();
+                    changed |= ui
+                        .selectable_value(&mut step.memory_value_type, MemoryValueType::F64, "Double (8 Bytes)")
                         .changed();
                 });
-            changed |= ui
-                .add_sized(
-                    [150.0, 21.0],
-                    egui::TextEdit::singleline(&mut step.key)
-                        .hint_text("address / module+offset [offsets] / @name"),
+            changed |= Self::render_expandable_text_edit(
+                    ui,
+                    &mut step.key,
+                    ui.make_persistent_id("memory-address"),
+                    150.0,
+                    360.0,
+                    21.0,
+                    21.0,
+                    "address / module+offset [offsets] / @name",
+                    false,
                 )
                 .on_hover_text(Self::tr_lang(
                     language,
