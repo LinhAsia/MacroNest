@@ -950,7 +950,10 @@ impl CrosshairApp {
         ui.allocate_ui_with_layout(
             vec2(width, height),
             egui::Layout::left_to_right(egui::Align::Center),
-            |ui| ui.add(label),
+            |ui| {
+                ui.set_min_size(vec2(width, height));
+                ui.add(label)
+            },
         )
         .inner
     }
