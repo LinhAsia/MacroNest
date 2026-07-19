@@ -425,6 +425,17 @@ where
                     }
                 } else if exception == EXCEPTION_BREAKPOINT && first_breakpoint {
                     first_breakpoint = false;
+                    // The attach breakpoint can replace debug-register state installed during the
+                    // synthetic CREATE_THREAD events. Re-arm every existing game thread after it.
+                    for &thread in threads.values() {
+                        if let Err(error) = arm_thread(thread, &kind) {
+                            notify(WatchEvent::Error(format!(
+                                "unable to arm an existing game thread: {error}"
+                            )));
+                            stop.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
                 } else {
                     status = DBG_EXCEPTION_NOT_HANDLED;
                 }
