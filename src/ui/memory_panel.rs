@@ -298,7 +298,6 @@ pub(crate) struct MemoryPanelState {
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     hotkey_was_down: HashMap<MemoryScanAction, bool>,
     capturing_hotkey: Option<MemoryScanAction>,
-    pending_hotkey_modifiers: Option<HotkeyBinding>,
     edit_value_index: Option<usize>,
     edit_value_input: String,
     edit_description_index: Option<usize>,
@@ -341,7 +340,6 @@ impl Default for MemoryPanelState {
             hotkeys: HashMap::new(),
             hotkey_was_down: HashMap::new(),
             capturing_hotkey: None,
-            pending_hotkey_modifiers: None,
             edit_value_index: None,
             edit_value_input: String::new(),
             edit_description_index: None,
@@ -940,11 +938,14 @@ impl CrosshairApp {
                         self.memory_panel.hotkeys.remove(&action);
                         self.memory_panel.hotkey_was_down.remove(&action);
                         self.memory_panel.capturing_hotkey = None;
-                        self.memory_panel.pending_hotkey_modifiers = None;
+                        self.capture_hotkey_combo_keys = None;
+                        self.capture_hotkey_combo_vks.clear();
                         self.persist_memory_hotkeys();
                     } else {
                         self.memory_panel.capturing_hotkey = Some(action);
-                        self.memory_panel.pending_hotkey_modifiers = None;
+                        self.capture_ignored_keys = self.snapshot_pressed_capture_keys();
+                        self.capture_hotkey_combo_keys = None;
+                        self.capture_hotkey_combo_vks.clear();
                     }
                 }
             }
@@ -2882,38 +2883,7 @@ impl CrosshairApp {
         let Some(action) = self.memory_panel.capturing_hotkey else {
             return;
         };
-        let captured_key = ctx.input(|input| {
-            input.events.iter().find_map(|event| match event {
-                egui::Event::Key {
-                    key,
-                    pressed: true,
-                    repeat: false,
-                    modifiers,
-                    ..
-                } => hotkey::capture_from_egui(*key, *modifiers),
-                _ => None,
-            })
-        });
-        if let Some(binding) = captured_key {
-            self.finish_memory_hotkey_capture(action, binding);
-            return;
-        }
-
-        let modifiers = ctx.input(|input| input.modifiers);
-        #[cfg(windows)]
-        let win = unsafe {
-            use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
-            (GetAsyncKeyState(0x5B) as u16 & 0x8000) != 0
-                || (GetAsyncKeyState(0x5C) as u16 & 0x8000) != 0
-        };
-        #[cfg(not(windows))]
-        let win = false;
-        if let Some(binding) = hotkey::capture_modifiers_from_egui(modifiers, win) {
-            update_pending_modifier_capture(
-                &mut self.memory_panel.pending_hotkey_modifiers,
-                binding,
-            );
-        } else if let Some(binding) = self.memory_panel.pending_hotkey_modifiers.take() {
+        if let Some(binding) = self.capture_next_input(ctx) {
             self.finish_memory_hotkey_capture(action, binding);
         }
     }
@@ -2922,7 +2892,8 @@ impl CrosshairApp {
         self.memory_panel.hotkeys.insert(action, binding);
         self.memory_panel.hotkey_was_down.insert(action, true);
         self.memory_panel.capturing_hotkey = None;
-        self.memory_panel.pending_hotkey_modifiers = None;
+        self.capture_hotkey_combo_keys = None;
+        self.capture_hotkey_combo_vks.clear();
         self.persist_memory_hotkeys();
     }
 
@@ -3319,17 +3290,6 @@ fn memory_binding_is_down(binding: &HotkeyBinding) -> bool {
 #[cfg(not(windows))]
 fn memory_binding_is_down(_binding: &HotkeyBinding) -> bool {
     false
-}
-
-fn update_pending_modifier_capture(pending: &mut Option<HotkeyBinding>, captured: HotkeyBinding) {
-    let captured_count = hotkey::binding_key_names(&captured).len();
-    let pending_count = pending
-        .as_ref()
-        .map(hotkey::binding_key_names)
-        .map_or(0, |keys| keys.len());
-    if captured_count >= pending_count {
-        *pending = Some(captured);
-    }
 }
 
 #[cfg(test)]
