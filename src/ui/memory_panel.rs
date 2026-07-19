@@ -363,6 +363,7 @@ pub(crate) struct MemoryPanelState {
     result_limit_input: String,
     candidates: Vec<ScanCandidate>,
     selected_results: HashSet<usize>,
+    marked_result_addresses: HashSet<usize>,
     selection_anchor: Option<usize>,
     saved: Vec<SavedMemoryAddress>,
     selected_saved: HashSet<usize>,
@@ -409,6 +410,7 @@ impl Default for MemoryPanelState {
             result_limit_input: DEFAULT_SCAN_LIMIT.to_string(),
             candidates: Vec::new(),
             selected_results: HashSet::new(),
+            marked_result_addresses: HashSet::new(),
             selection_anchor: None,
             saved: Vec::new(),
             selected_saved: HashSet::new(),
@@ -1236,6 +1238,10 @@ impl CrosshairApp {
                     for index in rows {
                         let candidate = self.memory_panel.candidates[index];
                         let selected = self.memory_panel.selected_results.contains(&index);
+                        let marked = self
+                            .memory_panel
+                            .marked_result_addresses
+                            .contains(&candidate.address);
                         let row_width = ui.available_width();
                         let full_row_rect = egui::Rect::from_min_size(
                             ui.next_widget_position(),
@@ -1287,6 +1293,13 @@ impl CrosshairApp {
                                 );
                             },
                         );
+                        if marked {
+                            ui.painter().rect_filled(
+                                response.rect,
+                                3.0,
+                                Color32::from_rgba_premultiplied(196, 82, 82, 72),
+                            );
+                        }
                         if response.hovered() || selected {
                             ui.painter().rect_filled(
                                 response.rect,
@@ -1299,6 +1312,25 @@ impl CrosshairApp {
                                 ),
                             );
                         }
+                        response.context_menu(|ui| {
+                            let label = if marked {
+                                "Remove not-relevant mark"
+                            } else {
+                                "Mark as not relevant"
+                            };
+                            if ui.button(label).clicked() {
+                                if marked {
+                                    self.memory_panel
+                                        .marked_result_addresses
+                                        .remove(&candidate.address);
+                                } else {
+                                    self.memory_panel
+                                        .marked_result_addresses
+                                        .insert(candidate.address);
+                                }
+                                ui.close();
+                            }
+                        });
                         if !pinned && response.clicked() && !response.double_clicked() {
                             let toggle =
                                 ui.input(|input| input.modifiers.ctrl || input.modifiers.command);
@@ -3392,6 +3424,7 @@ impl CrosshairApp {
         self.memory_panel.scanning = false;
         self.memory_panel.candidates.clear();
         self.memory_panel.selected_results.clear();
+        self.memory_panel.marked_result_addresses.clear();
         self.memory_panel.selection_anchor = None;
         self.memory_panel.has_scan_session = false;
         self.memory_panel.status = status.to_owned();
