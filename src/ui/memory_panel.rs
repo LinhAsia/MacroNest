@@ -796,13 +796,20 @@ impl CrosshairApp {
                     });
                 });
             }
+            let result_column_width =
+                ((ui.available_width() - if pinned { 0.0 } else { 25.0 }) / 3.0).max(80.0);
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
                 if !pinned {
                     ui.add_space(22.0);
                 }
-                Self::memory_table_cell(ui, 190.0, RichText::new("Address").strong());
-                Self::memory_table_cell(ui, 112.0, RichText::new("Current").strong());
-                Self::memory_table_cell(ui, 112.0, RichText::new("Previous").strong());
+                Self::memory_table_cell(ui, result_column_width, RichText::new("Address").strong());
+                Self::memory_table_cell(ui, result_column_width, RichText::new("Current").strong());
+                Self::memory_table_cell(
+                    ui,
+                    result_column_width,
+                    RichText::new("Previous").strong(),
+                );
             });
             ui.separator();
             let visible_count = self.memory_panel.candidates.len().min(MAX_VISIBLE_RESULTS);
@@ -849,6 +856,7 @@ impl CrosshairApp {
                             vec2(row_width, 22.0),
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
                                 if !pinned {
                                     ui.add_space(3.0);
                                     let mut checked = selected;
@@ -858,13 +866,13 @@ impl CrosshairApp {
                                 }
                                 Self::memory_table_cell(
                                     ui,
-                                    190.0,
+                                    result_column_width,
                                     RichText::new(format!("0x{:016X}", candidate.address))
                                         .monospace(),
                                 );
                                 Self::memory_table_cell(
                                     ui,
-                                    112.0,
+                                    result_column_width,
                                     RichText::new(format_scan_value(
                                         candidate.current,
                                         self.memory_panel.hex,
@@ -873,7 +881,7 @@ impl CrosshairApp {
                                 );
                                 Self::memory_table_cell(
                                     ui,
-                                    112.0,
+                                    result_column_width,
                                     RichText::new(format_scan_value(
                                         candidate.previous,
                                         self.memory_panel.hex,
@@ -947,15 +955,13 @@ impl CrosshairApp {
         height: f32,
         label: egui::Label,
     ) -> egui::Response {
-        ui.allocate_ui_with_layout(
-            vec2(width, height),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_size(vec2(width, height));
-                ui.add(label)
-            },
-        )
-        .inner
+        let (rect, cell_response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        let mut cell = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        cell_response.union(cell.add(label))
     }
 
     fn select_memory_result(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
