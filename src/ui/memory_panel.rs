@@ -372,8 +372,10 @@ impl CrosshairApp {
         self.refresh_memory_values();
         let builder = egui::ViewportBuilder::default()
             .with_title("MacroNest — Scan results")
+            .with_position(egui::pos2(0.0, 0.0))
             .with_inner_size(vec2(560.0, 430.0))
             .with_min_inner_size(vec2(400.0, 260.0))
+            .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
             .with_resizable(true)
             .with_always_on_top();
@@ -382,6 +384,7 @@ impl CrosshairApp {
             egui::ViewportId::from_hash_of("memory-scan-results"),
             builder,
             |ctx, _| {
+                Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     unpin = true;
                 }
@@ -1573,7 +1576,7 @@ impl CrosshairApp {
                 |ctx, _| {
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
-                        unpin = true;
+                        open = false;
                     }
                     Self::render_memory_popup_titlebar(ctx, &title, &mut unpin);
                     egui::TopBottomPanel::bottom("memory-watch-resize")
@@ -1720,7 +1723,7 @@ impl CrosshairApp {
                 |ctx, _| {
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
-                        unpin = true;
+                        open = false;
                     }
                     Self::render_memory_popup_titlebar(ctx, &title, &mut unpin);
                     egui::TopBottomPanel::bottom("memory-tool-resize")
@@ -1734,8 +1737,10 @@ impl CrosshairApp {
             if unpin {
                 dialog.pinned = false;
             }
-            self.memory_panel.memory_view_dialog = Some(dialog);
-            ctx.request_repaint_after(Duration::from_millis(250));
+            if open {
+                self.memory_panel.memory_view_dialog = Some(dialog);
+                ctx.request_repaint_after(Duration::from_millis(250));
+            }
             return;
         }
         egui::Window::new(title)
@@ -1969,8 +1974,10 @@ impl CrosshairApp {
     }
 
     fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) {
-        ui.add_sized(
-            [width, 18.0],
+        Self::memory_label_cell(
+            ui,
+            width,
+            18.0,
             egui::Label::new(RichText::new(text).monospace()).selectable(true),
         );
     }
