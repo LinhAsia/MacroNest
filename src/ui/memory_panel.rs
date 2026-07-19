@@ -1884,7 +1884,6 @@ impl CrosshairApp {
                         .find(|hit| hit.address == instruction_address)
                     {
                         hit.count += 1;
-                        hit.details = details;
                     } else if dialog.hits.len() < MAX_VISIBLE_INSTRUCTIONS {
                         dialog.hits.push(InstructionHit {
                             address: instruction_address,
@@ -1903,7 +1902,9 @@ impl CrosshairApp {
                     dialog.active = None;
                 }
                 WatchEvent::Stopped => {
-                    dialog.status = "Debugger stopped".to_owned();
+                    if !dialog.status.starts_with("Debugger stopped:") {
+                        dialog.status = "Debugger stopped".to_owned();
+                    }
                     dialog.active = None;
                 }
             }

@@ -89,7 +89,8 @@ fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
 }
 
 const ERROR_SEM_TIMEOUT: i32 = 121;
-const MAX_ACCESS_HITS: usize = 100;
+// ponytail: bound runaway debugger traffic; switch to sampled/VEH capture before raising this again.
+const MAX_ACCESS_HITS: usize = 10_000;
 const RESUME_FLAG: u32 = 1 << 16;
 
 #[repr(C, align(16))]
