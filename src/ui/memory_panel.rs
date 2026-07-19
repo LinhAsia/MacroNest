@@ -25,7 +25,7 @@ use crate::{
 #[cfg(windows)]
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, WatchEvent, WriteWatch, module_offset_for_address,
-    process_modules, resolve_module_offset,
+    list_processes, process_modules, resolve_module_offset,
 };
 
 use super::CrosshairApp;
@@ -114,6 +114,7 @@ struct SavedMemoryAddress {
     description: String,
     pointer: Option<PointerSpec>,
     frozen: Option<ScanValue>,
+    saved_to_library: bool,
 }
 
 #[derive(Clone)]
@@ -388,6 +389,7 @@ pub(crate) struct MemoryPanelState {
     memory_settings_open: bool,
     code_list_open: bool,
     stable_pointer_dialog: Option<StablePointerDialog>,
+    saved_library_open: bool,
     #[cfg(windows)]
     instruction_watch_dialog: Option<InstructionWatchDialog>,
     #[cfg(windows)]
@@ -433,6 +435,7 @@ impl Default for MemoryPanelState {
             memory_settings_open: false,
             code_list_open: false,
             stable_pointer_dialog: None,
+            saved_library_open: false,
             #[cfg(windows)]
             instruction_watch_dialog: None,
             #[cfg(windows)]
@@ -446,7 +449,7 @@ impl Default for MemoryPanelState {
 impl MemoryPanelState {
     pub(crate) fn with_hotkeys(
         stored: &[(String, HotkeyBinding)],
-        pointers: &[MemoryPointerEntry],
+        _pointers: &[MemoryPointerEntry],
     ) -> Self {
         let mut state = Self::default();
         state.hotkeys = stored
@@ -455,28 +458,38 @@ impl MemoryPanelState {
                 MemoryScanAction::from_config_key(key).map(|action| (action, binding.clone()))
             })
             .collect();
-        state.saved = pointers
-            .iter()
-            .filter_map(|entry| {
-                Some(SavedMemoryAddress {
-                    address: 0,
-                    value_type: memory_type_from_config(&entry.value_type)?,
-                    current: None,
-                    description: entry.name.clone(),
-                    pointer: Some(PointerSpec {
-                        base: 0,
-                        module: Some((entry.module.clone(), entry.module_offset)),
-                        offsets: entry.offsets.clone(),
-                    }),
-                    frozen: None,
-                })
-            })
-            .collect();
         state
     }
 }
 
 impl CrosshairApp {
+    fn select_memory_process(&mut self, selector: String, pid: Option<u32>, ctx: &egui::Context) {
+        self.memory_panel.process_selector = selector;
+        if self.memory_panel.process_pid != pid {
+            self.reset_memory_scan("Process changed");
+            self.memory_panel.saved.retain_mut(|saved| {
+                if saved.saved_to_library {
+                    saved.current = None;
+                    saved.frozen = None;
+                    true
+                } else {
+                    false
+                }
+            });
+            self.memory_panel.selected_saved.clear();
+            self.memory_panel.saved_selection_anchor = None;
+            self.memory_panel.edit_value_index = None;
+            self.memory_panel.edit_description_index = None;
+            self.memory_panel.address_dialog = None;
+        }
+        self.memory_panel.process_pid = pid;
+        self.memory_panel.status = pid.map_or_else(
+            || "Unable to open selected process".to_owned(),
+            |pid| format!("Process selected — PID {pid}"),
+        );
+        ctx.request_repaint();
+    }
+
     pub(crate) fn render_memory_panel(&mut self, ui: &mut egui::Ui) {
         let close_address_dialog = self
             .memory_panel
@@ -523,6 +536,9 @@ impl CrosshairApp {
                 if ui.button("Advanced options").clicked() {
                     self.memory_panel.code_list_open = true;
                 }
+                if ui.button("Saved addresses").clicked() {
+                    self.memory_panel.saved_library_open = true;
+                }
             });
         });
         ui.add_space(6.0);
@@ -555,6 +571,7 @@ impl CrosshairApp {
         self.render_memory_view_dialog(ui.ctx());
         self.render_memory_settings(ui.ctx());
         self.render_memory_code_list(ui.ctx());
+        self.render_saved_address_library(ui.ctx());
         self.render_stable_pointer_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_instruction_watch_dialog(ui.ctx());
@@ -809,16 +826,25 @@ impl CrosshairApp {
                 ui.label(RichText::new("Scan").strong());
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let process_label = self
-                        .open_window_infos
-                        .iter()
-                        .find(|window| window.selector == self.memory_panel.process_selector)
-                        .map(|window| Self::simplify_window_title(&window.title))
-                        .unwrap_or_else(|| "Select process".to_owned());
+                    let process_label = if let Some(label) = self
+                        .memory_panel
+                        .process_selector
+                        .strip_prefix("pid:")
+                        .and_then(|value| value.split_once(':').map(|(_, name)| name))
+                    {
+                        format!("{label} — PID {}", self.memory_panel.process_pid.unwrap_or_default())
+                    } else {
+                        self.open_window_infos
+                            .iter()
+                            .find(|window| window.selector == self.memory_panel.process_selector)
+                            .map(|window| Self::simplify_window_title(&window.title))
+                            .unwrap_or_else(|| "Select process".to_owned())
+                    };
                     let process_combo = egui::ComboBox::from_id_salt("memory-process")
                         .width(ui.available_width())
                         .selected_text(Self::truncate_window_title(&process_label, 52))
                         .show_ui(ui, |ui| {
+                            ui.label(RichText::new("Window processes (grouped)").strong());
                             for window in self.open_window_infos.clone() {
                                 let selected =
                                     window.selector == self.memory_panel.process_selector;
@@ -860,6 +886,26 @@ impl CrosshairApp {
                                         |pid| format!("Process selected — PID {pid}"),
                                     );
                                     ui.ctx().request_repaint();
+                                }
+                            }
+                            #[cfg(windows)]
+                            if let Ok(processes) = list_processes() {
+                                ui.separator();
+                                ui.label(RichText::new("All processes (individual PID)").strong());
+                                for (pid, name) in processes {
+                                    if ui
+                                        .selectable_label(
+                                            self.memory_panel.process_pid == Some(pid),
+                                            format!("{name} — PID {pid}"),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.select_memory_process(
+                                            format!("pid:{pid}:{name}"),
+                                            Some(pid),
+                                            ui.ctx(),
+                                        );
+                                    }
                                 }
                             }
                         });
@@ -1470,6 +1516,7 @@ impl CrosshairApp {
                             let mut delete = false;
                             let mut instruction_watch = None;
                             let mut find_stable_pointer = false;
+                            let mut save_to_library = false;
                             let mut persist_pointer_changes = false;
                             let mut row_hits = Vec::new();
                             let mut checkbox_changed = false;
@@ -1682,6 +1729,10 @@ impl CrosshairApp {
                                 self.select_saved_memory_row(index, selected, ui);
                             }
                             response.context_menu(|ui| {
+                                if ui.button("Save address to library").clicked() {
+                                    save_to_library = true;
+                                    ui.close();
+                                }
                                 if ui
                                     .button("Find instructions accessing this address (x64)")
                                     .clicked()
@@ -1751,6 +1802,14 @@ impl CrosshairApp {
                             }
                             if find_stable_pointer {
                                 self.start_stable_pointer_scan(&saved);
+                            }
+                            if save_to_library {
+                                self.memory_panel.saved[index].saved_to_library = true;
+                                if self.memory_panel.saved[index].description.is_empty() {
+                                    self.memory_panel.saved[index].description = format!("0x{:X}", saved.address);
+                                }
+                                self.persist_memory_pointers();
+                                self.memory_panel.status = "Address saved to library".to_owned();
                             }
                             if open_address {
                                 let (address, offsets, pointer) =
@@ -1839,6 +1898,100 @@ impl CrosshairApp {
             });
         self.memory_panel.memory_settings_open = open;
         if changed {
+            self.persist();
+        }
+    }
+
+    fn render_saved_address_library(&mut self, ctx: &egui::Context) {
+        if !self.memory_panel.saved_library_open {
+            return;
+        }
+        let mut open = true;
+        let mut load = None;
+        let mut delete = None;
+        egui::Window::new("Saved addresses")
+            .default_size(vec2(620.0, 420.0))
+            .collapsible(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                let mut apps = self
+                    .state
+                    .memory_pointer_list
+                    .iter()
+                    .map(|entry| {
+                        if entry.app_name.is_empty() {
+                            entry.module.clone()
+                        } else {
+                            entry.app_name.clone()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                apps.sort_by_key(|name| name.to_ascii_lowercase());
+                apps.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for app in apps {
+                        egui::CollapsingHeader::new(&app)
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                for (index, entry) in self.state.memory_pointer_list.iter().enumerate() {
+                                    let entry_app = if entry.app_name.is_empty() { &entry.module } else { &entry.app_name };
+                                    if !entry_app.eq_ignore_ascii_case(&app) {
+                                        continue;
+                                    }
+                                    ui.horizontal(|ui| {
+                                        let address = if entry.module.is_empty() {
+                                            entry.absolute_address.map_or_else(|| "Invalid address".to_owned(), |address| format!("0x{address:X}"))
+                                        } else {
+                                            format!("{}+{:X} [{}]", entry.module, entry.module_offset, entry.offsets.iter().map(|offset| format!("{offset:X}")).collect::<Vec<_>>().join(" → "))
+                                        };
+                                        ui.label(if entry.name.is_empty() { &address } else { &entry.name }).on_hover_text(&address);
+                                        if ui.small_button("Load").clicked() {
+                                            load = Some(index);
+                                        }
+                                        if ui.small_button("Delete").clicked() {
+                                            delete = Some(index);
+                                        }
+                                    });
+                                }
+                            });
+                    }
+                });
+                if self.state.memory_pointer_list.is_empty() {
+                    ui.centered_and_justified(|ui| ui.label(RichText::new("No saved addresses").weak()));
+                }
+            });
+        self.memory_panel.saved_library_open = open;
+        if let Some(index) = load
+            && let Some(entry) = self.state.memory_pointer_list.get(index).cloned()
+            && let Some(value_type) = memory_type_from_config(&entry.value_type)
+        {
+            let mut pointer = (!entry.module.is_empty()).then(|| PointerSpec {
+                base: 0,
+                module: Some((entry.module.clone(), entry.module_offset)),
+                offsets: entry.offsets.clone(),
+            });
+            let mut address = entry.absolute_address.unwrap_or_default();
+            if let (Some(pid), Some(pointer)) = (self.memory_panel.process_pid, pointer.as_mut())
+                && let Ok(base) = resolve_module_offset(pid, &entry.module, entry.module_offset)
+            {
+                pointer.base = base;
+                address = resolve_memory_address(pid, base, Some(pointer)).unwrap_or_default();
+            }
+            let current = self.memory_panel.process_pid.and_then(|pid| read_scan_value(pid, address, value_type).ok());
+            self.memory_panel.saved.push(SavedMemoryAddress {
+                address,
+                value_type,
+                current,
+                description: entry.name,
+                pointer,
+                frozen: None,
+                saved_to_library: false,
+            });
+            self.memory_panel.status = "Saved address loaded".to_owned();
+        }
+        if let Some(index) = delete {
+            self.state.memory_pointer_list.remove(index);
+            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
             self.persist();
         }
     }
@@ -2335,6 +2488,7 @@ impl CrosshairApp {
             ),
             pointer: Some(pointer),
             frozen: None,
+            saved_to_library: true,
         });
         self.memory_panel.status = "Stable pointer added to Address list".to_owned();
         self.persist_memory_pointers();
@@ -2751,6 +2905,7 @@ impl CrosshairApp {
             description: String::new(),
             pointer: None,
             frozen: None,
+            saved_to_library: false,
         });
         self.memory_panel.status = format!("Address 0x{address:X} added");
     }
@@ -3032,6 +3187,7 @@ impl CrosshairApp {
             description: String::new(),
             pointer: None,
             frozen: None,
+            saved_to_library: false,
         });
         self.memory_panel.status = format!("Address 0x{address:X} added");
     }
@@ -3267,6 +3423,7 @@ impl CrosshairApp {
                 description: String::new(),
                 pointer: None,
                 frozen: None,
+                saved_to_library: false,
             });
         }
         self.memory_panel.status = format!("{} address(es) saved", self.memory_panel.saved.len());
@@ -3290,6 +3447,7 @@ impl CrosshairApp {
             description: String::new(),
             pointer: None,
             frozen: None,
+            saved_to_library: false,
         });
         self.memory_panel.manual_address.clear();
     }
@@ -3478,22 +3636,45 @@ impl CrosshairApp {
     }
 
     fn persist_memory_pointers(&mut self) {
-        self.state.memory_pointer_list = self
-            .memory_panel
-            .saved
-            .iter()
-            .filter_map(|saved| {
-                let pointer = saved.pointer.as_ref()?;
-                let (module, module_offset) = pointer.module.as_ref()?;
-                Some(MemoryPointerEntry {
+        for saved in &self.memory_panel.saved {
+                if !saved.saved_to_library {
+                    continue;
+                }
+                let module_pointer = saved
+                    .pointer
+                    .as_ref()
+                    .and_then(|pointer| pointer.module.as_ref().map(|root| (pointer, root)));
+                let app_name = module_pointer
+                    .map(|(_, (module, _))| module.clone())
+                    .or_else(|| {
+                        self.memory_panel.process_pid.and_then(|pid| {
+                            #[cfg(windows)]
+                            return process_modules(pid).ok()?.first().map(|entry| entry.0.clone());
+                            #[cfg(not(windows))]
+                            None
+                        })
+                    })
+                    .unwrap_or_else(|| "Unknown application".to_owned());
+                let entry = MemoryPointerEntry {
                     name: saved.description.clone(),
-                    module: module.clone(),
-                    module_offset: *module_offset,
-                    offsets: pointer.offsets.clone(),
+                    app_name,
+                    module: module_pointer.map_or_else(String::new, |(_, root)| root.0.clone()),
+                    module_offset: module_pointer.map_or(0, |(_, root)| root.1),
+                    offsets: module_pointer.map_or_else(Vec::new, |(pointer, _)| pointer.offsets.clone()),
                     value_type: memory_type_config(saved.value_type).to_owned(),
-                })
-            })
-            .collect();
+                    absolute_address: module_pointer.is_none().then_some(saved.address),
+                };
+                if let Some(existing) = self.state.memory_pointer_list.iter_mut().find(|existing| {
+                    existing.module.eq_ignore_ascii_case(&entry.module)
+                        && existing.module_offset == entry.module_offset
+                        && existing.offsets == entry.offsets
+                        && existing.absolute_address == entry.absolute_address
+                }) {
+                    *existing = entry;
+                } else {
+                    self.state.memory_pointer_list.push(entry);
+                }
+        }
         crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
         self.persist();
     }

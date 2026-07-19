@@ -30378,6 +30378,9 @@ mod windows_overlay {
                 .iter()
                 .find(|entry| entry.name.eq_ignore_ascii_case(alias.trim()))
                 .cloned()?;
+            if let Some(address) = entry.absolute_address {
+                return Some(address);
+            }
             return resolve_memory_pointer_entry(
                 pid,
                 &entry.module,

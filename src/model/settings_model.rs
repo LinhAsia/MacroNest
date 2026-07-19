@@ -462,10 +462,14 @@ pub struct MemoryCodeEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct MemoryPointerEntry {
     pub name: String,
+    #[serde(default)]
+    pub app_name: String,
     pub module: String,
     pub module_offset: usize,
     pub offsets: Vec<usize>,
     pub value_type: String,
+    #[serde(default)]
+    pub absolute_address: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

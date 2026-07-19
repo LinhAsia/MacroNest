@@ -29,6 +29,7 @@ use windows_sys::Win32::{
         },
         Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW,
+            PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
             TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32,
         },
         Threading::{
@@ -37,6 +38,37 @@ use windows_sys::Win32::{
         },
     },
 };
+
+pub fn list_processes() -> io::Result<Vec<(u32, String)>> {
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut processes = Vec::new();
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..PROCESSENTRY32W::default()
+    };
+    let mut ok = unsafe { Process32FirstW(snapshot, &mut entry) };
+    while ok != 0 {
+        let end = entry
+            .szExeFile
+            .iter()
+            .position(|character| *character == 0)
+            .unwrap_or(entry.szExeFile.len());
+        if entry.th32ProcessID != 0 {
+            processes.push((
+                entry.th32ProcessID,
+                String::from_utf16_lossy(&entry.szExeFile[..end]),
+            ));
+        }
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        ok = unsafe { Process32NextW(snapshot, &mut entry) };
+    }
+    unsafe { CloseHandle(snapshot) };
+    processes.sort_by(|left, right| left.1.to_ascii_lowercase().cmp(&right.1.to_ascii_lowercase()).then(left.0.cmp(&right.0)));
+    Ok(processes)
+}
 
 pub fn module_offset_for_address(pid: u32, address: usize) -> io::Result<(String, usize)> {
     for (name, base, size) in process_modules(pid)? {
