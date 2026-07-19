@@ -127,6 +127,8 @@ struct StablePointerCandidate {
     path: PointerPath,
     valid: Option<bool>,
     resolved_base: Option<usize>,
+    resolved_address: Option<usize>,
+    observed_value: Option<ScanValue>,
 }
 
 struct StablePointerJobResult {
@@ -1920,6 +1922,8 @@ impl CrosshairApp {
                                 path,
                                 valid: None,
                                 resolved_base: None,
+                                resolved_address: None,
+                                observed_value: None,
                             })
                             .collect();
                         dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
@@ -1987,9 +1991,10 @@ impl CrosshairApp {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (index, candidate) in dialog.candidates.iter().enumerate() {
                     let state = match candidate.valid {
-                        Some(true) => "✓",
-                        Some(false) => "×",
-                        None => "?",
+                        Some(true) => "VERIFIED",
+                        Some(false) => "BROKEN",
+                        None if candidate.observed_value.is_some() => "VALUE CHANGED",
+                        None => "NOT CHECKED",
                     };
                     let offsets = candidate
                         .path
@@ -1998,8 +2003,17 @@ impl CrosshairApp {
                         .map(|offset| format!("{offset:X}"))
                         .collect::<Vec<_>>()
                         .join(" → ");
+                    let resolved = candidate
+                        .resolved_address
+                        .map_or_else(String::new, |address| {
+                            let value = candidate.observed_value.map_or_else(
+                                || "unreadable".to_owned(),
+                                |value| editable_scan_value(value, false),
+                            );
+                            format!("    => 0x{address:X}, value {value}")
+                        });
                     let text = format!(
-                        "{state}  {}+{:X}    [{}]",
+                        "{state}  {}+{:X}    [{}]{resolved}",
                         candidate.path.module, candidate.path.module_offset, offsets
                     );
                     if ui
@@ -2032,11 +2046,17 @@ impl CrosshairApp {
             return;
         };
         let mut valid = 0usize;
+        let mut changed = 0usize;
+        let mut broken = 0usize;
         for candidate in &mut dialog.candidates {
+            candidate.resolved_base = None;
+            candidate.resolved_address = None;
+            candidate.observed_value = None;
             let Ok(base) =
                 resolve_module_offset(pid, &candidate.path.module, candidate.path.module_offset)
             else {
                 candidate.valid = Some(false);
+                broken += 1;
                 continue;
             };
             let spec = PointerSpec {
@@ -2044,19 +2064,39 @@ impl CrosshairApp {
                 module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
                 offsets: candidate.path.offsets.clone(),
             };
-            let resolved = resolve_memory_address(pid, base, Some(&spec)).ok();
             candidate.resolved_base = Some(base);
-            candidate.valid = Some(
-                resolved.and_then(|address| read_scan_value(pid, address, dialog.value_type).ok())
-                    == Some(dialog.expected_value),
-            );
-            valid += usize::from(candidate.valid == Some(true));
+            let Ok(address) = resolve_memory_address(pid, base, Some(&spec)) else {
+                candidate.valid = Some(false);
+                broken += 1;
+                continue;
+            };
+            candidate.resolved_address = Some(address);
+            let Ok(observed) = read_scan_value(pid, address, dialog.value_type) else {
+                candidate.valid = Some(false);
+                broken += 1;
+                continue;
+            };
+            candidate.observed_value = Some(observed);
+            if observed == dialog.expected_value {
+                candidate.valid = Some(true);
+                valid += 1;
+            } else {
+                candidate.valid = None;
+                changed += 1;
+            }
         }
         dialog
             .candidates
-            .sort_by_key(|candidate| candidate.valid != Some(true));
-        dialog.selected = (valid > 0).then_some(0);
-        dialog.status = format!("Validated {valid} stable candidate(s) in PID {pid}");
+            .sort_by_key(|candidate| match candidate.valid {
+                Some(true) => 0,
+                None if candidate.observed_value.is_some() => 1,
+                _ => 2,
+            });
+        dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+        dialog.status = format!(
+            "PID {pid}: {valid} verified, {changed} resolved with a different value, {broken} broken. Expected {}.",
+            editable_scan_value(dialog.expected_value, false)
+        );
     }
 
     #[cfg(not(windows))]
