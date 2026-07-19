@@ -211,6 +211,7 @@ pub(crate) struct MemoryPanelState {
     selected_saved: HashSet<usize>,
     saved_selection_anchor: Option<usize>,
     saved_list_active: bool,
+    last_saved_cell_click: Option<(usize, isize, Instant)>,
     manual_address: String,
     status: String,
     last_action: String,
@@ -249,6 +250,7 @@ impl Default for MemoryPanelState {
             selected_saved: HashSet::new(),
             saved_selection_anchor: None,
             saved_list_active: false,
+            last_saved_cell_click: None,
             manual_address: String::new(),
             status: "Ready".to_owned(),
             last_action: "Ready".to_owned(),
@@ -1298,20 +1300,32 @@ impl CrosshairApp {
                                 response = response.union(hit);
                             }
                             if ui.input(|input| {
-                                input
-                                    .pointer
-                                    .button_double_clicked(egui::PointerButton::Primary)
+                                input.pointer.button_pressed(egui::PointerButton::Primary)
                             }) && let Some(pointer) = ui.ctx().pointer_latest_pos()
                                 && full_row_rect.contains(pointer)
                             {
                                 let column = ((pointer.x - full_row_rect.left() - 21.0)
                                     / column_width)
                                     .floor() as isize;
-                                match column {
-                                    0 => open_address = true,
-                                    2 => edit_value = true,
-                                    3 => self.memory_panel.edit_description_index = Some(index),
-                                    _ => {}
+                                let now = Instant::now();
+                                let double_clicked = self
+                                    .memory_panel
+                                    .last_saved_cell_click
+                                    .is_some_and(|(last_index, last_column, last_click)| {
+                                        last_index == index
+                                            && last_column == column
+                                            && now.duration_since(last_click)
+                                                <= Duration::from_millis(500)
+                                    });
+                                self.memory_panel.last_saved_cell_click =
+                                    (!double_clicked).then_some((index, column, now));
+                                if double_clicked {
+                                    match column {
+                                        0 => open_address = true,
+                                        2 => edit_value = true,
+                                        3 => self.memory_panel.edit_description_index = Some(index),
+                                        _ => {}
+                                    }
                                 }
                             }
                             if row_response.clicked() || checkbox_changed {
