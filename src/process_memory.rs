@@ -17,9 +17,12 @@ const PROCESS_VM_OPERATION: u32 = 0x0008;
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
 const MEM_COMMIT: u32 = 0x1000;
 const MEM_PRIVATE: u32 = 0x0002_0000;
+const MEM_MAPPED: u32 = 0x0004_0000;
 const MEM_IMAGE: u32 = 0x0100_0000;
+const PAGE_READONLY: u32 = 0x02;
 const PAGE_READWRITE: u32 = 0x04;
 const PAGE_WRITECOPY: u32 = 0x08;
+const PAGE_EXECUTE_READ: u32 = 0x20;
 const PAGE_EXECUTE_READWRITE: u32 = 0x40;
 const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
 const PAGE_GUARD: u32 = 0x100;
@@ -141,9 +144,13 @@ pub fn scan_pointer_paths(
 ) -> io::Result<Vec<PointerPath>> {
     // ponytail: these caps keep a pathological process from exhausting app memory; a disk-backed
     // pointer map is the upgrade path for larger scans.
-    const MAX_POINTERS: usize = 8_000_000;
+    const MAX_POINTERS: usize = 12_000_000;
     let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(&process);
+    let regions = pointer_scan_regions_for(&process);
+    let readable_ranges = regions
+        .iter()
+        .map(|region| (region.base, region.base.saturating_add(region.size)))
+        .collect::<Vec<_>>();
     let mut pointers = Vec::new();
     let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
     for region in regions {
@@ -153,13 +160,14 @@ pub fn scan_pointer_paths(
             let Ok(read) = process.read(address, &mut buffer[..wanted]) else {
                 continue;
             };
-            for byte_offset in (0..read.saturating_sub(7)).step_by(size_of::<usize>()) {
+            for byte_offset in (0..read.saturating_sub(7)).step_by(4) {
                 let value = usize::from_le_bytes(
                     buffer[byte_offset..byte_offset + size_of::<usize>()]
                         .try_into()
                         .unwrap(),
                 );
-                if (0x1_0000..=0x0000_7FFF_FFFF_FFFF).contains(&value) {
+                let range = readable_ranges.partition_point(|(base, _)| *base <= value);
+                if range > 0 && value < readable_ranges[range - 1].1 {
                     pointers.push((value, address + byte_offset));
                     if pointers.len() >= MAX_POINTERS {
                         break;
@@ -625,6 +633,53 @@ fn scan_regions_for(process: &ScanProcess) -> Vec<ScanRegion> {
             && matches!(
                 information.protect & 0xFF,
                 PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY
+            )
+            && information.protect & PAGE_GUARD == 0
+        {
+            regions.push(ScanRegion {
+                base,
+                size: information.region_size,
+            });
+        }
+        if next <= address {
+            break;
+        }
+        address = next;
+    }
+    regions
+}
+
+fn pointer_scan_regions_for(process: &ScanProcess) -> Vec<ScanRegion> {
+    let mut regions = Vec::new();
+    let mut address = 0usize;
+    loop {
+        let mut information = MaybeUninit::<MemoryBasicInformation>::zeroed();
+        let queried = unsafe {
+            VirtualQueryEx(
+                process.handle,
+                address as *const c_void,
+                information.as_mut_ptr(),
+                size_of::<MemoryBasicInformation>(),
+            )
+        };
+        if queried == 0 {
+            break;
+        }
+        let information = unsafe { information.assume_init() };
+        let base = information.base_address as usize;
+        let Some(next) = base.checked_add(information.region_size) else {
+            break;
+        };
+        if information.state == MEM_COMMIT
+            && matches!(information.kind, MEM_PRIVATE | MEM_MAPPED | MEM_IMAGE)
+            && matches!(
+                information.protect & 0xFF,
+                PAGE_READONLY
+                    | PAGE_READWRITE
+                    | PAGE_WRITECOPY
+                    | PAGE_EXECUTE_READ
+                    | PAGE_EXECUTE_READWRITE
+                    | PAGE_EXECUTE_WRITECOPY
             )
             && information.protect & PAGE_GUARD == 0
         {

@@ -1924,7 +1924,10 @@ impl CrosshairApp {
                             .collect();
                         dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
                         dialog.status = if dialog.candidates.is_empty() {
-                            "No module-based pointer paths found".to_owned()
+                            format!(
+                                "No module-based pointer paths found after reading {:.1} MB (5 levels, max offset 0x1000)",
+                                dialog.progress.load(Ordering::Relaxed) as f64 / 1_048_576.0
+                            )
                         } else {
                             format!(
                                 "{} candidate(s). Restart the game, restore the target value, select the new process, then Validate.",
