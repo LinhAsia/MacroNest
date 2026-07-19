@@ -124,7 +124,7 @@ struct AddressDialog {
     offsets: String,
     pointer: bool,
     position: egui::Pos2,
-    dismiss_on_outside: bool,
+    rect: Option<egui::Rect>,
 }
 
 #[derive(Clone, Copy)]
@@ -288,6 +288,21 @@ impl MemoryPanelState {
 
 impl CrosshairApp {
     pub(crate) fn render_memory_panel(&mut self, ui: &mut egui::Ui) {
+        let close_address_dialog = self
+            .memory_panel
+            .address_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.rect)
+            .is_some_and(|rect| {
+                ui.input(|input| input.pointer.any_pressed())
+                    && ui
+                        .ctx()
+                        .pointer_latest_pos()
+                        .is_some_and(|pointer| !rect.contains(pointer))
+            });
+        if close_address_dialog {
+            self.memory_panel.address_dialog = None;
+        }
         self.poll_memory_job();
         self.capture_memory_hotkey(ui.ctx());
         self.poll_memory_hotkeys(ui.ctx());
@@ -1387,7 +1402,7 @@ impl CrosshairApp {
                                         .pointer_latest_pos()
                                         .unwrap_or(full_row_rect.left_bottom())
                                         + vec2(12.0, 20.0),
-                                    dismiss_on_outside: false,
+                                    rect: None,
                                 });
                             }
                             if edit_value {
@@ -1920,12 +1935,9 @@ impl CrosshairApp {
                     }
                 });
             });
-        if dialog.dismiss_on_outside
-            && window.is_some_and(|window| window.response.clicked_elsewhere())
-        {
-            open = false;
+        if let Some(window) = window {
+            dialog.rect = Some(window.response.rect);
         }
-        dialog.dismiss_on_outside = true;
         if save {
             self.apply_memory_address_dialog(&dialog);
             open = false;
