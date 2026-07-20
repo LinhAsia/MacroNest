@@ -2164,11 +2164,7 @@ impl CrosshairApp {
                 return;
             }
         };
-        if let Some(dialog) = self.memory_panel.code_access_dialog.as_mut()
-            && let Some(active) = dialog.active.as_mut()
-        {
-            active.stop();
-        }
+        self.close_memory_debuggers();
         let (tx, rx) = mpsc::channel();
         let started = AccessWatch::start(pid, instruction_address, self.state.memory_debugger_architecture, move |event| {
             let _ = tx.send(event);
@@ -2564,11 +2560,7 @@ impl CrosshairApp {
                 "VEH debugger requires the injected helper and is not available yet".to_owned();
             return;
         }
-        if let Some(dialog) = self.memory_panel.instruction_watch_dialog.as_mut()
-            && let Some(active) = dialog.active.as_mut()
-        {
-            active.stop();
-        }
+        self.close_memory_debuggers();
         let (tx, rx) = mpsc::channel();
         let notify = move |event| {
             let _ = tx.send(event);
@@ -2947,7 +2939,28 @@ impl CrosshairApp {
                         Self::memory_view_cell(ui, 240.0, &format!("0x{address:X}"));
                         Self::memory_view_cell(ui, 120.0, &count.to_string());
                     })
-                    .response;
+                    .response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("Click to select this address; double-click to add it");
+                if dialog.selected == Some(index) {
+                    ui.painter().rect_filled(
+                        response.rect,
+                        2.0,
+                        Color32::from_rgba_premultiplied(84, 178, 222, 64),
+                    );
+                    ui.painter().rect_stroke(
+                        response.rect,
+                        2.0,
+                        egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
+                        egui::StrokeKind::Inside,
+                    );
+                } else if response.hovered() {
+                    ui.painter().rect_filled(
+                        response.rect,
+                        2.0,
+                        Color32::from_rgba_premultiplied(84, 178, 222, 36),
+                    );
+                }
                 if response.clicked() {
                     dialog.selected = Some(index);
                 }
@@ -3368,7 +3381,7 @@ impl CrosshairApp {
 
     fn start_memory_action(&mut self, action: MemoryScanAction) {
         #[cfg(windows)]
-        self.stop_memory_debuggers_for_scan();
+        self.close_memory_debuggers();
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process".to_owned();
             return;
@@ -3445,18 +3458,16 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn stop_memory_debuggers_for_scan(&mut self) {
-        if let Some(dialog) = self.memory_panel.instruction_watch_dialog.as_mut()
+    fn close_memory_debuggers(&mut self) {
+        if let Some(mut dialog) = self.memory_panel.instruction_watch_dialog.take()
             && let Some(mut active) = dialog.active.take()
         {
             active.stop();
-            dialog.status = "Debugger stopped before memory scan".to_owned();
         }
-        if let Some(dialog) = self.memory_panel.code_access_dialog.as_mut()
+        if let Some(mut dialog) = self.memory_panel.code_access_dialog.take()
             && let Some(mut active) = dialog.active.take()
         {
             active.stop();
-            dialog.status = "Debugger stopped before memory scan".to_owned();
         }
     }
 
