@@ -95,11 +95,20 @@ pub fn resolve_module_offset(pid: u32, module: &str, offset: usize) -> io::Resul
 }
 
 pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
-    let snapshot =
-        unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid) };
-    if snapshot == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
-    }
+    let mut attempts = 0;
+    let snapshot = loop {
+        let snapshot =
+            unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid) };
+        if snapshot != INVALID_HANDLE_VALUE {
+            break snapshot;
+        }
+        let error = io::Error::last_os_error();
+        attempts += 1;
+        if error.raw_os_error() != Some(ERROR_BAD_LENGTH) || attempts >= 4 {
+            return Err(error);
+        }
+        std::thread::yield_now();
+    };
     let mut modules = Vec::new();
     let mut entry = MODULEENTRY32W {
         dwSize: std::mem::size_of::<MODULEENTRY32W>() as u32,
@@ -125,6 +134,7 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
 }
 
 const ERROR_SEM_TIMEOUT: i32 = 121;
+const ERROR_BAD_LENGTH: i32 = 24;
 // ponytail: bound runaway debugger traffic; switch to sampled/VEH capture before raising this again.
 const MAX_ACCESS_HITS: usize = 10_000;
 const RESUME_FLAG: u32 = 1 << 16;

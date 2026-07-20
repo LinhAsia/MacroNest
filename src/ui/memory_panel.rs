@@ -277,6 +277,7 @@ struct MemoryViewDialog {
 struct ModuleListDialog {
     modules: Vec<(String, usize, usize)>,
     filter: String,
+    status: String,
 }
 
 #[cfg(windows)]
@@ -615,6 +616,7 @@ impl CrosshairApp {
                 ui.menu_button("Memory view", |ui| {
                     if ui.button("Enumerate modules / DLLs").clicked() {
                         self.open_memory_module_list();
+                        ui.ctx().request_repaint();
                         ui.close();
                     }
                 });
@@ -2138,9 +2140,11 @@ impl CrosshairApp {
                             }
                             if find_stable_pointer {
                                 self.start_stable_pointer_scan(&saved);
+                                ui.ctx().request_repaint();
                             }
                             if deep_pointer_scan {
                                 self.start_or_compare_deep_pointer_scan(&saved);
+                                ui.ctx().request_repaint();
                             }
                             if save_to_library {
                                 let indices = self.memory_panel.selected_saved
@@ -2505,15 +2509,29 @@ impl CrosshairApp {
             self.memory_panel.status = "Unable to read this address".to_owned();
             return;
         };
+        let target = saved.address;
+        let progress = Arc::new(AtomicUsize::new(0));
         let modules = match process_modules(pid) {
             Ok(modules) => modules,
             Err(error) => {
-                self.memory_panel.status = format!("Unable to list process modules: {error}");
+                let status = format!("Unable to list process modules: {error}");
+                self.memory_panel.status.clone_from(&status);
+                self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
+                    source_address: target,
+                    source_pid: pid,
+                    value_type: saved.value_type,
+                    expected_value,
+                    status,
+                    candidates: Vec::new(),
+                    selected: None,
+                    rx: None,
+                    progress,
+                    filter: String::new(),
+                    exe_only: false,
+                });
                 return;
             }
         };
-        let target = saved.address;
-        let progress = Arc::new(AtomicUsize::new(0));
         let worker_progress = Arc::clone(&progress);
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
@@ -2550,7 +2568,28 @@ impl CrosshairApp {
         let modules = match process_modules(pid) {
             Ok(modules) => modules,
             Err(error) => {
-                self.memory_panel.status = format!("Unable to list process modules: {error}");
+                let status = format!("Unable to list process modules: {error}");
+                self.memory_panel.status.clone_from(&status);
+                if let Some(dialog) = self.memory_panel.deep_pointer_dialog.as_mut() {
+                    dialog.status = status;
+                    dialog.rx = None;
+                } else {
+                    self.memory_panel.deep_pointer_dialog = Some(DeepPointerDialog {
+                        map_a: None,
+                        source_pid: pid,
+                        source_address: saved.address,
+                        value_type: saved.value_type,
+                        status,
+                        rx: None,
+                        progress: Arc::new(AtomicUsize::new(0)),
+                        candidates: Vec::new(),
+                        selected: HashSet::new(),
+                        selection_anchor: None,
+                        filter: String::new(),
+                        exe_only: false,
+                        display_type: saved.value_type,
+                    });
+                }
                 return;
             }
         };
@@ -3764,9 +3803,18 @@ impl CrosshairApp {
                 self.memory_panel.module_list_dialog = Some(ModuleListDialog {
                     modules,
                     filter: String::new(),
+                    status: String::new(),
                 });
             }
-            Err(error) => self.memory_panel.status = format!("Unable to enumerate modules: {error}"),
+            Err(error) => {
+                let status = format!("Unable to enumerate modules: {error}");
+                self.memory_panel.status.clone_from(&status);
+                self.memory_panel.module_list_dialog = Some(ModuleListDialog {
+                    modules: Vec::new(),
+                    filter: String::new(),
+                    status,
+                });
+            }
         }
     }
 
@@ -3778,6 +3826,9 @@ impl CrosshairApp {
         egui::CentralPanel::default()
             .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
+                if !dialog.status.is_empty() {
+                    ui.label(RichText::new(&dialog.status).color(Color32::LIGHT_RED));
+                }
                 ui.add(
                     egui::TextEdit::singleline(&mut dialog.filter)
                         .desired_width(f32::INFINITY)
