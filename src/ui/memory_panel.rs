@@ -166,9 +166,11 @@ struct DeepPointerDialog {
     rx: Option<Receiver<DeepPointerJobResult>>,
     progress: Arc<AtomicUsize>,
     candidates: Vec<PointerPath>,
-    selected: Option<usize>,
+    selected: HashSet<usize>,
+    selection_anchor: Option<usize>,
     filter: String,
     exe_only: bool,
+    display_type: ScanValueType,
 }
 
 struct AddressDialog {
@@ -427,6 +429,8 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     code_access_dialog: Option<CodeAccessDialog>,
     last_refresh: Instant,
+    #[cfg(windows)]
+    last_process_refresh: Instant,
     freeze_worker: MemoryFreezeWorker,
 }
 
@@ -479,6 +483,8 @@ impl Default for MemoryPanelState {
             #[cfg(windows)]
             code_access_dialog: None,
             last_refresh: Instant::now(),
+            #[cfg(windows)]
+            last_process_refresh: Instant::now(),
             freeze_worker: MemoryFreezeWorker::default(),
         }
     }
@@ -612,20 +618,77 @@ impl CrosshairApp {
             |ui| self.render_saved_memory_addresses(ui),
         );
 
-        self.render_memory_address_dialog(ui.ctx());
+        let address_open = self.memory_panel.address_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ui.ctx(),
+            "memory-change-address-host",
+            "Change address",
+            address_open,
+            Self::render_memory_address_dialog,
+        ) {
+            self.memory_panel.address_dialog = None;
+        }
         self.render_memory_view_dialog(ui.ctx());
         #[cfg(windows)]
-        self.render_memory_module_list(ui.ctx());
-        self.render_memory_settings(ui.ctx());
-        self.render_memory_code_list(ui.ctx());
-        self.render_saved_address_library(ui.ctx());
-        self.render_stable_pointer_dialog(ui.ctx());
+        {
+            let active = self.memory_panel.module_list_dialog.is_some();
+            if !self.render_detached_memory_popup(ui.ctx(), "memory-modules-host", "Enumerate modules / DLLs", active, Self::render_memory_module_list) {
+                self.memory_panel.module_list_dialog = None;
+            }
+        }
+        if !self.render_detached_memory_popup(ui.ctx(), "memory-settings-host", "Memory settings", self.memory_panel.memory_settings_open, Self::render_memory_settings) {
+            self.memory_panel.memory_settings_open = false;
+        }
+        if !self.render_detached_memory_popup(ui.ctx(), "memory-code-list-host", "Advanced options — Code list", self.memory_panel.code_list_open, Self::render_memory_code_list) {
+            self.memory_panel.code_list_open = false;
+        }
+        if !self.render_detached_memory_popup(ui.ctx(), "memory-saved-host", "Saved addresses", self.memory_panel.saved_library_open, Self::render_saved_address_library) {
+            self.memory_panel.saved_library_open = false;
+        }
+        let stable_active = self.memory_panel.stable_pointer_dialog.is_some();
+        if !self.render_detached_memory_popup(ui.ctx(), "memory-stable-pointer-host", "Find stable pointer", stable_active, Self::render_stable_pointer_dialog) {
+            self.memory_panel.stable_pointer_dialog = None;
+        }
         self.render_deep_pointer_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_instruction_watch_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_code_access_dialog(ui.ctx());
         self.sync_memory_freeze_targets();
+    }
+
+    fn render_detached_memory_popup(
+        &mut self,
+        ctx: &egui::Context,
+        id: &'static str,
+        title: &'static str,
+        active: bool,
+        render: fn(&mut Self, &egui::Context),
+    ) -> bool {
+        if !active {
+            return true;
+        }
+        let mut open = true;
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_position(egui::pos2(0.0, 0.0))
+            .with_inner_size(vec2(760.0, 560.0))
+            .with_min_inner_size(vec2(480.0, 280.0))
+            .with_clamp_size_to_monitor_size(true)
+            .with_decorations(false)
+            .with_resizable(true)
+            .with_always_on_top();
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
+            Self::constrain_memory_popup_to_monitor(ctx);
+            if ctx.input(|input| input.viewport().close_requested()) {
+                open = false;
+            }
+            let mut unpin = false;
+            Self::render_memory_popup_titlebar(ctx, title, &mut unpin, &mut open);
+            render(self, ctx);
+            Self::render_memory_popup_resize_handles(ctx);
+        });
+        open
     }
 
     pub(crate) fn render_memory_pinned_viewport(&mut self, ctx: &egui::Context) {
@@ -873,6 +936,20 @@ impl CrosshairApp {
                 ui.set_min_size(size - vec2(18.0, 18.0));
                 ui.label(RichText::new("Scan").strong());
                 ui.add_space(4.0);
+                #[cfg(windows)]
+                if self.memory_panel.last_process_refresh.elapsed() >= Duration::from_secs(1) {
+                    if let Ok(processes) = list_processes() {
+                        if self.memory_panel.process_pid.is_some_and(|pid| {
+                            !processes.iter().any(|(current, _)| *current == pid)
+                        }) {
+                            self.memory_panel.process_pid = None;
+                            self.memory_panel.process_selector.clear();
+                            self.reset_memory_scan("Process closed");
+                        }
+                        self.memory_panel.process_choices = processes;
+                    }
+                    self.memory_panel.last_process_refresh = Instant::now();
+                }
                 ui.horizontal(|ui| {
                     let process_label = if self.memory_panel.process_pid.is_none() {
                         "Select process".to_owned()
@@ -2355,7 +2432,8 @@ impl CrosshairApp {
             dialog.rx = Some(rx);
             dialog.progress = progress;
             dialog.candidates.clear();
-            dialog.selected = None;
+            dialog.selected.clear();
+            dialog.selection_anchor = None;
         } else {
             thread::spawn(move || {
                 let result = capture_pointer_map(pid, &modules, worker_progress)
@@ -2371,9 +2449,11 @@ impl CrosshairApp {
                 rx: Some(rx),
                 progress,
                 candidates: Vec::new(),
-                selected: None,
+                selected: HashSet::new(),
+                selection_anchor: None,
                 filter: String::new(),
                 exe_only: false,
+                display_type: saved.value_type,
             });
         }
     }
@@ -2610,7 +2690,8 @@ impl CrosshairApp {
                 }
                 DeepPointerJobResult::Compared(Ok(paths)) => {
                     dialog.candidates = paths;
-                    dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+                    dialog.selected.clear();
+                    dialog.selection_anchor = None;
                     dialog.status = format!(
                         "Compared map A and map B: {} common pointer path(s).",
                         dialog.candidates.len()
@@ -2625,12 +2706,25 @@ impl CrosshairApp {
         let mut open = true;
         let mut clear = false;
         let mut add = false;
-        egui::Window::new("Deep pointer scan — map comparison")
-            .default_size(vec2(720.0, 430.0))
-            .min_size(vec2(520.0, 300.0))
-            .collapsible(false)
-            .open(&mut open)
-            .show(ctx, |ui| {
+        let title = "Deep pointer scan — map comparison";
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_position(egui::pos2(0.0, 0.0))
+            .with_inner_size(vec2(760.0, 520.0))
+            .with_min_inner_size(vec2(520.0, 300.0))
+            .with_clamp_size_to_monitor_size(true)
+            .with_decorations(false)
+            .with_resizable(true)
+            .with_always_on_top();
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("memory-deep-pointer-scan"),
+            builder,
+            |ctx, _| {
+                Self::constrain_memory_popup_to_monitor(ctx);
+                if ctx.input(|input| input.viewport().close_requested()) { open = false; }
+                let mut unpin = false;
+                Self::render_memory_popup_titlebar(ctx, title, &mut unpin, &mut open);
+                egui::CentralPanel::default().frame(Self::memory_popup_frame(ctx)).show(ctx, |ui| {
                 ui.label(&dialog.status);
                 if dialog.rx.is_some() {
                     let read = dialog.progress.load(Ordering::Relaxed);
@@ -2640,7 +2734,10 @@ impl CrosshairApp {
                 }
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(dialog.selected.is_some(), Button::new("Add selected pointer"))
+                        .add_enabled(
+                            !dialog.selected.is_empty(),
+                            Button::new(format!("Add selected ({})", dialog.selected.len())),
+                        )
                         .clicked()
                     {
                         add = true;
@@ -2656,8 +2753,10 @@ impl CrosshairApp {
                     ui.checkbox(&mut dialog.exe_only, "EXE only");
                 });
                 ui.separator();
-                const ROOT_WIDTH: f32 = 310.0;
-                const OFFSETS_WIDTH: f32 = 360.0;
+                const ROOT_WIDTH: f32 = 250.0;
+                const OFFSETS_WIDTH: f32 = 180.0;
+                const ADDRESS_WIDTH: f32 = 150.0;
+                const VALUE_WIDTH: f32 = 130.0;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     Self::memory_label_cell(
@@ -2672,9 +2771,18 @@ impl CrosshairApp {
                         22.0,
                         egui::Label::new(RichText::new("Offsets").strong()),
                     );
+                    Self::memory_label_cell(ui, ADDRESS_WIDTH, 22.0, egui::Label::new(RichText::new("Address").strong()));
+                    Self::memory_label_cell(ui, VALUE_WIDTH, 22.0, egui::Label::new(RichText::new("Value").strong()));
                 });
                 ui.separator();
                 let filter = dialog.filter.trim().to_ascii_lowercase();
+                if ctx.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A)) {
+                    dialog.selected = dialog.candidates.iter().enumerate().filter(|(_, path)| {
+                        let module = path.module.to_ascii_lowercase();
+                        (!dialog.exe_only || module.ends_with(".exe"))
+                            && (filter.is_empty() || module.contains(&filter))
+                    }).map(|(index, _)| index).collect();
+                }
                 egui::ScrollArea::both().show(ui, |ui| {
                     for (index, path) in dialog.candidates.iter().enumerate() {
                         let module_lower = path.module.to_ascii_lowercase();
@@ -2690,16 +2798,29 @@ impl CrosshairApp {
                             .map(|offset| format!("{offset:X}"))
                             .collect::<Vec<_>>()
                             .join(" → ");
+                        let resolved = self.memory_panel.process_pid.and_then(|pid| {
+                            let base = resolve_module_offset(pid, &path.module, path.module_offset).ok()?;
+                            let pointer = PointerSpec {
+                                base,
+                                module: Some((path.module.clone(), path.module_offset)),
+                                offsets: path.offsets.clone(),
+                            };
+                            resolve_memory_address(pid, base, Some(&pointer)).ok()
+                        });
+                        let address_text = resolved.map_or_else(|| "—".to_owned(), |address| format!("0x{address:X}"));
+                        let value_text = self.memory_panel.process_pid.zip(resolved)
+                            .and_then(|(pid, address)| read_scan_value(pid, address, dialog.display_type).ok())
+                            .map_or_else(|| "—".to_owned(), |value| editable_scan_value(value, false));
                         let row_rect = egui::Rect::from_min_size(
                             ui.next_widget_position(),
-                            vec2((ROOT_WIDTH + OFFSETS_WIDTH).max(ui.available_width()), 24.0),
+                            vec2((ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH).max(ui.available_width()), 24.0),
                         );
                         let response = ui.interact(
                             row_rect,
                             ui.id().with(("deep-pointer-row", index)),
                             Sense::click(),
                         );
-                        if dialog.selected == Some(index) {
+                        if dialog.selected.contains(&index) {
                             ui.painter().rect_filled(
                                 row_rect,
                                 2.0,
@@ -2721,46 +2842,66 @@ impl CrosshairApp {
                                     24.0,
                                     egui::Label::new(offsets).truncate(),
                                 );
+                                Self::memory_label_cell(ui, ADDRESS_WIDTH, 24.0, egui::Label::new(address_text).truncate());
+                                Self::memory_label_cell(ui, VALUE_WIDTH, 24.0, egui::Label::new(value_text).truncate());
                             });
                         });
                         if response.clicked() {
-                            dialog.selected = Some(index);
+                            let (shift, additive) = ui.input(|input| (input.modifiers.shift, input.modifiers.command));
+                            if shift && let Some(anchor) = dialog.selection_anchor {
+                                if !additive { dialog.selected.clear(); }
+                                let (start, end) = if anchor <= index { (anchor, index) } else { (index, anchor) };
+                                dialog.selected.extend(start..=end);
+                            } else if additive {
+                                if !dialog.selected.insert(index) { dialog.selected.remove(&index); }
+                                dialog.selection_anchor = Some(index);
+                            } else {
+                                dialog.selected.clear();
+                                dialog.selected.insert(index);
+                                dialog.selection_anchor = Some(index);
+                            }
                         }
+                        response.context_menu(|ui| {
+                            ui.label(RichText::new("Display type").strong());
+                            for value_type in [ScanValueType::I8, ScanValueType::I16, ScanValueType::I32, ScanValueType::F32, ScanValueType::I64, ScanValueType::F64] {
+                                if ui.selectable_value(&mut dialog.display_type, value_type, memory_type_label(value_type)).clicked() { ui.close(); }
+                            }
+                        });
                     }
                 });
-            });
-        if add
-            && let Some(path) = dialog
-                .selected
-                .and_then(|index| dialog.candidates.get(index))
-                .cloned()
-            && let Some(pid) = self.memory_panel.process_pid
-            && let Ok(base) = resolve_module_offset(pid, &path.module, path.module_offset)
-        {
-            let pointer = PointerSpec {
-                base,
-                module: Some((path.module.clone(), path.module_offset)),
-                offsets: path.offsets,
-            };
-            if let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) {
-                self.memory_panel.saved.push(SavedMemoryAddress {
-                    address,
-                    value_type: dialog.value_type,
-                    current: read_scan_value(pid, address, dialog.value_type).ok(),
-                    description: format!("{}+{:X}", path.module, path.module_offset),
-                    pointer: Some(pointer),
-                    frozen: None,
-                    saved_to_library: false,
                 });
-                self.memory_panel.status = "Deep pointer added to Address list".to_owned();
+                Self::render_memory_popup_resize_handles(ctx);
+            },
+        );
+        if add && let Some(pid) = self.memory_panel.process_pid {
+            let mut added = 0usize;
+            for index in dialog.selected.iter().copied() {
+                let Some(path) = dialog.candidates.get(index).cloned() else { continue; };
+                let Ok(base) = resolve_module_offset(pid, &path.module, path.module_offset) else { continue; };
+                let pointer = PointerSpec {
+                    base,
+                    module: Some((path.module.clone(), path.module_offset)),
+                    offsets: path.offsets,
+                };
+                if let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) {
+                    self.memory_panel.saved.push(SavedMemoryAddress {
+                        address,
+                        value_type: dialog.display_type,
+                        current: read_scan_value(pid, address, dialog.display_type).ok(),
+                        description: format!("{}+{:X}", path.module, path.module_offset),
+                        pointer: Some(pointer),
+                        frozen: None,
+                        saved_to_library: false,
+                    });
+                    added += 1;
+                }
             }
+            self.memory_panel.status = format!("Added {added} deep pointer(s) to Address list");
         }
         if clear {
             self.memory_panel.status = "Pointer map A cleared".to_owned();
         } else if open {
-            if dialog.rx.is_some() {
-                ctx.request_repaint_after(Duration::from_millis(100));
-            }
+            ctx.request_repaint_after(Duration::from_millis(if dialog.rx.is_some() { 100 } else { 250 }));
             self.memory_panel.deep_pointer_dialog = Some(dialog);
         }
     }

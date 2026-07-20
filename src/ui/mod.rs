@@ -6878,6 +6878,10 @@ impl CrosshairApp {
                 let missing_primary = primary.as_ref().is_some_and(|current| {
                     !open_windows.iter().any(|window| &window.selector == current)
                 });
+                if missing_primary {
+                    *primary = None;
+                    changed = true;
+                }
                 let display_primary = if missing_primary {
                     label_when_none.to_owned()
                 } else {
