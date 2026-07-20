@@ -2216,12 +2216,9 @@ impl CrosshairApp {
         if !self.memory_panel.memory_settings_open {
             return;
         }
-        let mut open = true;
         let mut changed = false;
-        egui::Window::new("Memory settings")
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
+        egui::CentralPanel::default()
+            .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.label("Debugger method");
                 changed |= ui
@@ -2257,7 +2254,6 @@ impl CrosshairApp {
                         .changed();
                 }
             });
-        self.memory_panel.memory_settings_open = open;
         if changed {
             self.persist();
         }
@@ -2375,13 +2371,10 @@ impl CrosshairApp {
         if corrected_actions {
             self.persist();
         }
-        let mut open = true;
         let mut start = None;
         let mut delete = None;
-        egui::Window::new("Advanced options — Code list")
-            .default_size(vec2(720.0, 360.0))
-            .collapsible(false)
-            .open(&mut open)
+        egui::CentralPanel::default()
+            .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     Self::memory_view_cell(ui, 190.0, "Module + offset");
@@ -2418,7 +2411,6 @@ impl CrosshairApp {
                     });
                 }
             });
-        self.memory_panel.code_list_open = open;
         if let Some(index) = delete {
             self.state.memory_code_list.remove(index);
             self.persist();
@@ -2663,17 +2655,10 @@ impl CrosshairApp {
             }
         }
 
-        let mut open = true;
         let mut validate = false;
         let mut add = None;
-        egui::Window::new(format!(
-            "Find stable pointer — 0x{:X}",
-            dialog.source_address
-        ))
-        .default_size(vec2(720.0, 430.0))
-        .min_size(vec2(520.0, 300.0))
-        .collapsible(false)
-        .open(&mut open)
+        egui::CentralPanel::default()
+        .frame(Self::memory_popup_frame(ctx))
         .show(ctx, |ui| {
             ui.label(&dialog.status);
             if dialog.rx.is_some() {
@@ -2828,12 +2813,10 @@ impl CrosshairApp {
         if let Some(save_to_library) = add {
             self.add_stable_pointer_candidate(&dialog, save_to_library);
         }
-        if open {
-            if dialog.rx.is_some() {
-                ctx.request_repaint_after(Duration::from_millis(100));
-            }
-            self.memory_panel.stable_pointer_dialog = Some(dialog);
+        if dialog.rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(100));
         }
+        self.memory_panel.stable_pointer_dialog = Some(dialog);
     }
 
     fn render_deep_pointer_dialog(&mut self, ctx: &egui::Context) {
@@ -3258,6 +3241,11 @@ impl CrosshairApp {
                     dialog.status = format!("{total} hit(s), {} instruction(s)", dialog.hits.len());
                 }
                 WatchEvent::AccessHit { .. } => {}
+                WatchEvent::CaptureLimitReached(limit) => {
+                    dialog.status = format!(
+                        "Capture limit reached ({limit} accesses). Press Stop to detach safely."
+                    );
+                }
                 WatchEvent::Error(error) => {
                     dialog.status = format!("Debugger stopped: {error}");
                     dialog.active = None;
@@ -3588,6 +3576,11 @@ impl CrosshairApp {
                     dialog.status = format!("Debugger stopped: {error}");
                     dialog.active = None;
                 }
+                WatchEvent::CaptureLimitReached(limit) => {
+                    dialog.status = format!(
+                        "Capture limit reached ({limit} accesses). Press Stop to detach safely."
+                    );
+                }
                 WatchEvent::Stopped => {
                     dialog.status = "Debugger stopped".to_owned();
                     dialog.active = None;
@@ -3782,12 +3775,8 @@ impl CrosshairApp {
         let Some(dialog) = self.memory_panel.module_list_dialog.as_mut() else {
             return;
         };
-        let mut open = true;
-        egui::Window::new("Enumerate modules / DLLs")
-            .default_size(vec2(680.0, 520.0))
-            .min_size(vec2(480.0, 280.0))
-            .collapsible(false)
-            .open(&mut open)
+        egui::CentralPanel::default()
+            .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut dialog.filter)
@@ -3824,9 +3813,6 @@ impl CrosshairApp {
                     }
                 });
             });
-        if !open {
-            self.memory_panel.module_list_dialog = None;
-        }
     }
 
     fn render_memory_view_dialog(&mut self, ctx: &egui::Context) {
@@ -4130,11 +4116,8 @@ impl CrosshairApp {
         let mut open = true;
         let mut save = false;
         let mut cancel = false;
-        let window = egui::Window::new("Change address")
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(dialog.position)
-            .open(&mut open)
+        let window = egui::CentralPanel::default()
+            .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.checkbox(&mut dialog.pointer, "Pointer (x64)");
                 ui.horizontal(|ui| {
@@ -4156,9 +4139,7 @@ impl CrosshairApp {
                     }
                 });
             });
-        if let Some(window) = window {
-            dialog.rect = Some(window.response.rect);
-        }
+        dialog.rect = Some(window.response.rect);
         if save {
             self.apply_memory_address_dialog(&dialog);
             open = false;

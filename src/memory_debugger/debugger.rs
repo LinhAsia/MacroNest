@@ -157,6 +157,7 @@ pub enum WatchEvent {
     AccessHit {
         data_address: usize,
     },
+    CaptureLimitReached(usize),
     Error(String),
     Stopped,
 }
@@ -347,6 +348,7 @@ where
     let mut first_breakpoint = true;
     let mut threads = HashMap::new();
     let mut access_hits = 0usize;
+    let mut capture_limit_reached = false;
     while !stop.load(Ordering::Acquire) {
         let mut event = DEBUG_EVENT::default();
         if unsafe { WaitForDebugEvent(&mut event, 100) } == 0 {
@@ -396,7 +398,8 @@ where
                         match &kind {
                             WatchKind::Write { address } | WatchKind::ReadWrite { address } => {
                                 let read_write = matches!(kind, WatchKind::ReadWrite { .. });
-                                if let Some((instruction_address, decoded, instruction)) =
+                                if !capture_limit_reached
+                                    && let Some((instruction_address, decoded, instruction)) =
                                     decode_previous_access(
                                         &process,
                                         &context,
@@ -423,24 +426,21 @@ where
                                     if read_write {
                                         access_hits += 1;
                                         if access_hits >= MAX_ACCESS_HITS {
-                                            notify(WatchEvent::Error(format!(
-                                                "auto-stopped after {MAX_ACCESS_HITS} address accesses to protect responsiveness"
-                                            )));
-                                            stop.store(true, Ordering::Release);
+                                            capture_limit_reached = true;
+                                            notify(WatchEvent::CaptureLimitReached(MAX_ACCESS_HITS));
                                         }
                                     }
                                 }
                             }
                             WatchKind::Execute { instruction, .. } => {
-                                if let Some(data_address) = effective_address(instruction, &context)
+                                if !capture_limit_reached
+                                    && let Some(data_address) = effective_address(instruction, &context)
                                 {
                                     notify(WatchEvent::AccessHit { data_address });
                                     access_hits += 1;
                                     if access_hits >= MAX_ACCESS_HITS {
-                                        notify(WatchEvent::Error(format!(
-                                            "auto-stopped after {MAX_ACCESS_HITS} accesses to protect responsiveness"
-                                        )));
-                                        stop.store(true, Ordering::Release);
+                                        capture_limit_reached = true;
+                                        notify(WatchEvent::CaptureLimitReached(MAX_ACCESS_HITS));
                                     }
                                 }
                             }
