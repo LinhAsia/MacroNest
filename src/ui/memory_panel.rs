@@ -357,6 +357,8 @@ impl Drop for MemoryFreezeWorker {
 pub(crate) struct MemoryPanelState {
     process_selector: String,
     process_pid: Option<u32>,
+    #[cfg(windows)]
+    process_choices: Vec<(u32, String)>,
     value_type: ScanValueType,
     value_input: String,
     hex: bool,
@@ -404,6 +406,8 @@ impl Default for MemoryPanelState {
         Self {
             process_selector: String::new(),
             process_pid: None,
+            #[cfg(windows)]
+            process_choices: list_processes().unwrap_or_default(),
             value_type: ScanValueType::I32,
             value_input: "0".to_owned(),
             hex: false,
@@ -844,6 +848,7 @@ impl CrosshairApp {
                     };
                     let process_combo = egui::ComboBox::from_id_salt("memory-process")
                         .width(ui.available_width())
+                        .height(480.0)
                         .selected_text(Self::truncate_window_title(&process_label, 52))
                         .show_ui(ui, |ui| {
                             ui.label(RichText::new("Window processes (grouped)").strong());
@@ -891,10 +896,10 @@ impl CrosshairApp {
                                 }
                             }
                             #[cfg(windows)]
-                            if let Ok(processes) = list_processes() {
+                            if !self.memory_panel.process_choices.is_empty() {
                                 ui.separator();
                                 ui.label(RichText::new("All processes (individual PID)").strong());
-                                for (pid, name) in processes {
+                                for (pid, name) in self.memory_panel.process_choices.clone() {
                                     if ui
                                         .selectable_label(
                                             self.memory_panel.process_pid == Some(pid),
@@ -913,6 +918,10 @@ impl CrosshairApp {
                         });
                     if process_combo.response.clicked() {
                         self.ensure_open_windows_ready(true);
+                        #[cfg(windows)]
+                        if let Ok(processes) = list_processes() {
+                            self.memory_panel.process_choices = processes;
+                        }
                     }
                 });
                 ui.add_space(5.0);
@@ -2278,7 +2287,7 @@ impl CrosshairApp {
 
         let mut open = true;
         let mut validate = false;
-        let mut add = false;
+        let mut add = None;
         egui::Window::new(format!(
             "Find stable pointer — 0x{:X}",
             dialog.source_address
@@ -2316,7 +2325,7 @@ impl CrosshairApp {
                     )
                     .clicked()
                 {
-                    add = true;
+                    add = Some(true);
                 }
                 ui.add(
                     egui::TextEdit::singleline(&mut dialog.filter)
@@ -2424,6 +2433,13 @@ impl CrosshairApp {
                     if response.clicked() {
                         dialog.selected = Some(index);
                     }
+                    response.context_menu(|ui| {
+                        if ui.button("Add resolved address to Address list").clicked() {
+                            dialog.selected = Some(index);
+                            add = Some(false);
+                            ui.close();
+                        }
+                    });
                 }
             });
         });
@@ -2431,8 +2447,8 @@ impl CrosshairApp {
         if validate {
             self.validate_stable_pointer_candidates(&mut dialog);
         }
-        if add {
-            self.add_stable_pointer_candidate(&dialog);
+        if let Some(save_to_library) = add {
+            self.add_stable_pointer_candidate(&dialog, save_to_library);
         }
         if open {
             if dialog.rx.is_some() {
@@ -2504,7 +2520,11 @@ impl CrosshairApp {
     #[cfg(not(windows))]
     fn validate_stable_pointer_candidates(&mut self, _dialog: &mut StablePointerDialog) {}
 
-    fn add_stable_pointer_candidate(&mut self, dialog: &StablePointerDialog) {
+    fn add_stable_pointer_candidate(
+        &mut self,
+        dialog: &StablePointerDialog,
+        save_to_library: bool,
+    ) {
         let Some(pid) = self.memory_panel.process_pid else {
             return;
         };
@@ -2543,10 +2563,12 @@ impl CrosshairApp {
             ),
             pointer: Some(pointer),
             frozen: None,
-            saved_to_library: true,
+            saved_to_library: save_to_library,
         });
-        self.memory_panel.status = "Stable pointer added to Address list".to_owned();
-        self.persist_memory_pointers();
+        self.memory_panel.status = "Pointer added to Address list".to_owned();
+        if save_to_library {
+            self.persist_memory_pointers();
+        }
     }
 
     #[cfg(windows)]
