@@ -18,7 +18,8 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, DBG_CONTINUE, DBG_EXCEPTION_NOT_HANDLED, EXCEPTION_BREAKPOINT,
-        EXCEPTION_SINGLE_STEP, HANDLE, INVALID_HANDLE_VALUE,
+        EXCEPTION_SINGLE_STEP, HANDLE, INVALID_HANDLE_VALUE, STATUS_WX86_BREAKPOINT,
+        STATUS_WX86_SINGLE_STEP,
     },
     System::{
         Diagnostics::Debug::{
@@ -378,7 +379,7 @@ where
             },
             EXCEPTION_DEBUG_EVENT => unsafe {
                 let exception = event.u.Exception.ExceptionRecord.ExceptionCode;
-                if exception == EXCEPTION_SINGLE_STEP {
+                if exception == EXCEPTION_SINGLE_STEP || exception == STATUS_WX86_SINGLE_STEP {
                     if let Some(context) = threads.get(&event.dwThreadId).and_then(|&thread| {
                         read_hit(
                             thread,
@@ -446,7 +447,10 @@ where
                         // context API; never leak that debugger-owned exception into the game.
                         status = DBG_CONTINUE;
                     }
-                } else if exception == EXCEPTION_BREAKPOINT && first_breakpoint {
+                } else if (exception == EXCEPTION_BREAKPOINT
+                    || exception == STATUS_WX86_BREAKPOINT)
+                    && first_breakpoint
+                {
                     first_breakpoint = false;
                     // The attach breakpoint can replace debug-register state installed during the
                     // synthetic CREATE_THREAD events. Re-arm every existing game thread after it.
