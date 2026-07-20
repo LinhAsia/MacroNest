@@ -292,9 +292,19 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(HashSet::new()));
     static MEMORY_POINTER_ENTRIES: Lazy<Mutex<Vec<crate::model::MemoryPointerEntry>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
+    static MEMORY_TRIGGER_EVENTS: Lazy<Mutex<Vec<HotkeyBinding>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
 
     pub(crate) fn set_memory_pointer_entries(entries: &[crate::model::MemoryPointerEntry]) {
         *MEMORY_POINTER_ENTRIES.lock() = entries.to_vec();
+    }
+
+    pub(crate) fn take_memory_trigger_events() -> Vec<HotkeyBinding> {
+        if is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed) {
+            MEMORY_TRIGGER_EVENTS.lock().clear();
+            return Vec::new();
+        }
+        std::mem::take(&mut *MEMORY_TRIGGER_EVENTS.lock())
     }
     static STOP_REQUESTED_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
         Lazy::new(|| Mutex::new(HashSet::new()));
@@ -6358,6 +6368,13 @@ mod windows_overlay {
         let ui_is_foreground = is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
         if ui_is_foreground && !is_record_hotkey {
             return Some(false);
+        }
+        if !ui_is_foreground && !is_repeat {
+            let mut events = MEMORY_TRIGGER_EVENTS.lock();
+            // ponytail: UI drains this every frame; cap protects against a stalled UI.
+            if events.len() < 128 {
+                events.push(binding.clone());
+            }
         }
 
         let hook_state = HOOK_STATE.lock();

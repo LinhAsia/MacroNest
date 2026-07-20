@@ -434,7 +434,6 @@ pub(crate) struct MemoryPanelState {
     pinned: bool,
     address_list_pinned: bool,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
-    hotkey_was_down: HashMap<MemoryScanAction, bool>,
     capturing_hotkey: Option<MemoryScanAction>,
     edit_value_index: Option<usize>,
     edit_value_input: String,
@@ -495,7 +494,6 @@ impl Default for MemoryPanelState {
             pinned: false,
             address_list_pinned: false,
             hotkeys: HashMap::new(),
-            hotkey_was_down: HashMap::new(),
             capturing_hotkey: None,
             edit_value_index: None,
             edit_value_input: String::new(),
@@ -727,6 +725,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn render_memory_pinned_viewport(&mut self, ctx: &egui::Context) {
+        self.poll_memory_hotkeys(ctx);
         self.render_pinned_scan_results(ctx);
         self.render_pinned_address_list(ctx);
     }
@@ -1372,7 +1371,6 @@ impl CrosshairApp {
                 if response.clicked() {
                     if assigned_label.is_some() {
                         self.memory_panel.hotkeys.remove(&action);
-                        self.memory_panel.hotkey_was_down.remove(&action);
                         self.memory_panel.capturing_hotkey = None;
                         self.capture_hotkey_combo_keys = None;
                         self.capture_hotkey_combo_vks.clear();
@@ -4642,7 +4640,6 @@ impl CrosshairApp {
 
     fn finish_memory_hotkey_capture(&mut self, action: MemoryScanAction, binding: HotkeyBinding) {
         self.memory_panel.hotkeys.insert(action, binding);
-        self.memory_panel.hotkey_was_down.insert(action, true);
         self.memory_panel.capturing_hotkey = None;
         self.capture_hotkey_combo_keys = None;
         self.capture_hotkey_combo_vks.clear();
@@ -4650,21 +4647,17 @@ impl CrosshairApp {
     }
 
     fn poll_memory_hotkeys(&mut self, ctx: &egui::Context) {
-        let bindings = self
-            .memory_panel
-            .hotkeys
-            .iter()
-            .map(|(action, binding)| (*action, binding.clone()))
-            .collect::<Vec<_>>();
-        for (action, binding) in bindings {
-            let down = memory_binding_is_down(&binding);
-            let was_down = self
-                .memory_panel
-                .hotkey_was_down
-                .insert(action, down)
-                .unwrap_or(false);
-            if down && !was_down {
-                self.start_memory_action(action);
+        let events = crate::overlay::take_memory_trigger_events();
+        if !events.is_empty() {
+            let bindings = self.memory_panel.hotkeys.iter()
+                .map(|(action, binding)| (*action, binding.clone()))
+                .collect::<Vec<_>>();
+            for event in events {
+                for (action, expected) in &bindings {
+                    if hotkey::binding_matches(expected, &event) {
+                        self.start_memory_action(*action);
+                    }
+                }
             }
         }
         if !self.memory_panel.hotkeys.is_empty() || self.memory_panel.scanning {
@@ -5148,24 +5141,6 @@ fn resolve_memory_address(
         })?;
     }
     Ok(address)
-}
-
-#[cfg(windows)]
-fn memory_binding_is_down(binding: &HotkeyBinding) -> bool {
-    let keys = hotkey::binding_key_names(binding);
-    !keys.is_empty()
-        && keys.iter().all(|key| {
-            hotkey::key_name_to_vk(key).is_some_and(|vk| unsafe {
-                (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk as i32) as u16
-                    & 0x8000)
-                    != 0
-            })
-        })
-}
-
-#[cfg(not(windows))]
-fn memory_binding_is_down(_binding: &HotkeyBinding) -> bool {
-    false
 }
 
 #[cfg(test)]
