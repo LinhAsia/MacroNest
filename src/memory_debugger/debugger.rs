@@ -362,8 +362,10 @@ where
             CREATE_PROCESS_DEBUG_EVENT => unsafe {
                 let info = event.u.CreateProcessInfo;
                 if let Err(error) = arm_thread(info.hThread, &kind, architecture) {
-                    notify(WatchEvent::Error(error.to_string()));
-                    stop.store(true, Ordering::Release);
+                    if error.raw_os_error() != Some(87) {
+                        notify(WatchEvent::Error(error.to_string()));
+                        stop.store(true, Ordering::Release);
+                    }
                 }
                 close_if_valid(info.hFile);
                 close_if_valid(info.hProcess);
@@ -372,8 +374,10 @@ where
             CREATE_THREAD_DEBUG_EVENT => unsafe {
                 let thread = event.u.CreateThread.hThread;
                 if let Err(error) = arm_thread(thread, &kind, architecture) {
-                    notify(WatchEvent::Error(error.to_string()));
-                    stop.store(true, Ordering::Release);
+                    if error.raw_os_error() != Some(87) {
+                        notify(WatchEvent::Error(error.to_string()));
+                        stop.store(true, Ordering::Release);
+                    }
                 }
                 threads.insert(event.dwThreadId, thread);
             },
@@ -456,11 +460,13 @@ where
                     // synthetic CREATE_THREAD events. Re-arm every existing game thread after it.
                     for &thread in threads.values() {
                         if let Err(error) = arm_thread(thread, &kind, architecture) {
-                            notify(WatchEvent::Error(format!(
-                                "unable to arm an existing game thread: {error}"
-                            )));
-                            stop.store(true, Ordering::Release);
-                            break;
+                            if error.raw_os_error() != Some(87) {
+                                notify(WatchEvent::Error(format!(
+                                    "unable to arm an existing game thread: {error}"
+                                )));
+                                stop.store(true, Ordering::Release);
+                                break;
+                            }
                         }
                     }
                 } else {
@@ -892,7 +898,6 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
             context.Dr7 &= !0xF0003;
             unsafe { Wow64SetThreadContext(thread, &context) };
         }
-        return;
     }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;

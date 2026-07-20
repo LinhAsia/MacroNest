@@ -2769,7 +2769,28 @@ impl CrosshairApp {
                             );
                             address.union(instruction).union(count)
                         })
-                        .inner;
+                        .inner
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .on_hover_text("Click this instruction to select it for Add to code list");
+                    if dialog.selected == Some(index) {
+                        ui.painter().rect_filled(
+                            response.rect,
+                            2.0,
+                            Color32::from_rgba_premultiplied(84, 178, 222, 64),
+                        );
+                        ui.painter().rect_stroke(
+                            response.rect,
+                            2.0,
+                            egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
+                            egui::StrokeKind::Inside,
+                        );
+                    } else if response.hovered() {
+                        ui.painter().rect_filled(
+                            response.rect,
+                            2.0,
+                            Color32::from_rgba_premultiplied(84, 178, 222, 36),
+                        );
+                    }
                     if response.clicked() {
                         dialog.selected = Some(index);
                     }
