@@ -684,6 +684,38 @@ pub fn instruction_writes_memory(pid: u32, address: usize) -> io::Result<bool> {
     Ok(writes_memory(&decode_at(&Process::open(pid)?, address, architecture)?))
 }
 
+pub fn disassemble_from(
+    pid: u32,
+    address: usize,
+    configured: MemoryDebuggerArchitecture,
+    count: usize,
+) -> io::Result<Vec<(usize, String, String)>> {
+    let architecture = target_architecture(pid, configured)?;
+    let process = Process::open(pid)?;
+    let mut current = address;
+    let mut lines = Vec::with_capacity(count);
+    for _ in 0..count {
+        let instruction = decode_at(&process, current, architecture)?;
+        let mut encoded = [0u8; 15];
+        let read = process.read(current, &mut encoded[..instruction.len()])?;
+        let bytes = encoded[..read]
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut formatter = IntelFormatter::new();
+        let mut assembly = String::new();
+        formatter.format(&instruction, &mut assembly);
+        lines.push((current, bytes, assembly));
+        let next = instruction.next_ip() as usize;
+        if next <= current {
+            break;
+        }
+        current = next;
+    }
+    Ok(lines)
+}
+
 fn format_hit_details(
     process: &Process,
     instruction: &Instruction,

@@ -53,6 +53,19 @@ pub enum ScanValueType {
     F64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextEncoding {
+    Utf8,
+    Utf16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextScanCandidate {
+    pub address: usize,
+    pub previous: String,
+    pub current: String,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct MemoryRegionInfo {
     pub allocation_base: usize,
@@ -483,6 +496,127 @@ pub fn scan_memory_with_progress(
     }
     found.truncate(result_limit);
     Ok(found)
+}
+
+pub fn scan_text_memory_with_progress(
+    pid: u32,
+    text: &str,
+    encoding: TextEncoding,
+    case_sensitive: bool,
+    null_terminated: bool,
+    result_limit: usize,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<TextScanCandidate>> {
+    let pattern = encode_scan_text(text, encoding, case_sensitive, null_terminated);
+    if pattern.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "text cannot be empty"));
+    }
+    let process = ScanProcess::open(pid, false)?;
+    let mut found = Vec::new();
+    let mut buffer = Vec::new();
+    let overlap = pattern.len().saturating_sub(1);
+    'regions: for region in scan_regions_for(&process) {
+        let end = region.base.saturating_add(region.size);
+        let mut chunk_base = region.base;
+        while chunk_base < end {
+            let prefix = if chunk_base == region.base { 0 } else { overlap.min(chunk_base - region.base) };
+            let read_base = chunk_base - prefix;
+            let length = (end - read_base).min(SCAN_CHUNK_BYTES + prefix);
+            buffer.resize(length, 0);
+            if let Ok(count) = process.read(read_base, &mut buffer) {
+                total.fetch_add(count, Ordering::Relaxed);
+                let haystack = &buffer[..count];
+                if count < pattern.len() {
+                    chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
+                    continue;
+                }
+                let max_start = count.saturating_sub(pattern.len());
+                for offset in 0..=max_start {
+                    if offset < prefix || !text_bytes_equal(&haystack[offset..offset + pattern.len()], &pattern, encoding, case_sensitive) {
+                        continue;
+                    }
+                    found.push(TextScanCandidate {
+                        address: read_base + offset,
+                        previous: text.to_owned(),
+                        current: text.to_owned(),
+                    });
+                    if found.len() >= result_limit.max(1) {
+                        break 'regions;
+                    }
+                }
+            }
+            chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
+        }
+    }
+    Ok(found)
+}
+
+pub fn filter_text_scan_candidates(
+    pid: u32,
+    candidates: Vec<TextScanCandidate>,
+    text: &str,
+    encoding: TextEncoding,
+    case_sensitive: bool,
+    null_terminated: bool,
+) -> io::Result<Vec<TextScanCandidate>> {
+    let pattern = encode_scan_text(text, encoding, case_sensitive, null_terminated);
+    if pattern.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "text cannot be empty"));
+    }
+    let process = ScanProcess::open(pid, false)?;
+    let mut bytes = vec![0; pattern.len()];
+    let mut kept = Vec::new();
+    for candidate in candidates {
+        if process.read(candidate.address, &mut bytes).ok() == Some(pattern.len())
+            && text_bytes_equal(&bytes, &pattern, encoding, case_sensitive)
+        {
+            kept.push(TextScanCandidate {
+                address: candidate.address,
+                previous: candidate.current,
+                current: text.to_owned(),
+            });
+        }
+    }
+    Ok(kept)
+}
+
+fn encode_scan_text(
+    text: &str,
+    encoding: TextEncoding,
+    case_sensitive: bool,
+    null_terminated: bool,
+) -> Vec<u8> {
+    let text = if case_sensitive { text.to_owned() } else { text.to_lowercase() };
+    let mut bytes = match encoding {
+        TextEncoding::Utf8 => text.into_bytes(),
+        TextEncoding::Utf16 => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+    };
+    if null_terminated {
+        bytes.extend(std::iter::repeat_n(0, if encoding == TextEncoding::Utf16 { 2 } else { 1 }));
+    }
+    bytes
+}
+
+fn text_bytes_equal(
+    actual: &[u8],
+    expected: &[u8],
+    encoding: TextEncoding,
+    case_sensitive: bool,
+) -> bool {
+    if case_sensitive {
+        return actual == expected;
+    }
+    match encoding {
+        TextEncoding::Utf8 => actual.eq_ignore_ascii_case(expected),
+        TextEncoding::Utf16 => actual
+            .chunks_exact(2)
+            .zip(expected.chunks_exact(2))
+            .all(|(left, right)| {
+                let left = u16::from_le_bytes([left[0], left[1]]);
+                let right = u16::from_le_bytes([right[0], right[1]]);
+                left == right || (left <= 0x7F && right <= 0x7F && (left as u8).eq_ignore_ascii_case(&(right as u8)))
+            }),
+    }
 }
 
 pub fn filter_scan_candidates(

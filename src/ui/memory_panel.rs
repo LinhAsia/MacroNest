@@ -16,9 +16,11 @@ use crate::{
     model::{HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod, MemoryPointerEntry},
     process_memory::{
         MemoryRegionInfo, PointerMap, PointerPath, ScanCandidate, ScanComparison, ScanValue,
-        ScanValueType, capture_pointer_map, filter_scan_candidates, query_memory_region,
+        ScanValueType, TextEncoding, TextScanCandidate, capture_pointer_map, filter_scan_candidates,
+        filter_text_scan_candidates, query_memory_region,
         read_memory_bytes, read_scan_value,
-        refresh_scan_candidates, scan_memory_with_progress, scan_pointer_paths, write_scan_value,
+        refresh_scan_candidates, scan_memory_with_progress, scan_pointer_paths,
+        scan_text_memory_with_progress, write_scan_value,
     },
     window_list,
 };
@@ -26,7 +28,8 @@ use crate::{
 #[cfg(windows)]
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, WatchEvent, WriteWatch, module_offset_for_address,
-    instruction_writes_memory, list_processes, process_modules, resolve_module_offset,
+    disassemble_from, instruction_writes_memory, list_processes, process_modules,
+    resolve_module_offset,
 };
 
 use super::CrosshairApp;
@@ -308,6 +311,14 @@ struct InstructionWatchDialog {
     active: Option<ActiveInstructionWatch>,
     pinned: bool,
     pending_code_add: Option<usize>,
+    pending_disassembler: Option<usize>,
+}
+
+#[cfg(windows)]
+struct DisassemblerDialog {
+    address: usize,
+    lines: Vec<(usize, String, String)>,
+    status: String,
 }
 
 #[cfg(windows)]
@@ -326,7 +337,12 @@ struct CodeAccessDialog {
 struct ScanJobResult {
     pid: u32,
     action: MemoryScanAction,
-    result: Result<Vec<ScanCandidate>, String>,
+    result: Result<ScanJobCandidates, String>,
+}
+
+enum ScanJobCandidates {
+    Numeric(Vec<ScanCandidate>),
+    Text(Vec<TextScanCandidate>),
 }
 
 #[derive(Clone)]
@@ -388,10 +404,14 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     process_choices: Vec<(u32, String)>,
     value_type: ScanValueType,
+    text_encoding: Option<TextEncoding>,
+    text_case_sensitive: bool,
+    text_null_terminated: bool,
     value_input: String,
     hex: bool,
     result_limit_input: String,
     candidates: Vec<ScanCandidate>,
+    text_candidates: Vec<TextScanCandidate>,
     selected_results: HashSet<usize>,
     marked_result_addresses: HashSet<usize>,
     selection_anchor: Option<usize>,
@@ -427,6 +447,8 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     instruction_watch_dialog: Option<InstructionWatchDialog>,
     #[cfg(windows)]
+    disassembler_dialog: Option<DisassemblerDialog>,
+    #[cfg(windows)]
     code_access_dialog: Option<CodeAccessDialog>,
     last_refresh: Instant,
     #[cfg(windows)]
@@ -442,10 +464,14 @@ impl Default for MemoryPanelState {
             #[cfg(windows)]
             process_choices: list_processes().unwrap_or_default(),
             value_type: ScanValueType::I32,
+            text_encoding: None,
+            text_case_sensitive: true,
+            text_null_terminated: false,
             value_input: "0".to_owned(),
             hex: false,
             result_limit_input: DEFAULT_SCAN_LIMIT.to_string(),
             candidates: Vec::new(),
+            text_candidates: Vec::new(),
             selected_results: HashSet::new(),
             marked_result_addresses: HashSet::new(),
             selection_anchor: None,
@@ -480,6 +506,8 @@ impl Default for MemoryPanelState {
             saved_library_open: false,
             #[cfg(windows)]
             instruction_watch_dialog: None,
+            #[cfg(windows)]
+            disassembler_dialog: None,
             #[cfg(windows)]
             code_access_dialog: None,
             last_refresh: Instant::now(),
@@ -653,6 +681,8 @@ impl CrosshairApp {
         #[cfg(windows)]
         self.render_instruction_watch_dialog(ui.ctx());
         #[cfg(windows)]
+        self.render_disassembler_dialog(ui.ctx());
+        #[cfg(windows)]
         self.render_code_access_dialog(ui.ctx());
         self.sync_memory_freeze_targets();
     }
@@ -758,7 +788,7 @@ impl CrosshairApp {
                                 .load(Ordering::Relaxed)
                                 .max(self.memory_panel.scan_input_count)
                         } else {
-                            self.memory_panel.candidates.len()
+                            self.memory_panel.candidates.len().max(self.memory_panel.text_candidates.len())
                         };
                         ui.label(format!(
                             "{}  •  {count} address(es){}",
@@ -1056,8 +1086,12 @@ impl CrosshairApp {
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_id_salt("memory-value-type")
-                        .width(90.0)
-                        .selected_text(memory_type_label(self.memory_panel.value_type))
+                        .width(110.0)
+                        .selected_text(match self.memory_panel.text_encoding {
+                            Some(TextEncoding::Utf8) => "Text (UTF-8)",
+                            Some(TextEncoding::Utf16) => "Text (UTF-16)",
+                            None => memory_type_label(self.memory_panel.value_type),
+                        })
                         .show_ui(ui, |ui| {
                             for value_type in [
                                 ScanValueType::I8,
@@ -1068,13 +1102,27 @@ impl CrosshairApp {
                                 ScanValueType::F64,
                             ] {
                                 if ui
-                                    .selectable_value(
-                                        &mut self.memory_panel.value_type,
-                                        value_type,
+                                    .selectable_label(
+                                        self.memory_panel.text_encoding.is_none()
+                                            && self.memory_panel.value_type == value_type,
                                         memory_type_label(value_type),
-                                    )
-                                    .changed()
+                                    ).clicked()
                                 {
+                                    self.memory_panel.value_type = value_type;
+                                    self.memory_panel.text_encoding = None;
+                                    self.reset_memory_scan("Value type changed");
+                                }
+                            }
+                            ui.separator();
+                            for (encoding, label) in [
+                                (TextEncoding::Utf8, "Text (UTF-8)"),
+                                (TextEncoding::Utf16, "Text (UTF-16)"),
+                            ] {
+                                if ui.selectable_label(
+                                    self.memory_panel.text_encoding == Some(encoding), label,
+                                ).clicked() {
+                                    self.memory_panel.text_encoding = Some(encoding);
+                                    self.memory_panel.hex = false;
                                     self.reset_memory_scan("Value type changed");
                                 }
                             }
@@ -1101,8 +1149,21 @@ impl CrosshairApp {
                         };
                         self.start_memory_action(action);
                     }
-                    ui.checkbox(&mut self.memory_panel.hex, "Hex");
+                    if self.memory_panel.text_encoding.is_some() {
+                        ui.checkbox(&mut self.memory_panel.text_case_sensitive, "Case");
+                    } else {
+                        ui.checkbox(&mut self.memory_panel.hex, "Hex");
+                    }
                 });
+                if self.memory_panel.text_encoding.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.checkbox(
+                            &mut self.memory_panel.text_null_terminated,
+                            "Null terminated",
+                        );
+                        ui.label(RichText::new("Exact text").weak().small());
+                    });
+                }
                 ui.add_space(8.0);
                 self.memory_action_row(
                     ui,
@@ -1204,10 +1265,13 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             let enabled = !self.memory_panel.scanning
                 && self.memory_panel.process_pid.is_some()
+                && (self.memory_panel.text_encoding.is_none()
+                    || matches!(action, MemoryScanAction::FirstScan | MemoryScanAction::Exact))
                 && (matches!(
                     action,
                     MemoryScanAction::FirstScan | MemoryScanAction::Unknown
-                ) || !self.memory_panel.candidates.is_empty());
+                ) || !self.memory_panel.candidates.is_empty()
+                    || !self.memory_panel.text_candidates.is_empty());
             if ui
                 .add_enabled_ui(enabled, |ui| {
                     ui.add_sized(
@@ -1325,7 +1389,7 @@ impl CrosshairApp {
             if !pinned {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Scan results").strong());
-                    ui.label(format!("{}", self.memory_panel.candidates.len()));
+                    ui.label(format!("{}", self.memory_panel.candidates.len().max(self.memory_panel.text_candidates.len())));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("Add ↓").clicked() {
                             self.add_selected_memory_results();
@@ -1349,7 +1413,8 @@ impl CrosshairApp {
                 );
             });
             ui.separator();
-            let visible_count = self.memory_panel.candidates.len().min(MAX_VISIBLE_RESULTS);
+            let result_count = self.memory_panel.candidates.len().max(self.memory_panel.text_candidates.len());
+            let visible_count = result_count.min(MAX_VISIBLE_RESULTS);
             if !pinned
                 && !self.memory_panel.saved_list_active
                 && ui.ctx().memory(|memory| memory.focused().is_none())
@@ -1357,7 +1422,7 @@ impl CrosshairApp {
             {
                 self.memory_panel.selected_results = (0..visible_count).collect();
             }
-            if self.memory_panel.candidates.is_empty() && !self.memory_panel.scanning {
+            if result_count == 0 && !self.memory_panel.scanning {
                 ui.centered_and_justified(|ui| {
                     ui.label(RichText::new("No scan results").weak());
                 });
@@ -1374,12 +1439,21 @@ impl CrosshairApp {
                 .show_rows(ui, 22.0, visible_count, |ui, rows| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for index in rows {
-                        let candidate = self.memory_panel.candidates[index];
+                        let (address_value, current_value, previous_value) = if let Some(candidate) = self.memory_panel.text_candidates.get(index) {
+                            (candidate.address, candidate.current.clone(), candidate.previous.clone())
+                        } else {
+                            let candidate = self.memory_panel.candidates[index];
+                            (
+                                candidate.address,
+                                format_scan_value(candidate.current, self.memory_panel.hex),
+                                format_scan_value(candidate.previous, self.memory_panel.hex),
+                            )
+                        };
                         let selected = self.memory_panel.selected_results.contains(&index);
                         let marked = self
                             .memory_panel
                             .marked_result_addresses
-                            .contains(&candidate.address);
+                            .contains(&address_value);
                         let row_width = ui.available_width();
                         let full_row_rect = egui::Rect::from_min_size(
                             ui.next_widget_position(),
@@ -1389,7 +1463,7 @@ impl CrosshairApp {
                             .interact(
                                 full_row_rect,
                                 ui.id()
-                                    .with(("memory-result-row", pinned, candidate.address)),
+                                    .with(("memory-result-row", pinned, address_value)),
                                 Sense::click(),
                             )
                             .on_hover_cursor(egui::CursorIcon::Default);
@@ -1408,25 +1482,19 @@ impl CrosshairApp {
                                 Self::memory_table_cell(
                                     ui,
                                     result_column_width,
-                                    RichText::new(format!("0x{:016X}", candidate.address))
+                                    RichText::new(format!("0x{:016X}", address_value))
                                         .monospace(),
                                 );
                                 Self::memory_table_cell(
                                     ui,
                                     result_column_width,
-                                    RichText::new(format_scan_value(
-                                        candidate.current,
-                                        self.memory_panel.hex,
-                                    ))
+                                    RichText::new(&current_value)
                                     .monospace(),
                                 );
                                 Self::memory_table_cell(
                                     ui,
                                     result_column_width,
-                                    RichText::new(format_scan_value(
-                                        candidate.previous,
-                                        self.memory_panel.hex,
-                                    ))
+                                    RichText::new(&previous_value)
                                     .monospace(),
                                 );
                             },
@@ -1460,11 +1528,11 @@ impl CrosshairApp {
                                 if marked {
                                     self.memory_panel
                                         .marked_result_addresses
-                                        .remove(&candidate.address);
+                                        .remove(&address_value);
                                 } else {
                                     self.memory_panel
                                         .marked_result_addresses
-                                        .insert(candidate.address);
+                                        .insert(address_value);
                                 }
                                 ui.close();
                             }
@@ -1493,11 +1561,11 @@ impl CrosshairApp {
                         }
                     }
                 });
-            if self.memory_panel.candidates.len() > MAX_VISIBLE_RESULTS {
+            if result_count > MAX_VISIBLE_RESULTS {
                 ui.label(
                     RichText::new(format!(
                         "Showing first {MAX_VISIBLE_RESULTS} of {}",
-                        self.memory_panel.candidates.len()
+                        result_count
                     ))
                     .small()
                     .weak(),
@@ -3054,6 +3122,7 @@ impl CrosshairApp {
             active,
             pinned: true,
             pending_code_add: None,
+            pending_disassembler: None,
         });
     }
 
@@ -3167,6 +3236,29 @@ impl CrosshairApp {
         {
             self.add_instruction_to_code_list(hit.address, &hit.instruction, dialog.writes_only);
         }
+        if let Some(index) = dialog.pending_disassembler.take()
+            && let Some(hit) = dialog.hits.get(index)
+        {
+            let result = self.memory_panel.process_pid.ok_or_else(|| "Select a process".to_owned())
+                .and_then(|pid| disassemble_from(
+                    pid,
+                    hit.address,
+                    self.state.memory_debugger_architecture,
+                    128,
+                ).map_err(|error| error.to_string()));
+            self.memory_panel.disassembler_dialog = Some(match result {
+                Ok(lines) => DisassemblerDialog {
+                    address: hit.address,
+                    lines,
+                    status: "Ready".to_owned(),
+                },
+                Err(status) => DisassemblerDialog {
+                    address: hit.address,
+                    lines: Vec::new(),
+                    status,
+                },
+            });
+        }
         if open {
             self.memory_panel.instruction_watch_dialog = Some(dialog);
             ctx.request_repaint_after(Duration::from_millis(35));
@@ -3185,6 +3277,12 @@ impl CrosshairApp {
                     .clicked()
                 {
                     dialog.pending_code_add = dialog.selected;
+                }
+                if ui
+                    .add_enabled(dialog.selected.is_some(), Button::new("Show disassembler"))
+                    .clicked()
+                {
+                    dialog.pending_disassembler = dialog.selected;
                 }
                 if dialog.active.is_some() && ui.button("Stop").clicked() {
                     if let Some(active) = dialog.active.as_mut() {
@@ -3274,6 +3372,92 @@ impl CrosshairApp {
                 .selectable(true),
             );
         });
+    }
+
+    #[cfg(windows)]
+    fn render_disassembler_dialog(&mut self, ctx: &egui::Context) {
+        let active = self.memory_panel.disassembler_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-disassembler-host",
+            "Memory viewer — Disassembler",
+            active,
+            Self::render_disassembler_body,
+        ) {
+            self.memory_panel.disassembler_dialog = None;
+        }
+    }
+
+    #[cfg(windows)]
+    fn render_disassembler_body(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = self.memory_panel.disassembler_dialog.as_ref() else {
+            return;
+        };
+        egui::CentralPanel::default()
+            .frame(Self::memory_popup_frame(ctx))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("0x{:016X}", dialog.address)).monospace().strong());
+                    ui.label(RichText::new(&dialog.status).weak());
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    Self::memory_table_cell(ui, 180.0, RichText::new("Address").strong());
+                    Self::memory_table_cell(ui, 220.0, RichText::new("Bytes").strong());
+                    Self::memory_table_cell(ui, ui.available_width(), RichText::new("Opcode").strong());
+                });
+                egui::ScrollArea::both().id_salt("memory-disassembly-lines")
+                    .max_height((ui.available_height() * 0.62).max(160.0))
+                    .show(ui, |ui| {
+                        for (address, bytes, opcode) in &dialog.lines {
+                            let selected = *address == dialog.address;
+                            let response = ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                Self::memory_label_cell(ui, 180.0, 22.0, egui::Label::new(
+                                    RichText::new(format!("0x{address:016X}")).monospace()).selectable(true));
+                                Self::memory_label_cell(ui, 220.0, 22.0, egui::Label::new(
+                                    RichText::new(bytes).monospace()).selectable(true));
+                                Self::memory_label_cell(ui, ui.available_width().max(260.0), 22.0, egui::Label::new(
+                                    RichText::new(opcode).monospace()).selectable(true));
+                            }).response;
+                            if selected {
+                                ui.painter().rect_stroke(
+                                    response.rect,
+                                    2.0,
+                                    egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
+                        }
+                    });
+                ui.separator();
+                ui.label(RichText::new("Memory around instruction").strong());
+                if let Some(pid) = self.memory_panel.process_pid {
+                    let base = dialog.address.saturating_sub(64);
+                    match read_memory_bytes(pid, base, 256) {
+                        Ok(bytes) => {
+                            egui::ScrollArea::both().id_salt("memory-disassembly-bytes").show(ui, |ui| {
+                                for (row, chunk) in bytes.chunks(16).enumerate() {
+                                    let hex = chunk.iter().map(|byte| format!("{byte:02X}"))
+                                        .collect::<Vec<_>>().join(" ");
+                                    let ascii = chunk.iter().map(|byte| {
+                                        if byte.is_ascii_graphic() { *byte as char } else { '.' }
+                                    }).collect::<String>();
+                                    ui.horizontal(|ui| {
+                                        Self::memory_label_cell(ui, 180.0, 22.0, egui::Label::new(
+                                            RichText::new(format!("0x{:016X}", base + row * 16)).monospace()).selectable(true));
+                                        Self::memory_label_cell(ui, 390.0, 22.0, egui::Label::new(
+                                            RichText::new(hex).monospace()).selectable(true));
+                                        Self::memory_label_cell(ui, 150.0, 22.0, egui::Label::new(
+                                            RichText::new(ascii).monospace()).selectable(true));
+                                    });
+                                }
+                            });
+                        }
+                        Err(error) => { ui.label(format!("Unable to read memory: {error}")); }
+                    }
+                }
+            });
     }
 
     #[cfg(windows)]
@@ -3930,6 +4114,13 @@ impl CrosshairApp {
             return;
         }
         let value_type = self.memory_panel.value_type;
+        let text_encoding = self.memory_panel.text_encoding;
+        if text_encoding.is_some()
+            && !matches!(action, MemoryScanAction::FirstScan | MemoryScanAction::Exact)
+        {
+            self.memory_panel.status = "Text scan supports First scan and New value".to_owned();
+            return;
+        }
         let exact = if matches!(action, MemoryScanAction::Unknown)
             || matches!(
                 action,
@@ -3940,7 +4131,13 @@ impl CrosshairApp {
             ) {
             None
         } else {
-            match parse_scan_value(
+            if text_encoding.is_some() {
+                if self.memory_panel.value_input.is_empty() {
+                    self.memory_panel.status = "Text cannot be empty".to_owned();
+                    return;
+                }
+                None
+            } else { match parse_scan_value(
                 &self.memory_panel.value_input,
                 value_type,
                 self.memory_panel.hex,
@@ -3950,7 +4147,7 @@ impl CrosshairApp {
                     self.memory_panel.status = "Invalid value".to_owned();
                     return;
                 }
-            }
+            }}
         };
         let result_limit = self
             .memory_panel
@@ -3960,15 +4157,21 @@ impl CrosshairApp {
             .unwrap_or(DEFAULT_SCAN_LIMIT)
             .clamp(1_000, DEFAULT_SCAN_LIMIT);
         self.memory_panel.result_limit_input = result_limit.to_string();
-        let candidates = if action.comparison().is_some() {
+        let candidates = if action.comparison().is_some() && text_encoding.is_none() {
             std::mem::take(&mut self.memory_panel.candidates)
         } else {
             self.memory_panel.candidates.clear();
             Vec::new()
         };
+        let text_candidates = if action == MemoryScanAction::Exact && text_encoding.is_some() {
+            std::mem::take(&mut self.memory_panel.text_candidates)
+        } else {
+            self.memory_panel.text_candidates.clear();
+            Vec::new()
+        };
         self.memory_panel.scan_progress.store(0, Ordering::Relaxed);
         self.memory_panel.scan_input_count = if action.comparison().is_some() {
-            candidates.len()
+            candidates.len().max(text_candidates.len())
         } else {
             0
         };
@@ -3982,11 +4185,27 @@ impl CrosshairApp {
         self.memory_panel.last_action = action.label().to_owned();
         self.memory_panel.selected_results.clear();
         self.memory_panel.job_rx = Some(rx);
+        let text = self.memory_panel.value_input.clone();
+        let case_sensitive = self.memory_panel.text_case_sensitive;
+        let null_terminated = self.memory_panel.text_null_terminated;
         thread::spawn(move || {
-            let result = if let Some(comparison) = action.comparison() {
+            let result = if let Some(encoding) = text_encoding {
+                if action == MemoryScanAction::Exact && !text_candidates.is_empty() {
+                    filter_text_scan_candidates(
+                        pid, text_candidates, &text, encoding, case_sensitive, null_terminated,
+                    )
+                } else {
+                    scan_text_memory_with_progress(
+                        pid, &text, encoding, case_sensitive, null_terminated,
+                        result_limit, progress,
+                    )
+                }.map(ScanJobCandidates::Text)
+            } else if let Some(comparison) = action.comparison() {
                 filter_scan_candidates(pid, candidates, comparison, exact)
+                    .map(ScanJobCandidates::Numeric)
             } else {
                 scan_memory_with_progress(pid, exact, value_type, result_limit, progress)
+                    .map(ScanJobCandidates::Numeric)
             }
             .map_err(|error| error.to_string());
             let _ = tx.send(ScanJobResult {
@@ -4024,11 +4243,18 @@ impl CrosshairApp {
             return;
         }
         match outcome.result {
-            Ok(candidates) => {
+            Ok(ScanJobCandidates::Numeric(candidates)) => {
                 let count = candidates.len();
                 self.memory_panel.candidates = candidates;
+                self.memory_panel.text_candidates.clear();
                 self.memory_panel.status =
                     format!("{} — {count} result(s)", outcome.action.label());
+            }
+            Ok(ScanJobCandidates::Text(candidates)) => {
+                let count = candidates.len();
+                self.memory_panel.text_candidates = candidates;
+                self.memory_panel.candidates.clear();
+                self.memory_panel.status = format!("{} — {count} text result(s)", outcome.action.label());
             }
             Err(error) => {
                 self.memory_panel.status = format!("{} failed: {error}", outcome.action.label());
@@ -4040,6 +4266,7 @@ impl CrosshairApp {
         self.memory_panel.job_rx = None;
         self.memory_panel.scanning = false;
         self.memory_panel.candidates.clear();
+        self.memory_panel.text_candidates.clear();
         self.memory_panel.selected_results.clear();
         self.memory_panel.marked_result_addresses.clear();
         self.memory_panel.selection_anchor = None;
@@ -4057,6 +4284,27 @@ impl CrosshairApp {
             .collect::<Vec<_>>();
         indices.sort_unstable();
         for index in indices {
+            if let Some(candidate) = self.memory_panel.text_candidates.get(index) {
+                let address = candidate.address;
+                if self.memory_panel.saved.iter().any(|saved| saved.address == address) {
+                    continue;
+                }
+                let current = self.memory_panel.process_pid
+                    .and_then(|pid| read_scan_value(pid, address, ScanValueType::I8).ok());
+                self.memory_panel.saved.push(SavedMemoryAddress {
+                    address,
+                    value_type: ScanValueType::I8,
+                    current,
+                    description: match self.memory_panel.text_encoding {
+                        Some(TextEncoding::Utf16) => "Text (UTF-16)".to_owned(),
+                        _ => "Text (UTF-8)".to_owned(),
+                    },
+                    pointer: None,
+                    frozen: None,
+                    saved_to_library: false,
+                });
+                continue;
+            }
             let Some(candidate) = self.memory_panel.candidates.get(index).copied() else {
                 continue;
             };
