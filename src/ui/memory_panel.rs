@@ -20,7 +20,7 @@ use crate::{
         filter_text_scan_candidates, query_memory_region,
         read_memory_bytes, read_scan_value, read_text_memory,
         refresh_scan_candidates, scan_memory_with_progress, scan_pointer_paths,
-        scan_text_memory_with_progress, write_scan_value,
+        scan_text_memory_with_progress, write_scan_value, write_text_memory,
     },
     window_list,
 };
@@ -1958,7 +1958,7 @@ impl CrosshairApp {
                                 if double_clicked {
                                     match column {
                                         0 => open_address = true,
-                                        2 if saved.text_encoding.is_none() => edit_value = true,
+                                        2 => edit_value = true,
                                         3 => self.memory_panel.edit_description_index = Some(index),
                                         _ => {}
                                     }
@@ -2049,7 +2049,7 @@ impl CrosshairApp {
                                     open_address = true;
                                     ui.close();
                                 }
-                                if ui.add_enabled(saved.text_encoding.is_none(), Button::new("Edit value")).clicked() {
+                                if ui.button("Edit value").clicked() {
                                     edit_value = true;
                                     ui.close();
                                 }
@@ -2105,11 +2105,12 @@ impl CrosshairApp {
                                     rect: None,
                                 });
                             }
-                            if edit_value && saved.text_encoding.is_none() {
+                            if edit_value {
                                 self.memory_panel.edit_value_index = Some(index);
-                                self.memory_panel.edit_value_input = saved
-                                    .current
-                                    .map(|value| editable_scan_value(value, self.memory_panel.hex))
+                                self.memory_panel.edit_value_input = saved.current_text.clone()
+                                    .or_else(|| saved.current.map(|value| {
+                                        editable_scan_value(value, self.memory_panel.hex)
+                                    }))
                                     .unwrap_or_default();
                             }
                             if delete {
@@ -4443,9 +4444,22 @@ impl CrosshairApp {
         let Some(saved) = self.memory_panel.saved.get(index).cloned() else {
             return;
         };
-        if saved.text_encoding.is_some() {
-            self.memory_panel.edit_value_index = None;
-            self.memory_panel.status = "Text editing is not enabled for this address".to_owned();
+        if let Some(encoding) = saved.text_encoding {
+            match write_text_memory(
+                pid,
+                saved.address,
+                &self.memory_panel.edit_value_input,
+                encoding,
+                saved.text_byte_len,
+            ) {
+                Ok(()) => {
+                    self.memory_panel.saved[index].current_text =
+                        Some(self.memory_panel.edit_value_input.clone());
+                    self.memory_panel.edit_value_index = None;
+                    self.memory_panel.status = "Text written".to_owned();
+                }
+                Err(error) => self.memory_panel.status = format!("Write failed: {error}"),
+            }
             return;
         }
         let Some(value) = parse_scan_value(

@@ -418,12 +418,17 @@ pub fn read_text_memory(
         return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "partial text read"));
     }
     Ok(match encoding {
-        TextEncoding::Utf8 => String::from_utf8_lossy(&bytes).into_owned(),
-        TextEncoding::Utf16 => String::from_utf16_lossy(
-            &bytes.chunks_exact(2)
+        TextEncoding::Utf8 => {
+            let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+            String::from_utf8_lossy(&bytes[..end]).into_owned()
+        }
+        TextEncoding::Utf16 => {
+            let units = bytes.chunks_exact(2)
                 .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-                .collect::<Vec<_>>(),
-        ),
+                .take_while(|unit| *unit != 0)
+                .collect::<Vec<_>>();
+            String::from_utf16_lossy(&units)
+        }
     })
 }
 
@@ -442,6 +447,43 @@ pub fn write_scan_value(pid: u32, address: usize, value: ScanValue) -> io::Resul
         )
     };
     if ok == 0 || written != width {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+pub fn write_text_memory(
+    pid: u32,
+    address: usize,
+    text: &str,
+    encoding: TextEncoding,
+    capacity: usize,
+) -> io::Result<()> {
+    let encoded = match encoding {
+        TextEncoding::Utf8 => text.as_bytes().to_vec(),
+        TextEncoding::Utf16 => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
+    };
+    if encoded.len() > capacity {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("text needs {} bytes but this address has {capacity}", encoded.len()),
+        ));
+    }
+    let process = ScanProcess::open(pid, true)?;
+    let mut bytes = vec![0; capacity];
+    bytes[..encoded.len()].copy_from_slice(&encoded);
+    let mut written = 0;
+    let ok = unsafe {
+        WriteProcessMemory(
+            process.handle,
+            address as *mut c_void,
+            bytes.as_ptr().cast(),
+            bytes.len(),
+            &mut written,
+        )
+    };
+    if ok == 0 || written != bytes.len() {
         Err(io::Error::last_os_error())
     } else {
         Ok(())
