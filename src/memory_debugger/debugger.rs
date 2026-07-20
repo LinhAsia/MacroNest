@@ -441,7 +441,10 @@ where
                             }
                         }
                     } else {
-                        status = DBG_EXCEPTION_NOT_HANDLED;
+                        // This debug loop owns an active hardware breakpoint. WOW64 can report
+                        // STATUS_SINGLE_STEP before its DR6 state is visible through the native
+                        // context API; never leak that debugger-owned exception into the game.
+                        status = DBG_CONTINUE;
                     }
                 } else if exception == EXCEPTION_BREAKPOINT && first_breakpoint {
                     first_breakpoint = false;
@@ -554,7 +557,7 @@ impl CapturedContext {
     }
 }
 
-fn read_hit(thread: HANDLE, _address: usize, execution_breakpoint: bool, architecture: TargetArchitecture) -> Option<CapturedContext> {
+fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool, architecture: TargetArchitecture) -> Option<CapturedContext> {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
             ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS
@@ -563,7 +566,7 @@ fn read_hit(thread: HANDLE, _address: usize, execution_breakpoint: bool, archite
             ..WOW64_CONTEXT::default()
         };
         let hit = unsafe { Wow64GetThreadContext(thread, &mut context) } != 0
-            && context.Dr6 & 1 != 0;
+            && (context.Dr6 & 1 != 0 || context.Dr0 == address as u32);
         if hit {
             context.Dr6 = 0;
             if execution_breakpoint {
@@ -578,7 +581,7 @@ fn read_hit(thread: HANDLE, _address: usize, execution_breakpoint: bool, archite
     context.ContextFlags =
         CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64 | CONTEXT_INTEGER_AMD64;
     let hit = unsafe { GetThreadContext(thread, context) } != 0
-        && context.Dr6 & 1 != 0;
+        && (context.Dr6 & 1 != 0 || context.Dr0 == address as u64);
     let captured = hit.then_some(*context);
     if hit {
         context.Dr6 = 0;
