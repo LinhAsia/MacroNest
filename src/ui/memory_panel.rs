@@ -167,6 +167,8 @@ struct DeepPointerDialog {
     progress: Arc<AtomicUsize>,
     candidates: Vec<PointerPath>,
     selected: Option<usize>,
+    filter: String,
+    exe_only: bool,
 }
 
 struct AddressDialog {
@@ -872,7 +874,9 @@ impl CrosshairApp {
                 ui.label(RichText::new("Scan").strong());
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    let process_label = if let Some(label) = self
+                    let process_label = if self.memory_panel.process_pid.is_none() {
+                        "Select process".to_owned()
+                    } else if let Some(label) = self
                         .memory_panel
                         .process_selector
                         .strip_prefix("pid:")
@@ -886,11 +890,18 @@ impl CrosshairApp {
                             .map(|window| Self::simplify_window_title(&window.title))
                             .unwrap_or_else(|| "Select process".to_owned())
                     };
-                    let process_combo = egui::ComboBox::from_id_salt("memory-process")
-                        .width(ui.available_width())
-                        .height(480.0)
-                        .selected_text(Self::truncate_window_title(&process_label, 52))
-                        .show_ui(ui, |ui| {
+                    let missing_process = self.memory_panel.process_pid.is_none();
+                    let process_combo = ui.scope(|ui| {
+                        if missing_process {
+                            let stroke = egui::Stroke::new(1.0, Color32::from_rgb(185, 82, 82));
+                            ui.style_mut().visuals.widgets.inactive.bg_stroke = stroke;
+                            ui.style_mut().visuals.widgets.hovered.bg_stroke = stroke;
+                        }
+                        egui::ComboBox::from_id_salt("memory-process")
+                            .width(ui.available_width())
+                            .height(480.0)
+                            .selected_text(Self::truncate_window_title(&process_label, 52))
+                            .show_ui(ui, |ui| {
                             ui.label(RichText::new("Window processes (grouped)").strong());
                             for window in self.open_window_infos.clone() {
                                 let selected =
@@ -955,7 +966,8 @@ impl CrosshairApp {
                                     }
                                 }
                             }
-                        });
+                            })
+                    }).inner;
                     if process_combo.response.clicked() {
                         self.ensure_open_windows_ready(true);
                         #[cfg(windows)]
@@ -2360,6 +2372,8 @@ impl CrosshairApp {
                 progress,
                 candidates: Vec::new(),
                 selected: None,
+                filter: String::new(),
+                exe_only: false,
             });
         }
     }
@@ -2634,21 +2648,82 @@ impl CrosshairApp {
                     if ui.button("Clear map A").clicked() {
                         clear = true;
                     }
+                    ui.add(
+                        egui::TextEdit::singleline(&mut dialog.filter)
+                            .desired_width(150.0)
+                            .hint_text(RichText::new("Search module...").weak()),
+                    );
+                    ui.checkbox(&mut dialog.exe_only, "EXE only");
                 });
                 ui.separator();
+                const ROOT_WIDTH: f32 = 310.0;
+                const OFFSETS_WIDTH: f32 = 360.0;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    Self::memory_label_cell(
+                        ui,
+                        ROOT_WIDTH,
+                        22.0,
+                        egui::Label::new(RichText::new("Root").strong()),
+                    );
+                    Self::memory_label_cell(
+                        ui,
+                        OFFSETS_WIDTH,
+                        22.0,
+                        egui::Label::new(RichText::new("Offsets").strong()),
+                    );
+                });
+                ui.separator();
+                let filter = dialog.filter.trim().to_ascii_lowercase();
                 egui::ScrollArea::both().show(ui, |ui| {
                     for (index, path) in dialog.candidates.iter().enumerate() {
-                        let text = format!(
-                            "{}+{:X}    [{}]",
-                            path.module,
-                            path.module_offset,
-                            path.offsets
-                                .iter()
-                                .map(|offset| format!("{offset:X}"))
-                                .collect::<Vec<_>>()
-                                .join(" → ")
+                        let module_lower = path.module.to_ascii_lowercase();
+                        if (dialog.exe_only && !module_lower.ends_with(".exe"))
+                            || (!filter.is_empty() && !module_lower.contains(&filter))
+                        {
+                            continue;
+                        }
+                        let root = format!("{}+{:X}", path.module, path.module_offset);
+                        let offsets = path
+                            .offsets
+                            .iter()
+                            .map(|offset| format!("{offset:X}"))
+                            .collect::<Vec<_>>()
+                            .join(" → ");
+                        let row_rect = egui::Rect::from_min_size(
+                            ui.next_widget_position(),
+                            vec2((ROOT_WIDTH + OFFSETS_WIDTH).max(ui.available_width()), 24.0),
                         );
-                        if ui.selectable_label(dialog.selected == Some(index), text).clicked() {
+                        let response = ui.interact(
+                            row_rect,
+                            ui.id().with(("deep-pointer-row", index)),
+                            Sense::click(),
+                        );
+                        if dialog.selected == Some(index) {
+                            ui.painter().rect_filled(
+                                row_rect,
+                                2.0,
+                                ui.visuals().selection.bg_fill.gamma_multiply(0.55),
+                            );
+                        }
+                        ui.allocate_ui_at_rect(row_rect, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                Self::memory_label_cell(
+                                    ui,
+                                    ROOT_WIDTH,
+                                    24.0,
+                                    egui::Label::new(root).truncate(),
+                                );
+                                Self::memory_label_cell(
+                                    ui,
+                                    OFFSETS_WIDTH,
+                                    24.0,
+                                    egui::Label::new(offsets).truncate(),
+                                );
+                            });
+                        });
+                        if response.clicked() {
                             dialog.selected = Some(index);
                         }
                     }

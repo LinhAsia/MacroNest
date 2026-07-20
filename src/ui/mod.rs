@@ -6875,15 +6875,28 @@ impl CrosshairApp {
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().interact_size.y = 21.0;
-                let display_primary = primary
-                    .as_deref()
-                    .map(|current| Self::display_title_for_selector(current, open_windows))
-                    .unwrap_or_else(|| label_when_none.to_owned());
+                let missing_primary = primary.as_ref().is_some_and(|current| {
+                    !open_windows.iter().any(|window| &window.selector == current)
+                });
+                let display_primary = if missing_primary {
+                    label_when_none.to_owned()
+                } else {
+                    primary
+                        .as_deref()
+                        .map(|current| Self::display_title_for_selector(current, open_windows))
+                        .unwrap_or_else(|| label_when_none.to_owned())
+                };
                 let truncated_primary = Self::truncate_window_title(&display_primary, 40);
-                egui::ComboBox::from_id_salt((id_source, "primary-target-window"))
-                    .width(320.0)
-                    .selected_text(truncated_primary)
-                    .show_ui(ui, |ui| {
+                ui.scope(|ui| {
+                    if missing_primary || primary.is_none() {
+                        let stroke = egui::Stroke::new(1.0, Color32::from_rgb(185, 82, 82));
+                        ui.style_mut().visuals.widgets.inactive.bg_stroke = stroke;
+                        ui.style_mut().visuals.widgets.hovered.bg_stroke = stroke;
+                    }
+                    egui::ComboBox::from_id_salt((id_source, "primary-target-window"))
+                        .width(320.0)
+                        .selected_text(truncated_primary)
+                        .show_ui(ui, |ui| {
                         if ui
                             .selectable_label(primary.is_none(), label_when_none)
                             .clicked()
@@ -6907,7 +6920,8 @@ impl CrosshairApp {
                                 changed = true;
                             }
                         }
-                    });
+                        });
+                });
 
                 let add_btn = Button::new(Self::material_icon_text(0xe145, 12.0));
                 if ui
