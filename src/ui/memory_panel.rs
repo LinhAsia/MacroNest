@@ -246,6 +246,12 @@ struct MemoryViewDialog {
 }
 
 #[cfg(windows)]
+struct ModuleListDialog {
+    modules: Vec<(String, usize, usize)>,
+    filter: String,
+}
+
+#[cfg(windows)]
 enum ActiveInstructionWatch {
     Accesses(AddressAccessWatch),
     Writes(WriteWatch),
@@ -389,6 +395,8 @@ pub(crate) struct MemoryPanelState {
     edit_description_index: Option<usize>,
     address_dialog: Option<AddressDialog>,
     memory_view_dialog: Option<MemoryViewDialog>,
+    #[cfg(windows)]
+    module_list_dialog: Option<ModuleListDialog>,
     memory_settings_open: bool,
     code_list_open: bool,
     stable_pointer_dialog: Option<StablePointerDialog>,
@@ -438,6 +446,8 @@ impl Default for MemoryPanelState {
             edit_description_index: None,
             address_dialog: None,
             memory_view_dialog: None,
+            #[cfg(windows)]
+            module_list_dialog: None,
             memory_settings_open: false,
             code_list_open: false,
             stable_pointer_dialog: None,
@@ -542,6 +552,13 @@ impl CrosshairApp {
                 if ui.button("Advanced options").clicked() {
                     self.memory_panel.code_list_open = true;
                 }
+                #[cfg(windows)]
+                ui.menu_button("Memory view", |ui| {
+                    if ui.button("Enumerate modules / DLLs").clicked() {
+                        self.open_memory_module_list();
+                        ui.close();
+                    }
+                });
                 if ui.button("Saved addresses").clicked() {
                     self.memory_panel.saved_library_open = true;
                 }
@@ -575,6 +592,8 @@ impl CrosshairApp {
 
         self.render_memory_address_dialog(ui.ctx());
         self.render_memory_view_dialog(ui.ctx());
+        #[cfg(windows)]
+        self.render_memory_module_list(ui.ctx());
         self.render_memory_settings(ui.ctx());
         self.render_memory_code_list(ui.ctx());
         self.render_saved_address_library(ui.ctx());
@@ -3023,6 +3042,76 @@ impl CrosshairApp {
             saved_to_library: false,
         });
         self.memory_panel.status = format!("Address 0x{address:X} added");
+    }
+
+    #[cfg(windows)]
+    fn open_memory_module_list(&mut self) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process".to_owned();
+            return;
+        };
+        match process_modules(pid) {
+            Ok(mut modules) => {
+                modules.sort_by_key(|(_, base, _)| *base);
+                self.memory_panel.module_list_dialog = Some(ModuleListDialog {
+                    modules,
+                    filter: String::new(),
+                });
+            }
+            Err(error) => self.memory_panel.status = format!("Unable to enumerate modules: {error}"),
+        }
+    }
+
+    #[cfg(windows)]
+    fn render_memory_module_list(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = self.memory_panel.module_list_dialog.as_mut() else {
+            return;
+        };
+        let mut open = true;
+        egui::Window::new("Enumerate modules / DLLs")
+            .default_size(vec2(680.0, 520.0))
+            .min_size(vec2(480.0, 280.0))
+            .collapsible(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.filter)
+                        .desired_width(f32::INFINITY)
+                        .hint_text(RichText::new("Search module...").weak()),
+                );
+                ui.separator();
+                ui.horizontal(|ui| {
+                    Self::memory_view_cell(ui, 170.0, "Base address");
+                    Self::memory_view_cell(ui, 120.0, "Size");
+                    Self::memory_view_cell(ui, 340.0, "Module");
+                });
+                ui.separator();
+                let filter = dialog.filter.trim().to_ascii_lowercase();
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (name, base, size) in &dialog.modules {
+                        if !filter.is_empty() && !name.to_ascii_lowercase().contains(&filter) {
+                            continue;
+                        }
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [170.0, 22.0],
+                                egui::Label::new(format!("0x{base:X}")).selectable(true),
+                            );
+                            ui.add_sized(
+                                [120.0, 22.0],
+                                egui::Label::new(format!("0x{size:X}")).selectable(true),
+                            );
+                            ui.add_sized(
+                                [340.0, 22.0],
+                                egui::Label::new(name).selectable(true).truncate(),
+                            );
+                        });
+                    }
+                });
+            });
+        if !open {
+            self.memory_panel.module_list_dialog = None;
+        }
     }
 
     fn render_memory_view_dialog(&mut self, ctx: &egui::Context) {
