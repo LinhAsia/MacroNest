@@ -554,7 +554,7 @@ impl CapturedContext {
     }
 }
 
-fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool, architecture: TargetArchitecture) -> Option<CapturedContext> {
+fn read_hit(thread: HANDLE, _address: usize, execution_breakpoint: bool, architecture: TargetArchitecture) -> Option<CapturedContext> {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
             ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS
@@ -563,8 +563,7 @@ fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool, architec
             ..WOW64_CONTEXT::default()
         };
         let hit = unsafe { Wow64GetThreadContext(thread, &mut context) } != 0
-            && context.Dr6 & 1 != 0
-            && context.Dr0 == address as u32;
+            && context.Dr6 & 1 != 0;
         if hit {
             context.Dr6 = 0;
             if execution_breakpoint {
@@ -579,8 +578,7 @@ fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool, architec
     context.ContextFlags =
         CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64 | CONTEXT_INTEGER_AMD64;
     let hit = unsafe { GetThreadContext(thread, context) } != 0
-        && context.Dr6 & 1 != 0
-        && context.Dr0 == address as u64;
+        && context.Dr6 & 1 != 0;
     let captured = hit.then_some(*context);
     if hit {
         context.Dr6 = 0;

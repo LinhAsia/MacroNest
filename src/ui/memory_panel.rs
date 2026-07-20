@@ -3346,6 +3346,8 @@ impl CrosshairApp {
     }
 
     fn start_memory_action(&mut self, action: MemoryScanAction) {
+        #[cfg(windows)]
+        self.stop_memory_debuggers_for_scan();
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process".to_owned();
             return;
@@ -3419,6 +3421,22 @@ impl CrosshairApp {
                 result,
             });
         });
+    }
+
+    #[cfg(windows)]
+    fn stop_memory_debuggers_for_scan(&mut self) {
+        if let Some(dialog) = self.memory_panel.instruction_watch_dialog.as_mut()
+            && let Some(mut active) = dialog.active.take()
+        {
+            active.stop();
+            dialog.status = "Debugger stopped before memory scan".to_owned();
+        }
+        if let Some(dialog) = self.memory_panel.code_access_dialog.as_mut()
+            && let Some(mut active) = dialog.active.take()
+        {
+            active.stop();
+            dialog.status = "Debugger stopped before memory scan".to_owned();
+        }
     }
 
     fn poll_memory_job(&mut self) {
