@@ -432,6 +432,7 @@ pub(crate) struct MemoryPanelState {
     scan_input_count: usize,
     has_scan_session: bool,
     pinned: bool,
+    address_list_pinned: bool,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     hotkey_was_down: HashMap<MemoryScanAction, bool>,
     capturing_hotkey: Option<MemoryScanAction>,
@@ -492,6 +493,7 @@ impl Default for MemoryPanelState {
             scan_input_count: 0,
             has_scan_session: false,
             pinned: false,
+            address_list_pinned: false,
             hotkeys: HashMap::new(),
             hotkey_was_down: HashMap::new(),
             capturing_hotkey: None,
@@ -725,6 +727,11 @@ impl CrosshairApp {
     }
 
     pub(crate) fn render_memory_pinned_viewport(&mut self, ctx: &egui::Context) {
+        self.render_pinned_scan_results(ctx);
+        self.render_pinned_address_list(ctx);
+    }
+
+    fn render_pinned_scan_results(&mut self, ctx: &egui::Context) {
         if !self.memory_panel.pinned {
             return;
         }
@@ -811,6 +818,47 @@ impl CrosshairApp {
         );
         if unpin {
             self.memory_panel.pinned = false;
+        }
+    }
+
+    fn render_pinned_address_list(&mut self, ctx: &egui::Context) {
+        if !self.memory_panel.address_list_pinned {
+            return;
+        }
+        self.refresh_memory_values();
+        self.sync_memory_freeze_targets();
+        let builder = egui::ViewportBuilder::default()
+            .with_title("MacroNest — Address list")
+            .with_position(egui::pos2(0.0, 0.0))
+            .with_inner_size(vec2(760.0, 430.0))
+            .with_min_inner_size(vec2(520.0, 260.0))
+            .with_clamp_size_to_monitor_size(true)
+            .with_decorations(false)
+            .with_resizable(true)
+            .with_always_on_top();
+        let mut unpin = false;
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("memory-address-list"),
+            builder,
+            |ctx, _| {
+                Self::constrain_memory_popup_to_monitor(ctx);
+                if ctx.input(|input| input.viewport().close_requested()) {
+                    unpin = true;
+                }
+                let mut open = true;
+                Self::render_memory_popup_titlebar(ctx, "Address list", &mut unpin, &mut open);
+                if !open {
+                    unpin = true;
+                }
+                egui::CentralPanel::default()
+                    .frame(Self::memory_popup_frame(ctx))
+                    .show(ctx, |ui| self.render_saved_memory_addresses(ui));
+                Self::render_memory_popup_resize_handles(ctx);
+                ctx.request_repaint_after(Duration::from_millis(50));
+            },
+        );
+        if unpin {
+            self.memory_panel.address_list_pinned = false;
         }
     }
 
@@ -1694,6 +1742,17 @@ impl CrosshairApp {
                             self.delete_selected_saved_memory();
                         }
                     }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let label = if self.memory_panel.address_list_pinned {
+                            "Unpin address list"
+                        } else {
+                            "Pin address list"
+                        };
+                        if ui.button(label).clicked() {
+                            self.memory_panel.address_list_pinned =
+                                !self.memory_panel.address_list_pinned;
+                        }
+                    });
                 });
                 ui.separator();
                 let editing = self.memory_panel.edit_value_index.is_some()
@@ -1973,29 +2032,46 @@ impl CrosshairApp {
                             {
                                 self.select_saved_memory_row(index, selected, ui);
                             }
+                            if response.secondary_clicked() {
+                                self.memory_panel.saved_list_active = true;
+                                if !self.memory_panel.selected_saved.contains(&index) {
+                                    self.memory_panel.selected_saved.clear();
+                                    self.memory_panel.selected_saved.insert(index);
+                                    self.memory_panel.saved_selection_anchor = Some(index);
+                                }
+                            }
                             response.context_menu(|ui| {
+                                let selected_count = self.memory_panel.selected_saved.len();
+                                let single_target = selected_count == 1;
+                                let can_save = self.memory_panel.selected_saved.iter().any(|selected_index| {
+                                    self.memory_panel.saved.get(*selected_index)
+                                        .is_some_and(|entry| entry.text_encoding.is_none())
+                                });
                                 if ui.add_enabled(
-                                    saved.text_encoding.is_none(),
+                                    can_save,
                                     Button::new("Save address to library"),
                                 ).clicked() {
                                     save_to_library = true;
                                     ui.close();
                                 }
+                                if !single_target {
+                                    ui.label(RichText::new(format!("{selected_count} addresses selected — tools below need one address")).weak().small());
+                                }
                                 if ui
-                                    .button("Find instructions accessing this address (x64)")
+                                    .add_enabled(single_target, Button::new("Find instructions accessing this address (x64)"))
                                     .clicked()
                                 {
                                     instruction_watch = Some(true);
                                     ui.close();
                                 }
                                 if ui
-                                    .button("Find instructions writing this address (x64)")
+                                    .add_enabled(single_target, Button::new("Find instructions writing this address (x64)"))
                                     .clicked()
                                 {
                                     instruction_watch = Some(false);
                                     ui.close();
                                 }
-                                if ui.button("Find stable pointer automatically").clicked() {
+                                if ui.add_enabled(single_target, Button::new("Find stable pointer automatically")).clicked() {
                                     find_stable_pointer = true;
                                     ui.close();
                                 }
@@ -2009,11 +2085,11 @@ impl CrosshairApp {
                                 } else {
                                     "Deep pointer scan: create map A"
                                 };
-                                if ui.button(deep_label).clicked() {
+                                if ui.add_enabled(single_target, Button::new(deep_label)).clicked() {
                                     deep_pointer_scan = true;
                                     ui.close();
                                 }
-                                if ui.button("Browse this memory region").clicked() {
+                                if ui.add_enabled(single_target, Button::new("Browse this memory region")).clicked() {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
                                         kind: MemoryViewKind::Bytes,
@@ -2025,7 +2101,7 @@ impl CrosshairApp {
                                     });
                                     ui.close();
                                 }
-                                if ui.button("Dissect data/structure").clicked() {
+                                if ui.add_enabled(single_target, Button::new("Dissect data/structure")).clicked() {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
                                         kind: MemoryViewKind::Structure,
@@ -2039,21 +2115,21 @@ impl CrosshairApp {
                                 }
                                 if let Some(pointer) = saved.pointer.as_ref()
                                     && pointer.module.is_some()
-                                    && ui.button("Copy pointer for Macro").clicked()
+                                    && ui.add_enabled(single_target, Button::new("Copy pointer for Macro")).clicked()
                                 {
                                     ui.ctx().copy_text(format_pointer_expression(pointer));
                                     ui.close();
                                 }
                                 ui.separator();
-                                if ui.button("Change address / Pointer").clicked() {
+                                if ui.add_enabled(single_target, Button::new("Change address / Pointer")).clicked() {
                                     open_address = true;
                                     ui.close();
                                 }
-                                if ui.button("Edit value").clicked() {
+                                if ui.add_enabled(single_target, Button::new("Edit value")).clicked() {
                                     edit_value = true;
                                     ui.close();
                                 }
-                                if ui.button("Delete").clicked() {
+                                if ui.button(if single_target { "Delete" } else { "Delete selected" }).clicked() {
                                     delete = true;
                                     ui.close();
                                 }
@@ -2069,12 +2145,24 @@ impl CrosshairApp {
                                 self.start_or_compare_deep_pointer_scan(&saved);
                             }
                             if save_to_library {
-                                self.memory_panel.saved[index].saved_to_library = true;
-                                if self.memory_panel.saved[index].description.is_empty() {
-                                    self.memory_panel.saved[index].description = format!("0x{:X}", saved.address);
+                                let indices = self.memory_panel.selected_saved
+                                    .iter().copied().collect::<Vec<_>>();
+                                let mut saved_count = 0;
+                                for selected_index in indices {
+                                    let Some(entry) = self.memory_panel.saved.get_mut(selected_index) else {
+                                        continue;
+                                    };
+                                    if entry.text_encoding.is_some() {
+                                        continue;
+                                    }
+                                    entry.saved_to_library = true;
+                                    if entry.description.is_empty() {
+                                        entry.description = format!("0x{:X}", entry.address);
+                                    }
+                                    saved_count += 1;
                                 }
                                 self.persist_memory_pointers();
-                                self.memory_panel.status = "Address saved to library".to_owned();
+                                self.memory_panel.status = format!("{saved_count} address(es) saved to library");
                             }
                             if open_address {
                                 let (address, offsets, pointer) =
@@ -2114,9 +2202,7 @@ impl CrosshairApp {
                                     .unwrap_or_default();
                             }
                             if delete {
-                                self.memory_panel.saved.remove(index);
-                                self.reindex_saved_selection_after_delete(index);
-                                self.persist_memory_pointers();
+                                self.delete_selected_saved_memory();
                             }
                         }
                     });
@@ -2183,13 +2269,10 @@ impl CrosshairApp {
         if !self.memory_panel.saved_library_open {
             return;
         }
-        let mut open = true;
         let mut load = None;
         let mut delete = None;
-        egui::Window::new("Saved addresses")
-            .default_size(vec2(620.0, 420.0))
-            .collapsible(false)
-            .open(&mut open)
+        egui::CentralPanel::default()
+            .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
                 let mut apps = self
                     .state
@@ -2237,7 +2320,6 @@ impl CrosshairApp {
                     ui.centered_and_justified(|ui| ui.label(RichText::new("No saved addresses").weak()));
                 }
             });
-        self.memory_panel.saved_library_open = open;
         if let Some(index) = load
             && let Some(entry) = self.state.memory_pointer_list.get(index).cloned()
             && let Some(value_type) = memory_type_from_config(&entry.value_type)
