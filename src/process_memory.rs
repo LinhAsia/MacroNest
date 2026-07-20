@@ -407,6 +407,26 @@ pub fn read_memory_bytes(pid: u32, address: usize, length: usize) -> io::Result<
     Ok(bytes)
 }
 
+pub fn read_text_memory(
+    pid: u32,
+    address: usize,
+    byte_len: usize,
+    encoding: TextEncoding,
+) -> io::Result<String> {
+    let bytes = read_memory_bytes(pid, address, byte_len)?;
+    if bytes.len() != byte_len {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "partial text read"));
+    }
+    Ok(match encoding {
+        TextEncoding::Utf8 => String::from_utf8_lossy(&bytes).into_owned(),
+        TextEncoding::Utf16 => String::from_utf16_lossy(
+            &bytes.chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>(),
+        ),
+    })
+}
+
 pub fn write_scan_value(pid: u32, address: usize, value: ScanValue) -> io::Result<()> {
     let process = ScanProcess::open(pid, true)?;
     let bytes = value.bytes();

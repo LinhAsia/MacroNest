@@ -18,7 +18,7 @@ use crate::{
         MemoryRegionInfo, PointerMap, PointerPath, ScanCandidate, ScanComparison, ScanValue,
         ScanValueType, TextEncoding, TextScanCandidate, capture_pointer_map, filter_scan_candidates,
         filter_text_scan_candidates, query_memory_region,
-        read_memory_bytes, read_scan_value,
+        read_memory_bytes, read_scan_value, read_text_memory,
         refresh_scan_candidates, scan_memory_with_progress, scan_pointer_paths,
         scan_text_memory_with_progress, write_scan_value,
     },
@@ -115,6 +115,9 @@ struct SavedMemoryAddress {
     address: usize,
     value_type: ScanValueType,
     current: Option<ScanValue>,
+    text_encoding: Option<TextEncoding>,
+    text_byte_len: usize,
+    current_text: Option<String>,
     description: String,
     pointer: Option<PointerSpec>,
     frozen: Option<ScanValue>,
@@ -1818,7 +1821,11 @@ impl CrosshairApp {
                                         ui,
                                         column_width,
                                         row_height,
-                                        egui::Label::new(memory_type_label(saved.value_type))
+                                        egui::Label::new(match saved.text_encoding {
+                                            Some(TextEncoding::Utf8) => "Text (UTF-8)",
+                                            Some(TextEncoding::Utf16) => "Text (UTF-16)",
+                                            None => memory_type_label(saved.value_type),
+                                        })
                                             .selectable(false)
                                             .truncate(),
                                     );
@@ -1852,14 +1859,13 @@ impl CrosshairApp {
                                             column_width,
                                             row_height,
                                             egui::Label::new(
-                                                saved
-                                                    .current
-                                                    .map(|value| {
+                                                saved.current_text.clone().or_else(|| saved
+                                                    .current.map(|value| {
                                                         format_scan_value(
                                                             value,
                                                             self.memory_panel.hex,
                                                         )
-                                                    })
+                                                    }))
                                                     .unwrap_or_else(|| "?".to_owned()),
                                             )
                                             .selectable(false)
@@ -1911,13 +1917,13 @@ impl CrosshairApp {
                                     }
                                     let mut frozen = saved.frozen.is_some();
                                     let frozen_response = ui
-                                        .add_sized(
+                                        .add_enabled_ui(saved.text_encoding.is_none(), |ui| ui.add_sized(
                                             [18.0, 18.0],
                                             egui::Checkbox::without_text(&mut frozen),
-                                        )
+                                        )).inner
                                         .on_hover_text("Freeze");
                                     row_hits.push(frozen_response.clone());
-                                    if frozen_response.changed() {
+                                    if saved.text_encoding.is_none() && frozen_response.changed() {
                                         self.memory_panel.saved[index].frozen =
                                             if frozen { saved.current } else { None };
                                     }
@@ -1952,7 +1958,7 @@ impl CrosshairApp {
                                 if double_clicked {
                                     match column {
                                         0 => open_address = true,
-                                        2 => edit_value = true,
+                                        2 if saved.text_encoding.is_none() => edit_value = true,
                                         3 => self.memory_panel.edit_description_index = Some(index),
                                         _ => {}
                                     }
@@ -1968,7 +1974,10 @@ impl CrosshairApp {
                                 self.select_saved_memory_row(index, selected, ui);
                             }
                             response.context_menu(|ui| {
-                                if ui.button("Save address to library").clicked() {
+                                if ui.add_enabled(
+                                    saved.text_encoding.is_none(),
+                                    Button::new("Save address to library"),
+                                ).clicked() {
                                     save_to_library = true;
                                     ui.close();
                                 }
@@ -2040,7 +2049,7 @@ impl CrosshairApp {
                                     open_address = true;
                                     ui.close();
                                 }
-                                if ui.button("Edit value").clicked() {
+                                if ui.add_enabled(saved.text_encoding.is_none(), Button::new("Edit value")).clicked() {
                                     edit_value = true;
                                     ui.close();
                                 }
@@ -2096,7 +2105,7 @@ impl CrosshairApp {
                                     rect: None,
                                 });
                             }
-                            if edit_value {
+                            if edit_value && saved.text_encoding.is_none() {
                                 self.memory_panel.edit_value_index = Some(index);
                                 self.memory_panel.edit_value_input = saved
                                     .current
@@ -2249,6 +2258,9 @@ impl CrosshairApp {
                 address,
                 value_type,
                 current,
+                text_encoding: None,
+                text_byte_len: 0,
+                current_text: None,
                 description: entry.name,
                 pointer,
                 frozen: None,
@@ -2956,6 +2968,9 @@ impl CrosshairApp {
                         address,
                         value_type: dialog.display_type,
                         current: read_scan_value(pid, address, dialog.display_type).ok(),
+                        text_encoding: None,
+                        text_byte_len: 0,
+                        current_text: None,
                         description: format!("{}+{:X}", path.module, path.module_offset),
                         pointer: Some(pointer),
                         frozen: None,
@@ -3073,6 +3088,9 @@ impl CrosshairApp {
             address,
             value_type: dialog.value_type,
             current,
+            text_encoding: None,
+            text_byte_len: 0,
+            current_text: None,
             description: format!(
                 "{}+{:X}",
                 candidate.path.module, candidate.path.module_offset
@@ -3649,6 +3667,9 @@ impl CrosshairApp {
             address,
             value_type,
             current,
+            text_encoding: None,
+            text_byte_len: 0,
+            current_text: None,
             description: String::new(),
             pointer: None,
             frozen: None,
@@ -4001,6 +4022,9 @@ impl CrosshairApp {
             address,
             value_type,
             current,
+            text_encoding: None,
+            text_byte_len: 0,
+            current_text: None,
             description: String::new(),
             pointer: None,
             frozen: None,
@@ -4289,12 +4313,16 @@ impl CrosshairApp {
                 if self.memory_panel.saved.iter().any(|saved| saved.address == address) {
                     continue;
                 }
-                let current = self.memory_panel.process_pid
-                    .and_then(|pid| read_scan_value(pid, address, ScanValueType::I8).ok());
                 self.memory_panel.saved.push(SavedMemoryAddress {
                     address,
                     value_type: ScanValueType::I8,
-                    current,
+                    current: None,
+                    text_encoding: self.memory_panel.text_encoding,
+                    text_byte_len: match self.memory_panel.text_encoding {
+                        Some(TextEncoding::Utf16) => candidate.current.encode_utf16().count() * 2,
+                        _ => candidate.current.len(),
+                    },
+                    current_text: Some(candidate.current.clone()),
                     description: match self.memory_panel.text_encoding {
                         Some(TextEncoding::Utf16) => "Text (UTF-16)".to_owned(),
                         _ => "Text (UTF-8)".to_owned(),
@@ -4318,6 +4346,9 @@ impl CrosshairApp {
                 address: candidate.address,
                 value_type: candidate.current.value_type(),
                 current: Some(candidate.current),
+                text_encoding: None,
+                text_byte_len: 0,
+                current_text: None,
                 description: String::new(),
                 pointer: None,
                 frozen: None,
@@ -4342,6 +4373,9 @@ impl CrosshairApp {
             address,
             value_type,
             current,
+            text_encoding: None,
+            text_byte_len: 0,
+            current_text: None,
             description: String::new(),
             pointer: None,
             frozen: None,
@@ -4366,7 +4400,18 @@ impl CrosshairApp {
             {
                 saved.address = address;
             }
-            saved.current = read_scan_value(pid, saved.address, saved.value_type).ok();
+            if let Some(encoding) = saved.text_encoding {
+                saved.current_text = read_text_memory(
+                    pid,
+                    saved.address,
+                    saved.text_byte_len,
+                    encoding,
+                ).ok();
+                saved.current = None;
+            } else {
+                saved.current = read_scan_value(pid, saved.address, saved.value_type).ok();
+                saved.current_text = None;
+            }
         }
     }
 
@@ -4398,6 +4443,11 @@ impl CrosshairApp {
         let Some(saved) = self.memory_panel.saved.get(index).cloned() else {
             return;
         };
+        if saved.text_encoding.is_some() {
+            self.memory_panel.edit_value_index = None;
+            self.memory_panel.status = "Text editing is not enabled for this address".to_owned();
+            return;
+        }
         let Some(value) = parse_scan_value(
             &self.memory_panel.edit_value_input,
             saved.value_type,
@@ -4429,6 +4479,9 @@ impl CrosshairApp {
             let Some(saved) = self.memory_panel.saved.get(index) else {
                 continue;
             };
+            if saved.text_encoding.is_some() {
+                continue;
+            }
             let Some(value) = parse_scan_value(
                 &self.memory_panel.value_input,
                 saved.value_type,
@@ -4447,7 +4500,9 @@ impl CrosshairApp {
         let selected = self.memory_panel.selected_saved.clone();
         for index in selected {
             if let Some(saved) = self.memory_panel.saved.get_mut(index) {
-                saved.frozen = saved.current;
+                if saved.text_encoding.is_none() {
+                    saved.frozen = saved.current;
+                }
             }
         }
     }
