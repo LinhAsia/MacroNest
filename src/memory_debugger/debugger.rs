@@ -1,6 +1,7 @@
 //! x64 hardware watchpoints for an explicitly selected offline process.
 
 use super::memory::Process;
+use crate::model::MemoryDebuggerArchitecture;
 use iced_x86::{
     Decoder, DecoderOptions, Formatter, Instruction, InstructionInfoFactory, IntelFormatter,
     OpAccess, OpKind, Register,
@@ -25,7 +26,9 @@ use windows_sys::Win32::{
             CREATE_PROCESS_DEBUG_EVENT, CREATE_THREAD_DEBUG_EVENT, ContinueDebugEvent, DEBUG_EVENT,
             DebugActiveProcess, DebugActiveProcessStop, DebugSetProcessKillOnExit,
             EXCEPTION_DEBUG_EVENT, EXIT_PROCESS_DEBUG_EVENT, EXIT_THREAD_DEBUG_EVENT,
-            GetThreadContext, SetThreadContext, WaitForDebugEvent,
+            GetThreadContext, SetThreadContext, WOW64_CONTEXT, WOW64_CONTEXT_CONTROL,
+            WOW64_CONTEXT_DEBUG_REGISTERS, WOW64_CONTEXT_INTEGER, WaitForDebugEvent,
+            Wow64GetThreadContext, Wow64SetThreadContext,
         },
         Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW,
@@ -134,6 +137,12 @@ impl Default for AlignedContext {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TargetArchitecture {
+    X86,
+    X64,
+}
+
 #[derive(Debug)]
 pub enum WatchEvent {
     Started,
@@ -157,14 +166,19 @@ struct WatchSession {
 }
 
 impl WatchSession {
-    fn start<F>(pid: u32, kind: WatchKind, notify: F) -> io::Result<Self>
+    fn start<F>(
+        pid: u32,
+        kind: WatchKind,
+        requested_architecture: MemoryDebuggerArchitecture,
+        notify: F,
+    ) -> io::Result<Self>
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
-        ensure_x64_target(pid)?;
+        let architecture = target_architecture(pid, requested_architecture)?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
-        let worker = thread::spawn(move || watch_loop(pid, kind, worker_stop, notify));
+        let worker = thread::spawn(move || watch_loop(pid, kind, architecture, worker_stop, notify));
         Ok(Self {
             stop,
             worker: Some(worker),
@@ -188,7 +202,7 @@ impl Drop for WatchSession {
 pub struct WriteWatch(WatchSession);
 
 impl WriteWatch {
-    pub fn start<F>(pid: u32, address: usize, notify: F) -> io::Result<Self>
+    pub fn start<F>(pid: u32, address: usize, architecture: MemoryDebuggerArchitecture, notify: F) -> io::Result<Self>
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
@@ -198,7 +212,7 @@ impl WriteWatch {
                 "hardware watchpoint i32 requires a 4-byte aligned address",
             ));
         }
-        WatchSession::start(pid, WatchKind::Write { address }, notify).map(Self)
+        WatchSession::start(pid, WatchKind::Write { address }, architecture, notify).map(Self)
     }
 
     pub fn stop(&mut self) {
@@ -209,7 +223,7 @@ impl WriteWatch {
 pub struct AddressAccessWatch(WatchSession);
 
 impl AddressAccessWatch {
-    pub fn start<F>(pid: u32, address: usize, notify: F) -> io::Result<Self>
+    pub fn start<F>(pid: u32, address: usize, architecture: MemoryDebuggerArchitecture, notify: F) -> io::Result<Self>
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
@@ -219,7 +233,7 @@ impl AddressAccessWatch {
                 "hardware i32 access watchpoint requires a 4-byte aligned address",
             ));
         }
-        WatchSession::start(pid, WatchKind::ReadWrite { address }, notify).map(Self)
+        WatchSession::start(pid, WatchKind::ReadWrite { address }, architecture, notify).map(Self)
     }
 
     pub fn stop(&mut self) {
@@ -230,17 +244,19 @@ impl AddressAccessWatch {
 pub struct AccessWatch(WatchSession);
 
 impl AccessWatch {
-    pub fn start<F>(pid: u32, instruction_address: usize, notify: F) -> io::Result<Self>
+    pub fn start<F>(pid: u32, instruction_address: usize, architecture: MemoryDebuggerArchitecture, notify: F) -> io::Result<Self>
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
-        let instruction = decode_at(&Process::open(pid)?, instruction_address)?;
+        let target = target_architecture(pid, architecture)?;
+        let instruction = decode_at(&Process::open(pid)?, instruction_address, target)?;
         WatchSession::start(
             pid,
             WatchKind::Execute {
                 address: instruction_address,
                 instruction,
             },
+            architecture,
             notify,
         )
         .map(Self)
@@ -282,7 +298,7 @@ impl WatchKind {
     }
 }
 
-fn ensure_x64_target(pid: u32) -> io::Result<()> {
+fn target_architecture(pid: u32, requested: MemoryDebuggerArchitecture) -> io::Result<TargetArchitecture> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
         return Err(io::Error::last_os_error());
@@ -293,17 +309,17 @@ fn ensure_x64_target(pid: u32) -> io::Result<()> {
     if result == 0 {
         return Err(io::Error::last_os_error());
     }
-    if wow64 != 0 {
-        // ponytail: The app is x64-only today; add Wow64*Context when 32-bit targets matter.
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "the debugger currently supports 64-bit processes only",
-        ));
+    let detected = if wow64 != 0 { TargetArchitecture::X86 } else { TargetArchitecture::X64 };
+    match requested {
+        MemoryDebuggerArchitecture::Auto => Ok(detected),
+        MemoryDebuggerArchitecture::X86 if detected == TargetArchitecture::X86 => Ok(detected),
+        MemoryDebuggerArchitecture::X64 if detected == TargetArchitecture::X64 => Ok(detected),
+        MemoryDebuggerArchitecture::X86 => Err(io::Error::new(io::ErrorKind::InvalidInput, "selected 32-bit debugger for a 64-bit process")),
+        MemoryDebuggerArchitecture::X64 => Err(io::Error::new(io::ErrorKind::InvalidInput, "selected 64-bit debugger for a 32-bit process")),
     }
-    Ok(())
 }
 
-fn watch_loop<F>(pid: u32, kind: WatchKind, stop: Arc<AtomicBool>, notify: F)
+fn watch_loop<F>(pid: u32, kind: WatchKind, architecture: TargetArchitecture, stop: Arc<AtomicBool>, notify: F)
 where
     F: Fn(WatchEvent),
 {
@@ -344,7 +360,7 @@ where
         match event.dwDebugEventCode {
             CREATE_PROCESS_DEBUG_EVENT => unsafe {
                 let info = event.u.CreateProcessInfo;
-                if let Err(error) = arm_thread(info.hThread, &kind) {
+                if let Err(error) = arm_thread(info.hThread, &kind, architecture) {
                     notify(WatchEvent::Error(error.to_string()));
                     stop.store(true, Ordering::Release);
                 }
@@ -354,7 +370,7 @@ where
             },
             CREATE_THREAD_DEBUG_EVENT => unsafe {
                 let thread = event.u.CreateThread.hThread;
-                if let Err(error) = arm_thread(thread, &kind) {
+                if let Err(error) = arm_thread(thread, &kind, architecture) {
                     notify(WatchEvent::Error(error.to_string()));
                     stop.store(true, Ordering::Release);
                 }
@@ -368,8 +384,10 @@ where
                             thread,
                             kind.address(),
                             matches!(kind, WatchKind::Execute { .. }),
+                            architecture,
                         )
                     }) {
+                        let context = context.as_amd64();
                         match &kind {
                             WatchKind::Write { address } | WatchKind::ReadWrite { address } => {
                                 let read_write = matches!(kind, WatchKind::ReadWrite { .. });
@@ -379,6 +397,7 @@ where
                                         &context,
                                         *address,
                                         !read_write,
+                                        architecture,
                                     )
                                 {
                                     notify(WatchEvent::AddressHit {
@@ -391,6 +410,7 @@ where
                                             &context,
                                             *address,
                                             if read_write { "truy cáº­p" } else { "ghi" },
+                                            architecture,
                                         ),
                                         likely_stack_copy: address.abs_diff(context.Rsp as usize)
                                             < 8 * 1024 * 1024,
@@ -428,7 +448,7 @@ where
                     // The attach breakpoint can replace debug-register state installed during the
                     // synthetic CREATE_THREAD events. Re-arm every existing game thread after it.
                     for &thread in threads.values() {
-                        if let Err(error) = arm_thread(thread, &kind) {
+                        if let Err(error) = arm_thread(thread, &kind, architecture) {
                             notify(WatchEvent::Error(format!(
                                 "unable to arm an existing game thread: {error}"
                             )));
@@ -453,7 +473,7 @@ where
     for (_, thread) in threads {
         unsafe {
             if SuspendThread(thread) != u32::MAX {
-                disarm_thread(thread);
+                disarm_thread(thread, architecture);
                 ResumeThread(thread);
             }
             close_if_valid(thread);
@@ -469,7 +489,25 @@ unsafe fn close_if_valid(handle: HANDLE) {
     }
 }
 
-unsafe fn arm_thread(thread: HANDLE, kind: &WatchKind) -> io::Result<()> {
+unsafe fn arm_thread(thread: HANDLE, kind: &WatchKind, architecture: TargetArchitecture) -> io::Result<()> {
+    if architecture == TargetArchitecture::X86 {
+        let mut context = WOW64_CONTEXT {
+            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
+            ..WOW64_CONTEXT::default()
+        };
+        if unsafe { Wow64GetThreadContext(thread, &mut context) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        context.Dr0 = kind.address() as u32;
+        context.Dr6 = 0;
+        context.Dr7 &= !0xF0003;
+        context.Dr7 |= kind.dr7() as u32;
+        return if unsafe { Wow64SetThreadContext(thread, &context) } == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        };
+    }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
     context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
@@ -487,7 +525,55 @@ unsafe fn arm_thread(thread: HANDLE, kind: &WatchKind) -> io::Result<()> {
     }
 }
 
-fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool) -> Option<CONTEXT> {
+enum CapturedContext {
+    X86(WOW64_CONTEXT),
+    X64(CONTEXT),
+}
+
+impl CapturedContext {
+    fn as_amd64(&self) -> CONTEXT {
+        match self {
+            Self::X64(context) => *context,
+            Self::X86(context) => CONTEXT {
+                Rax: context.Eax as u64,
+                Rbx: context.Ebx as u64,
+                Rcx: context.Ecx as u64,
+                Rdx: context.Edx as u64,
+                Rsi: context.Esi as u64,
+                Rdi: context.Edi as u64,
+                Rbp: context.Ebp as u64,
+                Rsp: context.Esp as u64,
+                Rip: context.Eip as u64,
+                EFlags: context.EFlags,
+                Dr0: context.Dr0 as u64,
+                Dr6: context.Dr6 as u64,
+                Dr7: context.Dr7 as u64,
+                ..CONTEXT::default()
+            },
+        }
+    }
+}
+
+fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool, architecture: TargetArchitecture) -> Option<CapturedContext> {
+    if architecture == TargetArchitecture::X86 {
+        let mut context = WOW64_CONTEXT {
+            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS
+                | WOW64_CONTEXT_CONTROL
+                | WOW64_CONTEXT_INTEGER,
+            ..WOW64_CONTEXT::default()
+        };
+        let hit = unsafe { Wow64GetThreadContext(thread, &mut context) } != 0
+            && context.Dr6 & 1 != 0
+            && context.Dr0 == address as u32;
+        if hit {
+            context.Dr6 = 0;
+            if execution_breakpoint {
+                context.EFlags |= RESUME_FLAG;
+            }
+            unsafe { Wow64SetThreadContext(thread, &context) };
+        }
+        return hit.then_some(CapturedContext::X86(context));
+    }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
     context.ContextFlags =
@@ -503,13 +589,18 @@ fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool) -> Optio
         }
         unsafe { SetThreadContext(thread, context) };
     }
-    captured
+    captured.map(CapturedContext::X64)
 }
 
-fn decode_at(process: &Process, address: usize) -> io::Result<Instruction> {
+fn decode_at(process: &Process, address: usize, architecture: TargetArchitecture) -> io::Result<Instruction> {
     let mut bytes = [0u8; 15];
     let read = process.read(address, &mut bytes)?;
-    let mut decoder = Decoder::with_ip(64, &bytes[..read], address as u64, DecoderOptions::NONE);
+    let mut decoder = Decoder::with_ip(
+        if architecture == TargetArchitecture::X86 { 32 } else { 64 },
+        &bytes[..read],
+        address as u64,
+        DecoderOptions::NONE,
+    );
     let instruction = decoder.decode();
     if instruction.is_invalid() {
         Err(io::Error::new(
@@ -526,6 +617,7 @@ fn decode_previous_access(
     context: &CONTEXT,
     data_address: usize,
     writes_only: bool,
+    architecture: TargetArchitecture,
 ) -> Option<(usize, Instruction, String)> {
     let next_ip = context.Rip as usize;
     for length in 1..=15usize {
@@ -537,8 +629,12 @@ fn decode_previous_access(
         if read != length {
             continue;
         }
-        let mut decoder =
-            Decoder::with_ip(64, &bytes[..length], start as u64, DecoderOptions::NONE);
+        let mut decoder = Decoder::with_ip(
+            if architecture == TargetArchitecture::X86 { 32 } else { 64 },
+            &bytes[..length],
+            start as u64,
+            DecoderOptions::NONE,
+        );
         let instruction = decoder.decode();
         if !instruction.is_invalid()
             && instruction.len() == length
@@ -573,7 +669,8 @@ fn writes_memory(instruction: &Instruction) -> bool {
 }
 
 pub fn instruction_writes_memory(pid: u32, address: usize) -> io::Result<bool> {
-    Ok(writes_memory(&decode_at(&Process::open(pid)?, address)?))
+    let architecture = target_architecture(pid, MemoryDebuggerArchitecture::Auto)?;
+    Ok(writes_memory(&decode_at(&Process::open(pid)?, address, architecture)?))
 }
 
 fn format_hit_details(
@@ -582,6 +679,7 @@ fn format_hit_details(
     context: &CONTEXT,
     data_address: usize,
     action: &str,
+    architecture: TargetArchitecture,
 ) -> String {
     let action = if action == "ghi" { "write" } else { "access" };
     let mut text = format!(
@@ -608,7 +706,7 @@ fn format_hit_details(
             assembly,
             if index == 0 { "  <<" } else { "" }
         ));
-        let Ok(next) = decode_at(process, current.next_ip() as usize) else {
+        let Ok(next) = decode_at(process, current.next_ip() as usize, architecture) else {
             break;
         };
         current = next;
@@ -680,7 +778,7 @@ fn format_hit_details_legacy(
             assembly,
             if index == 0 { "  <<" } else { "" }
         ));
-        let Ok(next) = decode_at(process, current.next_ip() as usize) else {
+        let Ok(next) = decode_at(process, current.next_ip() as usize, TargetArchitecture::X64) else {
             break;
         };
         current = next;
@@ -777,7 +875,20 @@ fn register_value(register: Register, context: &CONTEXT) -> Option<u64> {
     })
 }
 
-unsafe fn disarm_thread(thread: HANDLE) {
+unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
+    if architecture == TargetArchitecture::X86 {
+        let mut context = WOW64_CONTEXT {
+            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS,
+            ..WOW64_CONTEXT::default()
+        };
+        if unsafe { Wow64GetThreadContext(thread, &mut context) } != 0 {
+            context.Dr0 = 0;
+            context.Dr6 = 0;
+            context.Dr7 &= !0xF0003;
+            unsafe { Wow64SetThreadContext(thread, &context) };
+        }
+        return;
+    }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
     context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
@@ -868,7 +979,7 @@ mod tests {
             }
         };
         let (sender, receiver) = mpsc::channel();
-        let mut watch = WriteWatch::start(child.id(), address, move |event| {
+        let mut watch = WriteWatch::start(child.id(), address, MemoryDebuggerArchitecture::Auto, move |event| {
             let _ = sender.send(event);
         })
         .unwrap();
@@ -893,7 +1004,7 @@ mod tests {
         watch.stop();
         let (sender, receiver) = mpsc::channel();
         let mut address_access_watch =
-            AddressAccessWatch::start(child.id(), address, move |event| {
+            AddressAccessWatch::start(child.id(), address, MemoryDebuggerArchitecture::Auto, move |event| {
                 let _ = sender.send(event);
             })
             .unwrap();
@@ -908,7 +1019,7 @@ mod tests {
         assert!(access_details.contains("TRUY Cáº¬P"));
         address_access_watch.stop();
         let (sender, receiver) = mpsc::channel();
-        let mut access_watch = AccessWatch::start(child.id(), ip, move |event| {
+        let mut access_watch = AccessWatch::start(child.id(), ip, MemoryDebuggerArchitecture::Auto, move |event| {
             let _ = sender.send(event);
         })
         .unwrap();

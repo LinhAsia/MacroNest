@@ -13,7 +13,7 @@ use eframe::egui::{self, Button, Color32, Frame, RichText, Sense, vec2};
 
 use crate::{
     hotkey,
-    model::{HotkeyBinding, MemoryCodeEntry, MemoryDebuggerMethod, MemoryPointerEntry},
+    model::{HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod, MemoryPointerEntry},
     process_memory::{
         MemoryRegionInfo, PointerPath, ScanCandidate, ScanComparison, ScanValue, ScanValueType,
         filter_scan_candidates, query_memory_region, read_memory_bytes, read_scan_value,
@@ -1927,6 +1927,17 @@ impl CrosshairApp {
                             .weak(),
                     );
                 }
+                ui.separator();
+                ui.label("Target architecture");
+                for (value, label) in [
+                    (MemoryDebuggerArchitecture::Auto, "Auto detect"),
+                    (MemoryDebuggerArchitecture::X86, "32-bit (x86)"),
+                    (MemoryDebuggerArchitecture::X64, "64-bit (x64)"),
+                ] {
+                    changed |= ui
+                        .radio_value(&mut self.state.memory_debugger_architecture, value, label)
+                        .changed();
+                }
             });
         self.memory_panel.memory_settings_open = open;
         if changed {
@@ -2159,7 +2170,7 @@ impl CrosshairApp {
             active.stop();
         }
         let (tx, rx) = mpsc::channel();
-        let started = AccessWatch::start(pid, instruction_address, move |event| {
+        let started = AccessWatch::start(pid, instruction_address, self.state.memory_debugger_architecture, move |event| {
             let _ = tx.send(event);
         });
         let (active, status) = match started {
@@ -2563,9 +2574,9 @@ impl CrosshairApp {
             let _ = tx.send(event);
         };
         let started = if reads_and_writes {
-            AddressAccessWatch::start(pid, address, notify).map(ActiveInstructionWatch::Accesses)
+            AddressAccessWatch::start(pid, address, self.state.memory_debugger_architecture, notify).map(ActiveInstructionWatch::Accesses)
         } else {
-            WriteWatch::start(pid, address, notify).map(ActiveInstructionWatch::Writes)
+            WriteWatch::start(pid, address, self.state.memory_debugger_architecture, notify).map(ActiveInstructionWatch::Writes)
         };
         let (active, status) = match started {
             Ok(active) => (Some(active), "Attaching debugger…".to_owned()),

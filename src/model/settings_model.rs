@@ -450,6 +450,14 @@ pub enum MemoryDebuggerMethod {
     Veh,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum MemoryDebuggerArchitecture {
+    #[default]
+    Auto,
+    X86,
+    X64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct MemoryCodeEntry {
     pub name: String,
@@ -482,6 +490,7 @@ pub struct AppState {
     pub active_panel: AppPanel,
     pub memory_scan_hotkeys: Vec<(String, HotkeyBinding)>,
     pub memory_debugger_method: MemoryDebuggerMethod,
+    pub memory_debugger_architecture: MemoryDebuggerArchitecture,
     pub memory_code_list: Vec<MemoryCodeEntry>,
     pub memory_pointer_list: Vec<MemoryPointerEntry>,
     pub ui_language: UiLanguage,
@@ -892,6 +901,7 @@ impl Default for AppState {
             active_panel: AppPanel::Macros,
             memory_scan_hotkeys: Vec::new(),
             memory_debugger_method: MemoryDebuggerMethod::Windows,
+            memory_debugger_architecture: MemoryDebuggerArchitecture::Auto,
             memory_code_list: Vec::new(),
             memory_pointer_list: Vec::new(),
             ui_language: UiLanguage::English,
