@@ -15,8 +15,9 @@ use crate::{
     hotkey,
     model::{HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod, MemoryPointerEntry},
     process_memory::{
-        MemoryRegionInfo, PointerPath, ScanCandidate, ScanComparison, ScanValue, ScanValueType,
-        filter_scan_candidates, query_memory_region, read_memory_bytes, read_scan_value,
+        MemoryRegionInfo, PointerMap, PointerPath, ScanCandidate, ScanComparison, ScanValue,
+        ScanValueType, capture_pointer_map, filter_scan_candidates, query_memory_region,
+        read_memory_bytes, read_scan_value,
         refresh_scan_candidates, scan_memory_with_progress, scan_pointer_paths, write_scan_value,
     },
     window_list,
@@ -149,6 +150,23 @@ struct StablePointerDialog {
     progress: Arc<AtomicUsize>,
     filter: String,
     exe_only: bool,
+}
+
+enum DeepPointerJobResult {
+    MapA(Result<PointerMap, String>),
+    Compared(Result<Vec<PointerPath>, String>),
+}
+
+struct DeepPointerDialog {
+    map_a: Option<Arc<PointerMap>>,
+    source_pid: u32,
+    source_address: usize,
+    value_type: ScanValueType,
+    status: String,
+    rx: Option<Receiver<DeepPointerJobResult>>,
+    progress: Arc<AtomicUsize>,
+    candidates: Vec<PointerPath>,
+    selected: Option<usize>,
 }
 
 struct AddressDialog {
@@ -400,6 +418,7 @@ pub(crate) struct MemoryPanelState {
     memory_settings_open: bool,
     code_list_open: bool,
     stable_pointer_dialog: Option<StablePointerDialog>,
+    deep_pointer_dialog: Option<DeepPointerDialog>,
     saved_library_open: bool,
     #[cfg(windows)]
     instruction_watch_dialog: Option<InstructionWatchDialog>,
@@ -451,6 +470,7 @@ impl Default for MemoryPanelState {
             memory_settings_open: false,
             code_list_open: false,
             stable_pointer_dialog: None,
+            deep_pointer_dialog: None,
             saved_library_open: false,
             #[cfg(windows)]
             instruction_watch_dialog: None,
@@ -598,6 +618,7 @@ impl CrosshairApp {
         self.render_memory_code_list(ui.ctx());
         self.render_saved_address_library(ui.ctx());
         self.render_stable_pointer_dialog(ui.ctx());
+        self.render_deep_pointer_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_instruction_watch_dialog(ui.ctx());
         #[cfg(windows)]
@@ -1576,6 +1597,7 @@ impl CrosshairApp {
                             let mut delete = false;
                             let mut instruction_watch = None;
                             let mut find_stable_pointer = false;
+                            let mut deep_pointer_scan = false;
                             let mut save_to_library = false;
                             let mut persist_pointer_changes = false;
                             let mut row_hits = Vec::new();
@@ -1811,6 +1833,20 @@ impl CrosshairApp {
                                     find_stable_pointer = true;
                                     ui.close();
                                 }
+                                let deep_label = if self
+                                    .memory_panel
+                                    .deep_pointer_dialog
+                                    .as_ref()
+                                    .is_some_and(|dialog| dialog.map_a.is_some())
+                                {
+                                    "Deep pointer scan: compare with map A"
+                                } else {
+                                    "Deep pointer scan: create map A"
+                                };
+                                if ui.button(deep_label).clicked() {
+                                    deep_pointer_scan = true;
+                                    ui.close();
+                                }
                                 if ui.button("Browse this memory region").clicked() {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
@@ -1862,6 +1898,9 @@ impl CrosshairApp {
                             }
                             if find_stable_pointer {
                                 self.start_stable_pointer_scan(&saved);
+                            }
+                            if deep_pointer_scan {
+                                self.start_or_compare_deep_pointer_scan(&saved);
                             }
                             if save_to_library {
                                 self.memory_panel.saved[index].saved_to_library = true;
@@ -2260,6 +2299,71 @@ impl CrosshairApp {
         self.memory_panel.status = "Stable pointer scan is available on Windows only".to_owned();
     }
 
+    #[cfg(windows)]
+    fn start_or_compare_deep_pointer_scan(&mut self, saved: &SavedMemoryAddress) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process".to_owned();
+            return;
+        };
+        let modules = match process_modules(pid) {
+            Ok(modules) => modules,
+            Err(error) => {
+                self.memory_panel.status = format!("Unable to list process modules: {error}");
+                return;
+            }
+        };
+        let progress = Arc::new(AtomicUsize::new(0));
+        let worker_progress = Arc::clone(&progress);
+        let (tx, rx) = mpsc::channel();
+        if let Some((map_a, target_a)) = self
+            .memory_panel
+            .deep_pointer_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.map_a.clone().map(|map| (map, dialog.source_address)))
+        {
+            let target = saved.address;
+            thread::spawn(move || {
+                let result = capture_pointer_map(pid, &modules, worker_progress)
+                    .map(|map_b| {
+                        let paths_a = map_a.paths_to(target_a, 0x1000, 5, 4096);
+                        let paths_b = map_b.paths_to(target, 0x1000, 5, 4096);
+                        let paths_b = paths_b.into_iter().collect::<HashSet<_>>();
+                        paths_a
+                            .into_iter()
+                            .filter(|path| paths_b.contains(path))
+                            .take(256)
+                            .collect()
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = tx.send(DeepPointerJobResult::Compared(result));
+            });
+            let dialog = self.memory_panel.deep_pointer_dialog.as_mut().unwrap();
+            dialog.value_type = saved.value_type;
+            dialog.status = "Capturing map B and comparing with map A…".to_owned();
+            dialog.rx = Some(rx);
+            dialog.progress = progress;
+            dialog.candidates.clear();
+            dialog.selected = None;
+        } else {
+            thread::spawn(move || {
+                let result = capture_pointer_map(pid, &modules, worker_progress)
+                    .map_err(|error| error.to_string());
+                let _ = tx.send(DeepPointerJobResult::MapA(result));
+            });
+            self.memory_panel.deep_pointer_dialog = Some(DeepPointerDialog {
+                map_a: None,
+                source_pid: pid,
+                source_address: saved.address,
+                value_type: saved.value_type,
+                status: "Capturing pointer map A…".to_owned(),
+                rx: Some(rx),
+                progress,
+                candidates: Vec::new(),
+                selected: None,
+            });
+        }
+    }
+
     fn render_stable_pointer_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.memory_panel.stable_pointer_dialog.take() else {
             return;
@@ -2474,6 +2578,115 @@ impl CrosshairApp {
                 ctx.request_repaint_after(Duration::from_millis(100));
             }
             self.memory_panel.stable_pointer_dialog = Some(dialog);
+        }
+    }
+
+    fn render_deep_pointer_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.memory_panel.deep_pointer_dialog.take() else {
+            return;
+        };
+        if let Some(rx) = dialog.rx.as_ref()
+            && let Ok(result) = rx.try_recv()
+        {
+            dialog.rx = None;
+            match result {
+                DeepPointerJobResult::MapA(Ok(map)) => {
+                    dialog.map_a = Some(Arc::new(map));
+                    dialog.status = "Map A ready. Restart the game, find the new target address, then right-click it and choose Compare with map A.".to_owned();
+                }
+                DeepPointerJobResult::Compared(Ok(paths)) => {
+                    dialog.candidates = paths;
+                    dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+                    dialog.status = format!(
+                        "Compared map A and map B: {} common pointer path(s).",
+                        dialog.candidates.len()
+                    );
+                }
+                DeepPointerJobResult::MapA(Err(error))
+                | DeepPointerJobResult::Compared(Err(error)) => {
+                    dialog.status = format!("Deep pointer scan failed: {error}");
+                }
+            }
+        }
+        let mut open = true;
+        let mut clear = false;
+        let mut add = false;
+        egui::Window::new("Deep pointer scan — map comparison")
+            .default_size(vec2(720.0, 430.0))
+            .min_size(vec2(520.0, 300.0))
+            .collapsible(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(&dialog.status);
+                if dialog.rx.is_some() {
+                    let read = dialog.progress.load(Ordering::Relaxed);
+                    ui.label(format!("Read {:.1} MB", read as f64 / 1_048_576.0));
+                    ui.spinner();
+                    return;
+                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(dialog.selected.is_some(), Button::new("Add selected pointer"))
+                        .clicked()
+                    {
+                        add = true;
+                    }
+                    if ui.button("Clear map A").clicked() {
+                        clear = true;
+                    }
+                });
+                ui.separator();
+                egui::ScrollArea::both().show(ui, |ui| {
+                    for (index, path) in dialog.candidates.iter().enumerate() {
+                        let text = format!(
+                            "{}+{:X}    [{}]",
+                            path.module,
+                            path.module_offset,
+                            path.offsets
+                                .iter()
+                                .map(|offset| format!("{offset:X}"))
+                                .collect::<Vec<_>>()
+                                .join(" → ")
+                        );
+                        if ui.selectable_label(dialog.selected == Some(index), text).clicked() {
+                            dialog.selected = Some(index);
+                        }
+                    }
+                });
+            });
+        if add
+            && let Some(path) = dialog
+                .selected
+                .and_then(|index| dialog.candidates.get(index))
+                .cloned()
+            && let Some(pid) = self.memory_panel.process_pid
+            && let Ok(base) = resolve_module_offset(pid, &path.module, path.module_offset)
+        {
+            let pointer = PointerSpec {
+                base,
+                module: Some((path.module.clone(), path.module_offset)),
+                offsets: path.offsets,
+            };
+            if let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) {
+                self.memory_panel.saved.push(SavedMemoryAddress {
+                    address,
+                    value_type: dialog.value_type,
+                    current: read_scan_value(pid, address, dialog.value_type).ok(),
+                    description: format!("{}+{:X}", path.module, path.module_offset),
+                    pointer: Some(pointer),
+                    frozen: None,
+                    saved_to_library: false,
+                });
+                self.memory_panel.status = "Deep pointer added to Address list".to_owned();
+            }
+        }
+        if clear {
+            self.memory_panel.status = "Pointer map A cleared".to_owned();
+        } else if open {
+            if dialog.rx.is_some() {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            self.memory_panel.deep_pointer_dialog = Some(dialog);
         }
     }
 

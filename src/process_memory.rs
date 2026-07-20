@@ -126,24 +126,23 @@ pub struct ScanCandidate {
     pub current: ScanValue,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PointerPath {
     pub module: String,
     pub module_offset: usize,
     pub offsets: Vec<usize>,
 }
 
-pub fn scan_pointer_paths(
+pub struct PointerMap {
+    pointers: Vec<(usize, usize)>,
+    modules: Vec<(String, usize, usize)>,
+}
+
+pub fn capture_pointer_map(
     pid: u32,
-    target: usize,
     modules: &[(String, usize, usize)],
-    max_offset: usize,
-    max_depth: usize,
-    result_limit: usize,
     progress: Arc<AtomicUsize>,
-) -> io::Result<Vec<PointerPath>> {
-    // ponytail: these caps keep a pathological process from exhausting app memory; a disk-backed
-    // pointer map is the upgrade path for larger scans.
+) -> io::Result<PointerMap> {
     const MAX_POINTERS: usize = 12_000_000;
     let process = ScanProcess::open(pid, false)?;
     let regions = pointer_scan_regions_for(&process);
@@ -183,8 +182,45 @@ pub fn scan_pointer_paths(
             break;
         }
     }
-    Ok(find_pointer_paths(
+    Ok(PointerMap {
         pointers,
+        modules: modules.to_vec(),
+    })
+}
+
+impl PointerMap {
+    pub fn paths_to(
+        &self,
+        target: usize,
+        max_offset: usize,
+        max_depth: usize,
+        result_limit: usize,
+    ) -> Vec<PointerPath> {
+        find_pointer_paths(
+            self.pointers.clone(),
+            target,
+            &self.modules,
+            max_offset,
+            max_depth,
+            result_limit,
+        )
+    }
+}
+
+pub fn scan_pointer_paths(
+    pid: u32,
+    target: usize,
+    modules: &[(String, usize, usize)],
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+    progress: Arc<AtomicUsize>,
+) -> io::Result<Vec<PointerPath>> {
+    // ponytail: these caps keep a pathological process from exhausting app memory; a disk-backed
+    // pointer map is the upgrade path for larger scans.
+    let map = capture_pointer_map(pid, modules, progress)?;
+    Ok(find_pointer_paths(
+        map.pointers,
         target,
         modules,
         max_offset,
