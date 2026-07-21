@@ -455,6 +455,7 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     code_access_dialog: Option<CodeAccessDialog>,
     last_refresh: Instant,
+    last_saved_refresh: Instant,
     #[cfg(windows)]
     last_process_refresh: Instant,
     freeze_worker: MemoryFreezeWorker,
@@ -515,6 +516,7 @@ impl Default for MemoryPanelState {
             #[cfg(windows)]
             code_access_dialog: None,
             last_refresh: Instant::now(),
+            last_saved_refresh: Instant::now(),
             #[cfg(windows)]
             last_process_refresh: Instant::now(),
             freeze_worker: MemoryFreezeWorker::default(),
@@ -4498,15 +4500,23 @@ impl CrosshairApp {
     }
 
     fn refresh_memory_values(&mut self) {
-        if self.memory_panel.last_refresh.elapsed() < Duration::from_millis(250) {
+        if self.memory_panel.last_refresh.elapsed() >= Duration::from_millis(250) {
+            self.memory_panel.last_refresh = Instant::now();
+            if let Some(pid) = self.memory_panel.process_pid {
+                let visible_count = self.memory_panel.candidates.len().min(MAX_VISIBLE_RESULTS);
+                let _ = refresh_scan_candidates(
+                    pid,
+                    &mut self.memory_panel.candidates[..visible_count],
+                );
+            }
+        }
+        if self.memory_panel.last_saved_refresh.elapsed() < Duration::from_millis(50) {
             return;
         }
-        self.memory_panel.last_refresh = Instant::now();
+        self.memory_panel.last_saved_refresh = Instant::now();
         let Some(pid) = self.memory_panel.process_pid else {
             return;
         };
-        let visible_count = self.memory_panel.candidates.len().min(MAX_VISIBLE_RESULTS);
-        let _ = refresh_scan_candidates(pid, &mut self.memory_panel.candidates[..visible_count]);
         for saved in &mut self.memory_panel.saved {
             if let Some(pointer) = saved.pointer.as_ref()
                 && let Ok(address) = resolve_memory_address(pid, pointer.base, Some(pointer))
