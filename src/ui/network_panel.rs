@@ -2,7 +2,6 @@ use std::{
     io::{Read, Write},
     net::{Shutdown, SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
-    process::Command,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -14,6 +13,16 @@ use std::{
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use eframe::egui::{self, Color32, RichText, Sense, Stroke};
 use serde::{Deserialize, Serialize};
+use windows_sys::Win32::{
+    Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
+    Networking::WinInet::{
+        INTERNET_OPTION_REFRESH, INTERNET_OPTION_SETTINGS_CHANGED, InternetSetOptionW,
+    },
+    System::Registry::{
+        HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD, REG_SZ,
+        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    },
+};
 
 use super::CrosshairApp;
 
@@ -205,37 +214,121 @@ impl Drop for SystemProxyGuard {
     }
 }
 
-fn powershell(script: &str) -> Result<String, String> {
-    let output = Command::new("powershell.exe")
-        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
-        .output().map_err(|error| error.to_string())?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
-    }
-}
-
 fn query_system_proxy() -> Result<ProxySnapshot, String> {
-    let output = powershell(
-        "$p=Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; [pscustomobject]@{proxy_enable=if($null -eq $p.ProxyEnable){$null}else{[uint32]$p.ProxyEnable};proxy_server=if($null -eq $p.ProxyServer){$null}else{[string]$p.ProxyServer}}|ConvertTo-Json -Compress",
-    )?;
-    serde_json::from_str(&output).map_err(|error| error.to_string())
+    let key = InternetSettingsKey::open()?;
+    Ok(ProxySnapshot {
+        proxy_enable: key.query_dword("ProxyEnable")?,
+        proxy_server: key.query_string("ProxyServer")?,
+    })
 }
 
 fn set_system_proxy(server: Option<&str>, enabled: bool) -> Result<(), String> {
-    let server_command = match server {
-        Some(server) => format!("Set-ItemProperty -LiteralPath $k -Name ProxyServer -Type String -Value '{server}';"),
-        None => "Remove-ItemProperty -LiteralPath $k -Name ProxyServer -ErrorAction SilentlyContinue;".to_owned(),
-    };
-    powershell(&format!(
-        "$k='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; Set-ItemProperty -LiteralPath $k -Name ProxyEnable -Type DWord -Value {}; {} Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class MNWinInet{{[DllImport(\"wininet.dll\")]public static extern bool InternetSetOption(IntPtr h,int o,IntPtr b,int l);}}';[MNWinInet]::InternetSetOption([IntPtr]::Zero,39,[IntPtr]::Zero,0)|Out-Null;[MNWinInet]::InternetSetOption([IntPtr]::Zero,37,[IntPtr]::Zero,0)|Out-Null",
-        u8::from(enabled), server_command
-    )).map(|_| ())
+    let key = InternetSettingsKey::open()?;
+    key.set_dword("ProxyEnable", u32::from(enabled))?;
+    match server {
+        Some(server) => key.set_string("ProxyServer", server)?,
+        None => key.delete("ProxyServer")?,
+    }
+    notify_proxy_changed()?;
+    let current = query_system_proxy()?;
+    if current.proxy_enable.unwrap_or(0) != u32::from(enabled)
+        || server.is_some_and(|server| current.proxy_server.as_deref() != Some(server))
+    {
+        return Err("Windows did not accept the proxy settings".to_owned());
+    }
+    Ok(())
 }
 
 fn restore_system_proxy(snapshot: &ProxySnapshot) -> Result<(), String> {
     set_system_proxy(snapshot.proxy_server.as_deref(), snapshot.proxy_enable.unwrap_or(0) != 0)
+}
+
+struct InternetSettingsKey(HKEY);
+
+impl InternetSettingsKey {
+    fn open() -> Result<Self, String> {
+        let path = wide("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings");
+        let mut key = std::ptr::null_mut();
+        let result = unsafe {
+            RegOpenKeyExW(HKEY_CURRENT_USER, path.as_ptr(), 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &mut key)
+        };
+        win32_result(result, "open Windows internet settings")?;
+        Ok(Self(key))
+    }
+
+    fn query_dword(&self, name: &str) -> Result<Option<u32>, String> {
+        let name = wide(name);
+        let mut value = 0_u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let result = unsafe {
+            RegQueryValueExW(self.0, name.as_ptr(), std::ptr::null(), std::ptr::null_mut(), (&mut value as *mut u32).cast(), &mut size)
+        };
+        if result == ERROR_FILE_NOT_FOUND { return Ok(None); }
+        win32_result(result, "read Windows proxy state")?;
+        Ok(Some(value))
+    }
+
+    fn query_string(&self, name: &str) -> Result<Option<String>, String> {
+        let name = wide(name);
+        let mut size = 0_u32;
+        let result = unsafe {
+            RegQueryValueExW(self.0, name.as_ptr(), std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), &mut size)
+        };
+        if result == ERROR_FILE_NOT_FOUND { return Ok(None); }
+        win32_result(result, "read Windows proxy server")?;
+        let mut bytes = vec![0_u8; size as usize];
+        let result = unsafe {
+            RegQueryValueExW(self.0, name.as_ptr(), std::ptr::null(), std::ptr::null_mut(), bytes.as_mut_ptr(), &mut size)
+        };
+        win32_result(result, "read Windows proxy server")?;
+        let words = bytes[..size as usize].chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|word| *word != 0).collect::<Vec<_>>();
+        Ok(Some(String::from_utf16_lossy(&words)))
+    }
+
+    fn set_dword(&self, name: &str, value: u32) -> Result<(), String> {
+        let name = wide(name);
+        let bytes = value.to_le_bytes();
+        let result = unsafe { RegSetValueExW(self.0, name.as_ptr(), 0, REG_DWORD, bytes.as_ptr(), bytes.len() as u32) };
+        win32_result(result, "write Windows proxy state")
+    }
+
+    fn set_string(&self, name: &str, value: &str) -> Result<(), String> {
+        let name = wide(name);
+        let words = wide(value);
+        let bytes = unsafe { std::slice::from_raw_parts(words.as_ptr().cast::<u8>(), words.len() * 2) };
+        let result = unsafe { RegSetValueExW(self.0, name.as_ptr(), 0, REG_SZ, bytes.as_ptr(), bytes.len() as u32) };
+        win32_result(result, "write Windows proxy server")
+    }
+
+    fn delete(&self, name: &str) -> Result<(), String> {
+        let name = wide(name);
+        let result = unsafe { RegDeleteValueW(self.0, name.as_ptr()) };
+        if result == ERROR_FILE_NOT_FOUND { Ok(()) } else { win32_result(result, "remove Windows proxy server") }
+    }
+}
+
+impl Drop for InternetSettingsKey {
+    fn drop(&mut self) { unsafe { RegCloseKey(self.0); } }
+}
+
+fn notify_proxy_changed() -> Result<(), String> {
+    unsafe {
+        if InternetSetOptionW(std::ptr::null_mut(), INTERNET_OPTION_SETTINGS_CHANGED, std::ptr::null_mut(), 0) == 0 {
+            return Err(format!("notify Windows proxy change failed: {}", std::io::Error::last_os_error()));
+        }
+        if InternetSetOptionW(std::ptr::null_mut(), INTERNET_OPTION_REFRESH, std::ptr::null_mut(), 0) == 0 {
+            return Err(format!("refresh Windows proxy failed: {}", std::io::Error::last_os_error()));
+        }
+    }
+    Ok(())
+}
+
+fn wide(value: &str) -> Vec<u16> { value.encode_utf16().chain(std::iter::once(0)).collect() }
+
+fn win32_result(code: u32, action: &str) -> Result<(), String> {
+    if code == ERROR_SUCCESS { Ok(()) } else { Err(format!("{action} failed (Windows error {code})")) }
 }
 
 impl Drop for NetworkProxy {
