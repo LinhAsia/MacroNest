@@ -166,8 +166,7 @@ impl NetworkPanelState {
             frida_processes: crate::memory_debugger::debugger::list_processes().unwrap_or_default(),
             frida_last_process_refresh: Instant::now(),
             frida_pid: None,
-            frida_script: "console.log('[MacroNest] Frida loaded in PID ' + Process.id);"
-                .to_owned(),
+            frida_script: crate::frida_injector::DEFAULT_NETWORK_SCRIPT.to_owned(),
             frida_log: String::new(),
             frida_session: None,
         }

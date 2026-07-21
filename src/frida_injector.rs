@@ -2,6 +2,117 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use frida::{DeviceManager, Frida, Message, ScriptHandler, ScriptOption};
 use std::thread::{self, JoinHandle};
 
+pub(crate) const DEFAULT_NETWORK_SCRIPT: &str = r#"
+'use strict';
+
+const MAX_PREVIEW = 16384;
+const hooked = [];
+const requests = new Map();
+
+function preview(pointer, length) {
+    if (pointer.isNull() || length <= 0) return '';
+    const size = Math.min(Number(length), MAX_PREVIEW);
+    try {
+        const bytes = new Uint8Array(pointer.readByteArray(size));
+        let text = '';
+        for (let i = 0; i < bytes.length; i++) {
+            const byte = bytes[i];
+            text += byte === 9 || byte === 10 || byte === 13 || (byte >= 32 && byte < 127)
+                ? String.fromCharCode(byte) : '.';
+        }
+        return text;
+    } catch (_) { return ''; }
+}
+
+function wide(pointer) {
+    try { return pointer.isNull() ? '' : pointer.readUtf16String(); } catch (_) { return ''; }
+}
+
+function emit(kind, details, data) {
+    console.log('[NET] ' + kind + (details ? ' ' + details : '') +
+        (data ? '\n' + data : ''));
+}
+
+function exportOf(moduleName, name) {
+    try {
+        const module = Process.findModuleByName(moduleName);
+        return module === null ? null : module.findExportByName(name);
+    } catch (_) { return null; }
+}
+
+function attach(moduleName, name, callbacks) {
+    const address = exportOf(moduleName, name);
+    if (address === null) return false;
+    Interceptor.attach(address, callbacks);
+    hooked.push(moduleName + '!' + name);
+    return true;
+}
+
+// WinHTTP: used by many native Windows applications.
+attach('winhttp.dll', 'WinHttpConnect', {
+    onEnter(args) { this.host = wide(args[1]); this.port = args[2].toUInt32(); },
+    onLeave(retval) { if (!retval.isNull()) requests.set(retval.toString(), { host: this.host + ':' + this.port }); }
+});
+attach('winhttp.dll', 'WinHttpOpenRequest', {
+    onEnter(args) {
+        this.parent = args[0].toString(); this.method = wide(args[1]) || 'GET'; this.path = wide(args[2]) || '/';
+    },
+    onLeave(retval) {
+        const parent = requests.get(this.parent) || {};
+        if (!retval.isNull()) requests.set(retval.toString(), { host: parent.host || '', method: this.method, path: this.path });
+        emit('WinHTTP', this.method + ' https://' + (parent.host || '?') + this.path, '');
+    }
+});
+attach('winhttp.dll', 'WinHttpSendRequest', {
+    onEnter(args) {
+        const request = requests.get(args[0].toString()) || {};
+        const headers = wide(args[1]);
+        const body = preview(args[3], args[4].toUInt32());
+        emit('WinHTTP SEND', (request.method || '') + ' ' + (request.host || '') + (request.path || ''), headers + (body ? '\n\n' + body : ''));
+    }
+});
+
+// WinINet: used by older/native desktop applications.
+attach('wininet.dll', 'HttpOpenRequestW', {
+    onEnter(args) { this.method = wide(args[1]) || 'GET'; this.path = wide(args[2]) || '/'; },
+    onLeave(retval) {
+        if (!retval.isNull()) requests.set(retval.toString(), { method: this.method, path: this.path });
+        emit('WinINet', this.method + ' ' + this.path, '');
+    }
+});
+attach('wininet.dll', 'HttpSendRequestW', {
+    onEnter(args) {
+        const request = requests.get(args[0].toString()) || {};
+        const headers = wide(args[1]);
+        const body = preview(args[3], args[4].toUInt32());
+        emit('WinINet SEND', (request.method || '') + ' ' + (request.path || ''), headers + (body ? '\n\n' + body : ''));
+    }
+});
+
+// OpenSSL/BoringSSL when the process exports its SSL API. Data here is plaintext.
+for (const module of Process.enumerateModules()) {
+    for (const name of ['SSL_write', 'SSL_write_ex']) {
+        const address = module.findExportByName(name);
+        if (address === null) continue;
+        Interceptor.attach(address, {
+            onEnter(args) { emit(name, module.name, preview(args[1], args[2].toUInt32())); }
+        });
+        hooked.push(module.name + '!' + name);
+    }
+    const read = module.findExportByName('SSL_read');
+    if (read !== null) {
+        Interceptor.attach(read, {
+            onEnter(args) { this.buffer = args[1]; },
+            onLeave(retval) { const count = retval.toInt32(); if (count > 0) emit('SSL_read', module.name, preview(this.buffer, count)); }
+        });
+        hooked.push(module.name + '!SSL_read');
+    }
+}
+
+emit('READY', 'PID ' + Process.id, hooked.length ? hooked.join('\n') :
+    'No supported exported HTTP/TLS API found. Electron/Chromium often links BoringSSL statically, so a generic export hook cannot read its plaintext.');
+"#;
+
 pub(crate) enum Event {
     Status(String),
     Log(String),
