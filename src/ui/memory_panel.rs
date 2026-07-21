@@ -456,6 +456,7 @@ pub(crate) struct MemoryPanelState {
     code_access_dialog: Option<CodeAccessDialog>,
     last_refresh: Instant,
     last_saved_refresh: Instant,
+    visible_scan_ranges: [Option<(usize, usize, Instant)>; 2],
     #[cfg(windows)]
     last_process_refresh: Instant,
     freeze_worker: MemoryFreezeWorker,
@@ -517,6 +518,7 @@ impl Default for MemoryPanelState {
             code_access_dialog: None,
             last_refresh: Instant::now(),
             last_saved_refresh: Instant::now(),
+            visible_scan_ranges: [None, None],
             #[cfg(windows)]
             last_process_refresh: Instant::now(),
             freeze_worker: MemoryFreezeWorker::default(),
@@ -1490,6 +1492,8 @@ impl CrosshairApp {
                 .auto_shrink([false, false])
                 .max_height(ui.available_height())
                 .show_rows(ui, 22.0, visible_count, |ui, rows| {
+                    self.memory_panel.visible_scan_ranges[usize::from(pinned)] =
+                        Some((rows.start, rows.end, Instant::now()));
                     ui.spacing_mut().item_spacing.y = 0.0;
                     for index in rows {
                         let (address_value, current_value, previous_value) = if let Some(candidate) = self.memory_panel.text_candidates.get(index) {
@@ -4503,11 +4507,20 @@ impl CrosshairApp {
         if self.memory_panel.last_refresh.elapsed() >= Duration::from_millis(50) {
             self.memory_panel.last_refresh = Instant::now();
             if let Some(pid) = self.memory_panel.process_pid {
-                let visible_count = self.memory_panel.candidates.len().min(MAX_VISIBLE_RESULTS);
-                let _ = refresh_scan_candidates(
-                    pid,
-                    &mut self.memory_panel.candidates[..visible_count],
-                );
+                for (start, end, rendered_at) in
+                    self.memory_panel.visible_scan_ranges.into_iter().flatten()
+                {
+                    if rendered_at.elapsed() > Duration::from_millis(100) {
+                        continue;
+                    }
+                    let end = end.min(self.memory_panel.candidates.len());
+                    if start < end {
+                        let _ = refresh_scan_candidates(
+                            pid,
+                            &mut self.memory_panel.candidates[start..end],
+                        );
+                    }
+                }
             }
         }
         if self.memory_panel.last_saved_refresh.elapsed() < Duration::from_millis(50) {
