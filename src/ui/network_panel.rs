@@ -1213,7 +1213,8 @@ impl CrosshairApp {
             );
         });
         ui.label(RichText::new("1. Install CA  2. Enable Decrypt HTTPS  3. Start  4. Use the target app. MacroNest restores the proxy and, by default, removes its CA on exit.").small().weak());
-        ui.collapsing("Advanced: Frida injection (only for certificate pinning)", |ui| {
+        ui.group(|ui| {
+            ui.label(RichText::new("Frida injection (certificate pinning only)").strong());
             ui.label(RichText::new("Only use this when Decrypt HTTPS still shows CONNECT. Choose the target process, then inject.").small().weak());
             let selected = self
                 .network_panel
@@ -1227,7 +1228,6 @@ impl CrosshairApp {
                 .map(|(pid, name)| format!("{name} — PID {pid}"))
                 .unwrap_or_else(|| "Select process".to_owned());
             let process_picker = egui::ComboBox::from_id_salt("network-frida-process")
-                .width(ui.available_width())
                 .height(480.0)
                 .selected_text(Self::truncate_window_title(&selected, 52))
                 .show_ui(ui, |ui| {
