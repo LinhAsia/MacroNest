@@ -1238,8 +1238,21 @@ impl CrosshairApp {
                 .selected_text(Self::truncate_window_title(&selected, 52))
                 .show_ui(ui, |ui| {
                     ui.set_min_height(480.0);
+                    ui.label(RichText::new("Window processes (grouped)").strong());
+                    for window in self.open_window_infos.clone() {
+                        let Some(pid) = crate::window_list::process_id_for_window(Some(&window.selector)) else { continue };
+                        if pid == std::process::id() { continue; }
+                        if ui.selectable_label(
+                            self.network_panel.frida_pid == Some(pid),
+                            Self::truncate_window_title(&Self::simplify_window_title(&window.title), 70),
+                        ).clicked() {
+                            self.network_panel.frida_pid = Some(pid);
+                        }
+                    }
+                    ui.separator();
                     ui.label(RichText::new("All processes (individual PID)").strong());
                     for (pid, name) in &self.network_panel.frida_processes {
+                        if *pid == std::process::id() { continue; }
                         ui.selectable_value(
                             &mut self.network_panel.frida_pid,
                             Some(*pid),
@@ -1248,6 +1261,7 @@ impl CrosshairApp {
                     }
                 });
             if process_picker.response.clicked() { self.network_panel.refresh_frida_processes(); }
+            if process_picker.response.clicked() { self.ensure_open_windows_ready(true); }
             ui.horizontal(|ui| {
                 if self.network_panel.frida_session.is_some() {
                     if ui.button("Detach").clicked() {

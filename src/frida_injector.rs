@@ -44,6 +44,7 @@ impl Session {
 }
 
 fn run(pid: u32, source: &str, events: &Sender<Event>, stop: &Receiver<()>) -> Result<(), String> {
+    verify_attach_access(pid)?;
     let frida = unsafe { Frida::obtain() };
     let manager = DeviceManager::obtain(&frida);
     let device = manager
@@ -51,7 +52,7 @@ fn run(pid: u32, source: &str, events: &Sender<Event>, stop: &Receiver<()>) -> R
         .map_err(|error| format!("local device: {error}"))?;
     let session = device
         .attach(pid)
-        .map_err(|error| format!("attach PID {pid}: {error}"))?;
+        .map_err(|error| format!("attach PID {pid}: {error}. The process may block injection; try its grouped window entry or run MacroNest as administrator"))?;
     let mut script = session
         .create_script(source, &mut ScriptOption::default())
         .map_err(|error| format!("create script: {error}"))?;
@@ -67,6 +68,38 @@ fn run(pid: u32, source: &str, events: &Sender<Event>, stop: &Receiver<()>) -> R
     let _ = session.detach();
     Ok(())
 }
+
+#[cfg(windows)]
+fn verify_attach_access(pid: u32) -> Result<(), String> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{
+            OpenProcess, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION,
+            PROCESS_VM_READ, PROCESS_VM_WRITE,
+        },
+    };
+    if pid == std::process::id() {
+        return Err("cannot inject Frida into MacroNest itself".to_owned());
+    }
+    let handle = unsafe {
+        OpenProcess(
+            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE,
+            0,
+            pid,
+        )
+    };
+    if handle.is_null() {
+        return Err(format!(
+            "Windows denied injection access to PID {pid}: {}. Run MacroNest at the same or higher privilege level",
+            std::io::Error::last_os_error()
+        ));
+    }
+    unsafe { CloseHandle(handle) };
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn verify_attach_access(_pid: u32) -> Result<(), String> { Ok(()) }
 
 impl Drop for Session {
     fn drop(&mut self) {
