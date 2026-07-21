@@ -46,6 +46,7 @@ mod layout;
 mod macro_panel;
 mod macro_panel_ocr;
 mod memory_panel;
+mod network_panel;
 mod mouse_panel;
 mod navigation;
 mod ocr_panel;
@@ -845,6 +846,7 @@ pub struct CrosshairApp {
     draw_geometry_step_preview_sent: Option<crate::model::GeometrySpec>,
     macro_step_inline_feedback: HashMap<(u32, usize), MacroStepInlineFeedback>,
     memory_panel: memory_panel::MemoryPanelState,
+    network_panel: network_panel::NetworkPanelState,
 
     macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
@@ -902,6 +904,7 @@ impl CrosshairApp {
             &state.memory_scan_hotkeys,
             &state.memory_pointer_list,
         );
+        let network_panel = network_panel::NetworkPanelState::default();
         let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
 
         let opencv_installed = paths.opencv_dll.exists();
@@ -1168,6 +1171,7 @@ impl CrosshairApp {
             draw_geometry_step_preview_sent: None,
             macro_step_inline_feedback: HashMap::new(),
             memory_panel,
+            network_panel,
             macro_referenced_variables_cache: None,
 
             variable_inspector_open: false,
@@ -15124,6 +15128,7 @@ impl eframe::App for CrosshairApp {
                         AppPanel::Geometry,
                         AppPanel::Sound,
                         AppPanel::Memory,
+                        AppPanel::Network,
                     ];
                     for panel in panels {
                         let selected = self.state.active_panel == panel;
@@ -15234,11 +15239,14 @@ impl eframe::App for CrosshairApp {
                     || active_panel == AppPanel::Modes
                     || active_panel == AppPanel::Mouse
                     || active_panel == AppPanel::Memory
+                    || active_panel == AppPanel::Network
                 {
                     if active_panel == AppPanel::Mouse {
                         self.render_mouse_panel(ui);
                     } else if active_panel == AppPanel::Memory {
                         self.render_memory_panel(ui);
+                    } else if active_panel == AppPanel::Network {
+                        self.render_network_panel(ui);
                     } else {
                         self.render_macro_panel(ui);
                     }
@@ -15267,6 +15275,7 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Timer => self.render_timer_panel(ui),
                                 AppPanel::Media => self.render_media_panel(ui),
                                 AppPanel::Memory => unreachable!(),
+                                AppPanel::Network => unreachable!(),
                             };
                             if self.capture_target.is_some() {
                                 ctx.request_repaint_after(Duration::from_millis(16));

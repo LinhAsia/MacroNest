@@ -137,6 +137,7 @@ pub enum AppPanel {
     Geometry,
     Timer,
     Memory,
+    Network,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]

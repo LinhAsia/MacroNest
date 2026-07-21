@@ -48,6 +48,7 @@ impl CrosshairApp {
             AppPanel::Geometry => "Geometry",
             AppPanel::Timer => "Timer",
             AppPanel::Memory => "Memory",
+            AppPanel::Network => "Network",
         };
         if panel == AppPanel::Ocr {
             Self::tr_lang(self.state.ui_language, "OCR", "OCR")
