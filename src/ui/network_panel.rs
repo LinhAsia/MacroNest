@@ -1224,17 +1224,19 @@ impl CrosshairApp {
                         .iter()
                         .find(|item| item.0 == pid)
                 })
-                .map(|(pid, name)| format!("{name} ({pid})"))
+                .map(|(pid, name)| format!("{name} — PID {pid}"))
                 .unwrap_or_else(|| "Select process".to_owned());
             let process_picker = egui::ComboBox::from_id_salt("network-frida-process")
-                .width(ui.available_width().min(640.0))
-                .selected_text(selected)
+                .width(ui.available_width())
+                .height(480.0)
+                .selected_text(Self::truncate_window_title(&selected, 52))
                 .show_ui(ui, |ui| {
+                    ui.label(RichText::new("All processes (individual PID)").strong());
                     for (pid, name) in &self.network_panel.frida_processes {
                         ui.selectable_value(
                             &mut self.network_panel.frida_pid,
                             Some(*pid),
-                            format!("{name} ({pid})"),
+                            format!("{name} — PID {pid}"),
                         );
                     }
                 });
