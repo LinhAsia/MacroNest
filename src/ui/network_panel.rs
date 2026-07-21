@@ -120,10 +120,11 @@ pub(crate) struct NetworkPanelState {
     proxy: Option<NetworkProxy>,
     recovery_file: PathBuf,
     ca_dir: PathBuf,
+    ca_installed: bool,
+    remove_ca_on_exit: bool,
     decrypt_https: bool,
     frida_processes: Vec<(u32, String)>,
     frida_pid: Option<u32>,
-    frida_filter: String,
     frida_script: String,
     frida_log: String,
     frida_session: Option<crate::frida_injector::Session>,
@@ -158,10 +159,11 @@ impl NetworkPanelState {
             proxy: None,
             recovery_file,
             ca_dir,
+            ca_installed: is_ca_installed(),
+            remove_ca_on_exit: true,
             decrypt_https: false,
             frida_processes: Vec::new(),
             frida_pid: None,
-            frida_filter: String::new(),
             frida_script: "console.log('[MacroNest] Frida loaded in PID ' + Process.id);"
                 .to_owned(),
             frida_log: String::new(),
@@ -250,19 +252,29 @@ impl NetworkPanelState {
         {
             let _ = set_system_proxy(None, false);
         }
+        if self.remove_ca_on_exit && self.ca_installed {
+            let _ = remove_ca();
+            self.ca_installed = false;
+        }
     }
 
     fn install_ca(&mut self) {
         self.status = match install_ca(&self.ca_dir) {
-            Ok(()) => "MacroNest CA installed for the current Windows user".to_owned(),
+            Ok(()) => {
+                self.ca_installed = true;
+                "MacroNest CA installed for the current Windows user".to_owned()
+            }
             Err(error) => format!("Unable to install MacroNest CA: {error}"),
         };
     }
 
     fn remove_ca(&mut self) {
         self.decrypt_https = false;
-        self.status = match run_certutil(["-user", "-delstore", "Root", "MacroNest Network CA"]) {
-            Ok(()) => "MacroNest CA removed".to_owned(),
+        self.status = match remove_ca() {
+            Ok(()) => {
+                self.ca_installed = false;
+                "MacroNest CA removed".to_owned()
+            }
             Err(error) => format!("Unable to remove MacroNest CA: {error}"),
         };
     }
@@ -698,6 +710,14 @@ fn run_certutil<const N: usize>(args: [&str; N]) -> Result<(), String> {
             message
         })
     }
+}
+
+fn is_ca_installed() -> bool {
+    run_certutil(["-user", "-store", "Root", "MacroNest Network CA"]).is_ok()
+}
+
+fn remove_ca() -> Result<(), String> {
+    run_certutil(["-user", "-delstore", "Root", "MacroNest Network CA"])
 }
 
 impl Drop for NetworkProxy {
@@ -1174,16 +1194,17 @@ impl CrosshairApp {
                 ui.ctx().copy_text(self.network_panel.bind_address.clone());
             }
             ui.separator();
-            if ui.button("Install CA").clicked() {
+            if ui.add_enabled(!self.network_panel.ca_installed, egui::Button::new("Install CA")).clicked() {
                 self.network_panel.install_ca();
             }
-            if ui.button("Remove CA").clicked() {
+            if ui.add_enabled(self.network_panel.ca_installed, egui::Button::new("Remove CA")).clicked() {
                 self.network_panel.remove_ca();
             }
             ui.add_enabled(
-                !running,
+                !running && self.network_panel.ca_installed,
                 egui::Checkbox::new(&mut self.network_panel.decrypt_https, "Decrypt HTTPS"),
             );
+            ui.checkbox(&mut self.network_panel.remove_ca_on_exit, "Remove CA on exit");
             ui.separator();
             ui.label("Filter");
             ui.add(
@@ -1191,19 +1212,9 @@ impl CrosshairApp {
                     .desired_width(f32::INFINITY),
             );
         });
-        ui.label(RichText::new("Set the target app's HTTP proxy to this address. HTTPS is recorded as an encrypted CONNECT tunnel.").small().weak());
-        ui.collapsing("Frida injection", |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Process filter");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.network_panel.frida_filter)
-                        .desired_width(180.0),
-                );
-                if ui.button("Refresh").clicked() {
-                    self.network_panel.refresh_frida_processes();
-                }
-            });
-            let filter = self.network_panel.frida_filter.to_ascii_lowercase();
+        ui.label(RichText::new("1. Install CA  2. Enable Decrypt HTTPS  3. Start  4. Use the target app. MacroNest restores the proxy and, by default, removes its CA on exit.").small().weak());
+        ui.collapsing("Advanced: Frida injection (only for certificate pinning)", |ui| {
+            ui.label(RichText::new("Only use this when Decrypt HTTPS still shows CONNECT. Choose the target process, then inject.").small().weak());
             let selected = self
                 .network_panel
                 .frida_pid
@@ -1215,29 +1226,19 @@ impl CrosshairApp {
                 })
                 .map(|(pid, name)| format!("{name} ({pid})"))
                 .unwrap_or_else(|| "Select process".to_owned());
-            egui::ComboBox::from_id_salt("network-frida-process")
+            let process_picker = egui::ComboBox::from_id_salt("network-frida-process")
+                .width(ui.available_width().min(640.0))
                 .selected_text(selected)
                 .show_ui(ui, |ui| {
                     for (pid, name) in &self.network_panel.frida_processes {
-                        if filter.is_empty()
-                            || name.to_ascii_lowercase().contains(&filter)
-                            || pid.to_string().contains(&filter)
-                        {
-                            ui.selectable_value(
-                                &mut self.network_panel.frida_pid,
-                                Some(*pid),
-                                format!("{name} ({pid})"),
-                            );
-                        }
+                        ui.selectable_value(
+                            &mut self.network_panel.frida_pid,
+                            Some(*pid),
+                            format!("{name} ({pid})"),
+                        );
                     }
                 });
-            ui.label("Frida JavaScript loaded inside the selected process");
-            ui.add(
-                egui::TextEdit::multiline(&mut self.network_panel.frida_script)
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(7),
-            );
+            if process_picker.response.clicked() { self.network_panel.refresh_frida_processes(); }
             ui.horizontal(|ui| {
                 if self.network_panel.frida_session.is_some() {
                     if ui.button("Detach").clicked() {
@@ -1246,7 +1247,7 @@ impl CrosshairApp {
                 } else if ui
                     .add_enabled(
                         self.network_panel.frida_pid.is_some(),
-                        egui::Button::new("Attach + load script"),
+                        egui::Button::new("Inject Frida"),
                     )
                     .clicked()
                 {
@@ -1259,13 +1260,18 @@ impl CrosshairApp {
                             self.network_panel.frida_script.clone(),
                         ));
                 }
-                if ui.button("Clear Frida log").clicked() {
-                    self.network_panel.frida_log.clear();
-                }
             });
-            if !self.network_panel.frida_log.is_empty() {
-                readonly_text(ui, self.network_panel.frida_log.clone());
-            }
+            ui.collapsing("Advanced options", |ui| {
+                ui.label("Custom Frida JavaScript");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.network_panel.frida_script)
+                        .code_editor()
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(7),
+                );
+                if ui.button("Clear log").clicked() { self.network_panel.frida_log.clear(); }
+                if !self.network_panel.frida_log.is_empty() { readonly_text(ui, self.network_panel.frida_log.clone()); }
+            });
         });
         ui.separator();
 
