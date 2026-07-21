@@ -192,13 +192,27 @@ impl NetworkProxy {
 
     fn self_check(&self, address: &str) -> Result<(), String> {
         let proxy = reqwest::Proxy::all(format!("http://{address}")).map_err(|error| error.to_string())?;
-        let response = reqwest::blocking::Client::builder()
+        let result = reqwest::blocking::Client::builder()
             .proxy(proxy)
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(8))
             .build().map_err(|error| error.to_string())?
             .get("https://www.google.com/generate_204")
-            .send().map_err(|error| format!("HTTPS self-check failed: {error}"))?;
+            .send();
+        let response = match result {
+            Ok(response) => response,
+            Err(error) => {
+                let details = self.events.try_iter().filter_map(|event| match event {
+                    NetworkEvent::Error(error) => Some(error),
+                    NetworkEvent::Entry(_) => None,
+                }).collect::<Vec<_>>().join("; ");
+                return Err(if details.is_empty() {
+                    format!("HTTPS self-check failed: {}", error_chain(&error))
+                } else {
+                    format!("HTTPS self-check failed: {}; proxy: {details}", error_chain(&error))
+                });
+            }
+        };
         if response.status().is_success() {
             Ok(())
         } else {
@@ -405,10 +419,14 @@ fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEvent>) -> std:
             notes: String::new(),
             secure_tunnel: true,
         })).ok();
-        let mut server = TcpStream::connect(&host)?;
+        let mut server = TcpStream::connect(&host).map_err(|error| {
+            std::io::Error::new(error.kind(), format!("connect to {host} failed: {error}"))
+        })?;
         client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
         server.write_all(&header[header_end..])?;
-        tunnel(client, server)
+        tunnel(client, server).map_err(|error| {
+            std::io::Error::new(error.kind(), format!("TLS tunnel for {host} failed: {error}"))
+        })
     } else {
         let (host, origin_target) = http_destination(&target, host_header);
         let body = header[header_end..].to_vec();
@@ -724,4 +742,14 @@ fn hex_dump(bytes: &[u8]) -> String {
     bytes.chunks(16).enumerate().map(|(row, chunk)| {
         format!("{:08X}  {}", row * 16, chunk.iter().map(|byte| format!("{byte:02X}")).collect::<Vec<_>>().join(" "))
     }).collect::<Vec<_>>().join("\n")
+}
+
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut messages = vec![error.to_string()];
+    let mut source = error.source();
+    while let Some(error) = source {
+        messages.push(error.to_string());
+        source = error.source();
+    }
+    messages.join(": ")
 }
