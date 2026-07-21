@@ -4594,12 +4594,21 @@ impl CrosshairApp {
         };
         match write_scan_value(pid, saved.address, value) {
             Ok(()) => {
-                self.memory_panel.saved[index].current = Some(value);
+                let observed = read_scan_value(pid, saved.address, saved.value_type).ok();
+                self.memory_panel.saved[index].current = observed.or(Some(value));
                 if self.memory_panel.saved[index].frozen.is_some() {
                     self.memory_panel.saved[index].frozen = Some(value);
                 }
                 self.memory_panel.edit_value_index = None;
-                self.memory_panel.status = "Value written".to_owned();
+                self.memory_panel.status = match observed {
+                    Some(observed) if observed == value => "Value written and verified".to_owned(),
+                    Some(observed) => format!(
+                        "Write was immediately overwritten: requested {}, read back {}",
+                        format_scan_value(value, self.memory_panel.hex),
+                        format_scan_value(observed, self.memory_panel.hex),
+                    ),
+                    None => "Value written, but verification read failed".to_owned(),
+                };
             }
             Err(error) => self.memory_panel.status = format!("Write failed: {error}"),
         }
