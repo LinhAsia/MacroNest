@@ -377,6 +377,7 @@ fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEntry>) -> std:
         }).ok();
         let mut server = TcpStream::connect(&host)?;
         client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
+        server.write_all(&header[header_end..])?;
         tunnel(client, server)
     } else {
         let (host, origin_target) = http_destination(&target, host_header);
