@@ -357,8 +357,8 @@ where
         )));
         return;
     }
-    notify(WatchEvent::Started);
     let mut first_breakpoint = true;
+    let mut debugger_started = false;
     let mut threads = HashMap::new();
     let mut access_hits = 0usize;
     let mut capture_limit_reached = false;
@@ -376,23 +376,20 @@ where
         match event.dwDebugEventCode {
             CREATE_PROCESS_DEBUG_EVENT => unsafe {
                 let info = event.u.CreateProcessInfo;
-                if let Err(error) = arm_thread(info.hThread, &kind, architecture) {
-                    if error.raw_os_error() != Some(87) {
-                        notify(WatchEvent::Error(error.to_string()));
-                        stop.store(true, Ordering::Release);
-                    }
-                }
                 close_if_valid(info.hFile);
                 close_if_valid(info.hProcess);
                 threads.insert(event.dwThreadId, info.hThread);
             },
             CREATE_THREAD_DEBUG_EVENT => unsafe {
                 let thread = event.u.CreateThread.hThread;
-                if let Err(error) = arm_thread(thread, &kind, architecture) {
-                    if error.raw_os_error() != Some(87) {
-                        notify(WatchEvent::Error(error.to_string()));
-                        stop.store(true, Ordering::Release);
-                    }
+                if debugger_started
+                    && let Err(error) = arm_thread(thread, &kind, architecture)
+                {
+                    notify(WatchEvent::Error(format!(
+                        "unable to arm new game thread {}: {error}",
+                        event.dwThreadId
+                    )));
+                    stop.store(true, Ordering::Release);
                 }
                 threads.insert(event.dwThreadId, thread);
             },
@@ -469,18 +466,27 @@ where
                     && first_breakpoint
                 {
                     first_breakpoint = false;
-                    // The attach breakpoint can replace debug-register state installed during the
-                    // synthetic CREATE_THREAD events. Re-arm every existing game thread after it.
+                    // Windows sends synthetic thread events before the attach breakpoint. Arm only
+                    // after that breakpoint so WOW64 context calls operate on initialized threads.
+                    let mut armed = 0usize;
+                    let mut last_error = None;
                     for &thread in threads.values() {
-                        if let Err(error) = arm_thread(thread, &kind, architecture) {
-                            if error.raw_os_error() != Some(87) {
-                                notify(WatchEvent::Error(format!(
-                                    "unable to arm an existing game thread: {error}"
-                                )));
-                                stop.store(true, Ordering::Release);
-                                break;
-                            }
+                        match arm_thread(thread, &kind, architecture) {
+                            Ok(()) => armed += 1,
+                            Err(error) => last_error = Some(error),
                         }
+                    }
+                    if armed == 0 {
+                        notify(WatchEvent::Error(format!(
+                            "unable to arm a hardware breakpoint on any game thread{}",
+                            last_error
+                                .map(|error| format!(": {error}"))
+                                .unwrap_or_default()
+                        )));
+                        stop.store(true, Ordering::Release);
+                    } else {
+                        debugger_started = true;
+                        notify(WatchEvent::Started);
                     }
                 } else {
                     status = DBG_EXCEPTION_NOT_HANDLED;
