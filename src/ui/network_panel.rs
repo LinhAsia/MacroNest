@@ -109,6 +109,10 @@ impl NetworkPanelState {
         }
     }
 
+    pub(crate) fn active_proxy_url(&self) -> Option<String> {
+        self.proxy.as_ref().map(|_| format!("http://{}", self.bind_address))
+    }
+
     fn start(&mut self) {
         match NetworkProxy::start(&self.bind_address, self.recovery_file.clone()) {
             Ok(proxy) => {
@@ -343,6 +347,7 @@ impl Drop for NetworkProxy {
 fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEntry>) -> std::io::Result<()> {
     client.set_read_timeout(Some(Duration::from_secs(10)))?;
     let header = read_header(&mut client)?;
+    client.set_read_timeout(None)?;
     let header_end = header.windows(4).position(|window| window == b"\r\n\r\n")
         .map(|position| position + 4).unwrap_or(header.len());
     let text = String::from_utf8_lossy(&header[..header_end]).into_owned();

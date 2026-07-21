@@ -1976,21 +1976,26 @@ impl CrosshairApp {
         let ui_tx = self.ui_tx.clone();
         let ctx = ctx.clone();
         let current_version = self.app_version_label().to_owned();
+        let network_proxy = self.network_panel.active_proxy_url();
         std::thread::spawn(move || {
-            let client = reqwest::blocking::Client::builder()
+            let mut client = reqwest::blocking::Client::builder()
                 .user_agent("MacroNest")
-                .build()
-                .map_err(|e| e.to_string());
+                .connect_timeout(Duration::from_secs(10))
+                .timeout(Duration::from_secs(20));
+            let client = match network_proxy {
+                Some(proxy) => reqwest::Proxy::all(proxy)
+                    .map(|proxy| client.proxy(proxy))
+                    .map_err(|error| error.to_string()),
+                None => Ok(client),
+            }
+            .and_then(|client| client.build().map_err(|error| error.to_string()));
             let result = client.and_then(|c| {
                 let cache_buster = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map(|duration| duration.as_secs())
                     .unwrap_or(0);
                 let manifest_url = format!("{UPDATE_MANIFEST_URL}?ts={cache_buster}");
-                let resp = c
-                    .get(&manifest_url)
-                    .send()
-                    .map_err(|e| e.to_string())?;
+                let resp = c.get(&manifest_url).send().map_err(|e| e.to_string())?;
 
                 if resp.status() == reqwest::StatusCode::NOT_FOUND {
                     return Err("No update manifest found.".to_owned());
