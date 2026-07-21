@@ -172,6 +172,14 @@ impl NetworkProxy {
                     Ok((stream, _)) => {
                         let tx = tx.clone();
                         thread::spawn(move || {
+                            // Accepted sockets can inherit the listener's non-blocking mode on
+                            // Windows; the connection handler intentionally uses blocking I/O.
+                            if let Err(error) = stream.set_nonblocking(false) {
+                                let _ = tx.send(NetworkEvent::Error(format!(
+                                    "configure accepted connection failed: {error}"
+                                )));
+                                return;
+                            }
                             if let Err(error) = proxy_connection(stream, tx.clone()) {
                                 let _ = tx.send(NetworkEvent::Error(error.to_string()));
                             }
