@@ -210,6 +210,9 @@ impl NetworkPanelState {
     }
 
     fn start(&mut self) {
+        if self.ca_installed {
+            self.decrypt_https = true;
+        }
         let mitm = self
             .decrypt_https
             .then(|| MitmConfig::load(&self.ca_dir))
@@ -255,7 +258,7 @@ impl NetworkPanelState {
             let _ = set_system_proxy(None, false);
         }
         if self.remove_ca_on_exit && self.ca_installed {
-            let _ = remove_ca();
+            spawn_ca_removal();
             self.ca_installed = false;
         }
     }
@@ -721,6 +724,14 @@ fn is_ca_installed() -> bool {
 
 fn remove_ca() -> Result<(), String> {
     run_certutil(["-user", "-delstore", "Root", "MacroNest Network CA"])
+}
+
+fn spawn_ca_removal() {
+    let mut command = Command::new("certutil.exe");
+    command.args(["-user", "-delstore", "Root", "MacroNest Network CA"]);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let _ = command.spawn();
 }
 
 impl Drop for NetworkProxy {
@@ -1221,7 +1232,7 @@ impl CrosshairApp {
         ui.label(RichText::new("1. Install CA  2. Enable Decrypt HTTPS  3. Start  4. Use the target app. MacroNest restores the proxy and, by default, removes its CA on exit.").small().weak());
         ui.group(|ui| {
             ui.label(RichText::new("Frida injection (certificate pinning only)").strong());
-            ui.label(RichText::new("Only use this when Decrypt HTTPS still shows CONNECT. Choose the target process, then inject.").small().weak());
+            ui.label(RichText::new("Attaching Frida alone does not bypass TLS. Use this only with a hook script for the target app's TLS stack.").small().weak());
             let selected = self
                 .network_panel
                 .frida_pid
@@ -1270,7 +1281,7 @@ impl CrosshairApp {
                 } else if ui
                     .add_enabled(
                         self.network_panel.frida_pid.is_some(),
-                        egui::Button::new("Inject Frida"),
+                        egui::Button::new("Attach Frida agent"),
                     )
                     .clicked()
                 {

@@ -104,8 +104,7 @@ fn verify_attach_access(_pid: u32) -> Result<(), String> { Ok(()) }
 impl Drop for Session {
     fn drop(&mut self) {
         let _ = self.stop.send(());
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        // ponytail: never join an injector from the UI thread; a target can stall Frida indefinitely.
+        self.worker.take();
     }
 }
