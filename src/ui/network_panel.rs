@@ -192,32 +192,31 @@ impl NetworkProxy {
 
     fn self_check(&self, address: &str) -> Result<(), String> {
         let proxy = reqwest::Proxy::all(format!("http://{address}")).map_err(|error| error.to_string())?;
-        let result = reqwest::blocking::Client::builder()
+        let client = reqwest::blocking::Client::builder()
             .proxy(proxy)
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(8))
-            .build().map_err(|error| error.to_string())?
-            .get("https://www.google.com/generate_204")
-            .send();
-        let response = match result {
-            Ok(response) => response,
-            Err(error) => {
-                let details = self.events.try_iter().filter_map(|event| match event {
-                    NetworkEvent::Error(error) => Some(error),
-                    NetworkEvent::Entry(_) => None,
-                }).collect::<Vec<_>>().join("; ");
-                return Err(if details.is_empty() {
-                    format!("HTTPS self-check failed: {}", error_chain(&error))
-                } else {
-                    format!("HTTPS self-check failed: {}; proxy: {details}", error_chain(&error))
-                });
+            .build().map_err(|error| error.to_string())?;
+        let mut failures = Vec::new();
+        for url in ["https://www.google.com/generate_204", "https://github.com/"] {
+            match client.get(url).send() {
+                // Any HTTP response proves that CONNECT and the TLS tunnel both work.
+                Ok(_) => return Ok(()),
+                Err(error) => failures.push(format!("{url}: {}", error_chain(&error))),
             }
-        };
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            Err(format!("HTTPS self-check returned {}", response.status()))
         }
+
+        // The connection worker reports on another thread and may finish just after reqwest.
+        let mut details = Vec::new();
+        if let Ok(event) = self.events.recv_timeout(Duration::from_millis(150)) {
+            if let NetworkEvent::Error(error) = event { details.push(error); }
+        }
+        details.extend(self.events.try_iter().filter_map(|event| match event {
+            NetworkEvent::Error(error) => Some(error),
+            NetworkEvent::Entry(_) => None,
+        }));
+        let proxy_error = (!details.is_empty()).then(|| format!("; proxy: {}", details.join("; "))).unwrap_or_default();
+        Err(format!("HTTPS self-check failed: {}{proxy_error}", failures.join(" | ")))
     }
 }
 
@@ -522,7 +521,6 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Network").strong().size(17.0));
             ui.separator();
-            ui.label(&self.network_panel.status);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Clear").clicked() {
                     self.network_panel.entries.clear();
@@ -537,6 +535,14 @@ impl CrosshairApp {
                     self.network_panel.start();
                 }
             });
+        });
+        ui.horizontal(|ui| {
+            ui.add(egui::Label::new(&self.network_panel.status).wrap());
+            if self.network_panel.status.contains("failed") || self.network_panel.status.contains("error") {
+                if ui.small_button("Copy error").clicked() {
+                    ui.ctx().copy_text(self.network_panel.status.clone());
+                }
+            }
         });
         ui.add_space(5.0);
         ui.horizontal(|ui| {
