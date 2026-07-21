@@ -214,7 +214,6 @@ impl NetworkPanelState {
             self.install_ca();
             if !self.ca_installed { return; }
         }
-        self.decrypt_https = true;
         let mitm = self
             .decrypt_https
             .then(|| MitmConfig::load(&self.ca_dir))
@@ -738,23 +737,23 @@ fn proxy_connection(
 
     if method.eq_ignore_ascii_case("CONNECT") {
         let host = target.clone();
-        if let Some(mitm) = mitm {
-            client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
-            return mitm_connection(client, &host, mitm, events);
-        }
         events
             .send(NetworkEvent::Entry(NetworkEntry {
                 id: 0,
                 time: SystemTime::now(),
-                method,
+                method: method.clone(),
                 host: host.clone(),
-                target,
-                headers: text,
+                target: target.clone(),
+                headers: text.clone(),
                 body: Vec::new(),
                 notes: String::new(),
                 secure_tunnel: true,
             }))
             .ok();
+        if let Some(mitm) = mitm {
+            client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
+            return mitm_connection(client, &host, mitm, events);
+        }
         let mut server = TcpStream::connect(&host).map_err(|error| {
             std::io::Error::new(error.kind(), format!("connect to {host} failed: {error}"))
         })?;
@@ -1192,7 +1191,7 @@ impl CrosshairApp {
                     .desired_width(f32::INFINITY),
             );
         });
-        ui.label(RichText::new("Press Start. The first run installs the CA and enables HTTPS decryption; later runs reuse it. Use Remove CA when you no longer need interception.").small().weak());
+        ui.label(RichText::new("Press Start to capture domains safely. Enable Decrypt HTTPS only when the target accepts the MacroNest CA; the CA is installed once and reused.").small().weak());
         ui.group(|ui| {
             ui.label(RichText::new("Frida injection (certificate pinning only)").strong());
             ui.label(RichText::new("Attaching Frida alone does not bypass TLS. Use this only with a hook script for the target app's TLS stack.").small().weak());
