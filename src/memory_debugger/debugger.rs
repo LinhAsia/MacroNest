@@ -400,7 +400,6 @@ where
                         read_hit(
                             thread,
                             kind.address(),
-                            matches!(kind, WatchKind::Execute { .. }),
                             architecture,
                         )
                     }) {
@@ -586,7 +585,7 @@ impl CapturedContext {
     }
 }
 
-fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool, architecture: TargetArchitecture) -> Option<CapturedContext> {
+fn read_hit(thread: HANDLE, address: usize, architecture: TargetArchitecture) -> Option<CapturedContext> {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
             ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS
@@ -598,9 +597,7 @@ fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool, architec
             && (context.Dr6 & 1 != 0 || context.Dr0 == address as u32);
         if hit {
             context.Dr6 = 0;
-            if execution_breakpoint {
-                context.EFlags |= RESUME_FLAG;
-            }
+            context.EFlags |= RESUME_FLAG;
             unsafe { Wow64SetThreadContext(thread, &context) };
         }
         return hit.then_some(CapturedContext::X86(context));
@@ -614,9 +611,7 @@ fn read_hit(thread: HANDLE, address: usize, execution_breakpoint: bool, architec
     let captured = hit.then_some(*context);
     if hit {
         context.Dr6 = 0;
-        if execution_breakpoint {
-            context.EFlags |= RESUME_FLAG;
-        }
+        context.EFlags |= RESUME_FLAG;
         unsafe { SetThreadContext(thread, context) };
     }
     captured.map(CapturedContext::X64)
@@ -949,6 +944,7 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
             context.Dr7 &= !0xF0003;
             unsafe { Wow64SetThreadContext(thread, &context) };
         }
+        return;
     }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
