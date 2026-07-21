@@ -3,6 +3,7 @@ use std::{
     io::{Read, Write},
     net::{Shutdown, SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
+    process::Command,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -14,6 +15,10 @@ use std::{
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use eframe::egui::{self, Color32, RichText, Sense, Stroke};
 use serde::{Deserialize, Serialize};
+use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair, KeyUsagePurpose};
+use rustls::{ServerConfig, ServerConnection, StreamOwned, pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer}};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use windows_sys::Win32::{
     Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS},
     Networking::WinInet::{
@@ -89,6 +94,7 @@ enum ContentTab {
     Text,
     Hex,
     Form,
+    Json,
     Raw,
 }
 
@@ -105,10 +111,13 @@ pub(crate) struct NetworkPanelState {
     pinned: bool,
     proxy: Option<NetworkProxy>,
     recovery_file: PathBuf,
+    ca_dir: PathBuf,
+    decrypt_https: bool,
 }
 
 impl NetworkPanelState {
     pub(crate) fn new(recovery_file: PathBuf) -> Self {
+        let ca_dir = recovery_file.parent().unwrap_or(Path::new(".")).join("network-ca");
         let recovery_status = if recovery_file.exists() {
             match SystemProxyGuard::restore_file(&recovery_file) {
                 Ok(true) => "Recovered Windows proxy from the previous session".to_owned(),
@@ -131,6 +140,8 @@ impl NetworkPanelState {
             pinned: false,
             proxy: None,
             recovery_file,
+            ca_dir,
+            decrypt_https: false,
         }
     }
 
@@ -156,7 +167,12 @@ impl NetworkPanelState {
     }
 
     fn start(&mut self) {
-        match NetworkProxy::start(&self.bind_address, self.recovery_file.clone()) {
+        let mitm = self.decrypt_https.then(|| MitmConfig::load(&self.ca_dir)).transpose();
+        let mitm = match mitm {
+            Ok(mitm) => mitm,
+            Err(error) => { self.status = error; return; }
+        };
+        match NetworkProxy::start(&self.bind_address, self.recovery_file.clone(), mitm) {
             Ok(proxy) => {
                 self.status = format!("Recording on {}", self.bind_address);
                 self.proxy = Some(proxy);
@@ -187,6 +203,32 @@ impl NetworkPanelState {
             let _ = set_system_proxy(None, false);
         }
     }
+
+    fn install_ca(&mut self) {
+        self.status = match install_ca(&self.ca_dir) {
+            Ok(()) => "MacroNest CA installed for the current Windows user".to_owned(),
+            Err(error) => format!("Unable to install MacroNest CA: {error}"),
+        };
+    }
+
+    fn remove_ca(&mut self) {
+        self.decrypt_https = false;
+        self.status = match run_certutil(["-user", "-delstore", "Root", "MacroNest Network CA"]) {
+            Ok(()) => "MacroNest CA removed".to_owned(),
+            Err(error) => format!("Unable to remove MacroNest CA: {error}"),
+        };
+    }
+}
+
+#[derive(Clone)]
+struct MitmConfig { cert_pem: String, key_pem: String }
+
+impl MitmConfig {
+    fn load(dir: &Path) -> Result<Self, String> {
+        let cert_pem = std::fs::read_to_string(dir.join("ca.pem")).map_err(|_| "Install the MacroNest CA before enabling HTTPS decryption".to_owned())?;
+        let key_pem = std::fs::read_to_string(dir.join("ca-key.pem")).map_err(|error| error.to_string())?;
+        Ok(Self { cert_pem, key_pem })
+    }
 }
 
 struct NetworkProxy {
@@ -197,7 +239,7 @@ struct NetworkProxy {
 }
 
 impl NetworkProxy {
-    fn start(address: &str, recovery_file: PathBuf) -> Result<Self, String> {
+    fn start(address: &str, recovery_file: PathBuf, mitm: Option<MitmConfig>) -> Result<Self, String> {
         let parsed = address.parse::<SocketAddr>().map_err(|_| "proxy address is invalid".to_owned())?;
         if !parsed.ip().is_loopback() {
             return Err("proxy must use a loopback address".to_owned());
@@ -212,6 +254,7 @@ impl NetworkProxy {
                 match listener.accept() {
                     Ok((stream, _)) => {
                         let tx = tx.clone();
+                        let mitm = mitm.clone();
                         thread::spawn(move || {
                             // Accepted sockets can inherit the listener's non-blocking mode on
                             // Windows; the connection handler intentionally uses blocking I/O.
@@ -221,7 +264,7 @@ impl NetworkProxy {
                                 )));
                                 return;
                             }
-                            if let Err(error) = proxy_connection(stream, tx.clone()) {
+                            if let Err(error) = proxy_connection(stream, tx.clone(), mitm.as_ref()) {
                                 let _ = tx.send(NetworkEvent::Error(error.to_string()));
                             }
                         });
@@ -430,6 +473,36 @@ fn win32_result(code: u32, action: &str) -> Result<(), String> {
     if code == ERROR_SUCCESS { Ok(()) } else { Err(format!("{action} failed (Windows error {code})")) }
 }
 
+fn install_ca(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    let cert_path = dir.join("ca.cer");
+    if !cert_path.exists() {
+        let mut params = CertificateParams::new(Vec::<String>::new()).map_err(|error| error.to_string())?;
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        params.distinguished_name.push(DnType::CommonName, "MacroNest Network CA");
+        params.key_usages.extend([KeyUsagePurpose::DigitalSignature, KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign]);
+        let key = KeyPair::generate().map_err(|error| error.to_string())?;
+        let cert = params.self_signed(&key).map_err(|error| error.to_string())?;
+        std::fs::write(dir.join("ca.pem"), cert.pem()).map_err(|error| error.to_string())?;
+        std::fs::write(dir.join("ca-key.pem"), key.serialize_pem()).map_err(|error| error.to_string())?;
+        std::fs::write(&cert_path, cert.der()).map_err(|error| error.to_string())?;
+    }
+    let path = cert_path.to_string_lossy().into_owned();
+    run_certutil(["-user", "-addstore", "-f", "Root", &path])
+}
+
+fn run_certutil<const N: usize>(args: [&str; N]) -> Result<(), String> {
+    let mut command = Command::new("certutil.exe");
+    command.args(args);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let output = command.output().map_err(|error| error.to_string())?;
+    if output.status.success() { Ok(()) } else {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        Err(if message.is_empty() { format!("certutil exited with {}", output.status) } else { message })
+    }
+}
+
 impl Drop for NetworkProxy {
     fn drop(&mut self) {
         // Restore connectivity before waiting for the proxy worker to exit.
@@ -441,7 +514,7 @@ impl Drop for NetworkProxy {
     }
 }
 
-fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEvent>) -> std::io::Result<()> {
+fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEvent>, mitm: Option<&MitmConfig>) -> std::io::Result<()> {
     client.set_read_timeout(Some(Duration::from_secs(10)))?;
     let header = read_header(&mut client)?;
     client.set_read_timeout(None)?;
@@ -461,6 +534,10 @@ fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEvent>) -> std:
 
     if method.eq_ignore_ascii_case("CONNECT") {
         let host = target.clone();
+        if let Some(mitm) = mitm {
+            client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
+            return mitm_connection(client, &host, mitm, events);
+        }
         events.send(NetworkEvent::Entry(NetworkEntry {
             id: 0,
             time: SystemTime::now(),
@@ -502,7 +579,7 @@ fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEvent>) -> std:
     }
 }
 
-fn read_header(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
+fn read_header(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
     let mut data = Vec::with_capacity(2048);
     let mut buffer = [0_u8; 2048];
     while data.len() < MAX_HEADER_BYTES {
@@ -532,6 +609,174 @@ fn read_header(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     } else {
         Ok(data)
     }
+}
+
+fn mitm_connection(client: TcpStream, target: &str, mitm: &MitmConfig, events: Sender<NetworkEvent>) -> std::io::Result<()> {
+    let hostname = target.rsplit_once(':').map(|(host, _)| host).unwrap_or(target);
+    let ca_key = KeyPair::from_pem(&mitm.key_pem).map_err(io_other)?;
+    let issuer = Issuer::from_ca_cert_pem(&mitm.cert_pem, ca_key).map_err(io_other)?;
+    let leaf_key = KeyPair::generate().map_err(io_other)?;
+    let mut params = CertificateParams::new(vec![hostname.to_owned()]).map_err(io_other)?;
+    params.distinguished_name.push(DnType::CommonName, hostname);
+    params.extended_key_usages.push(ExtendedKeyUsagePurpose::ServerAuth);
+    let leaf = params.signed_by(&leaf_key, &issuer).map_err(io_other)?;
+    let config = ServerConfig::builder().with_no_client_auth().with_single_cert(
+        vec![CertificateDer::from(leaf.der().to_vec())],
+        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der())),
+    ).map_err(io_other)?;
+    let mut downstream = StreamOwned::new(ServerConnection::new(Arc::new(config)).map_err(io_other)?, client);
+
+    let request = read_header(&mut downstream)?;
+    if request.is_empty() { return Ok(()); }
+    let header_end = request.windows(4).position(|window| window == b"\r\n\r\n").map(|position| position + 4).unwrap_or(request.len());
+    let text = String::from_utf8_lossy(&request[..header_end]).into_owned();
+    let mut parts = text.lines().next().unwrap_or_default().split_whitespace();
+    let method = parts.next().unwrap_or_default().to_owned();
+    let path = parts.next().unwrap_or("/").to_owned();
+    events.send(NetworkEvent::Entry(NetworkEntry {
+        id: 0,
+        time: SystemTime::now(),
+        method,
+        host: hostname.to_owned(),
+        target: path.clone(),
+        headers: text.clone(),
+        body: request[header_end..].to_vec(),
+        notes: String::new(),
+        secure_tunnel: false,
+    })).ok();
+
+    let server = TcpStream::connect(target)?;
+    let connector = native_tls::TlsConnector::new().map_err(io_other)?;
+    let mut upstream = connector.connect(hostname, server).map_err(io_other)?;
+    let websocket_upgrade = text.lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("upgrade") && value.trim().eq_ignore_ascii_case("websocket")
+        })
+    });
+    if websocket_upgrade { upstream.write_all(&request)?; }
+    else { upstream.write_all(&force_connection_close(&request, header_end))?; }
+    let response = read_header(&mut upstream)?;
+    let switching_protocols = String::from_utf8_lossy(&response).lines().next()
+        .is_some_and(|line| line.split_whitespace().nth(1) == Some("101"));
+    downstream.write_all(&response)?;
+    if switching_protocols {
+        relay_websocket(&mut downstream, &mut upstream, hostname, &path, events)?;
+    } else {
+        std::io::copy(&mut upstream, &mut downstream)?;
+    }
+    downstream.flush()?;
+    Ok(())
+}
+
+fn relay_websocket(
+    downstream: &mut StreamOwned<ServerConnection, TcpStream>,
+    upstream: &mut native_tls::TlsStream<TcpStream>,
+    host: &str,
+    path: &str,
+    events: Sender<NetworkEvent>,
+) -> std::io::Result<()> {
+    downstream.sock.set_read_timeout(Some(Duration::from_millis(25)))?;
+    upstream.get_ref().set_read_timeout(Some(Duration::from_millis(25)))?;
+    let mut client_frames = Vec::new();
+    let mut server_frames = Vec::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let mut progressed = false;
+        match downstream.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(count) => {
+                progressed = true;
+                upstream.write_all(&buffer[..count])?;
+                client_frames.extend_from_slice(&buffer[..count]);
+                emit_websocket_frames(&mut client_frames, "WS SEND", host, path, &events);
+            }
+            Err(error) if is_retryable_io(&error) => {}
+            Err(error) => return Err(error),
+        }
+        match upstream.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(count) => {
+                progressed = true;
+                downstream.write_all(&buffer[..count])?;
+                downstream.flush()?;
+                server_frames.extend_from_slice(&buffer[..count]);
+                emit_websocket_frames(&mut server_frames, "WS RECEIVE", host, path, &events);
+            }
+            Err(error) if is_retryable_io(&error) => {}
+            Err(error) => return Err(error),
+        }
+        if !progressed { thread::yield_now(); }
+    }
+}
+
+fn is_retryable_io(error: &std::io::Error) -> bool {
+    matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+}
+
+fn emit_websocket_frames(buffer: &mut Vec<u8>, method: &str, host: &str, path: &str, events: &Sender<NetworkEvent>) {
+    loop {
+        if buffer.len() < 2 { return; }
+        let masked = buffer[1] & 0x80 != 0;
+        let mut payload_len = usize::from(buffer[1] & 0x7f);
+        let mut offset = 2;
+        if payload_len == 126 {
+            if buffer.len() < 4 { return; }
+            payload_len = usize::from(u16::from_be_bytes([buffer[2], buffer[3]]));
+            offset = 4;
+        } else if payload_len == 127 {
+            if buffer.len() < 10 { return; }
+            let length = u64::from_be_bytes(buffer[2..10].try_into().unwrap_or([0; 8]));
+            let Ok(length) = usize::try_from(length) else { buffer.clear(); return; };
+            payload_len = length;
+            offset = 10;
+        }
+        let mask = if masked {
+            if buffer.len() < offset + 4 { return; }
+            let value = [buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3]];
+            offset += 4;
+            Some(value)
+        } else { None };
+        if buffer.len() < offset.saturating_add(payload_len) { return; }
+        let opcode = buffer[0] & 0x0f;
+        let mut payload = buffer[offset..offset + payload_len].to_vec();
+        if let Some(mask) = mask {
+            for (index, byte) in payload.iter_mut().enumerate() { *byte ^= mask[index % 4]; }
+        }
+        buffer.drain(..offset + payload_len);
+        if !matches!(opcode, 1 | 2) { continue; }
+        events.send(NetworkEvent::Entry(NetworkEntry {
+            id: 0,
+            time: SystemTime::now(),
+            method: method.to_owned(),
+            host: host.to_owned(),
+            target: path.to_owned(),
+            headers: format!("WebSocket opcode: {opcode}\nPayload length: {}", payload.len()),
+            body: payload,
+            notes: String::new(),
+            secure_tunnel: false,
+        })).ok();
+    }
+}
+
+fn force_connection_close(request: &[u8], header_end: usize) -> Vec<u8> {
+    let header = String::from_utf8_lossy(&request[..header_end]);
+    let mut output = String::new();
+    for line in header.lines() {
+        if !line.to_ascii_lowercase().starts_with("connection:")
+            && !line.to_ascii_lowercase().starts_with("proxy-connection:")
+        {
+            output.push_str(line);
+            output.push_str("\r\n");
+        }
+    }
+    output.push_str("Connection: close\r\n\r\n");
+    let mut bytes = output.into_bytes();
+    bytes.extend_from_slice(&request[header_end..]);
+    bytes
+}
+
+fn io_other(error: impl std::fmt::Display) -> std::io::Error {
+    std::io::Error::other(error.to_string())
 }
 
 fn http_destination(target: &str, host_header: &str) -> (String, String) {
@@ -608,6 +853,10 @@ impl CrosshairApp {
             if ui.button("Copy").clicked() {
                 ui.ctx().copy_text(self.network_panel.bind_address.clone());
             }
+            ui.separator();
+            if ui.button("Install CA").clicked() { self.network_panel.install_ca(); }
+            if ui.button("Remove CA").clicked() { self.network_panel.remove_ca(); }
+            ui.add_enabled(!running, egui::Checkbox::new(&mut self.network_panel.decrypt_https, "Decrypt HTTPS"));
             ui.separator();
             ui.label("Filter");
             ui.add(egui::TextEdit::singleline(&mut self.network_panel.filter).desired_width(f32::INFINITY));
@@ -744,6 +993,7 @@ impl CrosshairApp {
                         (ContentTab::Text, "Text"),
                         (ContentTab::Hex, "Hex"),
                         (ContentTab::Form, "Form"),
+                        (ContentTab::Json, "JSON"),
                         (ContentTab::Raw, "Raw"),
                     ] {
                         ui.add_enabled_ui(!entry.secure_tunnel || tab == ContentTab::Headers, |ui| {
@@ -860,6 +1110,13 @@ fn render_contents(ui: &mut egui::Ui, entry: &NetworkEntry, tab: ContentTab) {
         ContentTab::Text => readonly_text(ui, String::from_utf8_lossy(&entry.body).into_owned()),
         ContentTab::Hex => readonly_text(ui, hex_dump(&entry.body)),
         ContentTab::Form => render_form(ui, entry),
+        ContentTab::Json => {
+            let text = match serde_json::from_slice::<serde_json::Value>(&entry.body) {
+                Ok(value) => serde_json::to_string_pretty(&value).unwrap_or_else(|_| String::from_utf8_lossy(&entry.body).into_owned()),
+                Err(_) => "This request body is not JSON.".to_owned(),
+            };
+            readonly_text(ui, text);
+        }
         ContentTab::Raw => {
             let mut raw = entry.headers.clone();
             raw.push_str(&String::from_utf8_lossy(&entry.body));

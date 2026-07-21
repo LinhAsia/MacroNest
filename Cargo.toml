@@ -31,6 +31,8 @@ vi = "0.8"
 serialport = "4.6"
 tungstenite = "0.26"
 native-tls = "0.2"
+rcgen = { version = "0.14", features = ["x509-parser"] }
+rustls = "0.23"
 zip = { version = "4.3", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
