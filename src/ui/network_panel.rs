@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, HashSet},
     io::{Read, Write},
     net::{Shutdown, SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
@@ -44,6 +45,25 @@ struct NetworkEntry {
     secure_tunnel: bool,
 }
 
+#[derive(Default)]
+struct RequestTree {
+    folders: BTreeMap<String, RequestTree>,
+    requests: Vec<NetworkEntry>,
+}
+
+impl RequestTree {
+    fn insert(&mut self, entry: NetworkEntry) {
+        let path = request_path(&entry);
+        let mut segments = path.split('/').filter(|part| !part.is_empty()).peekable();
+        let mut node = self;
+        while let Some(segment) = segments.next() {
+            if segments.peek().is_none() { break; }
+            node = node.folders.entry(segment.to_owned()).or_default();
+        }
+        node.requests.push(entry);
+    }
+}
+
 enum NetworkEvent {
     Entry(NetworkEntry),
     Error(String),
@@ -81,6 +101,8 @@ pub(crate) struct NetworkPanelState {
     detail_tab: DetailTab,
     content_tab: ContentTab,
     status: String,
+    expanded_hosts: HashSet<String>,
+    pinned: bool,
     proxy: Option<NetworkProxy>,
     recovery_file: PathBuf,
 }
@@ -97,6 +119,8 @@ impl NetworkPanelState {
             detail_tab: DetailTab::Overview,
             content_tab: ContentTab::Headers,
             status: if recovery_available { "Previous proxy settings can be restored" } else { "Stopped" }.to_owned(),
+            expanded_hosts: HashSet::new(),
+            pinned: false,
             proxy: None,
             recovery_file,
         }
@@ -530,6 +554,9 @@ impl CrosshairApp {
             ui.label(RichText::new("Network").strong().size(17.0));
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(if self.network_panel.pinned { "Unpin network" } else { "Pin network" }).clicked() {
+                    self.network_panel.pinned = !self.network_panel.pinned;
+                }
                 if ui.button("Clear").clicked() {
                     self.network_panel.entries.clear();
                     self.network_panel.selected_id = None;
@@ -566,6 +593,11 @@ impl CrosshairApp {
         ui.label(RichText::new("Set the target app's HTTP proxy to this address. HTTPS is recorded as an encrypted CONNECT tunnel.").small().weak());
         ui.separator();
 
+        self.render_network_capture(ui);
+        self.render_pinned_network(ui.ctx());
+    }
+
+    fn render_network_capture(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size();
         ui.horizontal(|ui| {
             ui.set_height(available.y);
@@ -593,22 +625,67 @@ impl CrosshairApp {
         });
         ui.separator();
         let filter = self.network_panel.filter.to_ascii_lowercase();
+        let mut hosts = Vec::<String>::new();
+        for entry in self.network_panel.entries.iter().rev() {
+            if (filter.is_empty() || entry.host.to_ascii_lowercase().contains(&filter)
+                || entry.target.to_ascii_lowercase().contains(&filter))
+                && !hosts.contains(&entry.host)
+            {
+                hosts.push(entry.host.clone());
+            }
+        }
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for entry in self.network_panel.entries.iter().rev() {
-                if !filter.is_empty() && !entry.host.to_ascii_lowercase().contains(&filter)
-                    && !entry.target.to_ascii_lowercase().contains(&filter) { continue; }
-                let selected = self.network_panel.selected_id == Some(entry.id);
-                let icon = if entry.secure_tunnel { "[TLS]" } else { "[HTTP]" };
-                let label = format!("{icon}  {}  {}", entry.method, entry.host);
-                let response = ui.add_sized(
+            for host in hosts {
+                let matching = self.network_panel.entries.iter().rev().filter(|entry| {
+                    entry.host == host && (filter.is_empty()
+                        || entry.host.to_ascii_lowercase().contains(&filter)
+                        || entry.target.to_ascii_lowercase().contains(&filter))
+                }).cloned().collect::<Vec<_>>();
+                let expanded = self.network_panel.expanded_hosts.contains(&host);
+                let arrow = if expanded { "▼" } else { "▶" };
+                if ui.add_sized(
                     [ui.available_width(), 24.0],
-                    egui::Button::new(RichText::new(label).color(if selected { Color32::WHITE } else { ui.visuals().text_color() }))
-                        .selected(selected)
-                        .stroke(if selected { Stroke::new(1.0, Color32::from_rgb(92, 190, 225)) } else { Stroke::NONE }),
-                );
-                if response.clicked() { self.network_panel.selected_id = Some(entry.id); }
+                    egui::Button::new(format!("{arrow}  {host}  ({})", matching.len())),
+                ).clicked() {
+                    if expanded { self.network_panel.expanded_hosts.remove(&host); }
+                    else { self.network_panel.expanded_hosts.insert(host.clone()); }
+                }
+                if !expanded { continue; }
+                let mut tree = RequestTree::default();
+                for entry in matching { tree.insert(entry); }
+                if let Some(id) = render_request_tree(ui, &tree, self.network_panel.selected_id, &host) {
+                    self.network_panel.selected_id = Some(id);
+                }
             }
         });
+    }
+
+    fn render_pinned_network(&mut self, ctx: &egui::Context) {
+        if !self.network_panel.pinned { return; }
+        let builder = egui::ViewportBuilder::default()
+            .with_title("MacroNest — Network")
+            .with_position(egui::pos2(0.0, 0.0))
+            .with_inner_size(egui::vec2(900.0, 620.0))
+            .with_min_inner_size(egui::vec2(560.0, 320.0))
+            .with_clamp_size_to_monitor_size(true)
+            .with_decorations(false)
+            .with_resizable(true)
+            .with_always_on_top();
+        let mut unpin = false;
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("network-pinned"), builder, |ctx, _| {
+            if ctx.input(|input| input.viewport().close_requested()) { unpin = true; }
+            egui::TopBottomPanel::top("network-pinned-title").exact_height(38.0).show(ctx, |ui| {
+                let response = ui.horizontal(|ui| {
+                    ui.label(RichText::new("▣  MacroNest  Network").strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("×").clicked() || ui.button("Unpin").clicked() { unpin = true; }
+                    });
+                }).response.interact(Sense::drag());
+                if response.dragged() { ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag); }
+            });
+            egui::CentralPanel::default().show(ctx, |ui| self.render_network_capture(ui));
+        });
+        if unpin { self.network_panel.pinned = false; }
     }
 
     fn render_network_detail(&mut self, ui: &mut egui::Ui) {
@@ -672,6 +749,40 @@ impl CrosshairApp {
             }
         }
     }
+}
+
+fn request_path(entry: &NetworkEntry) -> &str {
+    if entry.secure_tunnel { return &entry.target; }
+    entry.target.strip_prefix("http://")
+        .and_then(|value| value.split_once('/').map(|(_, path)| path))
+        .or_else(|| entry.target.strip_prefix("https://").and_then(|value| value.split_once('/').map(|(_, path)| path)))
+        .unwrap_or(&entry.target)
+}
+
+fn render_request_tree(ui: &mut egui::Ui, tree: &RequestTree, selected_id: Option<u64>, id_path: &str) -> Option<u64> {
+    let mut clicked = None;
+    ui.indent(id_path, |ui| {
+        for (folder, child) in &tree.folders {
+            egui::CollapsingHeader::new(format!("📁 {folder}"))
+                .id_salt((id_path, folder))
+                .show(ui, |ui| {
+                    clicked = clicked.or_else(|| render_request_tree(ui, child, selected_id, &format!("{id_path}/{folder}")));
+                });
+        }
+        for entry in &tree.requests {
+            let selected = selected_id == Some(entry.id);
+            let icon = if entry.secure_tunnel { "TLS" } else { "HTTP" };
+            let leaf = request_path(entry).rsplit('/').next().filter(|part| !part.is_empty()).unwrap_or(&entry.target);
+            let response = ui.add_sized(
+                [ui.available_width(), 22.0],
+                egui::Button::new(RichText::new(format!("[{icon}] {}  {leaf}", entry.method)))
+                    .selected(selected)
+                    .stroke(if selected { Stroke::new(1.0, Color32::from_rgb(92, 190, 225)) } else { Stroke::NONE }),
+            );
+            if response.clicked() { clicked = Some(entry.id); }
+        }
+    });
+    clicked
 }
 
 fn render_overview(ui: &mut egui::Ui, entry: &NetworkEntry) {
