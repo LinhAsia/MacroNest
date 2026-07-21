@@ -9,7 +9,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
@@ -124,6 +124,7 @@ pub(crate) struct NetworkPanelState {
     remove_ca_on_exit: bool,
     decrypt_https: bool,
     frida_processes: Vec<(u32, String)>,
+    frida_last_process_refresh: Instant,
     frida_pid: Option<u32>,
     frida_script: String,
     frida_log: String,
@@ -162,7 +163,8 @@ impl NetworkPanelState {
             ca_installed: is_ca_installed(),
             remove_ca_on_exit: true,
             decrypt_https: false,
-            frida_processes: Vec::new(),
+            frida_processes: crate::memory_debugger::debugger::list_processes().unwrap_or_default(),
+            frida_last_process_refresh: Instant::now(),
             frida_pid: None,
             frida_script: "console.log('[MacroNest] Frida loaded in PID ' + Process.id);"
                 .to_owned(),
@@ -292,6 +294,7 @@ impl NetworkPanelState {
             }
             Err(error) => self.status = format!("Unable to list processes: {error}"),
         }
+        self.frida_last_process_refresh = Instant::now();
     }
 }
 
@@ -1137,6 +1140,9 @@ fn tunnel(mut left: TcpStream, mut right: TcpStream) -> std::io::Result<()> {
 impl CrosshairApp {
     pub(crate) fn render_network_panel(&mut self, ui: &mut egui::Ui) {
         self.network_panel.drain();
+        if self.network_panel.frida_last_process_refresh.elapsed() >= Duration::from_secs(1) {
+            self.network_panel.refresh_frida_processes();
+        }
         let running = self.network_panel.proxy.is_some();
         if running {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
@@ -1231,6 +1237,7 @@ impl CrosshairApp {
                 .height(480.0)
                 .selected_text(Self::truncate_window_title(&selected, 52))
                 .show_ui(ui, |ui| {
+                    ui.set_min_height(480.0);
                     ui.label(RichText::new("All processes (individual PID)").strong());
                     for (pid, name) in &self.network_panel.frida_processes {
                         ui.selectable_value(
