@@ -161,7 +161,7 @@ impl NetworkPanelState {
             recovery_file,
             ca_dir,
             ca_installed: is_ca_installed(),
-            remove_ca_on_exit: true,
+            remove_ca_on_exit: false,
             decrypt_https: false,
             frida_processes: crate::memory_debugger::debugger::list_processes().unwrap_or_default(),
             frida_last_process_refresh: Instant::now(),
@@ -210,9 +210,11 @@ impl NetworkPanelState {
     }
 
     fn start(&mut self) {
-        if self.ca_installed {
-            self.decrypt_https = true;
+        if !self.ca_installed {
+            self.install_ca();
+            if !self.ca_installed { return; }
         }
+        self.decrypt_https = true;
         let mitm = self
             .decrypt_https
             .then(|| MitmConfig::load(&self.ca_dir))
@@ -1229,7 +1231,7 @@ impl CrosshairApp {
                     .desired_width(f32::INFINITY),
             );
         });
-        ui.label(RichText::new("1. Install CA  2. Enable Decrypt HTTPS  3. Start  4. Use the target app. MacroNest restores the proxy and, by default, removes its CA on exit.").small().weak());
+        ui.label(RichText::new("Press Start. The first run installs the CA and enables HTTPS decryption; later runs reuse it. Use Remove CA when you no longer need interception.").small().weak());
         ui.group(|ui| {
             ui.label(RichText::new("Frida injection (certificate pinning only)").strong());
             ui.label(RichText::new("Attaching Frida alone does not bypass TLS. Use this only with a hook script for the target app's TLS stack.").small().weak());
