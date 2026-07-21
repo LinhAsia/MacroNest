@@ -379,47 +379,8 @@ impl NetworkProxy {
             thread: Some(thread),
             system_proxy: None,
         };
-        proxy.self_check(address)?;
         proxy.system_proxy = Some(SystemProxyGuard::enable(address, recovery_file)?);
         Ok(proxy)
-    }
-
-    fn self_check(&self, address: &str) -> Result<(), String> {
-        let proxy =
-            reqwest::Proxy::all(format!("http://{address}")).map_err(|error| error.to_string())?;
-        let client = reqwest::blocking::Client::builder()
-            .proxy(proxy)
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(8))
-            .build()
-            .map_err(|error| error.to_string())?;
-        let mut failures = Vec::new();
-        for url in ["https://www.google.com/generate_204", "https://github.com/"] {
-            match client.get(url).send() {
-                // Any HTTP response proves that CONNECT and the TLS tunnel both work.
-                Ok(_) => return Ok(()),
-                Err(error) => failures.push(format!("{url}: {}", error_chain(&error))),
-            }
-        }
-
-        // The connection worker reports on another thread and may finish just after reqwest.
-        let mut details = Vec::new();
-        if let Ok(event) = self.events.recv_timeout(Duration::from_millis(150)) {
-            if let NetworkEvent::Error(error) = event {
-                details.push(error);
-            }
-        }
-        details.extend(self.events.try_iter().filter_map(|event| match event {
-            NetworkEvent::Error(error) => Some(error),
-            NetworkEvent::Entry(_) => None,
-        }));
-        let proxy_error = (!details.is_empty())
-            .then(|| format!("; proxy: {}", details.join("; ")))
-            .unwrap_or_default();
-        Err(format!(
-            "HTTPS self-check failed: {}{proxy_error}",
-            failures.join(" | ")
-        ))
     }
 }
 
@@ -1823,14 +1784,4 @@ fn hex_dump(bytes: &[u8]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn error_chain(error: &dyn std::error::Error) -> String {
-    let mut messages = vec![error.to_string()];
-    let mut source = error.source();
-    while let Some(error) = source {
-        messages.push(error.to_string());
-        source = error.source();
-    }
-    messages.join(": ")
 }
