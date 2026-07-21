@@ -4500,7 +4500,7 @@ impl CrosshairApp {
     }
 
     fn refresh_memory_values(&mut self) {
-        if self.memory_panel.last_refresh.elapsed() >= Duration::from_millis(250) {
+        if self.memory_panel.last_refresh.elapsed() >= Duration::from_millis(50) {
             self.memory_panel.last_refresh = Instant::now();
             if let Some(pid) = self.memory_panel.process_pid {
                 let visible_count = self.memory_panel.candidates.len().min(MAX_VISIBLE_RESULTS);
