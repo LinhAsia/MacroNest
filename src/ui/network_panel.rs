@@ -171,9 +171,11 @@ impl NetworkPanelState {
     }
 
     fn restore_proxy(&mut self) {
+        let was_running = self.proxy.is_some();
         self.proxy.take();
         self.status = match SystemProxyGuard::restore_file(&self.recovery_file) {
             Ok(true) => "Previous Windows proxy restored".to_owned(),
+            Ok(false) if was_running => "Windows proxy restored".to_owned(),
             Ok(false) => "No saved proxy settings".to_owned(),
             Err(error) => format!("Unable to restore proxy: {error}"),
         };
@@ -663,9 +665,12 @@ impl CrosshairApp {
                 }).cloned().collect::<Vec<_>>();
                 let expanded = self.network_panel.expanded_hosts.contains(&host);
                 let arrow = if expanded { "-" } else { "+" };
-                if ui.add_sized(
-                    [ui.available_width(), 24.0],
-                    egui::Button::new(format!("{arrow}  {host}  ({})", matching.len())),
+                if left_row_button(
+                    ui,
+                    format!("{arrow}  {host}  ({})", matching.len()),
+                    24.0,
+                    Color32::from_rgb(126, 82, 24),
+                    Stroke::new(1.0, Color32::from_rgb(218, 145, 42)),
                 ).clicked() {
                     if expanded { self.network_panel.expanded_hosts.remove(&host); }
                     else { self.network_panel.expanded_hosts.insert(host.clone()); }
@@ -795,16 +800,35 @@ fn render_request_tree(ui: &mut egui::Ui, tree: &RequestTree, selected_id: Optio
             let selected = selected_id == Some(entry.id);
             let icon = if entry.secure_tunnel { "TLS" } else { "HTTP" };
             let leaf = request_path(entry).rsplit('/').next().filter(|part| !part.is_empty()).unwrap_or(&entry.target);
-            let response = ui.add_sized(
-                [ui.available_width(), 22.0],
-                egui::Button::new(RichText::new(format!("[{icon}] {}  {leaf}", entry.method)))
-                    .selected(selected)
-                    .stroke(if selected { Stroke::new(1.0, Color32::from_rgb(92, 190, 225)) } else { Stroke::NONE }),
+            let response = left_row_button(
+                ui,
+                format!("[{icon}] {}  {leaf}", entry.method),
+                22.0,
+                if selected { Color32::from_rgb(35, 116, 148) } else { Color32::from_rgb(58, 58, 58) },
+                if selected { Stroke::new(1.0, Color32::from_rgb(92, 190, 225)) } else { Stroke::NONE },
             );
             if response.clicked() { clicked = Some(entry.id); }
         }
     });
     clicked
+}
+
+fn left_row_button(ui: &mut egui::Ui, text: String, height: f32, fill: Color32, stroke: Stroke) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click());
+    let fill = if response.hovered() { fill.gamma_multiply(1.2) } else { fill };
+    ui.painter().rect_filled(rect, 2.0, fill);
+    if stroke != Stroke::NONE {
+        ui.painter().line_segment([rect.left_top(), rect.right_top()], stroke);
+        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
+    }
+    ui.painter().text(
+        egui::pos2(rect.left() + 8.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::TextStyle::Button.resolve(ui.style()),
+        ui.visuals().text_color(),
+    );
+    response
 }
 
 fn render_overview(ui: &mut egui::Ui, entry: &NetworkEntry) {

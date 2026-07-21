@@ -14753,7 +14753,9 @@ impl eframe::App for CrosshairApp {
                             self.tr("Exit", "Exit"),
                         );
                         if exit_response.clicked() {
-                            let _ = self.overlay_tx.send(OverlayCommand::Exit);
+                            self.network_panel.shutdown();
+                            self.quit_requested = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                         let hide_response = Self::hover_if(
                             Self::add_sized_with_show_hover_radius(
