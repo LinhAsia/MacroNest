@@ -109,7 +109,15 @@ pub(crate) struct NetworkPanelState {
 
 impl NetworkPanelState {
     pub(crate) fn new(recovery_file: PathBuf) -> Self {
-        let recovery_available = recovery_file.exists();
+        let recovery_status = if recovery_file.exists() {
+            match SystemProxyGuard::restore_file(&recovery_file) {
+                Ok(true) => "Recovered Windows proxy from the previous session".to_owned(),
+                Ok(false) => "Stopped".to_owned(),
+                Err(error) => format!("Unable to recover the previous Windows proxy: {error}"),
+            }
+        } else {
+            "Stopped".to_owned()
+        };
         Self {
             bind_address: DEFAULT_PROXY_ADDRESS.to_owned(),
             filter: String::new(),
@@ -118,7 +126,7 @@ impl NetworkPanelState {
             next_id: 1,
             detail_tab: DetailTab::Overview,
             content_tab: ContentTab::Headers,
-            status: if recovery_available { "Previous proxy settings can be restored" } else { "Stopped" }.to_owned(),
+            status: recovery_status,
             expanded_hosts: HashSet::new(),
             pinned: false,
             proxy: None,
@@ -412,6 +420,8 @@ fn win32_result(code: u32, action: &str) -> Result<(), String> {
 
 impl Drop for NetworkProxy {
     fn drop(&mut self) {
+        // Restore connectivity before waiting for the proxy worker to exit.
+        self.system_proxy.take();
         self.stop.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
