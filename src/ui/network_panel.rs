@@ -1,6 +1,8 @@
 use std::{
     io::{Read, Write},
-    net::{Shutdown, TcpListener, TcpStream},
+    net::{Shutdown, SocketAddr, TcpListener, TcpStream},
+    path::{Path, PathBuf},
+    process::Command,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -11,6 +13,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use eframe::egui::{self, Color32, RichText, Sense, Stroke};
+use serde::{Deserialize, Serialize};
 
 use super::CrosshairApp;
 
@@ -65,10 +68,12 @@ pub(crate) struct NetworkPanelState {
     content_tab: ContentTab,
     status: String,
     proxy: Option<NetworkProxy>,
+    recovery_file: PathBuf,
 }
 
-impl Default for NetworkPanelState {
-    fn default() -> Self {
+impl NetworkPanelState {
+    pub(crate) fn new(recovery_file: PathBuf) -> Self {
+        let recovery_available = recovery_file.exists();
         Self {
             bind_address: DEFAULT_PROXY_ADDRESS.to_owned(),
             filter: String::new(),
@@ -77,13 +82,12 @@ impl Default for NetworkPanelState {
             next_id: 1,
             detail_tab: DetailTab::Overview,
             content_tab: ContentTab::Headers,
-            status: "Stopped".to_owned(),
+            status: if recovery_available { "Previous proxy settings can be restored" } else { "Stopped" }.to_owned(),
             proxy: None,
+            recovery_file,
         }
     }
-}
 
-impl NetworkPanelState {
     fn drain(&mut self) {
         let Some(proxy) = &self.proxy else { return };
         while let Ok(mut entry) = proxy.events.try_recv() {
@@ -97,7 +101,7 @@ impl NetworkPanelState {
     }
 
     fn start(&mut self) {
-        match NetworkProxy::start(&self.bind_address) {
+        match NetworkProxy::start(&self.bind_address, self.recovery_file.clone()) {
             Ok(proxy) => {
                 self.status = format!("Recording on {}", self.bind_address);
                 self.proxy = Some(proxy);
@@ -110,18 +114,33 @@ impl NetworkPanelState {
         self.proxy.take();
         self.status = "Stopped".to_owned();
     }
+
+    fn restore_proxy(&mut self) {
+        self.proxy.take();
+        self.status = match SystemProxyGuard::restore_file(&self.recovery_file) {
+            Ok(true) => "Previous Windows proxy restored".to_owned(),
+            Ok(false) => "No saved proxy settings".to_owned(),
+            Err(error) => format!("Unable to restore proxy: {error}"),
+        };
+    }
 }
 
 struct NetworkProxy {
     stop: Arc<AtomicBool>,
     events: Receiver<NetworkEntry>,
     thread: Option<JoinHandle<()>>,
+    _system_proxy: SystemProxyGuard,
 }
 
 impl NetworkProxy {
-    fn start(address: &str) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(address)?;
-        listener.set_nonblocking(true)?;
+    fn start(address: &str, recovery_file: PathBuf) -> Result<Self, String> {
+        let parsed = address.parse::<SocketAddr>().map_err(|_| "proxy address is invalid".to_owned())?;
+        if !parsed.ip().is_loopback() {
+            return Err("proxy must use a loopback address".to_owned());
+        }
+        let listener = TcpListener::bind(parsed).map_err(|error| error.to_string())?;
+        listener.set_nonblocking(true).map_err(|error| error.to_string())?;
+        let system_proxy = SystemProxyGuard::enable(address, recovery_file)?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let (tx, events) = unbounded();
@@ -141,8 +160,82 @@ impl NetworkProxy {
                 }
             }
         });
-        Ok(Self { stop, events, thread: Some(thread) })
+        Ok(Self { stop, events, thread: Some(thread), _system_proxy: system_proxy })
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct ProxySnapshot {
+    proxy_enable: Option<u32>,
+    proxy_server: Option<String>,
+}
+
+struct SystemProxyGuard {
+    recovery_file: PathBuf,
+}
+
+impl SystemProxyGuard {
+    fn enable(address: &str, recovery_file: PathBuf) -> Result<Self, String> {
+        if recovery_file.exists() {
+            Self::restore_file(&recovery_file)?;
+        }
+        let snapshot = query_system_proxy()?;
+        let bytes = serde_json::to_vec(&snapshot).map_err(|error| error.to_string())?;
+        std::fs::write(&recovery_file, bytes).map_err(|error| error.to_string())?;
+        if let Err(error) = set_system_proxy(Some(address), true) {
+            let _ = std::fs::remove_file(&recovery_file);
+            return Err(error);
+        }
+        Ok(Self { recovery_file })
+    }
+
+    fn restore_file(path: &Path) -> Result<bool, String> {
+        if !path.exists() { return Ok(false); }
+        let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+        let snapshot: ProxySnapshot = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        restore_system_proxy(&snapshot)?;
+        std::fs::remove_file(path).map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+}
+
+impl Drop for SystemProxyGuard {
+    fn drop(&mut self) {
+        let _ = Self::restore_file(&self.recovery_file);
+    }
+}
+
+fn powershell(script: &str) -> Result<String, String> {
+    let output = Command::new("powershell.exe")
+        .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
+        .output().map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    }
+}
+
+fn query_system_proxy() -> Result<ProxySnapshot, String> {
+    let output = powershell(
+        "$p=Get-ItemProperty -LiteralPath 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; [pscustomobject]@{proxy_enable=if($null -eq $p.ProxyEnable){$null}else{[uint32]$p.ProxyEnable};proxy_server=if($null -eq $p.ProxyServer){$null}else{[string]$p.ProxyServer}}|ConvertTo-Json -Compress",
+    )?;
+    serde_json::from_str(&output).map_err(|error| error.to_string())
+}
+
+fn set_system_proxy(server: Option<&str>, enabled: bool) -> Result<(), String> {
+    let server_command = match server {
+        Some(server) => format!("Set-ItemProperty -LiteralPath $k -Name ProxyServer -Type String -Value '{server}';"),
+        None => "Remove-ItemProperty -LiteralPath $k -Name ProxyServer -ErrorAction SilentlyContinue;".to_owned(),
+    };
+    powershell(&format!(
+        "$k='HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'; Set-ItemProperty -LiteralPath $k -Name ProxyEnable -Type DWord -Value {}; {} Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class MNWinInet{{[DllImport(\"wininet.dll\")]public static extern bool InternetSetOption(IntPtr h,int o,IntPtr b,int l);}}';[MNWinInet]::InternetSetOption([IntPtr]::Zero,39,[IntPtr]::Zero,0)|Out-Null;[MNWinInet]::InternetSetOption([IntPtr]::Zero,37,[IntPtr]::Zero,0)|Out-Null",
+        u8::from(enabled), server_command
+    )).map(|_| ())
+}
+
+fn restore_system_proxy(snapshot: &ProxySnapshot) -> Result<(), String> {
+    set_system_proxy(snapshot.proxy_server.as_deref(), snapshot.proxy_enable.unwrap_or(0) != 0)
 }
 
 impl Drop for NetworkProxy {
@@ -287,6 +380,9 @@ impl CrosshairApp {
                 if ui.button("Clear").clicked() {
                     self.network_panel.entries.clear();
                     self.network_panel.selected_id = None;
+                }
+                if ui.button("Restore proxy").clicked() {
+                    self.network_panel.restore_proxy();
                 }
                 if running {
                     if ui.button("Stop").clicked() { self.network_panel.stop(); }

@@ -904,7 +904,9 @@ impl CrosshairApp {
             &state.memory_scan_hotkeys,
             &state.memory_pointer_list,
         );
-        let network_panel = network_panel::NetworkPanelState::default();
+        let network_panel = network_panel::NetworkPanelState::new(
+            paths.root.join("network-proxy-recovery.json"),
+        );
         let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
 
         let opencv_installed = paths.opencv_dll.exists();
