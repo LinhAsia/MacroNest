@@ -802,7 +802,9 @@ fn scan_value_matches(
                 _ => None,
             });
             match comparison {
-                ScanComparison::Exact => exact == Some($current),
+                ScanComparison::Exact => exact.is_some_and(|expected| {
+                    scan_exact_matches($variant($current), $variant(expected))
+                }),
                 ScanComparison::Less => exact.is_some_and(|value| $current < value),
                 ScanComparison::Greater => exact.is_some_and(|value| $current > value),
                 ScanComparison::Changed => $current != $previous,
@@ -836,6 +838,22 @@ fn scan_value_matches(
             _ => compare!(current, previous, ScanValue::F64),
         },
         _ => false,
+    }
+}
+
+fn scan_exact_matches(current: ScanValue, expected: ScanValue) -> bool {
+    match (current, expected) {
+        (ScanValue::F32(current), ScanValue::F32(expected)) => {
+            current.is_finite()
+                && expected.is_finite()
+                && (current - expected).abs() <= (expected.abs() * 1e-6).max(1e-5)
+        }
+        (ScanValue::F64(current), ScanValue::F64(expected)) => {
+            current.is_finite()
+                && expected.is_finite()
+                && (current - expected).abs() <= (expected.abs() * 1e-12).max(1e-9)
+        }
+        _ => current == expected,
     }
 }
 
@@ -952,7 +970,7 @@ fn scan_region_bucket(
                 if count >= width {
                     for offset in (0..=count - width).step_by(step) {
                         let value = value_type.decode(&buffer[offset..]).expect("value width");
-                        if exact.is_none() || exact == Some(value) {
+                        if exact.is_none_or(|expected| scan_exact_matches(value, expected)) {
                             if total.fetch_add(1, Ordering::Relaxed) >= result_limit {
                                 total.fetch_sub(1, Ordering::Relaxed);
                                 break 'regions;
@@ -1151,6 +1169,31 @@ mod tests {
         );
         write_scan_value(pid, address, ScanValue::F64(7.25)).unwrap();
         assert_eq!(*value, 7.25);
+    }
+
+    #[test]
+    fn reads_and_writes_float_in_current_process() {
+        let mut value = Box::new(123.4f32);
+        let address = std::ptr::from_mut(&mut *value).addr();
+        let pid = std::process::id();
+        assert_eq!(
+            read_scan_value(pid, address, ScanValueType::F32).unwrap(),
+            ScanValue::F32(123.4)
+        );
+        write_scan_value(pid, address, ScanValue::F32(-7.25)).unwrap();
+        assert_eq!(*value, -7.25);
+    }
+
+    #[test]
+    fn exact_float_scan_accepts_display_rounding() {
+        assert!(scan_exact_matches(
+            ScanValue::F32(123.39999),
+            ScanValue::F32(123.4),
+        ));
+        assert!(!scan_exact_matches(
+            ScanValue::F32(123.39),
+            ScanValue::F32(123.4),
+        ));
     }
 
     #[test]
