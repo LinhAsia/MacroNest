@@ -104,10 +104,12 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
         }
         let error = io::Error::last_os_error();
         attempts += 1;
-        if error.raw_os_error() != Some(ERROR_BAD_LENGTH) || attempts >= 4 {
+        if !matches!(error.raw_os_error(), Some(ERROR_BAD_LENGTH | ERROR_MORE_DATA))
+            || attempts >= 8
+        {
             return Err(error);
         }
-        std::thread::yield_now();
+        std::thread::sleep(std::time::Duration::from_millis(2));
     };
     let mut modules = Vec::new();
     let mut entry = MODULEENTRY32W {
@@ -135,6 +137,7 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
 
 const ERROR_SEM_TIMEOUT: i32 = 121;
 const ERROR_BAD_LENGTH: i32 = 24;
+const ERROR_MORE_DATA: i32 = 234;
 // ponytail: bound runaway debugger traffic; switch to sampled/VEH capture before raising this again.
 const MAX_ACCESS_HITS: usize = 10_000;
 const RESUME_FLAG: u32 = 1 << 16;
