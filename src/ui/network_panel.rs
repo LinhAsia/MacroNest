@@ -44,6 +44,11 @@ struct NetworkEntry {
     secure_tunnel: bool,
 }
 
+enum NetworkEvent {
+    Entry(NetworkEntry),
+    Error(String),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum DetailTab {
     #[default]
@@ -99,10 +104,15 @@ impl NetworkPanelState {
 
     fn drain(&mut self) {
         let Some(proxy) = &self.proxy else { return };
-        while let Ok(mut entry) = proxy.events.try_recv() {
-            entry.id = self.next_id;
-            self.next_id += 1;
-            self.entries.push(entry);
+        while let Ok(event) = proxy.events.try_recv() {
+            match event {
+                NetworkEvent::Entry(mut entry) => {
+                    entry.id = self.next_id;
+                    self.next_id += 1;
+                    self.entries.push(entry);
+                }
+                NetworkEvent::Error(error) => self.status = format!("Proxy error: {error}"),
+            }
         }
         if self.entries.len() > MAX_ENTRIES {
             self.entries.drain(..self.entries.len() - MAX_ENTRIES);
@@ -140,9 +150,9 @@ impl NetworkPanelState {
 
 struct NetworkProxy {
     stop: Arc<AtomicBool>,
-    events: Receiver<NetworkEntry>,
+    events: Receiver<NetworkEvent>,
     thread: Option<JoinHandle<()>>,
-    _system_proxy: SystemProxyGuard,
+    system_proxy: Option<SystemProxyGuard>,
 }
 
 impl NetworkProxy {
@@ -153,7 +163,6 @@ impl NetworkProxy {
         }
         let listener = TcpListener::bind(parsed).map_err(|error| error.to_string())?;
         listener.set_nonblocking(true).map_err(|error| error.to_string())?;
-        let system_proxy = SystemProxyGuard::enable(address, recovery_file)?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let (tx, events) = unbounded();
@@ -163,7 +172,9 @@ impl NetworkProxy {
                     Ok((stream, _)) => {
                         let tx = tx.clone();
                         thread::spawn(move || {
-                            let _ = proxy_connection(stream, tx);
+                            if let Err(error) = proxy_connection(stream, tx.clone()) {
+                                let _ = tx.send(NetworkEvent::Error(error.to_string()));
+                            }
                         });
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -173,7 +184,26 @@ impl NetworkProxy {
                 }
             }
         });
-        Ok(Self { stop, events, thread: Some(thread), _system_proxy: system_proxy })
+        let mut proxy = Self { stop, events, thread: Some(thread), system_proxy: None };
+        proxy.self_check(address)?;
+        proxy.system_proxy = Some(SystemProxyGuard::enable(address, recovery_file)?);
+        Ok(proxy)
+    }
+
+    fn self_check(&self, address: &str) -> Result<(), String> {
+        let proxy = reqwest::Proxy::all(format!("http://{address}")).map_err(|error| error.to_string())?;
+        let response = reqwest::blocking::Client::builder()
+            .proxy(proxy)
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(8))
+            .build().map_err(|error| error.to_string())?
+            .get("https://www.google.com/generate_204")
+            .send().map_err(|error| format!("HTTPS self-check failed: {error}"))?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(format!("HTTPS self-check returned {}", response.status()))
+        }
     }
 }
 
@@ -344,7 +374,7 @@ impl Drop for NetworkProxy {
     }
 }
 
-fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEntry>) -> std::io::Result<()> {
+fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEvent>) -> std::io::Result<()> {
     client.set_read_timeout(Some(Duration::from_secs(10)))?;
     let header = read_header(&mut client)?;
     client.set_read_timeout(None)?;
@@ -364,7 +394,7 @@ fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEntry>) -> std:
 
     if method.eq_ignore_ascii_case("CONNECT") {
         let host = target.clone();
-        events.send(NetworkEntry {
+        events.send(NetworkEvent::Entry(NetworkEntry {
             id: 0,
             time: SystemTime::now(),
             method,
@@ -374,7 +404,7 @@ fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEntry>) -> std:
             body: Vec::new(),
             notes: String::new(),
             secure_tunnel: true,
-        }).ok();
+        })).ok();
         let mut server = TcpStream::connect(&host)?;
         client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
         server.write_all(&header[header_end..])?;
@@ -382,7 +412,7 @@ fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEntry>) -> std:
     } else {
         let (host, origin_target) = http_destination(&target, host_header);
         let body = header[header_end..].to_vec();
-        events.send(NetworkEntry {
+        events.send(NetworkEvent::Entry(NetworkEntry {
             id: 0,
             time: SystemTime::now(),
             method: method.clone(),
@@ -392,7 +422,7 @@ fn proxy_connection(mut client: TcpStream, events: Sender<NetworkEntry>) -> std:
             body,
             notes: String::new(),
             secure_tunnel: false,
-        }).ok();
+        })).ok();
         let address = if host.contains(':') { host.clone() } else { format!("{host}:80") };
         let mut server = TcpStream::connect(address)?;
         let rewritten = rewrite_request(&header, &method, &origin_target, &version);
