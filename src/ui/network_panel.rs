@@ -178,6 +178,13 @@ impl NetworkPanelState {
             Err(error) => format!("Unable to restore proxy: {error}"),
         };
     }
+
+    pub(crate) fn shutdown(&mut self) {
+        self.proxy.take();
+        if self.recovery_file.exists() && SystemProxyGuard::restore_file(&self.recovery_file).is_err() {
+            let _ = set_system_proxy(None, false);
+        }
+    }
 }
 
 struct NetworkProxy {
@@ -297,7 +304,10 @@ impl SystemProxyGuard {
 
 impl Drop for SystemProxyGuard {
     fn drop(&mut self) {
-        let _ = Self::restore_file(&self.recovery_file);
+        if Self::restore_file(&self.recovery_file).is_err() {
+            // Never leave Windows pointing at a proxy process that is about to exit.
+            let _ = set_system_proxy(None, false);
+        }
     }
 }
 
@@ -652,7 +662,7 @@ impl CrosshairApp {
                         || entry.target.to_ascii_lowercase().contains(&filter))
                 }).cloned().collect::<Vec<_>>();
                 let expanded = self.network_panel.expanded_hosts.contains(&host);
-                let arrow = if expanded { "▼" } else { "▶" };
+                let arrow = if expanded { "-" } else { "+" };
                 if ui.add_sized(
                     [ui.available_width(), 24.0],
                     egui::Button::new(format!("{arrow}  {host}  ({})", matching.len())),
@@ -731,9 +741,11 @@ impl CrosshairApp {
                         (ContentTab::Form, "Form"),
                         (ContentTab::Raw, "Raw"),
                     ] {
-                        if ui.selectable_label(self.network_panel.content_tab == tab, label).clicked() {
-                            self.network_panel.content_tab = tab;
-                        }
+                        ui.add_enabled_ui(!entry.secure_tunnel || tab == ContentTab::Headers, |ui| {
+                            if ui.selectable_label(self.network_panel.content_tab == tab, label).clicked() {
+                                self.network_panel.content_tab = tab;
+                            }
+                        });
                     }
                 });
                 ui.separator();
@@ -773,7 +785,7 @@ fn render_request_tree(ui: &mut egui::Ui, tree: &RequestTree, selected_id: Optio
     let mut clicked = None;
     ui.indent(id_path, |ui| {
         for (folder, child) in &tree.folders {
-            egui::CollapsingHeader::new(format!("📁 {folder}"))
+            egui::CollapsingHeader::new(format!("[folder] {folder}"))
                 .id_salt((id_path, folder))
                 .show(ui, |ui| {
                     clicked = clicked.or_else(|| render_request_tree(ui, child, selected_id, &format!("{id_path}/{folder}")));
@@ -808,7 +820,7 @@ fn render_overview(ui: &mut egui::Ui, entry: &NetworkEntry) {
 
 fn render_contents(ui: &mut egui::Ui, entry: &NetworkEntry, tab: ContentTab) {
     if entry.secure_tunnel && tab != ContentTab::Headers {
-        ui.label("Contents are encrypted inside this TLS tunnel.");
+        ui.label("Unavailable: this HTTPS connection is only being tunneled, not decrypted.");
         return;
     }
     match tab {
@@ -823,12 +835,26 @@ fn render_contents(ui: &mut egui::Ui, entry: &NetworkEntry, tab: ContentTab) {
         }
         ContentTab::Text => readonly_text(ui, String::from_utf8_lossy(&entry.body).into_owned()),
         ContentTab::Hex => readonly_text(ui, hex_dump(&entry.body)),
-        ContentTab::Form => render_pairs(ui, String::from_utf8_lossy(&entry.body).split('&').filter_map(split_pair).collect()),
+        ContentTab::Form => render_form(ui, entry),
         ContentTab::Raw => {
             let mut raw = entry.headers.clone();
             raw.push_str(&String::from_utf8_lossy(&entry.body));
             readonly_text(ui, raw);
         }
+    }
+}
+
+fn render_form(ui: &mut egui::Ui, entry: &NetworkEntry) {
+    let content_type = entry.headers.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("content-type").then_some(value.trim().to_ascii_lowercase())
+    }).unwrap_or_default();
+    if content_type.starts_with("application/x-www-form-urlencoded") {
+        render_pairs(ui, String::from_utf8_lossy(&entry.body).split('&').filter_map(split_pair).collect());
+    } else if content_type.starts_with("multipart/form-data") {
+        ui.label("Multipart form body captured; field parsing is not implemented yet.");
+    } else {
+        ui.label("This request is not form data.");
     }
 }
 

@@ -15521,6 +15521,7 @@ impl eframe::App for CrosshairApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.network_panel.shutdown();
         crate::video_recorder::stop_blocking();
         let _ = crate::platform::show_taskbar();
         self.unpin_all_quick_action_windows();
