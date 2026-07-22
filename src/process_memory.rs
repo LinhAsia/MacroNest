@@ -53,6 +53,27 @@ pub enum ScanValueType {
     F64,
 }
 
+#[derive(Clone, Copy)]
+pub struct MemoryScanOptions {
+    pub writable: bool,
+    pub executable: bool,
+    pub copy_on_write: bool,
+    pub active_memory_only: bool,
+    pub alignment: Option<usize>,
+}
+
+impl Default for MemoryScanOptions {
+    fn default() -> Self {
+        Self {
+            writable: true,
+            executable: false,
+            copy_on_write: false,
+            active_memory_only: true,
+            alignment: Some(4),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextEncoding {
     Utf8,
@@ -337,6 +358,79 @@ struct ScanProcess {
 
 unsafe impl Send for ScanProcess {}
 
+pub struct PausedProcess {
+    #[cfg(windows)]
+    threads: Vec<windows_sys::Win32::Foundation::HANDLE>,
+}
+
+impl PausedProcess {
+    #[cfg(windows)]
+    pub fn new(pid: u32) -> io::Result<Self> {
+        use windows_sys::Win32::{
+            Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+            System::{
+                Diagnostics::ToolHelp::{
+                    CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
+                    Thread32Next,
+                },
+                Threading::{OpenThread, SuspendThread, THREAD_SUSPEND_RESUME},
+            },
+        };
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        let mut entry = THREADENTRY32 {
+            dwSize: size_of::<THREADENTRY32>() as u32,
+            ..unsafe { std::mem::zeroed() }
+        };
+        let mut threads = Vec::new();
+        let mut has_entry = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+        while has_entry {
+            if entry.th32OwnerProcessID == pid {
+                let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+                if !thread.is_null() {
+                    if unsafe { SuspendThread(thread) } != u32::MAX {
+                        threads.push(thread);
+                    } else {
+                        unsafe { CloseHandle(thread) };
+                    }
+                }
+            }
+            has_entry = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+        }
+        unsafe { CloseHandle(snapshot) };
+        if threads.is_empty() {
+            Err(io::Error::other("unable to pause any target thread"))
+        } else {
+            Ok(Self { threads })
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn new(_pid: u32) -> io::Result<Self> {
+        Ok(Self {})
+    }
+}
+
+impl Drop for PausedProcess {
+    fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::{
+                Foundation::CloseHandle,
+                System::Threading::ResumeThread,
+            };
+            for thread in self.threads.drain(..) {
+                unsafe {
+                    ResumeThread(thread);
+                    CloseHandle(thread);
+                }
+            }
+        }
+    }
+}
+
 impl Drop for ScanProcess {
     fn drop(&mut self) {
         unsafe { CloseHandle(self.handle) };
@@ -528,7 +622,15 @@ pub fn scan_memory_with_progress(
     result_limit: usize,
     total: Arc<AtomicUsize>,
 ) -> io::Result<Vec<ScanCandidate>> {
-    scan_memory_range_with_progress(pid, exact, None, value_type, result_limit, total)
+    scan_memory_range_with_progress(
+        pid,
+        exact,
+        None,
+        value_type,
+        result_limit,
+        MemoryScanOptions::default(),
+        total,
+    )
 }
 
 pub fn scan_memory_range_with_progress(
@@ -537,11 +639,12 @@ pub fn scan_memory_range_with_progress(
     range: Option<(ScanValue, ScanValue)>,
     value_type: ScanValueType,
     result_limit: usize,
+    options: MemoryScanOptions,
     total: Arc<AtomicUsize>,
 ) -> io::Result<Vec<ScanCandidate>> {
     let result_limit = result_limit.max(1);
     let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(&process)
+    let regions = scan_regions_for(&process, options)
         .into_iter()
         .flat_map(|region| {
             (0..region.size)
@@ -556,10 +659,7 @@ pub fn scan_memory_range_with_progress(
         .iter()
         .map(|region| region.size / value_type.width())
         .fold(0usize, usize::saturating_add);
-    let stride = exact
-        .is_none()
-        .then(|| slots.div_ceil(result_limit).max(1))
-        .unwrap_or(1);
+    let alignment = options.alignment.unwrap_or(1).max(1);
     // ponytail: Memory reads become bandwidth-bound quickly; raise this cap only after profiling.
     // Large unknown scans stay single-owner: merging worker Vecs temporarily doubles peak RAM.
     let worker_count = if exact.is_none() && slots > 10_000_000 {
@@ -592,7 +692,7 @@ pub fn scan_memory_range_with_progress(
         .map(|regions| {
             let total = Arc::clone(&total);
             thread::spawn(move || {
-                scan_region_bucket(pid, regions, exact, range, value_type, stride, result_limit, total)
+                scan_region_bucket(pid, regions, exact, range, value_type, alignment, result_limit, total)
             })
         })
         .collect::<Vec<_>>();
@@ -614,6 +714,7 @@ pub fn scan_text_memory_with_progress(
     case_sensitive: bool,
     null_terminated: bool,
     result_limit: usize,
+    options: MemoryScanOptions,
     total: Arc<AtomicUsize>,
 ) -> io::Result<Vec<TextScanCandidate>> {
     let pattern = encode_scan_text(text, encoding, case_sensitive, null_terminated);
@@ -627,7 +728,7 @@ pub fn scan_text_memory_with_progress(
     let mut found = Vec::new();
     let mut buffer = Vec::new();
     let overlap = pattern.len().saturating_sub(1);
-    'regions: for region in scan_regions_for(&process) {
+    'regions: for region in scan_regions_for(&process, options) {
         let end = region.base.saturating_add(region.size);
         let mut chunk_base = region.base;
         while chunk_base < end {
@@ -945,7 +1046,7 @@ fn scan_exact_matches(current: ScanValue, expected: ScanValue) -> bool {
     }
 }
 
-fn scan_regions_for(process: &ScanProcess) -> Vec<ScanRegion> {
+fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<ScanRegion> {
     let mut regions = Vec::new();
     let mut address = 0usize;
     loop {
@@ -966,12 +1067,30 @@ fn scan_regions_for(process: &ScanProcess) -> Vec<ScanRegion> {
         let Some(next) = base.checked_add(information.region_size) else {
             break;
         };
+        let protection = information.protect & 0xFF;
+        let writable = matches!(protection, PAGE_READWRITE | PAGE_EXECUTE_READWRITE);
+        let executable = matches!(
+            protection,
+            PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY
+        );
+        let copy_on_write = matches!(protection, PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY);
+        let readable = matches!(
+            protection,
+            PAGE_READONLY
+                | PAGE_READWRITE
+                | PAGE_WRITECOPY
+                | PAGE_EXECUTE_READ
+                | PAGE_EXECUTE_READWRITE
+                | PAGE_EXECUTE_WRITECOPY
+        );
         if information.state == MEM_COMMIT
-            && matches!(information.kind, MEM_PRIVATE | MEM_IMAGE)
-            && matches!(
-                information.protect & 0xFF,
-                PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY
-            )
+            && (information.kind == MEM_PRIVATE
+                || (!options.active_memory_only
+                    && matches!(information.kind, MEM_MAPPED | MEM_IMAGE)))
+            && readable
+            && (!options.writable || writable || (options.copy_on_write && copy_on_write))
+            && (options.executable || !executable)
+            && (options.copy_on_write || !copy_on_write)
             && information.protect & PAGE_GUARD == 0
         {
             regions.push(ScanRegion {
@@ -1040,7 +1159,7 @@ fn scan_region_bucket(
     exact: Option<ScanValue>,
     range: Option<(ScanValue, ScanValue)>,
     value_type: ScanValueType,
-    stride: usize,
+    alignment: usize,
     result_limit: usize,
     total: Arc<AtomicUsize>,
 ) -> io::Result<Vec<ScanCandidate>> {
@@ -1048,7 +1167,7 @@ fn scan_region_bucket(
     let mut found = Vec::new();
     let expected = regions
         .iter()
-        .map(|region| region.size / value_type.width() / stride.max(1))
+        .map(|region| region.size / alignment)
         .fold(0usize, usize::saturating_add)
         .min(result_limit);
     found.try_reserve_exact(expected).map_err(|_| {
@@ -1066,7 +1185,7 @@ fn scan_region_bucket(
             buffer.resize(length, 0);
             if let Ok(count) = process.read(chunk_base, &mut buffer) {
                 let width = value_type.width();
-                let step = stride.saturating_mul(width).max(width);
+                let step = alignment.max(1);
                 let chunk_start = found.len();
                 if count >= width {
                     for offset in (0..=count - width).step_by(step) {

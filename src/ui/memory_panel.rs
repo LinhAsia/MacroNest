@@ -18,7 +18,7 @@ use crate::{
         MemoryPointerEntry,
     },
     process_memory::{
-        MemoryRegionInfo, PointerMap, PointerPath, ScanCandidate, ScanComparison, ScanValue,
+        MemoryRegionInfo, MemoryScanOptions, PausedProcess, PointerMap, PointerPath, ScanCandidate, ScanComparison, ScanValue,
         ScanValueType, TextEncoding, TextScanCandidate, capture_pointer_map,
         filter_scan_candidates, filter_text_scan_candidates, query_memory_region,
         read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
@@ -444,6 +444,13 @@ pub(crate) struct MemoryPanelState {
     scan_modules: Vec<(String, usize, usize)>,
     hex: bool,
     result_limit_input: String,
+    scan_writable: bool,
+    scan_executable: bool,
+    scan_copy_on_write: bool,
+    scan_active_memory_only: bool,
+    fast_scan: bool,
+    fast_scan_alignment: String,
+    pause_while_scanning: bool,
     candidates: Vec<ScanCandidate>,
     text_candidates: Vec<TextScanCandidate>,
     selected_results: HashSet<usize>,
@@ -508,6 +515,13 @@ impl Default for MemoryPanelState {
             scan_modules: Vec::new(),
             hex: false,
             result_limit_input: "Unlimited".to_owned(),
+            scan_writable: true,
+            scan_executable: false,
+            scan_copy_on_write: false,
+            scan_active_memory_only: true,
+            fast_scan: true,
+            fast_scan_alignment: "4".to_owned(),
+            pause_while_scanning: false,
             candidates: Vec::new(),
             text_candidates: Vec::new(),
             selected_results: HashSet::new(),
@@ -1344,6 +1358,33 @@ impl CrosshairApp {
                             .desired_width(110.0),
                     );
                 });
+                ui.columns(2, |columns| {
+                    columns[0].checkbox(&mut self.memory_panel.scan_writable, "Writable");
+                    columns[1].checkbox(&mut self.memory_panel.scan_executable, "Executable");
+                    columns[0].checkbox(
+                        &mut self.memory_panel.scan_copy_on_write,
+                        "CopyOnWrite",
+                    );
+                    columns[1].checkbox(
+                        &mut self.memory_panel.scan_active_memory_only,
+                        "Active memory only",
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.memory_panel.fast_scan, "Fast Scan");
+                    ui.add_enabled(
+                        self.memory_panel.fast_scan,
+                        egui::TextEdit::singleline(
+                            &mut self.memory_panel.fast_scan_alignment,
+                        )
+                        .desired_width(42.0),
+                    );
+                    ui.label("Alignment");
+                });
+                ui.checkbox(
+                    &mut self.memory_panel.pause_while_scanning,
+                    "Pause the game while scanning",
+                );
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     ui.add(
@@ -1610,7 +1651,7 @@ impl CrosshairApp {
                                 (
                                     candidate.address,
                                     format_scan_value(current, self.memory_panel.hex),
-                                    "â€”".to_owned(),
+                                    "-".to_owned(),
                                 )
                             };
                         let selected = self.memory_panel.selected_results.contains(&index);
@@ -4728,6 +4769,21 @@ impl CrosshairApp {
         } else {
             result_limit.to_string()
         };
+        let alignment = self
+            .memory_panel
+            .fast_scan_alignment
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(value_type.width())
+            .clamp(1, 4096);
+        self.memory_panel.fast_scan_alignment = alignment.to_string();
+        let scan_options = MemoryScanOptions {
+            writable: self.memory_panel.scan_writable,
+            executable: self.memory_panel.scan_executable,
+            copy_on_write: self.memory_panel.scan_copy_on_write,
+            active_memory_only: self.memory_panel.scan_active_memory_only,
+            alignment: self.memory_panel.fast_scan.then_some(alignment),
+        };
         let candidates = if action.comparison().is_some() && text_encoding.is_none() {
             std::mem::take(&mut self.memory_panel.candidates)
         } else {
@@ -4759,7 +4815,23 @@ impl CrosshairApp {
         let text = self.memory_panel.value_input.clone();
         let case_sensitive = self.memory_panel.text_case_sensitive;
         let null_terminated = self.memory_panel.text_null_terminated;
+        let pause_while_scanning = self.memory_panel.pause_while_scanning;
         thread::spawn(move || {
+            let _pause = if pause_while_scanning {
+                match PausedProcess::new(pid) {
+                    Ok(paused) => Some(paused),
+                    Err(error) => {
+                        let _ = tx.send(ScanJobResult {
+                            pid,
+                            action,
+                            result: Err(format!("Unable to pause target: {error}")),
+                        });
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
             let result = if let Some(encoding) = text_encoding {
                 if action == MemoryScanAction::Exact && !text_candidates.is_empty() {
                     filter_text_scan_candidates(
@@ -4778,6 +4850,7 @@ impl CrosshairApp {
                         case_sensitive,
                         null_terminated,
                         result_limit,
+                        scan_options,
                         progress,
                     )
                 }
@@ -4786,7 +4859,15 @@ impl CrosshairApp {
                 filter_scan_candidates(pid, candidates, value_type, comparison, exact, range)
                     .map(ScanJobCandidates::Numeric)
             } else {
-                scan_memory_range_with_progress(pid, exact, range, value_type, result_limit, progress)
+                scan_memory_range_with_progress(
+                    pid,
+                    exact,
+                    range,
+                    value_type,
+                    result_limit,
+                    scan_options,
+                    progress,
+                )
                     .map(ScanJobCandidates::Numeric)
             }
             .map_err(|error| error.to_string());
