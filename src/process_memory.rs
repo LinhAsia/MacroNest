@@ -302,6 +302,7 @@ pub enum ScanComparison {
     Unchanged,
     Less,
     Greater,
+    Between,
 }
 
 #[derive(Clone, Copy)]
@@ -415,15 +416,22 @@ pub fn read_text_memory(
 ) -> io::Result<String> {
     let bytes = read_memory_bytes(pid, address, byte_len)?;
     if bytes.len() != byte_len {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "partial text read"));
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "partial text read",
+        ));
     }
     Ok(match encoding {
         TextEncoding::Utf8 => {
-            let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+            let end = bytes
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(bytes.len());
             String::from_utf8_lossy(&bytes[..end]).into_owned()
         }
         TextEncoding::Utf16 => {
-            let units = bytes.chunks_exact(2)
+            let units = bytes
+                .chunks_exact(2)
                 .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
                 .take_while(|unit| *unit != 0)
                 .collect::<Vec<_>>();
@@ -467,7 +475,10 @@ pub fn write_text_memory(
     if encoded.len() > capacity {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("text needs {} bytes but this address has {capacity}", encoded.len()),
+            format!(
+                "text needs {} bytes but this address has {capacity}",
+                encoded.len()
+            ),
         ));
     }
     let process = ScanProcess::open(pid, true)?;
@@ -493,6 +504,17 @@ pub fn write_text_memory(
 pub fn scan_memory_with_progress(
     pid: u32,
     exact: Option<ScanValue>,
+    value_type: ScanValueType,
+    result_limit: usize,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<ScanCandidate>> {
+    scan_memory_range_with_progress(pid, exact, None, value_type, result_limit, total)
+}
+
+pub fn scan_memory_range_with_progress(
+    pid: u32,
+    exact: Option<ScanValue>,
+    range: Option<(ScanValue, ScanValue)>,
     value_type: ScanValueType,
     result_limit: usize,
     total: Arc<AtomicUsize>,
@@ -545,7 +567,7 @@ pub fn scan_memory_with_progress(
         .map(|regions| {
             let total = Arc::clone(&total);
             thread::spawn(move || {
-                scan_region_bucket(pid, regions, exact, value_type, stride, result_limit, total)
+                scan_region_bucket(pid, regions, exact, range, value_type, stride, result_limit, total)
             })
         })
         .collect::<Vec<_>>();
@@ -571,7 +593,10 @@ pub fn scan_text_memory_with_progress(
 ) -> io::Result<Vec<TextScanCandidate>> {
     let pattern = encode_scan_text(text, encoding, case_sensitive, null_terminated);
     if pattern.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "text cannot be empty"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "text cannot be empty",
+        ));
     }
     let process = ScanProcess::open(pid, false)?;
     let mut found = Vec::new();
@@ -581,7 +606,11 @@ pub fn scan_text_memory_with_progress(
         let end = region.base.saturating_add(region.size);
         let mut chunk_base = region.base;
         while chunk_base < end {
-            let prefix = if chunk_base == region.base { 0 } else { overlap.min(chunk_base - region.base) };
+            let prefix = if chunk_base == region.base {
+                0
+            } else {
+                overlap.min(chunk_base - region.base)
+            };
             let read_base = chunk_base - prefix;
             let length = (end - read_base).min(SCAN_CHUNK_BYTES + prefix);
             buffer.resize(length, 0);
@@ -594,7 +623,14 @@ pub fn scan_text_memory_with_progress(
                 }
                 let max_start = count.saturating_sub(pattern.len());
                 for offset in 0..=max_start {
-                    if offset < prefix || !text_bytes_equal(&haystack[offset..offset + pattern.len()], &pattern, encoding, case_sensitive) {
+                    if offset < prefix
+                        || !text_bytes_equal(
+                            &haystack[offset..offset + pattern.len()],
+                            &pattern,
+                            encoding,
+                            case_sensitive,
+                        )
+                    {
                         continue;
                     }
                     found.push(TextScanCandidate {
@@ -623,7 +659,10 @@ pub fn filter_text_scan_candidates(
 ) -> io::Result<Vec<TextScanCandidate>> {
     let pattern = encode_scan_text(text, encoding, case_sensitive, null_terminated);
     if pattern.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "text cannot be empty"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "text cannot be empty",
+        ));
     }
     let process = ScanProcess::open(pid, false)?;
     let mut bytes = vec![0; pattern.len()];
@@ -648,13 +687,24 @@ fn encode_scan_text(
     case_sensitive: bool,
     null_terminated: bool,
 ) -> Vec<u8> {
-    let text = if case_sensitive { text.to_owned() } else { text.to_lowercase() };
+    let text = if case_sensitive {
+        text.to_owned()
+    } else {
+        text.to_lowercase()
+    };
     let mut bytes = match encoding {
         TextEncoding::Utf8 => text.into_bytes(),
         TextEncoding::Utf16 => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
     };
     if null_terminated {
-        bytes.extend(std::iter::repeat_n(0, if encoding == TextEncoding::Utf16 { 2 } else { 1 }));
+        bytes.extend(std::iter::repeat_n(
+            0,
+            if encoding == TextEncoding::Utf16 {
+                2
+            } else {
+                1
+            },
+        ));
     }
     bytes
 }
@@ -670,14 +720,19 @@ fn text_bytes_equal(
     }
     match encoding {
         TextEncoding::Utf8 => actual.eq_ignore_ascii_case(expected),
-        TextEncoding::Utf16 => actual
-            .chunks_exact(2)
-            .zip(expected.chunks_exact(2))
-            .all(|(left, right)| {
-                let left = u16::from_le_bytes([left[0], left[1]]);
-                let right = u16::from_le_bytes([right[0], right[1]]);
-                left == right || (left <= 0x7F && right <= 0x7F && (left as u8).eq_ignore_ascii_case(&(right as u8)))
-            }),
+        TextEncoding::Utf16 => {
+            actual
+                .chunks_exact(2)
+                .zip(expected.chunks_exact(2))
+                .all(|(left, right)| {
+                    let left = u16::from_le_bytes([left[0], left[1]]);
+                    let right = u16::from_le_bytes([right[0], right[1]]);
+                    left == right
+                        || (left <= 0x7F
+                            && right <= 0x7F
+                            && (left as u8).eq_ignore_ascii_case(&(right as u8)))
+                })
+        }
     }
 }
 
@@ -686,6 +741,7 @@ pub fn filter_scan_candidates(
     mut candidates: Vec<ScanCandidate>,
     comparison: ScanComparison,
     exact: Option<ScanValue>,
+    range: Option<(ScanValue, ScanValue)>,
 ) -> io::Result<Vec<ScanCandidate>> {
     if candidates.is_empty() {
         return Ok(candidates);
@@ -699,7 +755,7 @@ pub fn filter_scan_candidates(
     let kept = thread::scope(|scope| {
         candidates
             .chunks_mut(chunk_len)
-            .map(|chunk| scope.spawn(move || filter_candidate_slice(pid, chunk, comparison, exact)))
+            .map(|chunk| scope.spawn(move || filter_candidate_slice(pid, chunk, comparison, exact, range)))
             .collect::<Vec<_>>()
             .into_iter()
             .map(|worker| {
@@ -726,6 +782,7 @@ fn filter_candidate_slice(
     candidates: &mut [ScanCandidate],
     comparison: ScanComparison,
     exact: Option<ScanValue>,
+    range: Option<(ScanValue, ScanValue)>,
 ) -> io::Result<usize> {
     let process = ScanProcess::open(pid, false)?;
     let mut page = [0; PAGE_BYTES];
@@ -748,7 +805,12 @@ fn filter_candidate_slice(
                 let Some(current) = value_type.decode(&page[offset..]) else {
                     continue;
                 };
-                if scan_value_matches(comparison, current, candidate.previous, exact) {
+                let matches = if comparison == ScanComparison::Between {
+                    range.is_some_and(|(min, max)| scan_value_between(current, min, max))
+                } else {
+                    scan_value_matches(comparison, current, candidate.previous, exact)
+                };
+                if matches {
                     candidates[write] = ScanCandidate {
                         address: candidate.address,
                         previous: current,
@@ -811,6 +873,7 @@ fn scan_value_matches(
                 ScanComparison::Unchanged => $current == $previous,
                 ScanComparison::Increased => $current > $previous,
                 ScanComparison::Decreased => $current < $previous,
+                ScanComparison::Between => false,
             }
         }};
     }
@@ -950,6 +1013,7 @@ fn scan_region_bucket(
     pid: u32,
     regions: Vec<ScanRegion>,
     exact: Option<ScanValue>,
+    range: Option<(ScanValue, ScanValue)>,
     value_type: ScanValueType,
     stride: usize,
     result_limit: usize,
@@ -967,14 +1031,13 @@ fn scan_region_bucket(
             if let Ok(count) = process.read(chunk_base, &mut buffer) {
                 let width = value_type.width();
                 let step = stride.saturating_mul(width).max(width);
+                let chunk_start = found.len();
                 if count >= width {
                     for offset in (0..=count - width).step_by(step) {
                         let value = value_type.decode(&buffer[offset..]).expect("value width");
-                        if exact.is_none_or(|expected| scan_exact_matches(value, expected)) {
-                            if total.fetch_add(1, Ordering::Relaxed) >= result_limit {
-                                total.fetch_sub(1, Ordering::Relaxed);
-                                break 'regions;
-                            }
+                        if exact.is_none_or(|expected| scan_exact_matches(value, expected))
+                            && range.is_none_or(|(min, max)| scan_value_between(value, min, max))
+                        {
                             found.push(ScanCandidate {
                                 address: chunk_base + offset,
                                 previous: value,
@@ -983,11 +1046,45 @@ fn scan_region_bucket(
                         }
                     }
                 }
+                let chunk_matches = found.len() - chunk_start;
+                if chunk_matches > 0 {
+                    let allowed = claim_result_slots(&total, chunk_matches, result_limit);
+                    found.truncate(chunk_start + allowed);
+                    if allowed < chunk_matches {
+                        break 'regions;
+                    }
+                }
             }
             chunk_base = chunk_base.saturating_add(length);
         }
     }
     Ok(found)
+}
+
+fn scan_value_between(value: ScanValue, min: ScanValue, max: ScanValue) -> bool {
+    macro_rules! between {
+        ($variant:path) => {
+            if let ($variant(value), $variant(min), $variant(max)) = (value, min, max) {
+                return value >= min && value <= max;
+            }
+        };
+    }
+    between!(ScanValue::I8);
+    between!(ScanValue::I16);
+    between!(ScanValue::I32);
+    between!(ScanValue::F32);
+    between!(ScanValue::I64);
+    between!(ScanValue::F64);
+    false
+}
+
+fn claim_result_slots(total: &AtomicUsize, requested: usize, limit: usize) -> usize {
+    let previous = total
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            Some(current.saturating_add(requested).min(limit))
+        })
+        .unwrap_or_else(|current| current);
+    limit.saturating_sub(previous).min(requested)
 }
 
 pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::Result<String> {
@@ -1156,6 +1253,22 @@ unsafe extern "system" {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn result_slots_are_claimed_per_chunk_without_exceeding_limit() {
+        let total = AtomicUsize::new(0);
+        assert_eq!(claim_result_slots(&total, 8, 10), 8);
+        assert_eq!(claim_result_slots(&total, 8, 10), 2);
+        assert_eq!(claim_result_slots(&total, 1, 10), 0);
+        assert_eq!(total.load(Ordering::Relaxed), 10);
+    }
+
+    #[test]
+    fn between_includes_both_bounds() {
+        assert!(scan_value_between(ScanValue::I32(10), ScanValue::I32(10), ScanValue::I32(20)));
+        assert!(scan_value_between(ScanValue::F32(20.0), ScanValue::F32(10.0), ScanValue::F32(20.0)));
+        assert!(!scan_value_between(ScanValue::I32(21), ScanValue::I32(10), ScanValue::I32(20)));
+    }
+
     use super::*;
 
     #[test]

@@ -22,7 +22,7 @@ use crate::{
         ScanValueType, TextEncoding, TextScanCandidate, capture_pointer_map,
         filter_scan_candidates, filter_text_scan_candidates, query_memory_region,
         read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
-        scan_memory_with_progress, scan_pointer_paths, scan_text_memory_with_progress,
+        scan_memory_range_with_progress, scan_pointer_paths, scan_text_memory_with_progress,
         write_scan_value, write_text_memory,
     },
     window_list,
@@ -53,6 +53,7 @@ enum MemoryScanAction {
     Unchanged,
     Less,
     Greater,
+    Between,
 }
 
 impl MemoryScanAction {
@@ -67,6 +68,7 @@ impl MemoryScanAction {
             Self::Unchanged => "Unchanged",
             Self::Less => "Less than",
             Self::Greater => "Greater than",
+            Self::Between => "Between",
         }
     }
 
@@ -79,6 +81,7 @@ impl MemoryScanAction {
             Self::Unchanged => ScanComparison::Unchanged,
             Self::Less => ScanComparison::Less,
             Self::Greater => ScanComparison::Greater,
+            Self::Between => ScanComparison::Between,
             Self::FirstScan | Self::Unknown => return None,
         })
     }
@@ -94,6 +97,7 @@ impl MemoryScanAction {
             Self::Unchanged => "unchanged",
             Self::Less => "less",
             Self::Greater => "greater",
+            Self::Between => "between",
         }
     }
 
@@ -108,6 +112,7 @@ impl MemoryScanAction {
             "unchanged" => Self::Unchanged,
             "less" => Self::Less,
             "greater" => Self::Greater,
+            "between" => Self::Between,
             _ => return None,
         })
     }
@@ -415,6 +420,10 @@ pub(crate) struct MemoryPanelState {
     text_case_sensitive: bool,
     text_null_terminated: bool,
     value_input: String,
+    between_min_input: String,
+    between_max_input: String,
+    between_open: bool,
+    scan_modules: Vec<(String, usize, usize)>,
     hex: bool,
     result_limit_input: String,
     candidates: Vec<ScanCandidate>,
@@ -475,6 +484,10 @@ impl Default for MemoryPanelState {
             text_case_sensitive: true,
             text_null_terminated: false,
             value_input: "0".to_owned(),
+            between_min_input: "0".to_owned(),
+            between_max_input: "100".to_owned(),
+            between_open: false,
+            scan_modules: Vec::new(),
             hex: false,
             result_limit_input: DEFAULT_SCAN_LIMIT.to_string(),
             candidates: Vec::new(),
@@ -562,6 +575,12 @@ impl CrosshairApp {
             self.memory_panel.address_dialog = None;
         }
         self.memory_panel.process_pid = pid;
+        #[cfg(windows)]
+        {
+            self.memory_panel.scan_modules = pid
+                .and_then(|pid| process_modules(pid).ok())
+                .unwrap_or_default();
+        }
         self.memory_panel.status = pid.map_or_else(
             || "Unable to open selected process".to_owned(),
             |pid| format!("Process selected — PID {pid}"),
@@ -1284,6 +1303,20 @@ impl CrosshairApp {
                     self.memory_action_row(ui, actions, false);
                     ui.add_space(5.0);
                 }
+                ui.horizontal(|ui| {
+                    if ui.button("Between").clicked() {
+                        self.memory_panel.between_open = !self.memory_panel.between_open;
+                    }
+                    if self.memory_panel.between_open {
+                        ui.add(egui::TextEdit::singleline(&mut self.memory_panel.between_min_input).desired_width(80.0).hint_text("Min"));
+                        ui.label("to");
+                        ui.add(egui::TextEdit::singleline(&mut self.memory_panel.between_max_input).desired_width(80.0).hint_text("Max"));
+                        if ui.button("Scan").clicked() {
+                            self.start_memory_action(MemoryScanAction::Between);
+                        }
+                    }
+                });
+                ui.add_space(5.0);
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.label("Limit");
@@ -1562,6 +1595,16 @@ impl CrosshairApp {
                                 )
                             };
                         let selected = self.memory_panel.selected_results.contains(&index);
+                        let static_address = self.memory_panel.scan_modules.iter().find_map(
+                            |(name, base, size)| {
+                                (*base..base.saturating_add(*size))
+                                    .contains(&address_value)
+                                    .then(|| format!("{}+{:X}", name, address_value - *base))
+                            },
+                        );
+                        let address_text = static_address
+                            .clone()
+                            .unwrap_or_else(|| format!("0x{:016X}", address_value));
                         let marked = self
                             .memory_panel
                             .marked_result_addresses
@@ -1593,7 +1636,13 @@ impl CrosshairApp {
                                 Self::memory_table_cell(
                                     ui,
                                     result_column_width,
-                                    RichText::new(format!("0x{:016X}", address_value)).monospace(),
+                                    RichText::new(address_text)
+                                        .monospace()
+                                        .color(if static_address.is_some() {
+                                            Color32::from_rgb(80, 210, 120)
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
                                 );
                                 Self::memory_table_cell(
                                     ui,
@@ -4523,7 +4572,24 @@ impl CrosshairApp {
             self.memory_panel.status = "Text scan supports First scan and New value".to_owned();
             return;
         }
-        let exact = if matches!(action, MemoryScanAction::Unknown)
+        let range = if action == MemoryScanAction::Between {
+            let Some(min) = parse_scan_value(&self.memory_panel.between_min_input, value_type, self.memory_panel.hex) else {
+                self.memory_panel.status = "Invalid minimum value".to_owned();
+                return;
+            };
+            let Some(max) = parse_scan_value(&self.memory_panel.between_max_input, value_type, self.memory_panel.hex) else {
+                self.memory_panel.status = "Invalid maximum value".to_owned();
+                return;
+            };
+            if !scan_bounds_are_ordered(min, max) {
+                self.memory_panel.status = "Minimum must not exceed maximum".to_owned();
+                return;
+            }
+            Some((min, max))
+        } else {
+            None
+        };
+        let exact = if matches!(action, MemoryScanAction::Unknown | MemoryScanAction::Between)
             || matches!(
                 action,
                 MemoryScanAction::Increased
@@ -4616,10 +4682,10 @@ impl CrosshairApp {
                 }
                 .map(ScanJobCandidates::Text)
             } else if let Some(comparison) = action.comparison() {
-                filter_scan_candidates(pid, candidates, comparison, exact)
+                filter_scan_candidates(pid, candidates, comparison, exact, range)
                     .map(ScanJobCandidates::Numeric)
             } else {
-                scan_memory_with_progress(pid, exact, value_type, result_limit, progress)
+                scan_memory_range_with_progress(pid, exact, range, value_type, result_limit, progress)
                     .map(ScanJobCandidates::Numeric)
             }
             .map_err(|error| error.to_string());
@@ -5193,6 +5259,23 @@ fn parse_scan_value(text: &str, value_type: ScanValueType, hex: bool) -> Option<
         }
         _ => None,
     }
+}
+
+fn scan_bounds_are_ordered(min: ScanValue, max: ScanValue) -> bool {
+    macro_rules! ordered {
+        ($variant:path) => {
+            if let ($variant(min), $variant(max)) = (min, max) {
+                return min <= max;
+            }
+        };
+    }
+    ordered!(ScanValue::I8);
+    ordered!(ScanValue::I16);
+    ordered!(ScanValue::I32);
+    ordered!(ScanValue::F32);
+    ordered!(ScanValue::I64);
+    ordered!(ScanValue::F64);
+    false
 }
 
 fn parse_hex_signed(text: &str, bits: u32) -> Option<i64> {
