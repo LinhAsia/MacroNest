@@ -1424,7 +1424,7 @@ impl CrosshairApp {
                     ui.add(
                         egui::TextEdit::singleline(&mut self.memory_panel.manual_address)
                             .desired_width(180.0)
-                            .hint_text("address / 0x..."),
+                            .hint_text("address / module+offset [offsets]"),
                     );
                     if ui.button("Add address").clicked() {
                         self.add_manual_memory_address();
@@ -5150,12 +5150,33 @@ impl CrosshairApp {
             self.memory_panel.status = "Select a process".to_owned();
             return;
         };
-        let Some(address) = parse_memory_address(&self.memory_panel.manual_address) else {
-            self.memory_panel.status = "Invalid address".to_owned();
+        let pointer = parse_pointer_expression(&self.memory_panel.manual_address).map(
+            |(module, module_offset, offsets)| PointerSpec {
+                base: 0,
+                module: Some((module, module_offset)),
+                offsets,
+            },
+        );
+        let address = if let Some(pointer) = pointer.as_ref() {
+            match resolve_memory_address(pid, pointer.base, Some(pointer)) {
+                Ok(address) => address,
+                Err(error) => {
+                    self.memory_panel.status = format!("Unable to resolve pointer: {error}");
+                    return;
+                }
+            }
+        } else if let Some(address) = parse_memory_address(&self.memory_panel.manual_address) {
+            address
+        } else {
+            self.memory_panel.status = "Invalid address or pointer expression".to_owned();
             return;
         };
         let value_type = self.memory_panel.value_type;
         let current = read_scan_value(pid, address, value_type).ok();
+        let description = pointer
+            .as_ref()
+            .map(format_pointer_expression)
+            .unwrap_or_default();
         self.memory_panel.saved.push(SavedMemoryAddress {
             address,
             value_type,
@@ -5163,8 +5184,8 @@ impl CrosshairApp {
             text_encoding: None,
             text_byte_len: 0,
             current_text: None,
-            description: String::new(),
-            pointer: None,
+            description,
+            pointer,
             frozen: None,
             saved_to_library: false,
         });
@@ -5978,6 +5999,29 @@ fn parse_memory_address(text: &str) -> Option<usize> {
     Some(address)
 }
 
+fn parse_pointer_expression(text: &str) -> Option<(String, usize, Vec<usize>)> {
+    let text = text.trim();
+    let offsets_start = text.rfind('[')?;
+    let offsets_text = text.get(offsets_start + 1..)?.strip_suffix(']')?;
+    let (module, module_offset) = text[..offsets_start].trim().rsplit_once('+')?;
+    let module = module.trim();
+    if module.is_empty() {
+        return None;
+    }
+    let offsets = offsets_text
+        .split([',', ';'])
+        .map(parse_hex_offset)
+        .collect::<Option<Vec<_>>>()?;
+    if offsets.is_empty() {
+        return None;
+    }
+    Some((
+        module.to_owned(),
+        parse_hex_offset(module_offset)?,
+        offsets,
+    ))
+}
+
 fn parse_memory_address_term(text: &str) -> Option<usize> {
     let (digits, radix) = text
         .strip_prefix("0x")
@@ -6083,6 +6127,18 @@ mod tests {
         assert_eq!(parse_memory_address("0x1000"), Some(4096));
         assert_eq!(parse_memory_address("7FF6_ABCD"), Some(0x7FF6_ABCD));
         assert_eq!(parse_memory_address("0x1000+10-8"), Some(0x1008));
+    }
+
+    #[test]
+    fn parses_pasted_pointer_expression() {
+        assert_eq!(
+            parse_pointer_expression("the-hust-banhmi.exe+6389C60 [258, 180, 354]"),
+            Some((
+                "the-hust-banhmi.exe".to_owned(),
+                0x6389C60,
+                vec![0x258, 0x180, 0x354],
+            ))
+        );
     }
 
     #[test]

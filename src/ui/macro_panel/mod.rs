@@ -141,7 +141,7 @@ impl CrosshairApp {
                 .changed();
             if step.action == MacroAction::WriteMemory {
                 ui.label("=");
-                changed |= ui
+                let response = ui
                     .add_sized(
                         [120.0, 21.0],
                         egui::TextEdit::singleline(&mut step.memory_write_value)
@@ -151,8 +151,15 @@ impl CrosshairApp {
                         language,
                         "Value or expression to write",
                         "Giá trị hoặc biểu thức cần ghi",
-                    ))
-                    .changed();
+                    ));
+                changed |= response.changed();
+                Self::render_variable_suggestions_braced(
+                    ui,
+                    &response,
+                    &mut step.memory_write_value,
+                    &[],
+                    language,
+                );
             } else {
                 ui.label("→");
                 changed |= ui
@@ -20138,11 +20145,14 @@ if supports_move_mouse || show_detection_tuning {
                 Some(index) => index,
                 None => return,
             };
-        let cursor_byte = text
+        let mut cursor_byte = text
             .char_indices()
             .nth(cursor_index)
             .map(|(byte, _)| byte)
             .unwrap_or(text.len());
+        if require_wrap_open && text[..cursor_byte].ends_with('}') {
+            cursor_byte -= '}'.len_utf8();
+        }
         let before_cursor = &text[..cursor_byte];
         let after_cursor = text[cursor_byte..].to_string();
         let mut last_word_start = 0;
