@@ -119,6 +119,7 @@ pub(crate) struct NetworkPanelState {
     pinned: bool,
     proxy: Option<NetworkProxy>,
     recovery_file: PathBuf,
+    recovery_rx: Option<Receiver<String>>,
     ca_dir: PathBuf,
     ca_installed: bool,
     remove_ca_on_exit: bool,
@@ -137,14 +138,20 @@ impl NetworkPanelState {
             .unwrap_or(Path::new("."))
             .join("network-ca");
         let ca_installed = ca_dir.join("ca.cer").exists();
-        let recovery_status = if recovery_file.exists() {
-            match SystemProxyGuard::restore_file(&recovery_file) {
-                Ok(true) => "Recovered Windows proxy from the previous session".to_owned(),
-                Ok(false) => "Stopped".to_owned(),
-                Err(error) => format!("Unable to recover the previous Windows proxy: {error}"),
-            }
+        let (recovery_status, recovery_rx) = if recovery_file.exists() {
+            let (tx, rx) = unbounded();
+            let recovery_path = recovery_file.clone();
+            thread::spawn(move || {
+                let status = match SystemProxyGuard::restore_file(&recovery_path) {
+                    Ok(true) => "Recovered Windows proxy from the previous session".to_owned(),
+                    Ok(false) => "Stopped".to_owned(),
+                    Err(error) => format!("Unable to recover the previous Windows proxy: {error}"),
+                };
+                let _ = tx.send(status);
+            });
+            ("Restoring previous Windows proxy…".to_owned(), Some(rx))
         } else {
-            "Stopped".to_owned()
+            ("Stopped".to_owned(), None)
         };
         Self {
             bind_address: DEFAULT_PROXY_ADDRESS.to_owned(),
@@ -159,6 +166,7 @@ impl NetworkPanelState {
             pinned: false,
             proxy: None,
             recovery_file,
+            recovery_rx,
             ca_dir,
             ca_installed,
             remove_ca_on_exit: false,
@@ -172,6 +180,12 @@ impl NetworkPanelState {
     }
 
     fn drain(&mut self) {
+        if let Some(rx) = &self.recovery_rx
+            && let Ok(status) = rx.try_recv()
+        {
+            self.status = status;
+            self.recovery_rx = None;
+        }
         if let Some(session) = &self.frida_session {
             while let Ok(event) = session.events.try_recv() {
                 match event {
@@ -1197,7 +1211,7 @@ impl CrosshairApp {
                 .map(|process| format!("{} — PID {}", process.name, process.pid))
                 .unwrap_or_else(|| "Select process".to_owned());
             let process_picker = egui::ComboBox::from_id_salt("network-frida-process")
-                .height(480.0)
+                .height(720.0)
                 .selected_text(Self::truncate_window_title(&selected, 52))
                 .show_ui(ui, |ui| {
                     ui.set_min_height(480.0);
@@ -1209,6 +1223,7 @@ impl CrosshairApp {
                             ui,
                             self.network_panel.frida_pid == Some(pid),
                             Self::truncate_window_title(&Self::simplify_window_title(&window.title), 70),
+                            window.process_id,
                             &window.process_path,
                         ).clicked() {
                             self.network_panel.frida_pid = Some(pid);
@@ -1223,7 +1238,7 @@ impl CrosshairApp {
                         ui.label(RichText::new("Path").strong());
                     });
                     let count = self.network_panel.frida_processes.len();
-                    egui::ScrollArea::vertical().max_height(390.0).show_rows(ui, 22.0, count, |ui, rows| {
+                    egui::ScrollArea::vertical().max_height(620.0).show_rows(ui, 22.0, count, |ui, rows| {
                         for index in rows {
                             let process = &mut self.network_panel.frida_processes[index];
                             if process.pid == std::process::id() { continue; }

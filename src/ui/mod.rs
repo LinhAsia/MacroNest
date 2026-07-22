@@ -109,6 +109,8 @@ static LIVE_WINDOW_TARGET_COMBO_WINDOWS: Lazy<Mutex<Option<Vec<WindowInfo>>>> =
     Lazy::new(|| Mutex::new(None));
 static PROCESS_ICON_TEXTURES: Lazy<Mutex<HashMap<String, Option<TextureHandle>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+static PROCESS_PATHS: Lazy<Mutex<HashMap<u32, String>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum UpdateStatus {
@@ -7082,20 +7084,38 @@ impl CrosshairApp {
         texture
     }
 
+    fn lazy_process_path(pid: u32, known_path: &str) -> String {
+        if !known_path.is_empty() { return known_path.to_owned(); }
+        if let Some(path) = PROCESS_PATHS.lock().get(&pid).cloned() { return path; }
+        let path = crate::memory_debugger::debugger::process_path(pid);
+        PROCESS_PATHS.lock().insert(pid, path.clone());
+        path
+    }
+
     fn selectable_process_row(
         ui: &mut egui::Ui,
         selected: bool,
         label: impl Into<egui::WidgetText>,
+        pid: u32,
         path: &str,
     ) -> egui::Response {
-        ui.horizontal(|ui| {
-            if let Some(texture) = Self::process_icon_texture(ui.ctx(), path) {
+        let width = ui.available_width();
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
+        if selected || response.hovered() {
+            let color = if selected { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.hovered.bg_fill };
+            ui.painter().rect_filled(rect, 2.0, color);
+        }
+        let path = Self::lazy_process_path(pid, path);
+        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        row.horizontal(|ui| {
+            if let Some(texture) = Self::process_icon_texture(ui.ctx(), &path) {
                 ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
             } else {
                 ui.label(Self::material_icon_text(0xe30a, 16.0));
             }
-            ui.selectable_label(selected, label)
-        }).inner
+            ui.label(label);
+        });
+        response
     }
 
     fn selectable_process_detail_row(
@@ -7106,10 +7126,13 @@ impl CrosshairApp {
         path: &str,
     ) -> egui::Response {
         let width = ui.available_width();
-        let response = ui.scope(|ui| {
-            ui.set_min_width(width);
-            ui.set_max_width(width);
-            ui.horizontal(|ui| {
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
+        if selected || response.hovered() {
+            let color = if selected { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.hovered.bg_fill };
+            ui.painter().rect_filled(rect, 2.0, color);
+        }
+        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        row.horizontal(|ui| {
                 if let Some(texture) = Self::process_icon_texture(ui.ctx(), path) {
                     ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
                 } else {
@@ -7118,12 +7141,7 @@ impl CrosshairApp {
                 ui.add_sized([190.0, 20.0], egui::Label::new(name).truncate());
                 ui.add_sized([70.0, 20.0], egui::Label::new(pid.to_string()));
                 ui.add_sized([ui.available_width(), 20.0], egui::Label::new(path).truncate());
-            });
-        }).response.interact(egui::Sense::click());
-        if selected || response.hovered() {
-            let color = if selected { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.hovered.bg_fill };
-            ui.painter().rect_filled(response.rect, 2.0, color.linear_multiply(0.35));
-        }
+        });
         response
     }
 
@@ -7195,8 +7213,15 @@ impl CrosshairApp {
 
         if let Some(window) = target.as_deref().and_then(|selector| {
             effective_open_windows.iter().find(|window| window.selector == selector)
-        }) && let Some(texture) = Self::process_icon_texture(ui.ctx(), &window.process_path) {
-            ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
+        }) {
+            let path = if window.process_path.is_empty() {
+                PROCESS_PATHS.lock().get(&window.process_id).cloned().unwrap_or_default()
+            } else {
+                window.process_path.clone()
+            };
+            if let Some(texture) = Self::process_icon_texture(ui.ctx(), &path) {
+                ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
+            }
         }
         let combo_response = egui::ComboBox::from_id_salt((id_source, "target-window-combo"))
             .width(width)
@@ -7232,8 +7257,13 @@ impl CrosshairApp {
                         .find(|window| window.selector == first_selector)
                         .map(|window| window.process_path.as_str())
                         .unwrap_or_default();
+                    let process_id = effective_open_windows
+                        .iter()
+                        .find(|window| window.selector == first_selector)
+                        .map(|window| window.process_id)
+                        .unwrap_or_default();
                     let row_response = Self::selectable_process_row(
-                        ui, main_selected, truncated_row_label, process_path)
+                        ui, main_selected, truncated_row_label, process_id, process_path)
                         .on_hover_text(&title);
 
                     if row_response.hovered() && has_duplicates {
@@ -7316,8 +7346,13 @@ impl CrosshairApp {
                                         .find(|window| window.selector == *selector)
                                         .map(|window| window.process_path.as_str())
                                         .unwrap_or_default();
+                                    let process_id = effective_open_windows
+                                        .iter()
+                                        .find(|window| window.selector == *selector)
+                                        .map(|window| window.process_id)
+                                        .unwrap_or_default();
                                     let child_response = Self::selectable_process_row(
-                                        ui, child_selected, truncated_selector, process_path)
+                                        ui, child_selected, truncated_selector, process_id, process_path)
                                         .on_hover_text(selector);
                                     child_hovered |= child_response.hovered();
                                     if child_response.clicked() {

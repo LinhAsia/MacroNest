@@ -374,9 +374,16 @@ impl Default for MemoryFreezeWorker {
     fn default() -> Self {
         let config = Arc::new(Mutex::new((None, Vec::<FreezeTarget>::new())));
         let stop = Arc::new(AtomicBool::new(false));
-        let worker_config = Arc::clone(&config);
-        let worker_stop = Arc::clone(&stop);
-        let worker = thread::spawn(move || {
+        Self { config, stop, worker: None }
+    }
+}
+
+impl MemoryFreezeWorker {
+    fn ensure_started(&mut self) {
+        if self.worker.is_some() { return; }
+        let worker_config = Arc::clone(&self.config);
+        let worker_stop = Arc::clone(&self.stop);
+        self.worker = Some(thread::spawn(move || {
             while !worker_stop.load(Ordering::Acquire) {
                 let (pid, targets) = worker_config
                     .lock()
@@ -392,12 +399,7 @@ impl Default for MemoryFreezeWorker {
                 }
                 thread::sleep(Duration::from_millis(if pid.is_some() { 25 } else { 100 }));
             }
-        });
-        Self {
-            config,
-            stop,
-            worker: Some(worker),
-        }
+        }));
     }
 }
 
@@ -1103,7 +1105,7 @@ impl CrosshairApp {
                             }
                             egui::ComboBox::from_id_salt("memory-process")
                                 .width(ui.available_width())
-                                .height(480.0)
+                                .height(720.0)
                                 .selected_text(Self::truncate_window_title(&process_label, 52))
                                 .show_ui(ui, |ui| {
                                     ui.label(RichText::new("Window processes (grouped)").strong());
@@ -1117,6 +1119,7 @@ impl CrosshairApp {
                                                     &Self::simplify_window_title(&window.title),
                                                     70,
                                                 ),
+                                                window.process_id,
                                                 &window.process_path,
                                             )
                                             .clicked()
@@ -1166,7 +1169,7 @@ impl CrosshairApp {
                                             ui.label(RichText::new("Path").strong());
                                         });
                                         let count = self.memory_panel.process_choices.len();
-                                        egui::ScrollArea::vertical().max_height(390.0).show_rows(ui, 22.0, count, |ui, rows| {
+                                        egui::ScrollArea::vertical().max_height(620.0).show_rows(ui, 22.0, count, |ui, rows| {
                                             for index in rows {
                                                 let process = &mut self.memory_panel.process_choices[index];
                                                 if process.path.is_empty() {
@@ -1531,13 +1534,9 @@ impl CrosshairApp {
                     });
                 });
             }
-            let result_column_width =
-                ((ui.available_width() - if pinned { 0.0 } else { 25.0 }) / 3.0).max(80.0);
+            let result_column_width = (ui.available_width() / 3.0).max(80.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                if !pinned {
-                    ui.add_space(22.0);
-                }
                 Self::memory_table_cell(ui, result_column_width, RichText::new("Address").strong());
                 Self::memory_table_cell(ui, result_column_width, RichText::new("Current").strong());
                 Self::memory_table_cell(
@@ -1604,7 +1603,7 @@ impl CrosshairApp {
                         );
                         let address_text = static_address
                             .clone()
-                            .unwrap_or_else(|| format!("0x{:016X}", address_value));
+                            .unwrap_or_else(|| format!("{:X}", address_value));
                         let marked = self
                             .memory_panel
                             .marked_result_addresses
@@ -1626,13 +1625,6 @@ impl CrosshairApp {
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
-                                if !pinned {
-                                    ui.add_space(3.0);
-                                    let mut checked = selected;
-                                    if ui.checkbox(&mut checked, "").changed() {
-                                        self.select_memory_result(index, checked, ui);
-                                    }
-                                }
                                 Self::memory_table_cell(
                                     ui,
                                     result_column_width,
@@ -1875,10 +1867,9 @@ impl CrosshairApp {
                 {
                     self.delete_selected_saved_memory();
                 }
-                let header_column_width = ((ui.available_width() - 42.0) / 4.0).max(80.0);
+                let header_column_width = ((ui.available_width() - 21.0) / 4.0).max(80.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.add_space(21.0);
                     Self::memory_table_cell(
                         ui,
                         header_column_width,
@@ -1926,9 +1917,8 @@ impl CrosshairApp {
                             let mut save_to_library = false;
                             let mut persist_pointer_changes = false;
                             let mut row_hits = Vec::new();
-                            let mut checkbox_changed = false;
                             let row_width = ui.available_width();
-                            let column_width = ((row_width - 42.0) / 4.0).max(80.0);
+                            let column_width = ((row_width - 21.0) / 4.0).max(80.0);
                             let full_row_rect = egui::Rect::from_min_size(
                                 ui.next_widget_position(),
                                 vec2(row_width, row_height),
@@ -1956,25 +1946,11 @@ impl CrosshairApp {
                                     ui.spacing_mut().item_spacing.x = 0.0;
                                     ui.set_width(row_width);
                                     ui.add_space(3.0);
-                                    let mut checked = selected;
-                                    let checked_response = ui.add_sized(
-                                        [18.0, 18.0],
-                                        egui::Checkbox::without_text(&mut checked),
-                                    );
-                                    row_hits.push(checked_response.clone());
-                                    if checked_response.changed() {
-                                        checkbox_changed = true;
-                                        if checked {
-                                            self.memory_panel.selected_saved.insert(index);
-                                        } else {
-                                            self.memory_panel.selected_saved.remove(&index);
-                                        }
-                                    }
                                     let address_response = Self::memory_label_cell(
                                         ui,
                                         column_width,
                                         row_height,
-                                        egui::Label::new(format!("0x{:016X}", saved.address))
+                                        egui::Label::new(format!("{:X}", saved.address))
                                             .selectable(false)
                                             .sense(Sense::hover()),
                                     );
@@ -2105,7 +2081,7 @@ impl CrosshairApp {
                             }) && let Some(pointer) = ui.ctx().pointer_latest_pos()
                                 && full_row_rect.contains(pointer)
                             {
-                                let column = ((pointer.x - full_row_rect.left() - 21.0)
+                                let column = ((pointer.x - full_row_rect.left() - 3.0)
                                     / column_width)
                                     .floor() as isize;
                                 let now = Instant::now();
@@ -2129,12 +2105,11 @@ impl CrosshairApp {
                                     }
                                 }
                             }
-                            if row_response.clicked() || checkbox_changed {
+                            if row_response.clicked() {
                                 self.memory_panel.saved_list_active = true;
                             }
                             if row_response.clicked()
                                 && !row_response.double_clicked()
-                                && !checkbox_changed
                             {
                                 self.select_saved_memory_row(index, selected, ui);
                             }
@@ -4904,6 +4879,9 @@ impl CrosshairApp {
                 })
             })
             .collect::<Vec<_>>();
+        if !targets.is_empty() {
+            self.memory_panel.freeze_worker.ensure_started();
+        }
         if let Ok(mut config) = self.memory_panel.freeze_worker.config.lock() {
             config.0 = (!targets.is_empty())
                 .then_some(self.memory_panel.process_pid)

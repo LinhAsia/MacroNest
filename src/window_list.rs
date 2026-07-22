@@ -23,7 +23,7 @@ mod windows_impl {
             UI::Shell::{SHFILEINFOW, SHGetFileInfoW, SHGFI_ICON, SHGFI_SMALLICON},
             Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
         },
-        core::BOOL,
+        core::{BOOL, PCWSTR},
     };
 
     use anyhow::Context;
@@ -288,7 +288,7 @@ mod windows_impl {
                 selector: window_selector(hwnd, &title),
                 title,
                 process_id,
-                process_path: crate::memory_debugger::debugger::process_path(process_id),
+                process_path: String::new(),
             });
         }
         true.into()
