@@ -32,7 +32,7 @@ use crate::{
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, WatchEvent, WriteWatch, disassemble_from,
     instruction_writes_memory, list_process_details, module_offset_for_address, process_modules,
-    resolve_module_offset, ProcessInfo,
+    process_pointer_width, resolve_module_offset, ProcessInfo,
 };
 
 use super::CrosshairApp;
@@ -216,7 +216,7 @@ enum MemoryDisplayType {
     Double,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StructureElementType {
     Byte,
     I16,
@@ -245,20 +245,23 @@ impl StructureElementType {
             .unwrap()
     }
 
-    fn width(self) -> usize {
+    fn width(self, pointer_width: usize) -> usize {
         match self {
             Self::Byte => 1,
             Self::I16 => 2,
             Self::I32 | Self::Float => 4,
-            Self::I64 | Self::Double | Self::Pointer => 8,
+            Self::I64 | Self::Double => 8,
+            Self::Pointer => pointer_width,
         }
     }
 
-    fn scan_type(self) -> ScanValueType {
+    fn scan_type(self, pointer_width: usize) -> ScanValueType {
         match self {
             Self::Float => ScanValueType::F32,
             Self::Double => ScanValueType::F64,
-            Self::I64 | Self::Pointer => ScanValueType::I64,
+            Self::I64 => ScanValueType::I64,
+            Self::Pointer if pointer_width == 4 => ScanValueType::I32,
+            Self::Pointer => ScanValueType::I64,
             Self::Byte => ScanValueType::I8,
             Self::I16 => ScanValueType::I16,
             Self::I32 => ScanValueType::I32,
@@ -266,9 +269,18 @@ impl StructureElementType {
     }
 }
 
+#[derive(Clone)]
 struct StructureElement {
     offset: usize,
     value_type: StructureElementType,
+    name: String,
+}
+
+#[derive(Clone)]
+struct StructureClass {
+    name: String,
+    address: usize,
+    elements: Vec<StructureElement>,
 }
 
 struct MemoryViewDialog {
@@ -279,6 +291,10 @@ struct MemoryViewDialog {
     pinned: bool,
     elements: Vec<StructureElement>,
     pending_add: Option<(usize, ScanValueType)>,
+    pointer_width: usize,
+    previous_bytes: Vec<u8>,
+    classes: Vec<StructureClass>,
+    selected_class: usize,
 }
 
 #[cfg(windows)]
@@ -1338,6 +1354,9 @@ impl CrosshairApp {
                     if ui.button("Add address").clicked() {
                         self.add_manual_memory_address();
                     }
+                    if ui.button("View class").clicked() {
+                        self.open_manual_structure_view();
+                    }
                 });
                 if let Some(action) = self.memory_panel.capturing_hotkey {
                     ui.label(
@@ -2179,6 +2198,10 @@ impl CrosshairApp {
                                         pinned: true,
                                         elements: default_structure_elements(),
                                         pending_add: None,
+                                        pointer_width: self.memory_panel.process_pid.and_then(|pid| process_pointer_width(pid).ok()).unwrap_or(8),
+                                        previous_bytes: Vec::new(),
+                                        classes: vec![StructureClass { name: "Class_0".to_owned(), address: saved.address, elements: default_structure_elements() }],
+                                        selected_class: 0,
                                     });
                                     ui.close();
                                 }
@@ -2191,6 +2214,10 @@ impl CrosshairApp {
                                         pinned: true,
                                         elements: default_structure_elements(),
                                         pending_add: None,
+                                        pointer_width: self.memory_panel.process_pid.and_then(|pid| process_pointer_width(pid).ok()).unwrap_or(8),
+                                        previous_bytes: Vec::new(),
+                                        classes: vec![StructureClass { name: "Class_0".to_owned(), address: saved.address, elements: default_structure_elements() }],
+                                        selected_class: 0,
                                     });
                                     ui.close();
                                 }
@@ -4265,14 +4292,52 @@ impl CrosshairApp {
                 ui.separator();
             }
         }
-        egui::ScrollArea::both().show(ui, |ui| match dialog.kind {
+        match dialog.kind {
             MemoryViewKind::Bytes => {
-                Self::render_memory_region_grid(ui, dialog, bytes);
+                egui::ScrollArea::both().show(ui, |ui| Self::render_memory_region_grid(ui, dialog, bytes));
             }
             MemoryViewKind::Structure => {
-                Self::render_structure_elements(ui, dialog, bytes);
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(150.0);
+                        ui.label(RichText::new("Classes").strong());
+                        let classes = dialog.classes.iter().map(|class| class.name.clone()).collect::<Vec<_>>();
+                        for (index, name) in classes.into_iter().enumerate() {
+                            if ui.selectable_label(dialog.selected_class == index, name).clicked() {
+                                if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
+                                    active.address = dialog.address;
+                                    active.elements = dialog.elements.clone();
+                                }
+                                dialog.selected_class = index;
+                                if let Some(class) = dialog.classes.get(index).cloned() {
+                                    dialog.address = class.address;
+                                    dialog.elements = class.elements;
+                                    dialog.previous_bytes.clear();
+                                }
+                            }
+                        }
+                    });
+                    ui.separator();
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("Auto dissect").clicked() {
+                                dialog.elements = auto_structure_elements(bytes, dialog.pointer_width);
+                            }
+                            ui.label(format!("{}-bit pointers", dialog.pointer_width * 8));
+                            if let Some(class) = dialog.classes.get_mut(dialog.selected_class) {
+                                ui.add(egui::TextEdit::singleline(&mut class.name).desired_width(140.0).hint_text("Class name"));
+                            }
+                        });
+                        egui::ScrollArea::both().show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes));
+                    });
+                });
+                if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
+                    active.address = dialog.address;
+                    active.elements = dialog.elements.clone();
+                }
+                dialog.previous_bytes = bytes.to_vec();
             }
-        });
+        }
     }
 
     fn render_memory_region_grid(ui: &mut egui::Ui, dialog: &mut MemoryViewDialog, bytes: &[u8]) {
@@ -4353,30 +4418,43 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             Self::memory_view_cell(ui, 72.0, "Offset");
             Self::memory_view_cell(ui, 110.0, "Type");
+            Self::memory_view_cell(ui, 140.0, "Field");
             Self::memory_view_cell(ui, 152.0, "Address");
-            Self::memory_view_cell(ui, 260.0, "Value");
+            Self::memory_view_cell(ui, 220.0, "Value");
         });
         ui.separator();
+        let mut open_pointer_class = None;
         for element in &mut dialog.elements {
-            let width = element.value_type.width();
+            let width = element.value_type.width(dialog.pointer_width);
             let Some(raw) = bytes.get(element.offset..element.offset.saturating_add(width)) else {
                 continue;
             };
+            let changed = dialog.previous_bytes.get(element.offset..element.offset.saturating_add(width)).is_some_and(|previous| previous != raw);
             let element_address = dialog.address.saturating_add(element.offset);
             let mut add_request = None;
             let row = ui
                 .horizontal(|ui| {
                     Self::memory_view_cell(ui, 72.0, &format!("+{:04X}", element.offset));
                     Self::memory_view_cell(ui, 110.0, element.value_type.label());
+                    ui.add_sized([140.0, 18.0], egui::TextEdit::singleline(&mut element.name).hint_text("field"));
                     let address_response =
                         Self::memory_view_cell(ui, 152.0, &format!("{element_address:X}"));
-                    Self::memory_view_cell(
+                    Self::memory_label_cell(
                         ui,
-                        260.0,
-                        &format_structure_value(raw, element.value_type),
+                        220.0,
+                        18.0,
+                        egui::Label::new(
+                            RichText::new(format_structure_value(raw, element.value_type))
+                                .monospace()
+                                .color(if changed { Color32::from_rgb(255, 170, 70) } else { ui.visuals().text_color() }),
+                        ).selectable(true),
                     );
                     if address_response.double_clicked() {
-                        add_request = Some((element_address, element.value_type.scan_type()));
+                        if element.value_type == StructureElementType::Pointer {
+                            open_pointer_class = decode_pointer(raw);
+                        } else {
+                            add_request = Some((element_address, element.value_type.scan_type(dialog.pointer_width)));
+                        }
                     }
                 })
                 .response;
@@ -4403,6 +4481,20 @@ impl CrosshairApp {
             if add_request.is_some() {
                 dialog.pending_add = add_request;
             }
+        }
+        if let Some(address) = open_pointer_class.filter(|address| *address != 0) {
+            let index = dialog.classes.iter().position(|class| class.address == address).unwrap_or_else(|| {
+                dialog.classes.push(StructureClass {
+                    name: format!("Class_{address:X}"),
+                    address,
+                    elements: default_structure_elements(),
+                });
+                dialog.classes.len() - 1
+            });
+            dialog.selected_class = index;
+            dialog.address = address;
+            dialog.elements = dialog.classes[index].elements.clone();
+            dialog.previous_bytes.clear();
         }
     }
 
@@ -4820,6 +4912,31 @@ impl CrosshairApp {
             saved_to_library: false,
         });
         self.memory_panel.manual_address.clear();
+    }
+
+    fn open_manual_structure_view(&mut self) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process".to_owned();
+            return;
+        };
+        let Some(address) = parse_memory_address(&self.memory_panel.manual_address) else {
+            self.memory_panel.status = "Invalid address".to_owned();
+            return;
+        };
+        let elements = default_structure_elements();
+        self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+            address,
+            kind: MemoryViewKind::Structure,
+            display_type: MemoryDisplayType::ByteHex,
+            relative_addresses: true,
+            pinned: true,
+            elements: elements.clone(),
+            pending_add: None,
+            pointer_width: process_pointer_width(pid).unwrap_or(8),
+            previous_bytes: Vec::new(),
+            classes: vec![StructureClass { name: "Class_0".to_owned(), address, elements }],
+            selected_class: 0,
+        });
     }
 
     fn refresh_memory_values(&mut self) {
@@ -5307,8 +5424,42 @@ fn default_structure_elements() -> Vec<StructureElement> {
         .map(|offset| StructureElement {
             offset,
             value_type: StructureElementType::I32,
+            name: format!("field_{offset:04X}"),
         })
         .collect()
+}
+
+fn auto_structure_elements(bytes: &[u8], pointer_width: usize) -> Vec<StructureElement> {
+    let step = 4;
+    (0..bytes.len())
+        .step_by(step)
+        .map(|offset| {
+            let pointer = bytes
+                .get(offset..offset.saturating_add(pointer_width))
+                .and_then(decode_pointer);
+            let value_type = if pointer.is_some_and(|value| {
+                value >= 0x1_0000 && value % pointer_width == 0
+            }) {
+                StructureElementType::Pointer
+            } else if bytes.get(offset..offset + 4).is_some_and(|raw| {
+                let value = f32::from_le_bytes(raw.try_into().unwrap());
+                value.is_normal() && value.abs() <= 1_000_000.0
+            }) {
+                StructureElementType::Float
+            } else {
+                StructureElementType::I32
+            };
+            StructureElement { offset, value_type, name: format!("field_{offset:04X}") }
+        })
+        .collect()
+}
+
+fn decode_pointer(bytes: &[u8]) -> Option<usize> {
+    match bytes.len() {
+        4 => Some(u32::from_le_bytes(bytes.try_into().ok()?) as usize),
+        8 => Some(u64::from_le_bytes(bytes.try_into().ok()?) as usize),
+        _ => None,
+    }
 }
 
 fn format_structure_value(bytes: &[u8], value_type: StructureElementType) -> String {
@@ -5324,7 +5475,7 @@ fn format_structure_value(bytes: &[u8], value_type: StructureElementType) -> Str
             format_compact_float(f64::from_le_bytes(bytes.try_into().unwrap()), 10)
         }
         StructureElementType::Pointer => {
-            format!("P->0x{:X}", u64::from_le_bytes(bytes.try_into().unwrap()))
+            decode_pointer(bytes).map_or_else(|| "P->?".to_owned(), |value| format!("P->{value:X}"))
         }
     }
 }
@@ -5587,6 +5738,21 @@ mod tests {
         assert_eq!(parse_memory_address("0x1000"), Some(4096));
         assert_eq!(parse_memory_address("7FF6_ABCD"), Some(0x7FF6_ABCD));
         assert_eq!(parse_memory_address("0x1000+10-8"), Some(0x1008));
+    }
+
+    #[test]
+    fn decodes_x86_and_x64_class_pointers() {
+        assert_eq!(decode_pointer(&0x1234_5678u32.to_le_bytes()), Some(0x1234_5678));
+        assert_eq!(decode_pointer(&0x1234_5678_9ABC_DEF0u64.to_le_bytes()), Some(0x1234_5678_9ABC_DEF0));
+    }
+
+    #[test]
+    fn auto_dissect_recognizes_aligned_x86_pointer() {
+        let mut bytes = vec![0; 8];
+        bytes[..4].copy_from_slice(&0x0040_1000u32.to_le_bytes());
+        let elements = auto_structure_elements(&bytes, 4);
+        assert_eq!(elements[0].value_type, StructureElementType::Pointer);
+        assert_eq!(elements[0].value_type.width(4), 4);
     }
 
     #[test]

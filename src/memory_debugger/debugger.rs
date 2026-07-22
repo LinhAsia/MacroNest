@@ -400,6 +400,13 @@ fn target_architecture(
     }
 }
 
+pub fn process_pointer_width(pid: u32) -> io::Result<usize> {
+    Ok(match target_architecture(pid, MemoryDebuggerArchitecture::Auto)? {
+        TargetArchitecture::X86 => 4,
+        TargetArchitecture::X64 => 8,
+    })
+}
+
 fn watch_loop<F>(
     pid: u32,
     kind: WatchKind,
