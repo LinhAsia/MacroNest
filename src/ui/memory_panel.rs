@@ -185,6 +185,13 @@ struct DeepPointerDialog {
     filter: String,
     exe_only: bool,
     display_type: ScanValueType,
+    resolved_rows: HashMap<usize, DeepPointerResolvedRow>,
+}
+
+struct DeepPointerResolvedRow {
+    address: Option<usize>,
+    value: Option<ScanValue>,
+    updated_at: Instant,
 }
 
 struct AddressDialog {
@@ -438,6 +445,7 @@ impl Drop for MemoryFreezeWorker {
 pub(crate) struct MemoryPanelState {
     process_selector: String,
     process_pid: Option<u32>,
+    last_process_liveness_check: Instant,
     #[cfg(windows)]
     process_choices: Vec<ProcessInfo>,
     value_type: ScanValueType,
@@ -512,6 +520,7 @@ impl Default for MemoryPanelState {
         Self {
             process_selector: String::new(),
             process_pid: None,
+            last_process_liveness_check: Instant::now() - Duration::from_secs(2),
             #[cfg(windows)]
             process_choices: Vec::new(),
             value_type: ScanValueType::I32,
@@ -1112,6 +1121,17 @@ impl CrosshairApp {
     }
 
     fn render_memory_scan_controls(&mut self, ui: &mut egui::Ui) {
+        if self.memory_panel.last_process_liveness_check.elapsed() >= Duration::from_secs(1) {
+            self.memory_panel.last_process_liveness_check = Instant::now();
+            if self
+                .memory_panel
+                .process_pid
+                .is_some_and(|pid| process_pointer_width(pid).is_err())
+            {
+                self.select_memory_process(String::new(), None, ui.ctx());
+                self.memory_panel.status = "Target process exited".to_owned();
+            }
+        }
         let size = ui.available_size();
         Frame::group(ui.style())
             .inner_margin(egui::Margin::same(8))
@@ -1685,7 +1705,7 @@ impl CrosshairApp {
                         );
                         let address_text = static_address
                             .clone()
-                            .unwrap_or_else(|| format!("{:X}", address_value));
+                            .unwrap_or_else(|| format_memory_address(address_value));
                         let marked = self
                             .memory_panel
                             .marked_result_addresses
@@ -2084,7 +2104,7 @@ impl CrosshairApp {
                                         ui,
                                         column_width,
                                         row_height,
-                                        egui::Label::new(format!("{:X}", saved.address))
+                                        egui::Label::new(format_memory_address(saved.address))
                                             .selectable(false)
                                             .sense(Sense::hover()),
                                     );
@@ -2376,7 +2396,7 @@ impl CrosshairApp {
                                     }
                                     entry.saved_to_library = true;
                                     if entry.description.is_empty() {
-                                        entry.description = format!("0x{:X}", entry.address);
+                                        entry.description = format_prefixed_memory_address(entry.address);
                                     }
                                     saved_count += 1;
                                 }
@@ -2386,10 +2406,10 @@ impl CrosshairApp {
                             if open_address {
                                 let (address, offsets, pointer) =
                                     saved.pointer.as_ref().map_or_else(
-                                        || (format!("0x{:X}", saved.address), String::new(), false),
+                                        || (format_prefixed_memory_address(saved.address), String::new(), false),
                                         |spec| {
                                             (
-                                                format!("0x{:X}", spec.base),
+                                                format_prefixed_memory_address(spec.base),
                                                 spec.offsets
                                                     .iter()
                                                     .map(|offset| format!("{:X}", offset))
@@ -2535,7 +2555,7 @@ impl CrosshairApp {
                                         let address = if entry.module.is_empty() {
                                             entry.absolute_address.map_or_else(
                                                 || "Invalid address".to_owned(),
-                                                |address| format!("0x{address:X}"),
+                                                format_prefixed_memory_address,
                                             )
                                         } else {
                                             format!(
@@ -2861,6 +2881,7 @@ impl CrosshairApp {
                         filter: String::new(),
                         exe_only: false,
                         display_type: saved.value_type,
+                        resolved_rows: HashMap::new(),
                     });
                 }
                 return;
@@ -2898,6 +2919,7 @@ impl CrosshairApp {
             dialog.rx = Some(rx);
             dialog.progress = progress;
             dialog.candidates.clear();
+            dialog.resolved_rows.clear();
             dialog.selected.clear();
             dialog.selection_anchor = None;
         } else {
@@ -2920,6 +2942,7 @@ impl CrosshairApp {
                 filter: String::new(),
                 exe_only: false,
                 display_type: saved.value_type,
+                resolved_rows: HashMap::new(),
             });
         }
     }
@@ -3065,7 +3088,7 @@ impl CrosshairApp {
                         );
                         let address = candidate
                             .resolved_address
-                            .map_or_else(|| "—".to_owned(), |address| format!("0x{address:X}"));
+                            .map_or_else(|| "—".to_owned(), format_prefixed_memory_address);
                         let value = candidate.observed_value.map_or_else(
                             || "—".to_owned(),
                             |value| editable_scan_value(value, false),
@@ -3148,6 +3171,7 @@ impl CrosshairApp {
                 }
                 DeepPointerJobResult::Compared(Ok(paths)) => {
                     dialog.candidates = paths;
+                    dialog.resolved_rows.clear();
                     dialog.selected.clear();
                     dialog.selection_anchor = None;
                     dialog.status = format!(
@@ -3164,6 +3188,7 @@ impl CrosshairApp {
         let mut open = true;
         let mut clear = false;
         let mut add = false;
+        let mut add_one = None;
         let title = "Deep pointer scan — map comparison";
         let builder = egui::ViewportBuilder::default()
             .with_title(title)
@@ -3281,35 +3306,6 @@ impl CrosshairApp {
                                     .map(|offset| format!("{offset:X}"))
                                     .collect::<Vec<_>>()
                                     .join(" → ");
-                                let resolved = self.memory_panel.process_pid.and_then(|pid| {
-                                    let base = resolve_module_offset(
-                                        pid,
-                                        &path.module,
-                                        path.module_offset,
-                                    )
-                                    .ok()?;
-                                    let pointer = PointerSpec {
-                                        base,
-                                        module: Some((path.module.clone(), path.module_offset)),
-                                        offsets: path.offsets.clone(),
-                                    };
-                                    resolve_memory_address(pid, base, Some(&pointer)).ok()
-                                });
-                                let address_text = resolved.map_or_else(
-                                    || "—".to_owned(),
-                                    |address| format!("0x{address:X}"),
-                                );
-                                let value_text = self
-                                    .memory_panel
-                                    .process_pid
-                                    .zip(resolved)
-                                    .and_then(|(pid, address)| {
-                                        read_scan_value(pid, address, dialog.display_type).ok()
-                                    })
-                                    .map_or_else(
-                                        || "—".to_owned(),
-                                        |value| editable_scan_value(value, false),
-                                    );
                                 let row_rect = egui::Rect::from_min_size(
                                     ui.next_widget_position(),
                                     vec2(
@@ -3318,6 +3314,56 @@ impl CrosshairApp {
                                         24.0,
                                     ),
                                 );
+                                let stale = dialog.resolved_rows.get(&index).is_none_or(|row| {
+                                    row.updated_at.elapsed() >= Duration::from_millis(750)
+                                });
+                                if ui.is_rect_visible(row_rect) && stale {
+                                    let resolved = self.memory_panel.process_pid.and_then(|pid| {
+                                        let base = resolve_module_offset(
+                                            pid,
+                                            &path.module,
+                                            path.module_offset,
+                                        )
+                                        .ok()?;
+                                        let pointer = PointerSpec {
+                                            base,
+                                            module: Some((path.module.clone(), path.module_offset)),
+                                            offsets: path.offsets.clone(),
+                                        };
+                                        resolve_memory_address(pid, base, Some(&pointer)).ok()
+                                    });
+                                    let value = self
+                                        .memory_panel
+                                        .process_pid
+                                        .zip(resolved)
+                                        .and_then(|(pid, address)| {
+                                            read_scan_value(pid, address, dialog.display_type).ok()
+                                        });
+                                    dialog.resolved_rows.insert(
+                                        index,
+                                        DeepPointerResolvedRow {
+                                            address: resolved,
+                                            value,
+                                            updated_at: Instant::now(),
+                                        },
+                                    );
+                                }
+                                let resolved = dialog
+                                    .resolved_rows
+                                    .get(&index)
+                                    .and_then(|row| row.address);
+                                let address_text = resolved.map_or_else(
+                                    || "—".to_owned(),
+                                    format_prefixed_memory_address,
+                                );
+                                let value_text = dialog
+                                    .resolved_rows
+                                    .get(&index)
+                                    .and_then(|row| row.value)
+                                    .map_or_else(
+                                        || "—".to_owned(),
+                                        |value| editable_scan_value(value, false),
+                                    );
                                 let response = ui.interact(
                                     row_rect,
                                     ui.id().with(("deep-pointer-row", index)),
@@ -3385,6 +3431,17 @@ impl CrosshairApp {
                                     }
                                 }
                                 response.context_menu(|ui| {
+                                    if ui
+                                        .add_enabled(
+                                            resolved.is_some(),
+                                            Button::new("Add to Address list"),
+                                        )
+                                        .clicked()
+                                    {
+                                        add_one = Some(index);
+                                        ui.close();
+                                    }
+                                    ui.separator();
                                     ui.label(RichText::new("Display type").strong());
                                     for value_type in [
                                         ScanValueType::I8,
@@ -3402,6 +3459,7 @@ impl CrosshairApp {
                                             )
                                             .clicked()
                                         {
+                                            dialog.resolved_rows.clear();
                                             ui.close();
                                         }
                                     }
@@ -3412,9 +3470,13 @@ impl CrosshairApp {
                 Self::render_memory_popup_resize_handles(ctx);
             },
         );
-        if add && let Some(pid) = self.memory_panel.process_pid {
+        if (add || add_one.is_some()) && let Some(pid) = self.memory_panel.process_pid {
             let mut added = 0usize;
-            for index in dialog.selected.iter().copied() {
+            let indices = add_one.map_or_else(
+                || dialog.selected.iter().copied().collect::<Vec<_>>(),
+                |index| vec![index],
+            );
+            for index in indices {
                 let Some(path) = dialog.candidates.get(index).cloned() else {
                     continue;
                 };
@@ -3675,13 +3737,13 @@ impl CrosshairApp {
         }
         let mut open = true;
         let title = format!(
-            "Find instructions {} — 0x{:016X}",
+            "Find instructions {} — {}",
             if dialog.writes_only {
                 "writing"
             } else {
                 "accessing"
             },
-            dialog.address
+            format_prefixed_memory_address(dialog.address)
         );
         if dialog.pinned {
             let builder = egui::ViewportBuilder::default()
@@ -3812,7 +3874,7 @@ impl CrosshairApp {
                                 190.0,
                                 22.0,
                                 egui::Label::new(
-                                    RichText::new(format!("0x{:016X}", hit.address)).monospace(),
+                                    RichText::new(format_prefixed_memory_address(hit.address)).monospace(),
                                 )
                                 .selectable(true),
                             );
@@ -3903,7 +3965,7 @@ impl CrosshairApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!("0x{:016X}", dialog.address))
+                        RichText::new(format_prefixed_memory_address(dialog.address))
                             .monospace()
                             .strong(),
                     );
@@ -3933,7 +3995,7 @@ impl CrosshairApp {
                                         180.0,
                                         22.0,
                                         egui::Label::new(
-                                            RichText::new(format!("0x{address:016X}")).monospace(),
+                                            RichText::new(format_prefixed_memory_address(*address)).monospace(),
                                         )
                                         .selectable(true),
                                     );
@@ -3994,9 +4056,8 @@ impl CrosshairApp {
                                                 180.0,
                                                 22.0,
                                                 egui::Label::new(
-                                                    RichText::new(format!(
-                                                        "0x{:016X}",
-                                                        base + row * 16
+                                                    RichText::new(format_prefixed_memory_address(
+                                                        base + row * 16,
                                                     ))
                                                     .monospace(),
                                                 )
@@ -4071,7 +4132,7 @@ impl CrosshairApp {
         }
         let entry = self.state.memory_code_list.get(dialog.code_index);
         let title = entry.map_or_else(
-            || format!("Find addresses — 0x{:X}", dialog.instruction_address),
+            || format!("Find addresses — {}", format_prefixed_memory_address(dialog.instruction_address)),
             |entry| format!("Find addresses — {}+{:X}", entry.module, entry.offset),
         );
         let mut open = true;
@@ -4163,7 +4224,7 @@ impl CrosshairApp {
             for (index, (address, count)) in dialog.addresses.iter().enumerate() {
                 let response = ui
                     .horizontal(|ui| {
-                        Self::memory_view_cell(ui, 240.0, &format!("0x{address:X}"));
+                        Self::memory_view_cell(ui, 240.0, &format_prefixed_memory_address(*address));
                         Self::memory_view_cell(ui, 120.0, &count.to_string());
                     })
                     .response
@@ -4230,7 +4291,7 @@ impl CrosshairApp {
             frozen: None,
             saved_to_library: false,
         });
-        self.memory_panel.status = format!("Address 0x{address:X} added");
+        self.memory_panel.status = format!("Address {} added", format_prefixed_memory_address(address));
     }
 
     #[cfg(windows)]
@@ -4292,7 +4353,7 @@ impl CrosshairApp {
                         ui.horizontal(|ui| {
                             ui.add_sized(
                                 [170.0, 22.0],
-                                egui::Label::new(format!("0x{base:X}")).selectable(true),
+                                egui::Label::new(format_prefixed_memory_address(*base)).selectable(true),
                             );
                             ui.add_sized(
                                 [120.0, 22.0],
@@ -4315,8 +4376,8 @@ impl CrosshairApp {
         let address = dialog.address;
         let kind = dialog.kind;
         let title = match kind {
-            MemoryViewKind::Bytes => format!("Memory region — 0x{address:X}"),
-            MemoryViewKind::Structure => format!("Dissect data/structure — 0x{address:X}"),
+            MemoryViewKind::Bytes => format!("Memory region — {}", format_prefixed_memory_address(address)),
+            MemoryViewKind::Structure => format!("Dissect data/structure — {}", format_prefixed_memory_address(address)),
         };
         let bytes = self
             .memory_panel
@@ -4495,7 +4556,7 @@ impl CrosshairApp {
                 let shown_address = if dialog.relative_addresses {
                     format!("+{:04X}", row * row_bytes)
                 } else {
-                    format!("{row_address:X}")
+                    format_memory_address(row_address)
                 };
                 Self::memory_view_cell(ui, address_width, &shown_address);
                 for (column, value) in chunk.chunks(unit).take(columns).enumerate() {
@@ -4567,7 +4628,7 @@ impl CrosshairApp {
                     Self::memory_view_cell(ui, 110.0, element.value_type.label());
                     ui.add_sized([140.0, 18.0], egui::TextEdit::singleline(&mut element.name).hint_text("field"));
                     let address_response =
-                        Self::memory_view_cell(ui, 152.0, &format!("{element_address:X}"));
+                        Self::memory_view_cell(ui, 152.0, &format_memory_address(element_address));
                     Self::memory_label_cell(
                         ui,
                         220.0,
@@ -4655,7 +4716,7 @@ impl CrosshairApp {
             frozen: None,
             saved_to_library: false,
         });
-        self.memory_panel.status = format!("Address 0x{address:X} added");
+        self.memory_panel.status = format!("Address {} added", format_prefixed_memory_address(address));
     }
 
     fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) -> egui::Response {
@@ -5528,7 +5589,7 @@ fn memory_type_from_config(value_type: &str) -> Option<ScanValueType> {
 
 fn format_pointer_expression(pointer: &PointerSpec) -> String {
     let root = pointer.module.as_ref().map_or_else(
-        || format!("0x{:X}", pointer.base),
+        || format_prefixed_memory_address(pointer.base),
         |(module, offset)| format!("{module}+{offset:X}"),
     );
     let offsets = pointer
@@ -5924,6 +5985,15 @@ fn parse_memory_address_term(text: &str) -> Option<usize> {
             |digits| (digits, 16),
         );
     usize::from_str_radix(digits, radix).ok()
+}
+
+fn format_memory_address(address: usize) -> String {
+    // Eight digits align common low addresses without filling x64 values with leading zeroes.
+    format!("{address:08X}")
+}
+
+fn format_prefixed_memory_address(address: usize) -> String {
+    format!("0x{}", format_memory_address(address))
 }
 
 fn parse_hex_offset(text: &str) -> Option<usize> {
