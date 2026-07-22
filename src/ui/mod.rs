@@ -7100,8 +7100,8 @@ impl CrosshairApp {
         path: &str,
     ) -> egui::Response {
         let width = ui.available_width();
-        let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
-        if selected || response.hovered() {
+        let (rect, slot) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+        if selected || ui.rect_contains_pointer(rect) {
             let color = if selected { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.hovered.bg_fill };
             ui.painter().rect_filled(rect, 2.0, color);
         }
@@ -7113,9 +7113,10 @@ impl CrosshairApp {
             } else {
                 ui.label(Self::material_icon_text(0xe30a, 16.0));
             }
-            ui.label(label);
+            ui.add(egui::Label::new(label).selectable(false));
         });
-        response
+        ui.interact(rect, slot.id.with("process-row"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::Default)
     }
 
     fn selectable_process_detail_row(
@@ -7126,8 +7127,8 @@ impl CrosshairApp {
         path: &str,
     ) -> egui::Response {
         let width = ui.available_width();
-        let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::click());
-        if selected || response.hovered() {
+        let (rect, slot) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
+        if selected || ui.rect_contains_pointer(rect) {
             let color = if selected { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.hovered.bg_fill };
             ui.painter().rect_filled(rect, 2.0, color);
         }
@@ -7138,11 +7139,12 @@ impl CrosshairApp {
                 } else {
                     ui.label(Self::material_icon_text(0xe30a, 16.0));
                 }
-                ui.add_sized([190.0, 20.0], egui::Label::new(name).truncate());
-                ui.add_sized([70.0, 20.0], egui::Label::new(pid.to_string()));
-                ui.add_sized([ui.available_width(), 20.0], egui::Label::new(path).truncate());
+                ui.add_sized([190.0, 20.0], egui::Label::new(name).selectable(false).truncate());
+                ui.add_sized([70.0, 20.0], egui::Label::new(pid.to_string()).selectable(false));
+                ui.add_sized([ui.available_width(), 20.0], egui::Label::new(path).selectable(false).truncate());
         });
-        response
+        ui.interact(rect, slot.id.with("process-detail-row"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::Default)
     }
 
     fn render_window_target_combo_with_duplicate_mode(
