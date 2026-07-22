@@ -135,9 +135,29 @@ impl ScanValue {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScanCandidate {
     pub address: usize,
-    pub previous: ScanValue,
-    pub current: ScanValue,
+    current: u64,
 }
+
+impl ScanCandidate {
+    fn new(address: usize, current: ScanValue) -> Self {
+        Self {
+            address,
+            current: u64::from_le_bytes(current.bytes()),
+        }
+    }
+
+    pub fn current(self, value_type: ScanValueType) -> ScanValue {
+        value_type
+            .decode(&self.current.to_le_bytes())
+            .expect("stored scan value width")
+    }
+
+    fn set_current(&mut self, current: ScanValue) {
+        self.current = u64::from_le_bytes(current.bytes());
+    }
+}
+
+const _: () = assert!(std::mem::size_of::<ScanCandidate>() == 16);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PointerPath {
@@ -541,11 +561,16 @@ pub fn scan_memory_range_with_progress(
         .then(|| slots.div_ceil(result_limit).max(1))
         .unwrap_or(1);
     // ponytail: Memory reads become bandwidth-bound quickly; raise this cap only after profiling.
-    let worker_count = thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(2)
-        .clamp(2, 8)
-        .min(regions.len().max(1));
+    // Large unknown scans stay single-owner: merging worker Vecs temporarily doubles peak RAM.
+    let worker_count = if exact.is_none() && slots > 10_000_000 {
+        1
+    } else {
+        thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(2)
+            .clamp(2, 8)
+            .min(regions.len().max(1))
+    };
     let total_bytes = regions
         .iter()
         .map(|region| region.size)
@@ -739,6 +764,7 @@ fn text_bytes_equal(
 pub fn filter_scan_candidates(
     pid: u32,
     mut candidates: Vec<ScanCandidate>,
+    value_type: ScanValueType,
     comparison: ScanComparison,
     exact: Option<ScanValue>,
     range: Option<(ScanValue, ScanValue)>,
@@ -755,7 +781,7 @@ pub fn filter_scan_candidates(
     let kept = thread::scope(|scope| {
         candidates
             .chunks_mut(chunk_len)
-            .map(|chunk| scope.spawn(move || filter_candidate_slice(pid, chunk, comparison, exact, range)))
+            .map(|chunk| scope.spawn(move || filter_candidate_slice(pid, chunk, value_type, comparison, exact, range)))
             .collect::<Vec<_>>()
             .into_iter()
             .map(|worker| {
@@ -780,6 +806,7 @@ pub fn filter_scan_candidates(
 fn filter_candidate_slice(
     pid: u32,
     candidates: &mut [ScanCandidate],
+    value_type: ScanValueType,
     comparison: ScanComparison,
     exact: Option<ScanValue>,
     range: Option<(ScanValue, ScanValue)>,
@@ -798,7 +825,6 @@ fn filter_candidate_slice(
             for read in index..end {
                 let candidate = candidates[read];
                 let offset = candidate.address - page_base;
-                let value_type = candidate.current.value_type();
                 if offset + value_type.width() > count {
                     continue;
                 }
@@ -808,14 +834,10 @@ fn filter_candidate_slice(
                 let matches = if comparison == ScanComparison::Between {
                     range.is_some_and(|(min, max)| scan_value_between(current, min, max))
                 } else {
-                    scan_value_matches(comparison, current, candidate.previous, exact)
+                    scan_value_matches(comparison, current, candidate.current(value_type), exact)
                 };
                 if matches {
-                    candidates[write] = ScanCandidate {
-                        address: candidate.address,
-                        previous: current,
-                        current,
-                    };
+                    candidates[write] = ScanCandidate::new(candidate.address, current);
                     write += 1;
                 }
             }
@@ -825,7 +847,11 @@ fn filter_candidate_slice(
     Ok(write)
 }
 
-pub fn refresh_scan_candidates(pid: u32, candidates: &mut [ScanCandidate]) -> io::Result<()> {
+pub fn refresh_scan_candidates(
+    pid: u32,
+    candidates: &mut [ScanCandidate],
+    value_type: ScanValueType,
+) -> io::Result<()> {
     let process = ScanProcess::open(pid, false)?;
     let mut page = [0; PAGE_BYTES];
     let mut index = 0;
@@ -838,11 +864,10 @@ pub fn refresh_scan_candidates(pid: u32, candidates: &mut [ScanCandidate]) -> io
         if let Ok(count) = process.read(page_base, &mut page) {
             for candidate in &mut candidates[index..end] {
                 let offset = candidate.address - page_base;
-                let value_type = candidate.current.value_type();
                 if offset + value_type.width() <= count
                     && let Some(current) = value_type.decode(&page[offset..])
                 {
-                    candidate.current = current;
+                    candidate.set_current(current);
                 }
             }
         }
@@ -1021,6 +1046,17 @@ fn scan_region_bucket(
 ) -> io::Result<Vec<ScanCandidate>> {
     let process = ScanProcess::open(pid, false)?;
     let mut found = Vec::new();
+    let expected = regions
+        .iter()
+        .map(|region| region.size / value_type.width() / stride.max(1))
+        .fold(0usize, usize::saturating_add)
+        .min(result_limit);
+    found.try_reserve_exact(expected).map_err(|_| {
+        io::Error::other(format!(
+            "not enough memory for {expected} scan results ({} bytes each)",
+            std::mem::size_of::<ScanCandidate>()
+        ))
+    })?;
     let mut buffer = Vec::new();
     'regions: for region in regions {
         let end = region.base.saturating_add(region.size);
@@ -1038,11 +1074,7 @@ fn scan_region_bucket(
                         if exact.is_none_or(|expected| scan_exact_matches(value, expected))
                             && range.is_none_or(|(min, max)| scan_value_between(value, min, max))
                         {
-                            found.push(ScanCandidate {
-                                address: chunk_base + offset,
-                                previous: value,
-                                current: value,
-                            });
+                            found.push(ScanCandidate::new(chunk_base + offset, value));
                         }
                     }
                 }

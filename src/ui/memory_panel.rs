@@ -1606,10 +1606,11 @@ impl CrosshairApp {
                                 )
                             } else {
                                 let candidate = self.memory_panel.candidates[index];
+                                let current = candidate.current(self.memory_panel.value_type);
                                 (
                                     candidate.address,
-                                    format_scan_value(candidate.current, self.memory_panel.hex),
-                                    format_scan_value(candidate.previous, self.memory_panel.hex),
+                                    format_scan_value(current, self.memory_panel.hex),
+                                    "â€”".to_owned(),
                                 )
                             };
                         let selected = self.memory_panel.selected_results.contains(&index);
@@ -4782,7 +4783,7 @@ impl CrosshairApp {
                 }
                 .map(ScanJobCandidates::Text)
             } else if let Some(comparison) = action.comparison() {
-                filter_scan_candidates(pid, candidates, comparison, exact, range)
+                filter_scan_candidates(pid, candidates, value_type, comparison, exact, range)
                     .map(ScanJobCandidates::Numeric)
             } else {
                 scan_memory_range_with_progress(pid, exact, range, value_type, result_limit, progress)
@@ -4899,16 +4900,17 @@ impl CrosshairApp {
             let Some(candidate) = self.memory_panel.candidates.get(index).copied() else {
                 continue;
             };
+            let current = candidate.current(self.memory_panel.value_type);
             if self.memory_panel.saved.iter().any(|saved| {
                 saved.address == candidate.address
-                    && saved.value_type == candidate.current.value_type()
+                    && saved.value_type == self.memory_panel.value_type
             }) {
                 continue;
             }
             self.memory_panel.saved.push(SavedMemoryAddress {
                 address: candidate.address,
-                value_type: candidate.current.value_type(),
-                current: Some(candidate.current),
+                value_type: self.memory_panel.value_type,
+                current: Some(current),
                 text_encoding: None,
                 text_byte_len: 0,
                 current_text: None,
@@ -4987,6 +4989,7 @@ impl CrosshairApp {
                         let _ = refresh_scan_candidates(
                             pid,
                             &mut self.memory_panel.candidates[start..end],
+                            self.memory_panel.value_type,
                         );
                     }
                 }
