@@ -475,7 +475,6 @@ fn watch_loop<F>(
                     if let Some(context) = threads.get(&event.dwThreadId).and_then(|&thread| {
                         read_hit(
                             thread,
-                            kind.address(),
                             architecture,
                         )
                     }) {
@@ -669,7 +668,6 @@ impl CapturedContext {
 
 fn read_hit(
     thread: HANDLE,
-    address: usize,
     architecture: TargetArchitecture,
 ) -> Option<CapturedContext> {
     if architecture == TargetArchitecture::X86 {
@@ -679,9 +677,9 @@ fn read_hit(
                 | WOW64_CONTEXT_INTEGER,
             ..WOW64_CONTEXT::default()
         };
-        let hit = unsafe { Wow64GetThreadContext(thread, &mut context) } != 0
-            && (context.Dr6 & 1 != 0 || context.Dr0 == address as u32);
-        if hit {
+        let captured = unsafe { Wow64GetThreadContext(thread, &mut context) } != 0;
+        let hit = captured && context.Dr6 & 1 != 0;
+        if captured {
             context.Dr6 = 0;
             context.EFlags |= RESUME_FLAG;
             unsafe { Wow64SetThreadContext(thread, &context) };
@@ -692,10 +690,10 @@ fn read_hit(
     let context = &mut aligned.0;
     context.ContextFlags =
         CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64 | CONTEXT_INTEGER_AMD64;
-    let hit = unsafe { GetThreadContext(thread, context) } != 0
-        && (context.Dr6 & 1 != 0 || context.Dr0 == address as u64);
+    let context_read = unsafe { GetThreadContext(thread, context) } != 0;
+    let hit = context_read && context.Dr6 & 1 != 0;
     let captured = hit.then_some(*context);
-    if hit {
+    if context_read {
         context.Dr6 = 0;
         context.EFlags |= RESUME_FLAG;
         unsafe { SetThreadContext(thread, context) };
@@ -724,7 +722,7 @@ fn decode_at(
     if instruction.is_invalid() {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "invalid x64 instruction",
+            "invalid instruction",
         ))
     } else {
         Ok(instruction)

@@ -1849,12 +1849,6 @@ impl CrosshairApp {
                     ui.label(RichText::new("Address list").strong());
                     let selected = self.memory_panel.selected_saved.len();
                     if selected > 0 {
-                        if ui.button(format!("Write selected ({selected})")).clicked() {
-                            self.write_selected_saved_memory();
-                        }
-                        if ui.button(format!("Freeze selected ({selected})")).clicked() {
-                            self.freeze_selected_saved_memory();
-                        }
                         if ui.button("Delete").clicked() {
                             self.delete_selected_saved_memory();
                         }
@@ -1872,6 +1866,11 @@ impl CrosshairApp {
                     });
                 });
                 ui.separator();
+                if ui.rect_contains_pointer(ui.max_rect())
+                    && ui.input(|input| input.pointer.primary_pressed())
+                {
+                    self.memory_panel.saved_list_active = true;
+                }
                 let editing = self.memory_panel.edit_value_index.is_some()
                     || self.memory_panel.edit_description_index.is_some();
                 if self.memory_panel.saved_list_active
@@ -1930,6 +1929,7 @@ impl CrosshairApp {
                             let mut open_address = false;
                             let mut edit_value = false;
                             let mut delete = false;
+                            let mut freeze_selection = None;
                             let mut instruction_watch = None;
                             let mut find_stable_pointer = false;
                             let mut deep_pointer_scan = false;
@@ -2143,6 +2143,14 @@ impl CrosshairApp {
                             response.context_menu(|ui| {
                                 let selected_count = self.memory_panel.selected_saved.len();
                                 let single_target = selected_count == 1;
+                                let debugger_arch = self.memory_panel.process_pid
+                                    .and_then(|pid| process_pointer_width(pid).ok())
+                                    .map_or("auto", |width| if width == 4 { "x86" } else { "x64" });
+                                let editable_selection = selected_count > 0 && self.memory_panel.selected_saved.iter().all(|selected_index| {
+                                    self.memory_panel.saved.get(*selected_index).is_some_and(|entry| {
+                                        entry.value_type == saved.value_type && entry.text_encoding == saved.text_encoding
+                                    })
+                                });
                                 let can_save = self.memory_panel.selected_saved.iter().any(|selected_index| {
                                     self.memory_panel.saved.get(*selected_index)
                                         .is_some_and(|entry| entry.text_encoding.is_none())
@@ -2155,17 +2163,29 @@ impl CrosshairApp {
                                     ui.close();
                                 }
                                 if !single_target {
-                                    ui.label(RichText::new(format!("{selected_count} addresses selected — tools below need one address")).weak().small());
+                                    ui.label(RichText::new(format!("{selected_count} addresses selected")).weak().small());
                                 }
+                                if ui.add_enabled(editable_selection, Button::new(if single_target { "Edit value" } else { "Edit selected values" })).clicked() {
+                                    edit_value = true;
+                                    ui.close();
+                                }
+                                let all_frozen = self.memory_panel.selected_saved.iter().all(|selected_index| {
+                                    self.memory_panel.saved.get(*selected_index).is_some_and(|entry| entry.frozen.is_some())
+                                });
+                                if ui.add_enabled(can_save, Button::new(if all_frozen { "Unfreeze selected" } else { "Freeze selected" })).clicked() {
+                                    freeze_selection = Some(!all_frozen);
+                                    ui.close();
+                                }
+                                ui.separator();
                                 if ui
-                                    .add_enabled(single_target, Button::new("Find instructions accessing this address (x64)"))
+                                    .add_enabled(single_target, Button::new(format!("Find instructions accessing this address ({debugger_arch})")))
                                     .clicked()
                                 {
                                     instruction_watch = Some(true);
                                     ui.close();
                                 }
                                 if ui
-                                    .add_enabled(single_target, Button::new("Find instructions writing this address (x64)"))
+                                    .add_enabled(single_target, Button::new(format!("Find instructions writing this address ({debugger_arch})")))
                                     .clicked()
                                 {
                                     instruction_watch = Some(false);
@@ -2231,10 +2251,6 @@ impl CrosshairApp {
                                 ui.separator();
                                 if ui.add_enabled(single_target, Button::new("Change address / Pointer")).clicked() {
                                     open_address = true;
-                                    ui.close();
-                                }
-                                if ui.add_enabled(single_target, Button::new("Edit value")).clicked() {
-                                    edit_value = true;
                                     ui.close();
                                 }
                                 if ui.button(if single_target { "Delete" } else { "Delete selected" }).clicked() {
@@ -2310,6 +2326,17 @@ impl CrosshairApp {
                                         editable_scan_value(value, self.memory_panel.hex)
                                     }))
                                     .unwrap_or_default();
+                            }
+                            if let Some(freeze) = freeze_selection {
+                                let selected = self.memory_panel.selected_saved.clone();
+                                for selected_index in selected {
+                                    if let Some(entry) = self.memory_panel.saved.get_mut(selected_index)
+                                        && entry.text_encoding.is_none()
+                                    {
+                                        entry.frozen = freeze.then_some(entry.current).flatten();
+                                    }
+                                }
+                                self.sync_memory_freeze_targets();
                             }
                             if delete {
                                 self.delete_selected_saved_memory();
@@ -3552,14 +3579,11 @@ impl CrosshairApp {
             dialog.address
         );
         if dialog.pinned {
-            let monitor_height = ctx
-                .input(|input| input.viewport().monitor_size)
-                .map_or(900.0, |size| size.y);
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(760.0, monitor_height))
-                .with_min_inner_size(vec2(520.0, 300.0))
+                .with_inner_size(vec2(760.0, 430.0))
+                .with_min_inner_size(vec2(520.0, 260.0))
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
@@ -4199,13 +4223,10 @@ impl CrosshairApp {
             .and_then(|pid| query_memory_region(pid, address).ok());
         let mut open = true;
         if dialog.pinned {
-            let monitor_height = ctx
-                .input(|input| input.viewport().monitor_size)
-                .map_or(900.0, |size| size.y);
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(720.0, monitor_height))
+                .with_inner_size(vec2(760.0, 430.0))
                 .with_min_inner_size(vec2(520.0, 280.0))
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
@@ -4297,9 +4318,11 @@ impl CrosshairApp {
                 egui::ScrollArea::both().show(ui, |ui| Self::render_memory_region_grid(ui, dialog, bytes));
             }
             MemoryViewKind::Structure => {
+                let available = ui.available_size();
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
+                    ui.allocate_ui_with_layout(vec2(150.0, available.y), egui::Layout::top_down(egui::Align::LEFT), |ui| {
                         ui.set_width(150.0);
+                        ui.set_min_height(available.y);
                         ui.label(RichText::new("Classes").strong());
                         let classes = dialog.classes.iter().map(|class| class.name.clone()).collect::<Vec<_>>();
                         for (index, name) in classes.into_iter().enumerate() {
@@ -4318,7 +4341,8 @@ impl CrosshairApp {
                         }
                     });
                     ui.separator();
-                    ui.vertical(|ui| {
+                    ui.allocate_ui_with_layout(vec2((available.x - 160.0).max(360.0), available.y), egui::Layout::top_down(egui::Align::LEFT), |ui| {
+                        ui.set_min_height(available.y);
                         ui.horizontal(|ui| {
                             if ui.button("Auto dissect").clicked() {
                                 dialog.elements = auto_structure_elements(bytes, dialog.pointer_width);
@@ -4328,7 +4352,7 @@ impl CrosshairApp {
                                 ui.add(egui::TextEdit::singleline(&mut class.name).desired_width(140.0).hint_text("Class name"));
                             }
                         });
-                        egui::ScrollArea::both().show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes));
+                        egui::ScrollArea::both().max_height(ui.available_height()).show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes));
                     });
                 });
                 if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
@@ -5014,90 +5038,45 @@ impl CrosshairApp {
         let Some(saved) = self.memory_panel.saved.get(index).cloned() else {
             return;
         };
-        if let Some(encoding) = saved.text_encoding {
-            match write_text_memory(
-                pid,
-                saved.address,
-                &self.memory_panel.edit_value_input,
-                encoding,
-                saved.text_byte_len,
-            ) {
-                Ok(()) => {
-                    self.memory_panel.saved[index].current_text =
-                        Some(self.memory_panel.edit_value_input.clone());
-                    self.memory_panel.edit_value_index = None;
-                    self.memory_panel.status = "Text written".to_owned();
-                }
-                Err(error) => self.memory_panel.status = format!("Write failed: {error}"),
-            }
-            return;
-        }
-        let Some(value) = parse_scan_value(
-            &self.memory_panel.edit_value_input,
-            saved.value_type,
-            self.memory_panel.hex,
-        ) else {
-            self.memory_panel.status = "Invalid value".to_owned();
-            return;
+        let targets = if self.memory_panel.selected_saved.contains(&index) {
+            self.memory_panel.selected_saved.iter().copied().collect::<Vec<_>>()
+        } else {
+            vec![index]
         };
-        match write_scan_value(pid, saved.address, value) {
-            Ok(()) => {
-                let observed = read_scan_value(pid, saved.address, saved.value_type).ok();
-                self.memory_panel.saved[index].current = observed.or(Some(value));
-                if self.memory_panel.saved[index].frozen.is_some() {
-                    self.memory_panel.saved[index].frozen = Some(value);
-                }
-                self.memory_panel.edit_value_index = None;
-                self.memory_panel.status = match observed {
-                    Some(observed) if observed == value => "Value written and verified".to_owned(),
-                    Some(observed) => format!(
-                        "Write was immediately overwritten: requested {}, read back {}",
-                        format_scan_value(value, self.memory_panel.hex),
-                        format_scan_value(observed, self.memory_panel.hex),
-                    ),
-                    None => "Value written, but verification read failed".to_owned(),
-                };
-            }
-            Err(error) => self.memory_panel.status = format!("Write failed: {error}"),
-        }
-    }
-
-    fn write_selected_saved_memory(&mut self) {
-        let Some(pid) = self.memory_panel.process_pid else {
-            return;
-        };
-        let selected = self.memory_panel.selected_saved.clone();
         let mut written = 0;
-        for index in selected {
-            let Some(saved) = self.memory_panel.saved.get(index) else {
-                continue;
-            };
-            if saved.text_encoding.is_some() {
-                continue;
+        if let Some(encoding) = saved.text_encoding {
+            for target in targets {
+                let Some(entry) = self.memory_panel.saved.get(target).cloned() else { continue };
+                if entry.text_encoding != Some(encoding)
+                    || write_text_memory(pid, entry.address, &self.memory_panel.edit_value_input, encoding, entry.text_byte_len).is_err()
+                {
+                    continue;
+                }
+                self.memory_panel.saved[target].current_text = Some(self.memory_panel.edit_value_input.clone());
+                written += 1;
             }
-            let Some(value) = parse_scan_value(
-                &self.memory_panel.value_input,
-                saved.value_type,
-                self.memory_panel.hex,
-            ) else {
-                continue;
+        } else {
+            let Some(value) = parse_scan_value(&self.memory_panel.edit_value_input, saved.value_type, self.memory_panel.hex) else {
+                self.memory_panel.status = "Invalid value".to_owned();
+                return;
             };
-            if write_scan_value(pid, saved.address, value).is_ok() {
+            for target in targets {
+                let Some(entry) = self.memory_panel.saved.get(target).cloned() else { continue };
+                if entry.text_encoding.is_some() || entry.value_type != saved.value_type
+                    || write_scan_value(pid, entry.address, value).is_err()
+                {
+                    continue;
+                }
+                let observed = read_scan_value(pid, entry.address, entry.value_type).ok();
+                self.memory_panel.saved[target].current = observed.or(Some(value));
+                if self.memory_panel.saved[target].frozen.is_some() {
+                    self.memory_panel.saved[target].frozen = Some(value);
+                }
                 written += 1;
             }
         }
-        self.memory_panel.status = format!("Wrote {written} address(es)");
-    }
-
-    fn freeze_selected_saved_memory(&mut self) {
-        let selected = self.memory_panel.selected_saved.clone();
-        for index in selected {
-            if let Some(saved) = self.memory_panel.saved.get_mut(index) {
-                if saved.text_encoding.is_none() {
-                    saved.frozen = saved.current;
-                }
-            }
-        }
+        self.memory_panel.edit_value_index = None;
+        self.memory_panel.status = format!("Value written to {written} address(es)");
     }
 
     fn delete_selected_saved_memory(&mut self) {
