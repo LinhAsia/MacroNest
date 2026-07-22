@@ -380,6 +380,13 @@ struct FreezeTarget {
     pointer: Option<PointerSpec>,
 }
 
+struct PendingWriteCheck {
+    due: Instant,
+    address: usize,
+    value_type: ScanValueType,
+    expected: ScanValue,
+}
+
 struct MemoryFreezeWorker {
     config: Arc<Mutex<(Option<u32>, Vec<FreezeTarget>)>>,
     stop: Arc<AtomicBool>,
@@ -452,6 +459,7 @@ pub(crate) struct MemoryPanelState {
     fast_scan_alignment: String,
     pause_while_scanning: bool,
     candidates: Vec<ScanCandidate>,
+    live_candidate_values: HashMap<usize, ScanValue>,
     text_candidates: Vec<TextScanCandidate>,
     selected_results: HashSet<usize>,
     marked_result_addresses: HashSet<usize>,
@@ -495,6 +503,7 @@ pub(crate) struct MemoryPanelState {
     last_refresh: Instant,
     last_saved_refresh: Instant,
     visible_scan_ranges: [Option<(usize, usize, Instant)>; 2],
+    pending_write_checks: Vec<PendingWriteCheck>,
     freeze_worker: MemoryFreezeWorker,
 }
 
@@ -524,6 +533,7 @@ impl Default for MemoryPanelState {
             fast_scan_alignment: "4".to_owned(),
             pause_while_scanning: false,
             candidates: Vec::new(),
+            live_candidate_values: HashMap::new(),
             text_candidates: Vec::new(),
             selected_results: HashSet::new(),
             marked_result_addresses: HashSet::new(),
@@ -567,6 +577,7 @@ impl Default for MemoryPanelState {
             last_refresh: Instant::now(),
             last_saved_refresh: Instant::now(),
             visible_scan_ranges: [None, None],
+            pending_write_checks: Vec::new(),
             freeze_worker: MemoryFreezeWorker::default(),
         }
     }
@@ -1650,7 +1661,14 @@ impl CrosshairApp {
                                 )
                             } else {
                                 let candidate = self.memory_panel.candidates[index];
-                                let current = candidate.current(self.memory_panel.value_type);
+                                let current = self
+                                    .memory_panel
+                                    .live_candidate_values
+                                    .get(&index)
+                                    .copied()
+                                    .unwrap_or_else(|| {
+                                        candidate.current(self.memory_panel.value_type)
+                                    });
                                 (
                                     candidate.address,
                                     format_scan_value(current, self.memory_panel.hex),
@@ -4842,6 +4860,7 @@ impl CrosshairApp {
             Vec::new()
         };
         self.memory_panel.scan_progress.store(0, Ordering::Relaxed);
+        self.memory_panel.live_candidate_values.clear();
         self.memory_panel.scan_input_count = if action.comparison().is_some() {
             candidates.len().max(text_candidates.len())
         } else {
@@ -4954,6 +4973,7 @@ impl CrosshairApp {
             Ok(ScanJobCandidates::Numeric(candidates)) => {
                 let count = candidates.len();
                 self.memory_panel.candidates = candidates;
+                self.memory_panel.live_candidate_values.clear();
                 self.memory_panel.text_candidates.clear();
                 self.memory_panel.status =
                     format!("{} — {count} result(s)", outcome.action.label());
@@ -4962,6 +4982,7 @@ impl CrosshairApp {
                 let count = candidates.len();
                 self.memory_panel.text_candidates = candidates;
                 self.memory_panel.candidates.clear();
+                self.memory_panel.live_candidate_values.clear();
                 self.memory_panel.status =
                     format!("{} — {count} text result(s)", outcome.action.label());
             }
@@ -4975,10 +4996,13 @@ impl CrosshairApp {
         self.memory_panel.job_rx = None;
         self.memory_panel.scanning = false;
         self.memory_panel.candidates.clear();
+        self.memory_panel.live_candidate_values.clear();
         self.memory_panel.text_candidates.clear();
         self.memory_panel.selected_results.clear();
         self.memory_panel.marked_result_addresses.clear();
         self.memory_panel.selection_anchor = None;
+        self.memory_panel.visible_scan_ranges = [None, None];
+        self.memory_panel.pending_write_checks.clear();
         self.memory_panel.has_scan_session = false;
         self.memory_panel.status = status.to_owned();
         self.memory_panel.last_action = status.to_owned();
@@ -5112,13 +5136,55 @@ impl CrosshairApp {
                     }
                     let end = end.min(self.memory_panel.candidates.len());
                     if start < end {
-                        let _ = refresh_scan_candidates(
+                        let mut visible = self.memory_panel.candidates[start..end].to_vec();
+                        if refresh_scan_candidates(
                             pid,
-                            &mut self.memory_panel.candidates[start..end],
+                            &mut visible,
                             self.memory_panel.value_type,
-                        );
+                        )
+                        .is_ok()
+                        {
+                            for (offset, candidate) in visible.into_iter().enumerate() {
+                                self.memory_panel.live_candidate_values.insert(
+                                    start + offset,
+                                    candidate.current(self.memory_panel.value_type),
+                                );
+                            }
+                        }
                     }
                 }
+            }
+        }
+        if let Some(pid) = self.memory_panel.process_pid {
+            let now = Instant::now();
+            let mut pending = Vec::new();
+            let mut verified = 0usize;
+            let mut overwritten = 0usize;
+            let mut unreadable = 0usize;
+            for check in self.memory_panel.pending_write_checks.drain(..) {
+                if now < check.due {
+                    pending.push(check);
+                    continue;
+                }
+                match read_scan_value(pid, check.address, check.value_type) {
+                    Ok(observed) if observed == check.expected => verified += 1,
+                    Ok(_) => overwritten += 1,
+                    Err(_) => unreadable += 1,
+                }
+            }
+            self.memory_panel.pending_write_checks = pending;
+            if overwritten > 0 {
+                self.memory_panel.status = format!(
+                    "Game overwrote {overwritten} value(s) shortly after the write; freeze or find the authoritative address"
+                );
+            } else if verified > 0 && self.memory_panel.pending_write_checks.is_empty() {
+                self.memory_panel.status = if unreadable == 0 {
+                    format!(
+                        "Write persisted at {verified} address(es); if the game did not react, these are mirrored/render values"
+                    )
+                } else {
+                    format!("Write verified at {verified} address(es), {unreadable} unreadable")
+                };
             }
         }
         if self.memory_panel.last_saved_refresh.elapsed() < Duration::from_millis(50) {
@@ -5261,6 +5327,12 @@ impl CrosshairApp {
                 }
                 let observed = read_scan_value(pid, entry.address, entry.value_type).ok();
                 self.memory_panel.saved[target].current = observed.or(Some(value));
+                self.memory_panel.pending_write_checks.push(PendingWriteCheck {
+                    due: Instant::now() + Duration::from_millis(250),
+                    address: entry.address,
+                    value_type: entry.value_type,
+                    expected: value,
+                });
                 if self.memory_panel.saved[target].frozen.is_some() {
                     self.memory_panel.saved[target].frozen = Some(value);
                 }
