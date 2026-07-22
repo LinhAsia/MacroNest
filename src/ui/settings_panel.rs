@@ -667,6 +667,11 @@ impl CrosshairApp {
         language: UiLanguage,
         downloading_progress: Option<f32>,
     ) {
+        if !self.interception_driver_checked {
+            self.interception_driver_installed =
+                crate::platform::is_interception_driver_installed();
+            self.interception_driver_checked = true;
+        }
         let package_ready = self.interception_package_downloaded;
         let driver_installed = self.interception_driver_installed;
         let restart_required = self.interception_driver_needs_restart;

@@ -823,6 +823,7 @@ pub struct CrosshairApp {
     interception_download_job: Option<JoinHandle<Result<()>>>,
     interception_download_progress: Arc<AtomicU32>,
     interception_package_downloaded: bool,
+    interception_driver_checked: bool,
     interception_driver_installed: bool,
     interception_driver_needs_restart: bool,
     interception_install_job: Option<JoinHandle<Result<()>>>,
@@ -933,10 +934,7 @@ impl CrosshairApp {
         let opencv_installed = paths.opencv_dll.exists();
         let ffmpeg_installed = paths.ffmpeg_exe.exists();
         let interception_pending_marker = paths.bin_dir.join("interception.install.pending");
-        let mut interception_driver_installed = crate::platform::is_interception_driver_installed();
-        if interception_driver_installed {
-            let _ = std::fs::remove_file(&interception_pending_marker);
-        } else if interception_pending_marker.exists() {
+        if interception_pending_marker.exists() {
             if let Ok(metadata) = std::fs::metadata(&interception_pending_marker) {
                 if let Ok(created) = metadata.created().or_else(|_| metadata.modified()) {
                     if let Ok(elapsed) = created.elapsed() {
@@ -948,11 +946,8 @@ impl CrosshairApp {
                 }
             }
         }
-        let interception_driver_needs_restart =
-            !interception_driver_installed && interception_pending_marker.exists();
-        if interception_driver_needs_restart {
-            interception_driver_installed = true;
-        }
+        let interception_driver_needs_restart = interception_pending_marker.exists();
+        let interception_driver_installed = interception_driver_needs_restart;
         let mut app = Self {
             paths: paths.clone(),
             state,
@@ -1145,6 +1140,7 @@ impl CrosshairApp {
             interception_package_downloaded: paths.interception_zip.exists()
                 || paths.interception_package_dir.exists()
                 || paths.interception_installer_exe.exists(),
+            interception_driver_checked: interception_driver_needs_restart,
             interception_driver_installed,
             interception_driver_needs_restart,
             interception_install_job: None,
