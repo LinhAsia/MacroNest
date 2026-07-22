@@ -15,6 +15,7 @@ const PROCESS_VM_READ: u32 = 0x0010;
 const PROCESS_VM_WRITE: u32 = 0x0020;
 const PROCESS_VM_OPERATION: u32 = 0x0008;
 const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
 const MEM_COMMIT: u32 = 0x1000;
 const MEM_PRIVATE: u32 = 0x0002_0000;
 const MEM_MAPPED: u32 = 0x0004_0000;
@@ -41,6 +42,12 @@ struct MemoryBasicInformation {
     state: u32,
     protect: u32,
     kind: u32,
+}
+
+#[repr(C)]
+struct WorkingSetExInformation {
+    virtual_address: *mut c_void,
+    virtual_attributes: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -440,6 +447,7 @@ impl Drop for ScanProcess {
 impl ScanProcess {
     fn open(pid: u32, write: bool) -> io::Result<Self> {
         let access = PROCESS_QUERY_LIMITED_INFORMATION
+            | PROCESS_QUERY_INFORMATION
             | PROCESS_VM_READ
             | if write {
                 PROCESS_VM_OPERATION | PROCESS_VM_WRITE
@@ -1084,19 +1092,22 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
                 | PAGE_EXECUTE_WRITECOPY
         );
         if information.state == MEM_COMMIT
-            && (information.kind == MEM_PRIVATE
-                || (!options.active_memory_only
-                    && matches!(information.kind, MEM_MAPPED | MEM_IMAGE)))
+            && matches!(information.kind, MEM_PRIVATE | MEM_MAPPED | MEM_IMAGE)
             && readable
             && (!options.writable || writable || (options.copy_on_write && copy_on_write))
             && (options.executable || !executable)
             && (options.copy_on_write || !copy_on_write)
             && information.protect & PAGE_GUARD == 0
         {
-            regions.push(ScanRegion {
+            let region = ScanRegion {
                 base,
                 size: information.region_size,
-            });
+            };
+            if options.active_memory_only {
+                regions.extend(active_scan_regions(process, region));
+            } else {
+                regions.push(region);
+            }
         }
         if next <= address {
             break;
@@ -1104,6 +1115,50 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
         address = next;
     }
     regions
+}
+
+fn active_scan_regions(process: &ScanProcess, region: ScanRegion) -> Vec<ScanRegion> {
+    const QUERY_PAGES: usize = 4096;
+    let end = region.base.saturating_add(region.size);
+    let mut page = region.base;
+    let mut active_start = None;
+    let mut active = Vec::new();
+    while page < end {
+        let count = (end - page).div_ceil(PAGE_BYTES).min(QUERY_PAGES);
+        let mut information = (0..count)
+            .map(|index| WorkingSetExInformation {
+                virtual_address: page.saturating_add(index * PAGE_BYTES) as *mut c_void,
+                virtual_attributes: 0,
+            })
+            .collect::<Vec<_>>();
+        let queried = unsafe {
+            K32QueryWorkingSetEx(
+                process.handle,
+                information.as_mut_ptr().cast(),
+                (information.len() * size_of::<WorkingSetExInformation>()) as u32,
+            )
+        } != 0;
+        for (index, entry) in information.iter().enumerate() {
+            let address = page.saturating_add(index * PAGE_BYTES);
+            let resident = queried && entry.virtual_attributes & 1 != 0;
+            if resident {
+                active_start.get_or_insert(address);
+            } else if let Some(start) = active_start.take() {
+                active.push(ScanRegion {
+                    base: start,
+                    size: address - start,
+                });
+            }
+        }
+        page = page.saturating_add(count * PAGE_BYTES);
+    }
+    if let Some(start) = active_start {
+        active.push(ScanRegion {
+            base: start,
+            size: end - start,
+        });
+    }
+    active
 }
 
 fn pointer_scan_regions_for(process: &ScanProcess) -> Vec<ScanRegion> {
@@ -1399,6 +1454,7 @@ unsafe extern "system" {
         information: *mut MemoryBasicInformation,
         length: usize,
     ) -> usize;
+    fn K32QueryWorkingSetEx(process: *mut c_void, information: *mut c_void, length: u32) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
 }
 
