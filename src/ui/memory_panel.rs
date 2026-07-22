@@ -37,7 +37,7 @@ use crate::memory_debugger::debugger::{
 
 use super::CrosshairApp;
 
-const DEFAULT_SCAN_LIMIT: usize = 10_000_000;
+const DEFAULT_SCAN_LIMIT: usize = usize::MAX;
 // ponytail: keep live polling bounded; add paged candidate refresh before raising this ceiling.
 const MAX_VISIBLE_RESULTS: usize = 1_000;
 const MAX_VISIBLE_INSTRUCTIONS: usize = 64;
@@ -507,7 +507,7 @@ impl Default for MemoryPanelState {
             between_open: false,
             scan_modules: Vec::new(),
             hex: false,
-            result_limit_input: DEFAULT_SCAN_LIMIT.to_string(),
+            result_limit_input: "Unlimited".to_owned(),
             candidates: Vec::new(),
             text_candidates: Vec::new(),
             selected_results: HashSet::new(),
@@ -4710,14 +4710,23 @@ impl CrosshairApp {
                 }
             }
         };
-        let result_limit = self
-            .memory_panel
-            .result_limit_input
-            .replace(['.', ',', '_'], "")
-            .parse::<usize>()
-            .unwrap_or(DEFAULT_SCAN_LIMIT)
-            .clamp(1_000, DEFAULT_SCAN_LIMIT);
-        self.memory_panel.result_limit_input = result_limit.to_string();
+        let limit_input = self.memory_panel.result_limit_input.trim();
+        let result_limit = if limit_input.is_empty()
+            || limit_input.eq_ignore_ascii_case("unlimited")
+        {
+            DEFAULT_SCAN_LIMIT
+        } else {
+            limit_input
+                .replace(['.', ',', '_'], "")
+                .parse::<usize>()
+                .unwrap_or(DEFAULT_SCAN_LIMIT)
+                .max(1_000)
+        };
+        self.memory_panel.result_limit_input = if result_limit == DEFAULT_SCAN_LIMIT {
+            "Unlimited".to_owned()
+        } else {
+            result_limit.to_string()
+        };
         let candidates = if action.comparison().is_some() && text_encoding.is_none() {
             std::mem::take(&mut self.memory_panel.candidates)
         } else {
