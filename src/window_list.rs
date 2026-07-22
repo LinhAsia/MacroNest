@@ -15,11 +15,13 @@ mod windows_impl {
                 BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetClientRect, GetForegroundWindow,
                 GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
                 GetWindowTextW, GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic,
-                IsWindow, IsWindowVisible,
-                PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-                SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
-                SetForegroundWindow, SetWindowPos, ShowWindow, WS_EX_TOPMOST,
+                IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN,
+                SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOMOVE,
+                SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos, ShowWindow,
+                WS_EX_TOPMOST, DestroyIcon, DrawIconEx, DI_NORMAL,
             },
+            UI::Shell::{SHFILEINFOW, SHGetFileInfoW, SHGFI_ICON, SHGFI_SMALLICON},
+            Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
         },
         core::BOOL,
     };
@@ -55,6 +57,8 @@ mod windows_impl {
     pub struct WindowInfo {
         pub title: String,
         pub selector: String,
+        pub process_id: u32,
+        pub process_path: String,
     }
 
     #[derive(Debug, Clone)]
@@ -105,6 +109,60 @@ mod windows_impl {
             let _ = GetWindowThreadProcessId(hwnd, Some(&mut process_id));
         }
         (process_id != 0).then_some(process_id)
+    }
+
+    pub fn process_icon_rgba(path: &str) -> Option<Vec<u8>> {
+        if path.is_empty() { return None; }
+        let wide = path.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        let mut info = SHFILEINFOW::default();
+        let found = unsafe {
+            SHGetFileInfoW(
+                PCWSTR(wide.as_ptr()),
+                FILE_FLAGS_AND_ATTRIBUTES(0),
+                Some(&mut info),
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                SHGFI_ICON | SHGFI_SMALLICON,
+            )
+        };
+        if found == 0 || info.hIcon.0.is_null() { return None; }
+        let result = unsafe { hicon_rgba(info.hIcon) };
+        unsafe { let _ = DestroyIcon(info.hIcon); }
+        result
+    }
+
+    unsafe fn hicon_rgba(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Vec<u8>> {
+        let screen = GetDC(None);
+        if screen.0.is_null() { return None; }
+        let dc = CreateCompatibleDC(Some(screen));
+        let mut bitmap_info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: 16,
+                biHeight: -16,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..BITMAPINFOHEADER::default()
+            },
+            ..BITMAPINFO::default()
+        };
+        let mut bits = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(Some(dc), &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        let old = SelectObject(dc, HGDIOBJ(bitmap.0));
+        std::ptr::write_bytes(bits, 0, 16 * 16 * 4);
+        let drawn = DrawIconEx(dc, 0, 0, icon, 16, 16, 0, None, DI_NORMAL).is_ok();
+        let mut rgba = vec![0; 16 * 16 * 4];
+        if drawn {
+            let source = std::slice::from_raw_parts(bits.cast::<u8>(), rgba.len());
+            for (src, dst) in source.chunks_exact(4).zip(rgba.chunks_exact_mut(4)) {
+                dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+            }
+        }
+        let _ = SelectObject(dc, old);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(dc);
+        let _ = ReleaseDC(None, screen);
+        drawn.then_some(rgba)
     }
 
     pub fn capture_window_preview_with_candidates(
@@ -223,10 +281,14 @@ mod windows_impl {
             return true.into();
         }
         if let Some(title) = window_title(hwnd) {
+            let mut process_id = 0;
+            let _ = GetWindowThreadProcessId(hwnd, Some(&mut process_id));
             let windows = &mut *(lparam.0 as *mut Vec<WindowInfo>);
             windows.push(WindowInfo {
                 selector: window_selector(hwnd, &title),
                 title,
+                process_id,
+                process_path: crate::memory_debugger::debugger::process_path(process_id),
             });
         }
         true.into()
@@ -1174,6 +1236,8 @@ mod fallback {
     pub struct WindowInfo {
         pub title: String,
         pub selector: String,
+        pub process_id: u32,
+        pub process_path: String,
     }
 
     #[derive(Debug, Clone)]

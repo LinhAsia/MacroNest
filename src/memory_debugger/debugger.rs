@@ -37,11 +37,41 @@ use windows_sys::Win32::{
             TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32,
         },
         Threading::{
-            IsWow64Process, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread,
-            SuspendThread,
+            IsWow64Process, OpenProcess, QueryFullProcessImageNameW,
+            PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread, SuspendThread,
         },
     },
 };
+
+#[derive(Clone, Debug)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub name: String,
+    pub path: String,
+}
+
+pub fn process_path(pid: u32) -> String {
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return String::new();
+    }
+    let mut buffer = vec![0u16; 32_768];
+    let mut length = buffer.len() as u32;
+    let ok = unsafe { QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length) };
+    unsafe { CloseHandle(process) };
+    if ok == 0 {
+        String::new()
+    } else {
+        String::from_utf16_lossy(&buffer[..length as usize])
+    }
+}
+
+pub fn list_process_details() -> io::Result<Vec<ProcessInfo>> {
+    Ok(list_processes()?
+        .into_iter()
+        .map(|(pid, name)| ProcessInfo { pid, name, path: process_path(pid) })
+        .collect())
+}
 
 pub fn list_processes() -> io::Result<Vec<(u32, String)>> {
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
@@ -426,7 +456,7 @@ where
                                             &decoded,
                                             &context,
                                             *address,
-                                            if read_write { "truy cáº­p" } else { "ghi" },
+                                            if read_write { "truy c???p" } else { "ghi" },
                                             architecture,
                                         ),
                                         likely_stack_copy: address.abs_diff(context.Rsp as usize)
@@ -812,7 +842,7 @@ fn format_hit_details_legacy(
     action: &str,
 ) -> String {
     let mut text = format!(
-        "DISASSEMBLY (dÃ²ng << lÃ  instruction {action}; cÃ¡c dÃ²ng sau lÃ  code káº¿ tiáº¿p)\r\n"
+        "DISASSEMBLY (d??ng << l?? instruction {action}; c??c d??ng sau l?? code k??? ti???p)\r\n"
     );
     let mut current = *instruction;
     for index in 0..6 {
@@ -841,7 +871,7 @@ fn format_hit_details_legacy(
         current = next;
     }
     text.push_str(&format!(
-        "\r\nSNAPSHOT SAU Láº¦N {} Gáº¦N NHáº¤T\r\n\
+        "\r\nSNAPSHOT SAU L???N {} G???N NH???T\r\n\
 RAX={:016X}  RBX={:016X}\r\n\
 RCX={:016X}  RDX={:016X}\r\n\
 RSI={:016X}  RDI={:016X}\r\n\
@@ -850,8 +880,8 @@ R8 ={:016X}  R9 ={:016X}\r\n\
 R10={:016X}  R11={:016X}\r\n\
 R12={:016X}  R13={:016X}\r\n\
 R14={:016X}  R15={:016X}\r\n\
-RIP(sau lá»‡nh)={:016X}  RFLAGS={:08X}\r\n\
-Äá»ŠA CHá»ˆ DATA THá»°C Táº¾=0x{:016X}\r\n",
+RIP(sau l???nh)={:016X}  RFLAGS={:08X}\r\n\
+?????A CH??? DATA TH???C T???=0x{:016X}\r\n",
         action.to_uppercase(),
         context.Rax,
         context.Rbx,
@@ -1073,7 +1103,7 @@ mod tests {
                 _ => {}
             }
         };
-        assert!(access_details.contains("TRUY Cáº¬P"));
+        assert!(access_details.contains("TRUY C???P"));
         address_access_watch.stop();
         let (sender, receiver) = mpsc::channel();
         let mut access_watch = AccessWatch::start(child.id(), ip, MemoryDebuggerArchitecture::Auto, move |event| {

@@ -123,7 +123,7 @@ pub(crate) struct NetworkPanelState {
     ca_installed: bool,
     remove_ca_on_exit: bool,
     decrypt_https: bool,
-    frida_processes: Vec<(u32, String)>,
+    frida_processes: Vec<crate::memory_debugger::debugger::ProcessInfo>,
     frida_pid: Option<u32>,
     frida_script: String,
     frida_log: String,
@@ -284,12 +284,12 @@ impl NetworkPanelState {
     }
 
     fn refresh_frida_processes(&mut self) {
-        match crate::memory_debugger::debugger::list_processes() {
+        match crate::memory_debugger::debugger::list_process_details() {
             Ok(processes) => {
                 self.frida_processes = processes;
                 if self
                     .frida_pid
-                    .is_some_and(|pid| !self.frida_processes.iter().any(|item| item.0 == pid))
+                    .is_some_and(|pid| !self.frida_processes.iter().any(|item| item.pid == pid))
                 {
                     self.frida_pid = None;
                 }
@@ -1192,9 +1192,9 @@ impl CrosshairApp {
                     self.network_panel
                         .frida_processes
                         .iter()
-                        .find(|item| item.0 == pid)
+                        .find(|item| item.pid == pid)
                 })
-                .map(|(pid, name)| format!("{name} — PID {pid}"))
+                .map(|process| format!("{} — PID {}", process.name, process.pid))
                 .unwrap_or_else(|| "Select process".to_owned());
             let process_picker = egui::ComboBox::from_id_salt("network-frida-process")
                 .height(480.0)
@@ -1205,22 +1205,27 @@ impl CrosshairApp {
                     for window in self.open_window_infos.clone() {
                         let Some(pid) = crate::window_list::process_id_for_window(Some(&window.selector)) else { continue };
                         if pid == std::process::id() { continue; }
-                        if ui.selectable_label(
+                        if Self::selectable_process_row(
+                            ui,
                             self.network_panel.frida_pid == Some(pid),
                             Self::truncate_window_title(&Self::simplify_window_title(&window.title), 70),
+                            &window.process_path,
                         ).clicked() {
                             self.network_panel.frida_pid = Some(pid);
                         }
                     }
                     ui.separator();
                     ui.label(RichText::new("All processes (individual PID)").strong());
-                    for (pid, name) in &self.network_panel.frida_processes {
-                        if *pid == std::process::id() { continue; }
-                        ui.selectable_value(
-                            &mut self.network_panel.frida_pid,
-                            Some(*pid),
-                            format!("{name} — PID {pid}"),
-                        );
+                    for process in &self.network_panel.frida_processes {
+                        if process.pid == std::process::id() { continue; }
+                        if Self::selectable_process_row(
+                            ui,
+                            self.network_panel.frida_pid == Some(process.pid),
+                            format!("{} — PID {}    {}", process.name, process.pid, process.path),
+                            &process.path,
+                        ).clicked() {
+                            self.network_panel.frida_pid = Some(process.pid);
+                        }
                     }
                 });
             if process_picker.response.clicked() { self.network_panel.refresh_frida_processes(); }
