@@ -3431,6 +3431,17 @@ impl CrosshairApp {
                                     }
                                 }
                                 response.context_menu(|ui| {
+                                    if ui.button("Copy pointer for Macro").clicked() {
+                                        ui.ctx().copy_text(format_pointer_expression(&PointerSpec {
+                                            base: 0,
+                                            module: Some((
+                                                path.module.clone(),
+                                                path.module_offset,
+                                            )),
+                                            offsets: path.offsets.clone(),
+                                        }));
+                                        ui.close();
+                                    }
                                     if ui
                                         .add_enabled(
                                             resolved.is_some(),

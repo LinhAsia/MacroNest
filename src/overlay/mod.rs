@@ -30354,18 +30354,32 @@ mod windows_overlay {
         let mut address =
             crate::memory_debugger::debugger::resolve_module_offset(pid, module, module_offset)
                 .ok()?;
+        let pointer_width = crate::memory_debugger::debugger::process_pointer_width(pid).ok()?;
         for offset in offsets {
-            let crate::process_memory::ScanValue::I64(next) =
-                crate::process_memory::read_scan_value(
+            let next = match pointer_width {
+                4 => match crate::process_memory::read_scan_value(
+                    pid,
+                    address,
+                    crate::process_memory::ScanValueType::I32,
+                )
+                .ok()?
+                {
+                    crate::process_memory::ScanValue::I32(value) => value as u32 as usize,
+                    _ => return None,
+                },
+                8 => match crate::process_memory::read_scan_value(
                     pid,
                     address,
                     crate::process_memory::ScanValueType::I64,
                 )
                 .ok()?
-            else {
-                return None;
+                {
+                    crate::process_memory::ScanValue::I64(value) => value as usize,
+                    _ => return None,
+                },
+                _ => return None,
             };
-            address = usize::try_from(next).ok()?.checked_add(*offset)?;
+            address = next.checked_add(*offset)?;
         }
         Some(address)
     }
@@ -30511,8 +30525,33 @@ mod windows_overlay {
                 value.to_string()
             }
         };
-        let _ =
-            crate::process_memory::write_value(pid, address, step.memory_value_type, value.trim());
+        let value = match step.memory_value_type {
+            crate::model::MemoryValueType::I8 => match value.trim().parse() {
+                Ok(value) => crate::process_memory::ScanValue::I8(value),
+                Err(_) => return,
+            },
+            crate::model::MemoryValueType::I16 => match value.trim().parse() {
+                Ok(value) => crate::process_memory::ScanValue::I16(value),
+                Err(_) => return,
+            },
+            crate::model::MemoryValueType::I32 => match value.trim().parse() {
+                Ok(value) => crate::process_memory::ScanValue::I32(value),
+                Err(_) => return,
+            },
+            crate::model::MemoryValueType::F32 => match value.trim().parse() {
+                Ok(value) => crate::process_memory::ScanValue::F32(value),
+                Err(_) => return,
+            },
+            crate::model::MemoryValueType::I64 => match value.trim().parse() {
+                Ok(value) => crate::process_memory::ScanValue::I64(value),
+                Err(_) => return,
+            },
+            crate::model::MemoryValueType::F64 => match value.trim().parse() {
+                Ok(value) => crate::process_memory::ScanValue::F64(value),
+                Err(_) => return,
+            },
+        };
+        let _ = crate::process_memory::write_scan_value(pid, address, value);
     }
 
     fn execute_ocr_action_step(step: &crate::model::MacroStep) {
