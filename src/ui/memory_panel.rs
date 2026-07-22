@@ -475,6 +475,7 @@ pub(crate) struct MemoryPanelState {
     capturing_hotkey: Option<MemoryScanAction>,
     edit_value_index: Option<usize>,
     edit_value_input: String,
+    edit_value_position: Option<egui::Pos2>,
     edit_description_index: Option<usize>,
     address_dialog: Option<AddressDialog>,
     memory_view_dialog: Option<MemoryViewDialog>,
@@ -546,6 +547,7 @@ impl Default for MemoryPanelState {
             capturing_hotkey: None,
             edit_value_index: None,
             edit_value_input: String::new(),
+            edit_value_position: None,
             edit_description_index: None,
             address_dialog: None,
             memory_view_dialog: None,
@@ -603,6 +605,7 @@ impl CrosshairApp {
             self.memory_panel.selected_saved.clear();
             self.memory_panel.saved_selection_anchor = None;
             self.memory_panel.edit_value_index = None;
+            self.memory_panel.edit_value_position = None;
             self.memory_panel.edit_description_index = None;
             self.memory_panel.address_dialog = None;
         }
@@ -1894,6 +1897,11 @@ impl CrosshairApp {
                         if ui.button("Delete").clicked() {
                             self.delete_selected_saved_memory();
                         }
+                        if selected < self.memory_panel.saved.len()
+                            && ui.button("Delete unselected").clicked()
+                        {
+                            self.delete_unselected_saved_memory();
+                        }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label = if self.memory_panel.address_list_pinned {
@@ -1921,11 +1929,58 @@ impl CrosshairApp {
                 {
                     self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
                 }
-                if self.memory_panel.saved_list_active
-                    && !editing
-                    && ui.input(|input| input.key_pressed(egui::Key::Delete))
-                {
-                    self.delete_selected_saved_memory();
+                if self.memory_panel.saved_list_active && !editing {
+                    let (shift_w, shift_s, delete, shift_delete, edit) = ui.input(|input| {
+                        (
+                            input.modifiers.shift && input.key_pressed(egui::Key::W),
+                            input.modifiers.shift && input.key_pressed(egui::Key::S),
+                            !input.modifiers.shift && input.key_pressed(egui::Key::Delete),
+                            input.modifiers.shift && input.key_pressed(egui::Key::Delete),
+                            !input.modifiers.ctrl
+                                && !input.modifiers.command
+                                && !input.modifiers.alt
+                                && input.key_pressed(egui::Key::C),
+                        )
+                    });
+                    if shift_w && !self.memory_panel.selected_saved.is_empty() {
+                        let end = self
+                            .memory_panel
+                            .selected_saved
+                            .iter()
+                            .copied()
+                            .max()
+                            .unwrap_or(0);
+                        self.memory_panel.selected_saved.extend(0..=end);
+                        self.memory_panel.saved_selection_anchor = Some(0);
+                    }
+                    if shift_s && !self.memory_panel.selected_saved.is_empty() {
+                        let start = self
+                            .memory_panel
+                            .selected_saved
+                            .iter()
+                            .copied()
+                            .min()
+                            .unwrap_or(0);
+                        self.memory_panel
+                            .selected_saved
+                            .extend(start..self.memory_panel.saved.len());
+                        self.memory_panel.saved_selection_anchor =
+                            self.memory_panel.saved.len().checked_sub(1);
+                    }
+                    if shift_delete {
+                        self.delete_unselected_saved_memory();
+                    } else if delete {
+                        self.delete_selected_saved_memory();
+                    } else if edit
+                        && let Some(index) = self.memory_panel.selected_saved.iter().copied().min()
+                    {
+                        let position = ui
+                            .ctx()
+                            .pointer_latest_pos()
+                            .unwrap_or(ui.next_widget_position())
+                            + vec2(12.0, 12.0);
+                        self.begin_saved_memory_value_edit(index, position);
+                    }
                 }
                 let header_column_width = ((ui.available_width() - 21.0) / 4.0).max(80.0);
                 ui.horizontal(|ui| {
@@ -2035,49 +2090,27 @@ impl CrosshairApp {
                                         .clone()
                                         .on_hover_cursor(egui::CursorIcon::Default);
                                     row_hits.push(type_response);
-                                    if self.memory_panel.edit_value_index == Some(index) {
-                                        let response = ui.add_sized(
-                                            [column_width, 20.0],
-                                            egui::TextEdit::singleline(
-                                                &mut self.memory_panel.edit_value_input,
-                                            ),
-                                        );
-                                        response.request_focus();
-                                        row_hits.push(response.clone());
-                                        if response.clicked_elsewhere()
-                                            || (response.has_focus()
-                                                && ui.input(|input| {
-                                                    input.key_pressed(egui::Key::Enter)
+                                    let value_response = Self::memory_label_cell(
+                                        ui,
+                                        column_width,
+                                        row_height,
+                                        egui::Label::new(
+                                            saved.current_text.clone().or_else(|| saved
+                                                .current.map(|value| {
+                                                    format_scan_value(
+                                                        value,
+                                                        self.memory_panel.hex,
+                                                    )
                                                 }))
-                                        {
-                                            self.commit_saved_memory_value(index);
-                                        }
-                                        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                                            self.memory_panel.edit_value_index = None;
-                                        }
-                                    } else {
-                                        let value_response = Self::memory_label_cell(
-                                            ui,
-                                            column_width,
-                                            row_height,
-                                            egui::Label::new(
-                                                saved.current_text.clone().or_else(|| saved
-                                                    .current.map(|value| {
-                                                        format_scan_value(
-                                                            value,
-                                                            self.memory_panel.hex,
-                                                        )
-                                                    }))
-                                                    .unwrap_or_else(|| "?".to_owned()),
-                                            )
-                                            .selectable(false)
-                                            .sense(Sense::hover()),
-                                        );
-                                        value_response
-                                            .clone()
-                                            .on_hover_cursor(egui::CursorIcon::Default);
-                                        row_hits.push(value_response.clone());
-                                    }
+                                                .unwrap_or_else(|| "?".to_owned()),
+                                        )
+                                        .selectable(false)
+                                        .sense(Sense::hover()),
+                                    );
+                                    value_response
+                                        .clone()
+                                        .on_hover_cursor(egui::CursorIcon::Default);
+                                    row_hits.push(value_response.clone());
                                     if self.memory_panel.edit_description_index == Some(index) {
                                         let description_response = ui.add_sized(
                                             [column_width, row_height],
@@ -2362,12 +2395,12 @@ impl CrosshairApp {
                                 });
                             }
                             if edit_value {
-                                self.memory_panel.edit_value_index = Some(index);
-                                self.memory_panel.edit_value_input = saved.current_text.clone()
-                                    .or_else(|| saved.current.map(|value| {
-                                        editable_scan_value(value, self.memory_panel.hex)
-                                    }))
-                                    .unwrap_or_default();
+                                let position = ui
+                                    .ctx()
+                                    .pointer_latest_pos()
+                                    .unwrap_or(full_row_rect.right_center())
+                                    + vec2(12.0, 8.0);
+                                self.begin_saved_memory_value_edit(index, position);
                             }
                             if let Some(freeze) = freeze_selection {
                                 let selected = self.memory_panel.selected_saved.clone();
@@ -2391,6 +2424,7 @@ impl CrosshairApp {
                     });
                 }
             });
+        self.render_saved_memory_value_editor(ui.ctx());
     }
 
     fn render_memory_settings(&mut self, ctx: &egui::Context) {
@@ -2744,9 +2778,19 @@ impl CrosshairApp {
             }
         };
         let worker_progress = Arc::clone(&progress);
+        let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = scan_pointer_paths(pid, target, &modules, 0x1000, 5, 128, worker_progress)
+            let result = scan_pointer_paths(
+                pid,
+                target,
+                &modules,
+                pointer_width,
+                0x1000,
+                5,
+                128,
+                worker_progress,
+            )
                 .map_err(|error| error.to_string());
             let _ = tx.send(StablePointerJobResult { pid, result });
         });
@@ -2805,6 +2849,7 @@ impl CrosshairApp {
             }
         };
         let progress = Arc::new(AtomicUsize::new(0));
+        let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
         let worker_progress = Arc::clone(&progress);
         let (tx, rx) = mpsc::channel();
         if let Some((map_a, target_a)) = self
@@ -2815,10 +2860,10 @@ impl CrosshairApp {
         {
             let target = saved.address;
             thread::spawn(move || {
-                let result = capture_pointer_map(pid, &modules, worker_progress)
+                let result = capture_pointer_map(pid, &modules, pointer_width, worker_progress)
                     .map(|map_b| {
-                        let paths_a = map_a.paths_to(target_a, 0x1000, 5, 4096);
-                        let paths_b = map_b.paths_to(target, 0x1000, 5, 4096);
+                        let paths_a = map_a.paths_to(target_a, 0x1000, 5, 65_536);
+                        let paths_b = map_b.paths_to(target, 0x1000, 5, 65_536);
                         let paths_b = paths_b.into_iter().collect::<HashSet<_>>();
                         paths_a
                             .into_iter()
@@ -2839,7 +2884,7 @@ impl CrosshairApp {
             dialog.selection_anchor = None;
         } else {
             thread::spawn(move || {
-                let result = capture_pointer_map(pid, &modules, worker_progress)
+                let result = capture_pointer_map(pid, &modules, pointer_width, worker_progress)
                     .map_err(|error| error.to_string());
                 let _ = tx.send(DeepPointerJobResult::MapA(result));
             });
@@ -5124,6 +5169,60 @@ impl CrosshairApp {
         }
     }
 
+    fn begin_saved_memory_value_edit(&mut self, index: usize, position: egui::Pos2) {
+        let Some(saved) = self.memory_panel.saved.get(index) else {
+            return;
+        };
+        self.memory_panel.edit_value_index = Some(index);
+        self.memory_panel.edit_value_input = saved
+            .current_text
+            .clone()
+            .or_else(|| {
+                saved
+                    .current
+                    .map(|value| editable_scan_value(value, self.memory_panel.hex))
+            })
+            .unwrap_or_default();
+        self.memory_panel.edit_value_position = Some(position);
+    }
+
+    fn render_saved_memory_value_editor(&mut self, ctx: &egui::Context) {
+        let (Some(index), Some(position)) = (
+            self.memory_panel.edit_value_index,
+            self.memory_panel.edit_value_position,
+        ) else {
+            return;
+        };
+        let mut commit = false;
+        let mut cancel = false;
+        egui::Area::new(egui::Id::new("saved-memory-value-editor"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(position)
+            .show(ctx, |ui| {
+                Frame::popup(ui.style()).inner_margin(8).show(ui, |ui| {
+                    ui.label(RichText::new("Edit selected value(s)").strong());
+                    let response = ui.add_sized(
+                        [190.0, 24.0],
+                        egui::TextEdit::singleline(&mut self.memory_panel.edit_value_input),
+                    );
+                    response.request_focus();
+                    ui.horizontal(|ui| {
+                        commit = ui.button("Apply").clicked();
+                        cancel = ui.button("Cancel").clicked();
+                    });
+                    commit |= response.has_focus()
+                        && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    cancel |= ui.input(|input| input.key_pressed(egui::Key::Escape));
+                });
+            });
+        if commit {
+            self.commit_saved_memory_value(index);
+        } else if cancel {
+            self.memory_panel.edit_value_index = None;
+            self.memory_panel.edit_value_position = None;
+        }
+    }
+
     fn commit_saved_memory_value(&mut self, index: usize) {
         let Some(pid) = self.memory_panel.process_pid else {
             return;
@@ -5169,6 +5268,7 @@ impl CrosshairApp {
             }
         }
         self.memory_panel.edit_value_index = None;
+        self.memory_panel.edit_value_position = None;
         self.memory_panel.status = format!("Value written to {written} address(es)");
     }
 
@@ -5182,6 +5282,26 @@ impl CrosshairApp {
             .filter_map(|(index, saved)| (!selected.contains(&index)).then_some(saved))
             .collect();
         self.memory_panel.selected_saved.clear();
+        self.memory_panel.edit_value_index = None;
+        self.memory_panel.edit_value_position = None;
+        self.sync_memory_freeze_targets();
+        self.persist_memory_pointers();
+    }
+
+    fn delete_unselected_saved_memory(&mut self) {
+        let selected = &self.memory_panel.selected_saved;
+        self.memory_panel.saved = self
+            .memory_panel
+            .saved
+            .drain(..)
+            .enumerate()
+            .filter_map(|(index, saved)| selected.contains(&index).then_some(saved))
+            .collect();
+        self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
+        self.memory_panel.saved_selection_anchor = (!self.memory_panel.saved.is_empty()).then_some(0);
+        self.memory_panel.edit_value_index = None;
+        self.memory_panel.edit_value_position = None;
+        self.sync_memory_freeze_targets();
         self.persist_memory_pointers();
     }
 

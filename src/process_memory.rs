@@ -202,9 +202,15 @@ pub struct PointerMap {
 pub fn capture_pointer_map(
     pid: u32,
     modules: &[(String, usize, usize)],
+    pointer_width: usize,
     progress: Arc<AtomicUsize>,
 ) -> io::Result<PointerMap> {
-    const MAX_POINTERS: usize = 12_000_000;
+    if !matches!(pointer_width, 4 | 8) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "pointer width must be 4 or 8 bytes",
+        ));
+    }
     let process = ScanProcess::open(pid, false)?;
     let regions = pointer_scan_regions_for(&process);
     let readable_ranges = regions
@@ -212,6 +218,9 @@ pub fn capture_pointer_map(
         .map(|region| (region.base, region.base.saturating_add(region.size)))
         .collect::<Vec<_>>();
     let mut pointers = Vec::new();
+    pointers
+        .try_reserve_exact(1_000_000)
+        .map_err(|_| io::Error::other("not enough memory to start pointer map"))?;
     let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
     for region in regions {
         for offset in (0..region.size).step_by(SCAN_CHUNK_BYTES) {
@@ -220,29 +229,36 @@ pub fn capture_pointer_map(
             let Ok(read) = process.read(address, &mut buffer[..wanted]) else {
                 continue;
             };
-            for byte_offset in (0..read.saturating_sub(7)).step_by(4) {
-                let value = usize::from_le_bytes(
-                    buffer[byte_offset..byte_offset + size_of::<usize>()]
-                        .try_into()
-                        .unwrap(),
-                );
+            if read < pointer_width {
+                continue;
+            }
+            for byte_offset in (0..=read - pointer_width).step_by(pointer_width) {
+                let value = if pointer_width == 4 {
+                    u32::from_le_bytes(
+                        buffer[byte_offset..byte_offset + 4].try_into().unwrap(),
+                    ) as usize
+                } else {
+                    u64::from_le_bytes(
+                        buffer[byte_offset..byte_offset + 8].try_into().unwrap(),
+                    ) as usize
+                };
                 let range = readable_ranges.partition_point(|(base, _)| *base <= value);
                 if range > 0 && value < readable_ranges[range - 1].1 {
-                    pointers.push((value, address + byte_offset));
-                    if pointers.len() >= MAX_POINTERS {
-                        break;
+                    if pointers.len() == pointers.capacity() {
+                        pointers.try_reserve_exact(1_000_000).map_err(|_| {
+                            io::Error::other(format!(
+                                "not enough memory after capturing {} pointers",
+                                pointers.len()
+                            ))
+                        })?;
                     }
+                    pointers.push((value, address + byte_offset));
                 }
             }
             progress.fetch_add(read, Ordering::Relaxed);
-            if pointers.len() >= MAX_POINTERS {
-                break;
-            }
-        }
-        if pointers.len() >= MAX_POINTERS {
-            break;
         }
     }
+    pointers.sort_unstable();
     Ok(PointerMap {
         pointers,
         modules: modules.to_vec(),
@@ -258,7 +274,7 @@ impl PointerMap {
         result_limit: usize,
     ) -> Vec<PointerPath> {
         find_pointer_paths(
-            self.pointers.clone(),
+            &self.pointers,
             target,
             &self.modules,
             max_offset,
@@ -272,6 +288,7 @@ pub fn scan_pointer_paths(
     pid: u32,
     target: usize,
     modules: &[(String, usize, usize)],
+    pointer_width: usize,
     max_offset: usize,
     max_depth: usize,
     result_limit: usize,
@@ -279,9 +296,9 @@ pub fn scan_pointer_paths(
 ) -> io::Result<Vec<PointerPath>> {
     // ponytail: these caps keep a pathological process from exhausting app memory; a disk-backed
     // pointer map is the upgrade path for larger scans.
-    let map = capture_pointer_map(pid, modules, progress)?;
+    let map = capture_pointer_map(pid, modules, pointer_width, progress)?;
     Ok(find_pointer_paths(
-        map.pointers,
+        &map.pointers,
         target,
         modules,
         max_offset,
@@ -291,7 +308,7 @@ pub fn scan_pointer_paths(
 }
 
 fn find_pointer_paths(
-    mut pointers: Vec<(usize, usize)>,
+    pointers: &[(usize, usize)],
     target: usize,
     modules: &[(String, usize, usize)],
     max_offset: usize,
@@ -299,7 +316,6 @@ fn find_pointer_paths(
     result_limit: usize,
 ) -> Vec<PointerPath> {
     const MAX_FRONTIER: usize = 50_000;
-    pointers.sort_unstable_by_key(|(value, _)| *value);
     let mut results = Vec::new();
     let mut frontier = vec![(target, Vec::<usize>::new())];
     for _ in 0..max_depth.max(1) {
@@ -1536,7 +1552,7 @@ mod tests {
     #[test]
     fn pointer_paths_keep_offsets_in_dereference_order() {
         let paths = find_pointer_paths(
-            vec![(0x2FE0, 0x2000), (0x1FF0, 0x1010)],
+            &[(0x1FF0, 0x1010), (0x2FE0, 0x2000)],
             0x3000,
             &[("game.exe".to_owned(), 0x1000, 0x100)],
             0x100,
