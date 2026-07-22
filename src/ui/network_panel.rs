@@ -1216,17 +1216,25 @@ impl CrosshairApp {
                     }
                     ui.separator();
                     ui.label(RichText::new("All processes (individual PID)").strong());
-                    for process in &self.network_panel.frida_processes {
-                        if process.pid == std::process::id() { continue; }
-                        if Self::selectable_process_row(
-                            ui,
-                            self.network_panel.frida_pid == Some(process.pid),
-                            format!("{} — PID {}    {}", process.name, process.pid, process.path),
-                            &process.path,
-                        ).clicked() {
-                            self.network_panel.frida_pid = Some(process.pid);
+                    ui.horizontal(|ui| {
+                        ui.add_space(24.0);
+                        ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new("Name").strong()));
+                        ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new("PID").strong()));
+                        ui.label(RichText::new("Path").strong());
+                    });
+                    let count = self.network_panel.frida_processes.len();
+                    egui::ScrollArea::vertical().max_height(390.0).show_rows(ui, 22.0, count, |ui, rows| {
+                        for index in rows {
+                            let process = &mut self.network_panel.frida_processes[index];
+                            if process.pid == std::process::id() { continue; }
+                            if process.path.is_empty() {
+                                process.path = crate::memory_debugger::debugger::process_path(process.pid);
+                            }
+                            if Self::selectable_process_detail_row(ui, self.network_panel.frida_pid == Some(process.pid), &process.name, process.pid, &process.path).clicked() {
+                                self.network_panel.frida_pid = Some(process.pid);
+                            }
                         }
-                    }
+                    });
                 });
             if process_picker.response.clicked() { self.network_panel.refresh_frida_processes(); }
             if process_picker.response.clicked() { self.ensure_open_windows_ready(true); }

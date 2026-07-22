@@ -1140,25 +1140,25 @@ impl CrosshairApp {
                                             RichText::new("All processes (individual PID)")
                                                 .strong(),
                                         );
-                                        for process in self.memory_panel.process_choices.clone() {
-                                            let pid = process.pid;
-                                            let path = process.path;
-                                            let name = format!("{}    {path}", process.name);
-                                            if Self::selectable_process_row(
-                                                ui,
-                                                    self.memory_panel.process_pid == Some(pid),
-                                                    format!("{name} — PID {pid}"),
-                                                    &path,
-                                                )
-                                                .clicked()
-                                            {
-                                                self.select_memory_process(
-                                                    format!("pid:{pid}:{name}"),
-                                                    Some(pid),
-                                                    ui.ctx(),
-                                                );
+                                        ui.horizontal(|ui| {
+                                            ui.add_space(24.0);
+                                            ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new("Name").strong()));
+                                            ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new("PID").strong()));
+                                            ui.label(RichText::new("Path").strong());
+                                        });
+                                        let count = self.memory_panel.process_choices.len();
+                                        egui::ScrollArea::vertical().max_height(390.0).show_rows(ui, 22.0, count, |ui, rows| {
+                                            for index in rows {
+                                                let process = &mut self.memory_panel.process_choices[index];
+                                                if process.path.is_empty() {
+                                                    process.path = crate::memory_debugger::debugger::process_path(process.pid);
+                                                }
+                                                let process = process.clone();
+                                                if Self::selectable_process_detail_row(ui, self.memory_panel.process_pid == Some(process.pid), &process.name, process.pid, &process.path).clicked() {
+                                                    self.select_memory_process(format!("pid:{}:{}", process.pid, process.name), Some(process.pid), ui.ctx());
+                                                }
                                             }
-                                        }
+                                        });
                                     }
                                 })
                         })

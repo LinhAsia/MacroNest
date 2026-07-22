@@ -33,8 +33,8 @@ use windows_sys::Win32::{
         },
         Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW,
-            PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
-            TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32,
+            PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPMODULE,
+            TH32CS_SNAPMODULE32, TH32CS_SNAPPROCESS,
         },
         Threading::{
             IsWow64Process, OpenProcess, QueryFullProcessImageNameW,
@@ -69,7 +69,7 @@ pub fn process_path(pid: u32) -> String {
 pub fn list_process_details() -> io::Result<Vec<ProcessInfo>> {
     Ok(list_processes()?
         .into_iter()
-        .map(|(pid, name)| ProcessInfo { pid, name, path: process_path(pid) })
+        .map(|(pid, name)| ProcessInfo { pid, name, path: String::new() })
         .collect())
 }
 
@@ -100,7 +100,12 @@ pub fn list_processes() -> io::Result<Vec<(u32, String)>> {
         ok = unsafe { Process32NextW(snapshot, &mut entry) };
     }
     unsafe { CloseHandle(snapshot) };
-    processes.sort_by(|left, right| left.1.to_ascii_lowercase().cmp(&right.1.to_ascii_lowercase()).then(left.0.cmp(&right.0)));
+    processes.sort_by(|left, right| {
+        left.1
+            .to_ascii_lowercase()
+            .cmp(&right.1.to_ascii_lowercase())
+            .then(left.0.cmp(&right.0))
+    });
     Ok(processes)
 }
 
@@ -134,8 +139,10 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
         }
         let error = io::Error::last_os_error();
         attempts += 1;
-        if !matches!(error.raw_os_error(), Some(ERROR_BAD_LENGTH | ERROR_MORE_DATA))
-            || attempts >= 8
+        if !matches!(
+            error.raw_os_error(),
+            Some(ERROR_BAD_LENGTH | ERROR_MORE_DATA)
+        ) || attempts >= 8
         {
             return Err(error);
         }
@@ -223,7 +230,8 @@ impl WatchSession {
         let architecture = target_architecture(pid, requested_architecture)?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
-        let worker = thread::spawn(move || watch_loop(pid, kind, architecture, worker_stop, notify));
+        let worker =
+            thread::spawn(move || watch_loop(pid, kind, architecture, worker_stop, notify));
         Ok(Self {
             stop,
             worker: Some(worker),
@@ -247,7 +255,12 @@ impl Drop for WatchSession {
 pub struct WriteWatch(WatchSession);
 
 impl WriteWatch {
-    pub fn start<F>(pid: u32, address: usize, architecture: MemoryDebuggerArchitecture, notify: F) -> io::Result<Self>
+    pub fn start<F>(
+        pid: u32,
+        address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        notify: F,
+    ) -> io::Result<Self>
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
@@ -268,7 +281,12 @@ impl WriteWatch {
 pub struct AddressAccessWatch(WatchSession);
 
 impl AddressAccessWatch {
-    pub fn start<F>(pid: u32, address: usize, architecture: MemoryDebuggerArchitecture, notify: F) -> io::Result<Self>
+    pub fn start<F>(
+        pid: u32,
+        address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        notify: F,
+    ) -> io::Result<Self>
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
@@ -289,7 +307,12 @@ impl AddressAccessWatch {
 pub struct AccessWatch(WatchSession);
 
 impl AccessWatch {
-    pub fn start<F>(pid: u32, instruction_address: usize, architecture: MemoryDebuggerArchitecture, notify: F) -> io::Result<Self>
+    pub fn start<F>(
+        pid: u32,
+        instruction_address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        notify: F,
+    ) -> io::Result<Self>
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
@@ -343,7 +366,10 @@ impl WatchKind {
     }
 }
 
-fn target_architecture(pid: u32, requested: MemoryDebuggerArchitecture) -> io::Result<TargetArchitecture> {
+fn target_architecture(
+    pid: u32,
+    requested: MemoryDebuggerArchitecture,
+) -> io::Result<TargetArchitecture> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
         return Err(io::Error::last_os_error());
@@ -354,18 +380,33 @@ fn target_architecture(pid: u32, requested: MemoryDebuggerArchitecture) -> io::R
     if result == 0 {
         return Err(io::Error::last_os_error());
     }
-    let detected = if wow64 != 0 { TargetArchitecture::X86 } else { TargetArchitecture::X64 };
+    let detected = if wow64 != 0 {
+        TargetArchitecture::X86
+    } else {
+        TargetArchitecture::X64
+    };
     match requested {
         MemoryDebuggerArchitecture::Auto => Ok(detected),
         MemoryDebuggerArchitecture::X86 if detected == TargetArchitecture::X86 => Ok(detected),
         MemoryDebuggerArchitecture::X64 if detected == TargetArchitecture::X64 => Ok(detected),
-        MemoryDebuggerArchitecture::X86 => Err(io::Error::new(io::ErrorKind::InvalidInput, "selected 32-bit debugger for a 64-bit process")),
-        MemoryDebuggerArchitecture::X64 => Err(io::Error::new(io::ErrorKind::InvalidInput, "selected 64-bit debugger for a 32-bit process")),
+        MemoryDebuggerArchitecture::X86 => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "selected 32-bit debugger for a 64-bit process",
+        )),
+        MemoryDebuggerArchitecture::X64 => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "selected 64-bit debugger for a 32-bit process",
+        )),
     }
 }
 
-fn watch_loop<F>(pid: u32, kind: WatchKind, architecture: TargetArchitecture, stop: Arc<AtomicBool>, notify: F)
-where
+fn watch_loop<F>(
+    pid: u32,
+    kind: WatchKind,
+    architecture: TargetArchitecture,
+    stop: Arc<AtomicBool>,
+    notify: F,
+) where
     F: Fn(WatchEvent),
 {
     let process = match Process::open(pid) {
@@ -412,9 +453,7 @@ where
             },
             CREATE_THREAD_DEBUG_EVENT => unsafe {
                 let thread = event.u.CreateThread.hThread;
-                if debugger_started
-                    && let Err(error) = arm_thread(thread, &kind, architecture)
-                {
+                if debugger_started && let Err(error) = arm_thread(thread, &kind, architecture) {
                     notify(WatchEvent::Error(format!(
                         "unable to arm new game thread {}: {error}",
                         event.dwThreadId
@@ -439,13 +478,13 @@ where
                                 let read_write = matches!(kind, WatchKind::ReadWrite { .. });
                                 if !capture_limit_reached
                                     && let Some((instruction_address, decoded, instruction)) =
-                                    decode_previous_access(
-                                        &process,
-                                        &context,
-                                        *address,
-                                        !read_write,
-                                        architecture,
-                                    )
+                                        decode_previous_access(
+                                            &process,
+                                            &context,
+                                            *address,
+                                            !read_write,
+                                            architecture,
+                                        )
                                 {
                                     notify(WatchEvent::AddressHit {
                                         instruction_address,
@@ -456,7 +495,7 @@ where
                                             &decoded,
                                             &context,
                                             *address,
-                                            if read_write { "truy c???p" } else { "ghi" },
+                                            if read_write { "truy cáº­p" } else { "ghi" },
                                             architecture,
                                         ),
                                         likely_stack_copy: address.abs_diff(context.Rsp as usize)
@@ -466,14 +505,17 @@ where
                                         access_hits += 1;
                                         if access_hits >= MAX_ACCESS_HITS {
                                             capture_limit_reached = true;
-                                            notify(WatchEvent::CaptureLimitReached(MAX_ACCESS_HITS));
+                                            notify(WatchEvent::CaptureLimitReached(
+                                                MAX_ACCESS_HITS,
+                                            ));
                                         }
                                     }
                                 }
                             }
                             WatchKind::Execute { instruction, .. } => {
                                 if !capture_limit_reached
-                                    && let Some(data_address) = effective_address(instruction, &context)
+                                    && let Some(data_address) =
+                                        effective_address(instruction, &context)
                                 {
                                     notify(WatchEvent::AccessHit { data_address });
                                     access_hits += 1;
@@ -490,8 +532,7 @@ where
                         // context API; never leak that debugger-owned exception into the game.
                         status = DBG_CONTINUE;
                     }
-                } else if (exception == EXCEPTION_BREAKPOINT
-                    || exception == STATUS_WX86_BREAKPOINT)
+                } else if (exception == EXCEPTION_BREAKPOINT || exception == STATUS_WX86_BREAKPOINT)
                     && first_breakpoint
                 {
                     first_breakpoint = false;
@@ -550,7 +591,11 @@ unsafe fn close_if_valid(handle: HANDLE) {
     }
 }
 
-unsafe fn arm_thread(thread: HANDLE, kind: &WatchKind, architecture: TargetArchitecture) -> io::Result<()> {
+unsafe fn arm_thread(
+    thread: HANDLE,
+    kind: &WatchKind,
+    architecture: TargetArchitecture,
+) -> io::Result<()> {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
             ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
@@ -615,7 +660,11 @@ impl CapturedContext {
     }
 }
 
-fn read_hit(thread: HANDLE, address: usize, architecture: TargetArchitecture) -> Option<CapturedContext> {
+fn read_hit(
+    thread: HANDLE,
+    address: usize,
+    architecture: TargetArchitecture,
+) -> Option<CapturedContext> {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
             ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS
@@ -647,11 +696,19 @@ fn read_hit(thread: HANDLE, address: usize, architecture: TargetArchitecture) ->
     captured.map(CapturedContext::X64)
 }
 
-fn decode_at(process: &Process, address: usize, architecture: TargetArchitecture) -> io::Result<Instruction> {
+fn decode_at(
+    process: &Process,
+    address: usize,
+    architecture: TargetArchitecture,
+) -> io::Result<Instruction> {
     let mut bytes = [0u8; 15];
     let read = process.read(address, &mut bytes)?;
     let mut decoder = Decoder::with_ip(
-        if architecture == TargetArchitecture::X86 { 32 } else { 64 },
+        if architecture == TargetArchitecture::X86 {
+            32
+        } else {
+            64
+        },
         &bytes[..read],
         address as u64,
         DecoderOptions::NONE,
@@ -685,7 +742,11 @@ fn decode_previous_access(
             continue;
         }
         let mut decoder = Decoder::with_ip(
-            if architecture == TargetArchitecture::X86 { 32 } else { 64 },
+            if architecture == TargetArchitecture::X86 {
+                32
+            } else {
+                64
+            },
             &bytes[..length],
             start as u64,
             DecoderOptions::NONE,
@@ -725,7 +786,11 @@ fn writes_memory(instruction: &Instruction) -> bool {
 
 pub fn instruction_writes_memory(pid: u32, address: usize) -> io::Result<bool> {
     let architecture = target_architecture(pid, MemoryDebuggerArchitecture::Auto)?;
-    Ok(writes_memory(&decode_at(&Process::open(pid)?, address, architecture)?))
+    Ok(writes_memory(&decode_at(
+        &Process::open(pid)?,
+        address,
+        architecture,
+    )?))
 }
 
 pub fn disassemble_from(
@@ -842,7 +907,7 @@ fn format_hit_details_legacy(
     action: &str,
 ) -> String {
     let mut text = format!(
-        "DISASSEMBLY (d??ng << l?? instruction {action}; c??c d??ng sau l?? code k??? ti???p)\r\n"
+        "DISASSEMBLY (dÃ²ng << lÃ  instruction {action}; cÃ¡c dÃ²ng sau lÃ  code káº¿ tiáº¿p)\r\n"
     );
     let mut current = *instruction;
     for index in 0..6 {
@@ -865,13 +930,14 @@ fn format_hit_details_legacy(
             assembly,
             if index == 0 { "  <<" } else { "" }
         ));
-        let Ok(next) = decode_at(process, current.next_ip() as usize, TargetArchitecture::X64) else {
+        let Ok(next) = decode_at(process, current.next_ip() as usize, TargetArchitecture::X64)
+        else {
             break;
         };
         current = next;
     }
     text.push_str(&format!(
-        "\r\nSNAPSHOT SAU L???N {} G???N NH???T\r\n\
+        "\r\nSNAPSHOT SAU Láº¦N {} Gáº¦N NHáº¤T\r\n\
 RAX={:016X}  RBX={:016X}\r\n\
 RCX={:016X}  RDX={:016X}\r\n\
 RSI={:016X}  RDI={:016X}\r\n\
@@ -880,8 +946,8 @@ R8 ={:016X}  R9 ={:016X}\r\n\
 R10={:016X}  R11={:016X}\r\n\
 R12={:016X}  R13={:016X}\r\n\
 R14={:016X}  R15={:016X}\r\n\
-RIP(sau l???nh)={:016X}  RFLAGS={:08X}\r\n\
-?????A CH??? DATA TH???C T???=0x{:016X}\r\n",
+RIP(sau lá»‡nh)={:016X}  RFLAGS={:08X}\r\n\
+Äá»ŠA CHá»ˆ DATA THá»°C Táº¾=0x{:016X}\r\n",
         action.to_uppercase(),
         context.Rax,
         context.Rbx,
@@ -1066,9 +1132,14 @@ mod tests {
             }
         };
         let (sender, receiver) = mpsc::channel();
-        let mut watch = WriteWatch::start(child.id(), address, MemoryDebuggerArchitecture::Auto, move |event| {
-            let _ = sender.send(event);
-        })
+        let mut watch = WriteWatch::start(
+            child.id(),
+            address,
+            MemoryDebuggerArchitecture::Auto,
+            move |event| {
+                let _ = sender.send(event);
+            },
+        )
         .unwrap();
         let (ip, assembly, details) = loop {
             match receiver.recv_timeout(Duration::from_secs(4)).unwrap() {
@@ -1090,11 +1161,15 @@ mod tests {
         assert!(details.contains("<<"));
         watch.stop();
         let (sender, receiver) = mpsc::channel();
-        let mut address_access_watch =
-            AddressAccessWatch::start(child.id(), address, MemoryDebuggerArchitecture::Auto, move |event| {
+        let mut address_access_watch = AddressAccessWatch::start(
+            child.id(),
+            address,
+            MemoryDebuggerArchitecture::Auto,
+            move |event| {
                 let _ = sender.send(event);
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         let access_details = loop {
             match receiver.recv_timeout(Duration::from_secs(4)).unwrap() {
                 WatchEvent::AddressHit { details, .. } => break details,
@@ -1103,12 +1178,17 @@ mod tests {
                 _ => {}
             }
         };
-        assert!(access_details.contains("TRUY C???P"));
+        assert!(access_details.contains("TRUY Cáº¬P"));
         address_access_watch.stop();
         let (sender, receiver) = mpsc::channel();
-        let mut access_watch = AccessWatch::start(child.id(), ip, MemoryDebuggerArchitecture::Auto, move |event| {
-            let _ = sender.send(event);
-        })
+        let mut access_watch = AccessWatch::start(
+            child.id(),
+            ip,
+            MemoryDebuggerArchitecture::Auto,
+            move |event| {
+                let _ = sender.send(event);
+            },
+        )
         .unwrap();
         let accessed = loop {
             match receiver.recv_timeout(Duration::from_secs(4)).unwrap() {

@@ -21,14 +21,16 @@ use resvg::usvg;
 use crate::{
     ai, audio, audiosense, hotkey,
     model::{
-        AppPanel, AppState, AudioClipSettings, AudioSettings, CaptureRequest, CapturedInput,
-        CommandPreset, CrosshairStyle, FocusHighlightDecoration, GeometrySpec, GroqSettings,
-        HotkeyBinding, MacroAction, MacroFolder, MacroGroup, MacroPreset, MacroStep,
-        MacroTriggerMode, MascotStyle, MasterMacroGroupState, MasterMacroPresetState, MasterPreset,
-        MasterWindowFocusPresetState, MasterWindowPresetState, MasterZoomPresetState,
-        MousePathEvent, MousePathEventKind, ProfileRecord, QuickKeyDisplayMode,
-        QuickScreenDrawTool, QuickVideoRecordMode, RgbaColor, TimerPreset, UiLanguage, UiThemeMode,
-        VietnameseInputMode, VisionSettings, WindowAnchor, WindowExpandDirection, WindowPreset,
+        AppPanel, AppState, AudioClipSettings, AudioSensePreset, AudioSettings, CaptureRequest,
+        CapturedInput, CommandPreset, CrosshairStyle, FocusHighlightDecoration, GeometryPreset,
+        GeometrySpec, GroqSettings, HotkeyBinding, HudPreset, MacroAction, MacroFolder, MacroGroup,
+        MacroPreset, MacroStep, MacroTriggerMode, MascotStyle, MasterMacroGroupState,
+        MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
+        MasterWindowPresetState, MasterZoomPresetState, MousePathEvent, MousePathEventKind,
+        MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset, ProfileRecord,
+        QuickKeyDisplayMode, QuickScreenDrawTool, QuickVideoRecordMode, RgbaColor, SoundPreset,
+        TimerPreset, UiLanguage, UiThemeMode, VietnameseInputMode, VisionPreset, VisionSettings,
+        WindowAnchor, WindowExpandDirection, WindowPreset,
     },
     overlay::{OverlayCommand, UiCommand},
     storage::AppPaths,
@@ -46,9 +48,9 @@ mod layout;
 mod macro_panel;
 mod macro_panel_ocr;
 mod memory_panel;
-mod network_panel;
 mod mouse_panel;
 mod navigation;
+mod network_panel;
 mod ocr_panel;
 mod settings_panel;
 mod sound_panel;
@@ -97,18 +99,17 @@ pub(crate) struct VietnameseInputConfig {
     pub(crate) mode: VietnameseInputMode,
 }
 
-pub(crate) static VIETNAMESE_INPUT_CONFIG: Lazy<Mutex<VietnameseInputConfig>> =
-    Lazy::new(|| {
-        Mutex::new(VietnameseInputConfig {
-            enabled: false,
-            mode: VietnameseInputMode::Telex,
-        })
-    });
+pub(crate) static VIETNAMESE_INPUT_CONFIG: Lazy<Mutex<VietnameseInputConfig>> = Lazy::new(|| {
+    Mutex::new(VietnameseInputConfig {
+        enabled: false,
+        mode: VietnameseInputMode::Telex,
+    })
+});
 static LIVE_WINDOW_TARGET_COMBO_WINDOWS: Lazy<Mutex<Option<Vec<WindowInfo>>>> =
     Lazy::new(|| Mutex::new(None));
-
 static PROCESS_ICON_TEXTURES: Lazy<Mutex<HashMap<String, Option<TextureHandle>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum UpdateStatus {
     #[default]
@@ -598,6 +599,22 @@ pub(crate) enum MacroGroupClipboardFeedback {
     Cut,
 }
 
+#[derive(Clone)]
+enum PresetClipboard {
+    Command(CommandPreset),
+    Window(WindowPreset),
+    Pin(PinPreset),
+    MousePath(MousePathPreset),
+    MouseSensitivity(MouseSensitivityPreset),
+    Vision(VisionPreset),
+    AudioSense(AudioSensePreset),
+    Ocr(OcrPreset),
+    Geometry(GeometryPreset),
+    Sound(SoundPreset),
+    Hud(HudPreset),
+    Timer(TimerPreset),
+}
+
 pub struct CrosshairApp {
     pub paths: AppPaths,
     pub state: AppState,
@@ -727,6 +744,7 @@ pub struct CrosshairApp {
     macro_step_clipboard: Vec<MacroStep>,
     pending_macro_group_scroll_target: Option<u32>,
     crosshair_profile_clipboard: Option<ProfileRecord>,
+    preset_clipboard: Option<PresetClipboard>,
     crosshair_editor_dirty: bool,
     crosshair_preview_last_sync_at: Option<Instant>,
     crosshair_preview_dirty_index: Option<usize>,
@@ -906,9 +924,8 @@ impl CrosshairApp {
             &state.memory_scan_hotkeys,
             &state.memory_pointer_list,
         );
-        let network_panel = network_panel::NetworkPanelState::new(
-            paths.root.join("network-proxy-recovery.json"),
-        );
+        let network_panel =
+            network_panel::NetworkPanelState::new(paths.root.join("network-proxy-recovery.json"));
         let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
 
         let opencv_installed = paths.opencv_dll.exists();
@@ -1047,6 +1064,7 @@ impl CrosshairApp {
             macro_step_clipboard: Vec::new(),
             pending_macro_group_scroll_target: None,
             crosshair_profile_clipboard: None,
+            preset_clipboard: None,
             crosshair_editor_dirty: false,
             crosshair_preview_last_sync_at: None,
             crosshair_preview_dirty_index: None,
@@ -2487,10 +2505,10 @@ impl CrosshairApp {
             })
             .unwrap_or_else(|| {
                 let fallback_vi = match fallback {
-                    "Select image search preset" => "Ch?n preset image search",
-                    "Select geometry" => "Ch?n geometry",
-                    "Select OCR" => "Ch?n OCR",
-                    "Any Preset" => "M?i preset",
+                    "Select image search preset" => "Chọn preset image search",
+                    "Select geometry" => "Chọn geometry",
+                    "Select OCR" => "Chọn OCR",
+                    "Any Preset" => "Mọi preset",
                     _ => fallback,
                 };
                 Self::tr_lang(language, fallback, fallback_vi).to_owned()
@@ -2509,7 +2527,7 @@ impl CrosshairApp {
             .and_then(|id| {
                 if id == any_id {
                     let any_label_vi = match any_label {
-                        "Any Preset" => "M?i preset",
+                        "Any Preset" => "Mọi preset",
                         _ => any_label,
                     };
                     Some(Self::tr_lang(language, any_label, any_label_vi).to_owned())
@@ -2522,10 +2540,10 @@ impl CrosshairApp {
             })
             .unwrap_or_else(|| {
                 let fallback_vi = match fallback {
-                    "Select image search preset" => "Ch?n preset image search",
-                    "Select geometry" => "Ch?n geometry",
-                    "Select OCR" => "Ch?n OCR",
-                    "Any Preset" => "M?i preset",
+                    "Select image search preset" => "Chọn preset image search",
+                    "Select geometry" => "Chọn geometry",
+                    "Select OCR" => "Chọn OCR",
+                    "Any Preset" => "Mọi preset",
                     _ => fallback,
                 };
                 Self::tr_lang(language, fallback, fallback_vi).to_owned()
@@ -3334,10 +3352,7 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn apply_vietnamese_input_static(
-        response: &egui::Response,
-        text: &mut String,
-    ) {
+    pub(crate) fn apply_vietnamese_input_static(response: &egui::Response, text: &mut String) {
         let (enabled, mode) = {
             let config = VIETNAMESE_INPUT_CONFIG.lock();
             (config.enabled, config.mode)
@@ -4436,8 +4451,7 @@ impl CrosshairApp {
         let success = window_list::set_window_topmost(selector, pinned);
         if success {
             if pinned {
-                self.quick_action_pinned_windows
-                    .insert(selector.to_owned());
+                self.quick_action_pinned_windows.insert(selector.to_owned());
             } else {
                 self.quick_action_pinned_windows.remove(selector);
             }
@@ -4448,10 +4462,7 @@ impl CrosshairApp {
     }
 
     fn unpin_all_quick_action_windows(&mut self) {
-        let selectors = self
-            .quick_action_pinned_windows
-            .drain()
-            .collect::<Vec<_>>();
+        let selectors = self.quick_action_pinned_windows.drain().collect::<Vec<_>>();
         for selector in selectors {
             let _ = window_list::set_window_topmost(&selector, false);
         }
@@ -4780,14 +4791,14 @@ impl CrosshairApp {
                                 self.status = Self::tr_lang(
                                     self.state.ui_language,
                                     "Unpinned all selected windows.",
-                                    "?? b? ghim t?t c? c?a s? ?? ch?n.",
+                                    "Đã bỏ ghim tất cả cửa sổ đã chọn.",
                                 )
                                 .to_owned();
                             } else {
                                 self.status = Self::tr_lang(
                                     self.state.ui_language,
                                     "Select windows from the dropdown to pin them.",
-                                    "Ch?n c?a s? trong danh s?ch ?? ghim.",
+                                    "Chọn cửa sổ trong danh sách để ghim.",
                                 )
                                 .to_owned();
                             }
@@ -4799,13 +4810,13 @@ impl CrosshairApp {
                                 Self::tr_lang(
                                     self.state.ui_language,
                                     "Unpin all",
-                                    "B? ghim t?t c?",
+                                    "Bỏ ghim tất cả",
                                 )
                             } else {
                                 Self::tr_lang(
                                     self.state.ui_language,
                                     "Pin windows",
-                                    "Ghim c?a s?",
+                                    "Ghim cửa sổ",
                                 )
                             },
                             14,
@@ -4849,7 +4860,7 @@ impl CrosshairApp {
                                             Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Selected",
-                                                "?? ch?n",
+                                                "Đã chọn",
                                             ),
                                             self.quick_action_pinned_windows.len()
                                         )
@@ -4857,7 +4868,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Select windows",
-                                            "Ch?n c?a s?",
+                                            "Chọn cửa sổ",
                                         )
                                         .to_owned()
                                     };
@@ -4932,7 +4943,7 @@ impl CrosshairApp {
                                                         self.status = Self::tr_lang(
                                                             self.state.ui_language,
                                                             "Could not update the selected window.",
-                                                            "Kh?ng th? c?p nh?t c?a s? ?? ch?n.",
+                                                            "Không thể cập nhật cửa sổ đã chọn.",
                                                         )
                                                         .to_owned();
                                                     }
@@ -5058,7 +5069,7 @@ impl CrosshairApp {
                                             Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Plain (Native / Smooth)",
-                                                "??n gi?n (Native / m??t)",
+                                                "Đơn giản (Native / mượt)",
                                             )
                                         }
                                         FocusHighlightDecoration::Rainbow => Self::tr_lang(
@@ -5086,7 +5097,7 @@ impl CrosshairApp {
                                                         Self::tr_lang(
                                                             self.state.ui_language,
                                                             "Plain (Native / Smooth)",
-                                                            "??n gi?n (Native / m??t)",
+                                                            "Đơn giản (Native / mượt)",
                                                         ),
                                                     )
                                                     .clicked();
@@ -5153,7 +5164,7 @@ impl CrosshairApp {
                                     RichText::new(Self::tr_lang(
                                         self.state.ui_language,
                                         "Focus mode",
-                                        "Ch? ?? t?p trung",
+                                        "Chế độ tập trung",
                                     ))
                                     .size(11.0)
                                     .color(if button_response.hovered() {
@@ -5177,7 +5188,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Focused window",
-                                            "C?a s? ?ang focus",
+                                            "Cửa sổ đang focus",
                                         ),
                                     )
                                     .changed();
@@ -5195,7 +5206,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Select window",
-                                            "Ch?n c?a s?",
+                                            "Chọn cửa sổ",
                                         )
                                         .to_owned()
                                     } else {
@@ -5250,7 +5261,7 @@ impl CrosshairApp {
                                         .text(Self::tr_lang(
                                             self.state.ui_language,
                                             "Dim",
-                                            "?? t?i",
+                                            "Độ tối",
                                         ))
                                         .suffix("%"),
                                     )
@@ -5266,7 +5277,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Include taskbar",
-                                            "L?m t?i c? taskbar",
+                                            "Làm tối cả taskbar",
                                         ),
                                     )
                                     .changed();
@@ -5306,7 +5317,7 @@ impl CrosshairApp {
                                     RichText::new(Self::tr_lang(
                                         self.state.ui_language,
                                         "Window opacity",
-                                        "?? trong su?t",
+                                        "Độ trong suốt",
                                     ))
                                     .size(11.0)
                                     .color(if button_response.hovered() {
@@ -5330,7 +5341,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Focused window",
-                                            "C?a s? ?ang focus",
+                                            "Cửa sổ đang focus",
                                         ),
                                     )
                                     .changed()
@@ -5348,7 +5359,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Select window",
-                                            "Ch?n c?a s?",
+                                            "Chọn cửa sổ",
                                         )
                                         .to_owned()
                                     } else {
@@ -5402,7 +5413,7 @@ impl CrosshairApp {
                                         .text(Self::tr_lang(
                                             self.state.ui_language,
                                             "Opacity",
-                                            "?? trong su?t",
+                                            "Độ trong suốt",
                                         ))
                                         .suffix("%"),
                                     )
@@ -5483,8 +5494,8 @@ impl CrosshairApp {
                                     ui.label(
                                         RichText::new(Self::tr_lang(
                                             self.state.ui_language,
-                                            "Hold Shift while dragging a needle to snap the angle to 15? steps.",
-                                            "Gi? Shift khi k?o kim ?? snap g?c theo t?ng b??c 15?.",
+                                            "Hold Shift while dragging a needle to snap the angle to 15° steps.",
+                                            "Giữ Shift khi kéo kim để snap góc theo từng bước 15°.",
                                         ))
                                         .size(10.0),
                                     );
@@ -5511,7 +5522,7 @@ impl CrosshairApp {
                         }
 
                         ui.add_space(6.0);
-                        let ruler_label = Self::tr_lang(self.state.ui_language, "Ruler", "Th??c");
+                        let ruler_label = Self::tr_lang(self.state.ui_language, "Ruler", "Thước");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
@@ -5540,7 +5551,7 @@ impl CrosshairApp {
                                             RichText::new(Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Copy result",
-                                                "Ch?p k?t qu?",
+                                                "Chép kết quả",
                                             ))
                                             .size(10.0),
                                         )
@@ -5779,7 +5790,7 @@ impl CrosshairApp {
                                         RichText::new(Self::tr_lang(
                                             self.state.ui_language,
                                             "Mode",
-                                            "Ch? ??",
+                                            "Chế độ",
                                         ))
                                         .size(10.0),
                                     );
@@ -5791,7 +5802,7 @@ impl CrosshairApp {
                                             QuickKeyDisplayMode::Normal => Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Normal",
-                                                "B?nh th??ng",
+                                                "Bình thường",
                                             ),
                                             QuickKeyDisplayMode::Mascot => Self::tr_lang(
                                                 self.state.ui_language,
@@ -5806,7 +5817,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Normal",
-                                                    "B?nh th??ng",
+                                                    "Bình thường",
                                                 ),
                                             );
                                             ui.selectable_value(
@@ -5869,7 +5880,7 @@ impl CrosshairApp {
                                             Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Select presets",
-                                                "Ch?n preset",
+                                                "Chọn preset",
                                             )
                                         } else {
                                             selected_text.as_str()
@@ -5992,7 +6003,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Pick point",
-                                                    "Ch?n ?i?m",
+                                                    "Chọn điểm",
                                                 )
                                             }),
                                         )
@@ -6044,7 +6055,7 @@ impl CrosshairApp {
                                     RichText::new(Self::tr_lang(
                                         self.state.ui_language,
                                         "Draw",
-                                        "V?",
+                                        "Vẽ",
                                     ))
                                     .size(11.0)
                                     .color(
@@ -6072,7 +6083,7 @@ impl CrosshairApp {
                                             RichText::new(Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Freeze screen",
-                                                "??ng b?ng m?n h?nh",
+                                                "Đóng băng màn hình",
                                             ))
                                             .size(10.0),
                                         )
@@ -6091,7 +6102,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Capturing...",
-                                            "?ang b?t ph?m...",
+                                            "Đang bắt phím...",
                                         )
                                         .to_owned()
                                     } else {
@@ -6108,7 +6119,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Set trigger key",
-                                                    "??t ph?m trigger",
+                                                    "Đặt phím trigger",
                                                 )
                                                 .to_owned()
                                             })
@@ -6149,13 +6160,13 @@ impl CrosshairApp {
                                             Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Cancel capture",
-                                                "H?y b?t ph?m",
+                                                "Hủy bắt phím",
                                             )
                                         } else {
                                             Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Capture draw hotkey",
-                                                "B?t ph?m v?",
+                                                "Bắt phím vẽ",
                                             )
                                         })
                                         .clicked()
@@ -6182,7 +6193,7 @@ impl CrosshairApp {
                                         RichText::new(Self::tr_lang(
                                             self.state.ui_language,
                                             "Hold trigger to capture screen region",
-                                            "?? n?t trigger ?? ch?p v?ng m?n h?nh",
+                                            "Đè nút trigger để chụp vùng màn hình",
                                         ))
                                         .size(10.0)
                                         .color(ui.visuals().weak_text_color()),
@@ -6192,7 +6203,7 @@ impl CrosshairApp {
                                         RichText::new(Self::tr_lang(
                                             self.state.ui_language,
                                             "Hold right mouse to erase",
-                                            "?? chu?t ph?i ?? x?a",
+                                            "Đè chuột phải để xóa",
                                         ))
                                         .size(10.0)
                                         .color(ui.visuals().weak_text_color()),
@@ -6274,22 +6285,22 @@ impl CrosshairApp {
                                             QuickVideoRecordMode::FullScreen => Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Full screen",
-                                                "To?n m?n h?nh",
+                                                "Toàn màn hình",
                                             ),
                                             QuickVideoRecordMode::FocusedWindow => Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Focused window",
-                                                "C?a s? ?ang focus",
+                                                "Cửa sổ đang focus",
                                             ),
                                             QuickVideoRecordMode::SelectedWindow => Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Selected window",
-                                                "C?a s? ?? ch?n",
+                                                "Cửa sổ đã chọn",
                                             ),
                                             QuickVideoRecordMode::Region => Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Screen region",
-                                                "V?ng m?n h?nh",
+                                                "Vùng màn hình",
                                             ),
                                         })
                                         .show_ui(ui, |ui| {
@@ -6299,7 +6310,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Full screen",
-                                                    "To?n m?n h?nh",
+                                                    "Toàn màn hình",
                                                 ),
                                             );
                                             ui.selectable_value(
@@ -6308,7 +6319,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Focused window",
-                                                    "C?a s? ?ang focus",
+                                                    "Cửa sổ đang focus",
                                                 ),
                                             );
                                             ui.selectable_value(
@@ -6317,7 +6328,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Selected window",
-                                                    "C?a s? ?? ch?n",
+                                                    "Cửa sổ đã chọn",
                                                 ),
                                             );
                                             ui.selectable_value(
@@ -6326,7 +6337,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Screen region",
-                                                    "V?ng m?n h?nh",
+                                                    "Vùng màn hình",
                                                 ),
                                             );
                                         });
@@ -6345,7 +6356,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Select window",
-                                                    "Ch?n c?a s?",
+                                                    "Chọn cửa sổ",
                                                 )
                                                 .to_owned()
                                             } else {
@@ -6402,7 +6413,7 @@ impl CrosshairApp {
                                                     Self::tr_lang(
                                                         self.state.ui_language,
                                                         "Select region",
-                                                        "Ch?n v?ng",
+                                                        "Chọn vùng",
                                                     )
                                                     .to_owned()
                                                 });
@@ -6433,7 +6444,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Capturing...",
-                                            "?ang b?t ph?m...",
+                                            "Đang bắt phím...",
                                         )
                                         .to_owned()
                                     } else {
@@ -6450,7 +6461,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Set trigger key",
-                                                    "??t ph?m trigger",
+                                                    "Đặt phím trigger",
                                                 )
                                                 .to_owned()
                                             })
@@ -6490,7 +6501,7 @@ impl CrosshairApp {
                                         .on_hover_text(Self::tr_lang(
                                             self.state.ui_language,
                                             "Press to start or stop. Hold while idle to select a region, then release to record it.",
-                                            "Nh?n ?? b?t ??u ho?c d?ng. Khi ch?a quay, gi? ph?m ?? ch?n v?ng r?i th? ra ?? quay v?ng ??.",
+                                            "Nhấn để bắt đầu hoặc dừng. Khi chưa quay, giữ phím để chọn vùng rồi thả ra để quay vùng đó.",
                                         ))
                                         .clicked()
                                     {
@@ -6514,7 +6525,7 @@ impl CrosshairApp {
                                         RichText::new(Self::tr_lang(
                                             self.state.ui_language,
                                             "Hold trigger to select and record a region",
-                                            "Gi? trigger ?? ch?n v? quay m?t v?ng",
+                                            "Giữ trigger để chọn và quay một vùng",
                                         ))
                                         .size(9.0)
                                         .weak(),
@@ -6555,7 +6566,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Choose folder",
-                                            "Ch?n th? m?c",
+                                            "Chọn thư mục",
                                         )
                                     });
                                     if ui
@@ -6566,7 +6577,7 @@ impl CrosshairApp {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Save",
-                                                    "L?u",
+                                                    "Lưu",
                                                 ),
                                                 folder_name
                                             )),
@@ -6592,7 +6603,7 @@ impl CrosshairApp {
                                         Button::new(Self::tr_lang(
                                             self.state.ui_language,
                                             "Open video folder",
-                                            "M? th? m?c video",
+                                            "Mở thư mục video",
                                         )),
                                     )
                                     .clicked()
@@ -6615,7 +6626,7 @@ impl CrosshairApp {
                                         Self::tr_lang(
                                             self.state.ui_language,
                                             "Copy video after recording",
-                                            "Sao ch?p video sau khi quay",
+                                            "Sao chép video sau khi quay",
                                         ),
                                     ),
                                 );
@@ -6645,7 +6656,7 @@ impl CrosshairApp {
                                             Button::new(Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Install recorder",
-                                                "C?i c?ng c? quay",
+                                                "Cài công cụ quay",
                                             )),
                                         )
                                         .clicked()
@@ -6700,7 +6711,7 @@ impl CrosshairApp {
                         let clear_label = Self::tr_lang(
                             self.state.ui_language,
                             "Clear overlays",
-                            "X?a overlay",
+                            "Xóa overlay",
                         );
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
@@ -6740,13 +6751,13 @@ impl CrosshairApp {
                                 Self::tr_lang(
                                     self.state.ui_language,
                                     "Key sound enabled.",
-                                    "B?t ?m thanh nh?n ph?m.",
+                                    "Bật âm thanh nhấn phím.",
                                 )
                             } else {
                                 Self::tr_lang(
                                     self.state.ui_language,
                                     "Key sound disabled.",
-                                    "T?t ?m thanh nh?n ph?m.",
+                                    "Tắt âm thanh nhấn phím.",
                                 )
                             }
                             .to_owned();
@@ -6754,7 +6765,7 @@ impl CrosshairApp {
 
                         ui.add_space(6.0);
                         let sound_label =
-                            Self::tr_lang(self.state.ui_language, "Key Sound", "Ti?ng ph?m c?");
+                            Self::tr_lang(self.state.ui_language, "Key Sound", "Tiếng phím cơ");
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
@@ -6782,7 +6793,7 @@ impl CrosshairApp {
                                         RichText::new(Self::tr_lang(
                                             self.state.ui_language,
                                             "Switch Type",
-                                            "Lo?i ph?m",
+                                            "Loại phím",
                                         ))
                                         .size(10.0),
                                     );
@@ -6884,7 +6895,9 @@ impl CrosshairApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().interact_size.y = 21.0;
                 let missing_primary = primary.as_ref().is_some_and(|current| {
-                    !open_windows.iter().any(|window| &window.selector == current)
+                    !open_windows
+                        .iter()
+                        .any(|window| &window.selector == current)
                 });
                 if missing_primary {
                     *primary = None;
@@ -6909,29 +6922,30 @@ impl CrosshairApp {
                         .width(320.0)
                         .selected_text(truncated_primary)
                         .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(primary.is_none(), label_when_none)
-                            .clicked()
-                        {
-                            *primary = None;
-                            changed = true;
-                        }
-                        for window in open_windows {
-                            let selector = &window.selector;
-                            let display_title = Self::simplify_window_title(&window.title);
-                            let truncated_title = Self::truncate_window_title(&display_title, 50);
                             if ui
-                                .selectable_label(
-                                    primary.as_deref() == Some(selector),
-                                    truncated_title,
-                                )
-                                .on_hover_text(selector)
+                                .selectable_label(primary.is_none(), label_when_none)
                                 .clicked()
                             {
-                                *primary = Some(selector.clone());
+                                *primary = None;
                                 changed = true;
                             }
-                        }
+                            for window in open_windows {
+                                let selector = &window.selector;
+                                let display_title = Self::simplify_window_title(&window.title);
+                                let truncated_title =
+                                    Self::truncate_window_title(&display_title, 50);
+                                if ui
+                                    .selectable_label(
+                                        primary.as_deref() == Some(selector),
+                                        truncated_title,
+                                    )
+                                    .on_hover_text(selector)
+                                    .clicked()
+                                {
+                                    *primary = Some(selector.clone());
+                                    changed = true;
+                                }
+                            }
                         });
                 });
 
@@ -7052,20 +7066,6 @@ impl CrosshairApp {
             .unwrap_or_else(|| Self::simplify_window_title(selector))
     }
 
-    fn render_window_target_combo_with_duplicate_mode(
-        ui: &mut egui::Ui,
-        language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
-        label_when_none: &str,
-        target: &mut Option<String>,
-        match_duplicate_window_titles: &mut bool,
-        open_windows: &[WindowInfo],
-        width: f32,
-        allow_none: bool,
-    ) -> bool {
-        let mut changed = false;
-        let live_open_windows = LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
-        let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
     fn process_icon_texture(ctx: &egui::Context, path: &str) -> Option<TextureHandle> {
         if path.is_empty() { return None; }
         if let Some(cached) = PROCESS_ICON_TEXTURES.lock().get(path).cloned() {
@@ -7098,6 +7098,49 @@ impl CrosshairApp {
         }).inner
     }
 
+    fn selectable_process_detail_row(
+        ui: &mut egui::Ui,
+        selected: bool,
+        name: &str,
+        pid: u32,
+        path: &str,
+    ) -> egui::Response {
+        let width = ui.available_width();
+        let response = ui.scope(|ui| {
+            ui.set_min_width(width);
+            ui.set_max_width(width);
+            ui.horizontal(|ui| {
+                if let Some(texture) = Self::process_icon_texture(ui.ctx(), path) {
+                    ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
+                } else {
+                    ui.label(Self::material_icon_text(0xe30a, 16.0));
+                }
+                ui.add_sized([190.0, 20.0], egui::Label::new(name).truncate());
+                ui.add_sized([70.0, 20.0], egui::Label::new(pid.to_string()));
+                ui.add_sized([ui.available_width(), 20.0], egui::Label::new(path).truncate());
+            });
+        }).response.interact(egui::Sense::click());
+        if selected || response.hovered() {
+            let color = if selected { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.hovered.bg_fill };
+            ui.painter().rect_filled(response.rect, 2.0, color.linear_multiply(0.35));
+        }
+        response
+    }
+
+    fn render_window_target_combo_with_duplicate_mode(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_source: impl std::hash::Hash + Copy,
+        label_when_none: &str,
+        target: &mut Option<String>,
+        match_duplicate_window_titles: &mut bool,
+        open_windows: &[WindowInfo],
+        width: f32,
+        allow_none: bool,
+    ) -> bool {
+        let mut changed = false;
+        let live_open_windows = LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
+        let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
         let window_groups = Self::grouped_window_selectors(effective_open_windows);
         let selected_text = target
             .as_deref()
@@ -7150,6 +7193,11 @@ impl CrosshairApp {
             .ctx()
             .data(|data| data.get_temp::<String>(popup_state_id));
 
+        if let Some(window) = target.as_deref().and_then(|selector| {
+            effective_open_windows.iter().find(|window| window.selector == selector)
+        }) && let Some(texture) = Self::process_icon_texture(ui.ctx(), &window.process_path) {
+            ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
+        }
         let combo_response = egui::ComboBox::from_id_salt((id_source, "target-window-combo"))
             .width(width)
             .selected_text(truncated_selected_text)
@@ -7164,11 +7212,6 @@ impl CrosshairApp {
                         expanded_title = None;
                         changed = true;
                     }
-        if let Some(window) = target.as_deref().and_then(|selector| {
-            effective_open_windows.iter().find(|window| window.selector == selector)
-        }) && let Some(texture) = Self::process_icon_texture(ui.ctx(), &window.process_path) {
-            ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
-        }
                 }
                 ui.separator();
 
@@ -7573,11 +7616,11 @@ impl CrosshairApp {
             ),
             MacroAction::SetWifiRadioOff => (
                 "macro_action_tooltip.set_wifi_radio_off",
-                "Instantly turn off the Wi-Fi radio using the Windows Radio API ? like pressing the hardware Wi-Fi button.",
+                "Instantly turn off the Wi-Fi radio using the Windows Radio API — like pressing the hardware Wi-Fi button.",
             ),
             MacroAction::SetWifiRadioOn => (
                 "macro_action_tooltip.set_wifi_radio_on",
-                "Instantly turn on the Wi-Fi radio using the Windows Radio API ? like pressing the hardware Wi-Fi button.",
+                "Instantly turn on the Wi-Fi radio using the Windows Radio API — like pressing the hardware Wi-Fi button.",
             ),
             MacroAction::EnableCrosshairProfile => (
                 "macro_action_tooltip.enable_crosshair_profile",
@@ -8128,7 +8171,7 @@ impl CrosshairApp {
                 | MacroAction::SetWifiRadioOn
         ) {
             return match language {
-                UiLanguage::Vietnamese => "M?ng".to_owned(),
+                UiLanguage::Vietnamese => "Mạng".to_owned(),
                 UiLanguage::English | UiLanguage::Icon => "Network".to_owned(),
             };
         }
@@ -9335,14 +9378,12 @@ impl CrosshairApp {
                     _ => {}
                 }
                 if active_handle == SelectionDragHandle::Center {
-                    target_pos.x = target_pos.x.clamp(
-                        preview_rect.left(),
-                        preview_rect.right() - rect.width(),
-                    );
-                    target_pos.y = target_pos.y.clamp(
-                        preview_rect.top(),
-                        preview_rect.bottom() - rect.height(),
-                    );
+                    target_pos.x = target_pos
+                        .x
+                        .clamp(preview_rect.left(), preview_rect.right() - rect.width());
+                    target_pos.y = target_pos
+                        .y
+                        .clamp(preview_rect.top(), preview_rect.bottom() - rect.height());
                 }
 
                 match active_handle {
@@ -9443,18 +9484,19 @@ impl CrosshairApp {
                         rect = rect.translate(egui::vec2(preview_rect.right() - rect.right(), 0.0));
                     }
                     if rect.bottom() > preview_rect.bottom() {
-                        rect = rect.translate(egui::vec2(0.0, preview_rect.bottom() - rect.bottom()));
+                        rect =
+                            rect.translate(egui::vec2(0.0, preview_rect.bottom() - rect.bottom()));
                     }
                 }
 
-                rect.min.x = rect.min.x.clamp(
-                    preview_rect.left(),
-                    preview_rect.right() - min_size.x,
-                );
-                rect.min.y = rect.min.y.clamp(
-                    preview_rect.top(),
-                    preview_rect.bottom() - min_size.y,
-                );
+                rect.min.x = rect
+                    .min
+                    .x
+                    .clamp(preview_rect.left(), preview_rect.right() - min_size.x);
+                rect.min.y = rect
+                    .min
+                    .y
+                    .clamp(preview_rect.top(), preview_rect.bottom() - min_size.y);
                 rect.max.x = rect
                     .max
                     .x
@@ -12559,8 +12601,14 @@ impl eframe::App for CrosshairApp {
         [0.0, 0.0, 0.0, 0.0]
     }
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        crate::overlay::UI_WANTS_KEYBOARD_INPUT.store(ctx.wants_keyboard_input(), std::sync::atomic::Ordering::Relaxed);
-        crate::overlay::UI_CAPTURING_INPUT.store(self.capture_target.is_some(), std::sync::atomic::Ordering::Relaxed);
+        crate::overlay::UI_WANTS_KEYBOARD_INPUT.store(
+            ctx.wants_keyboard_input(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        crate::overlay::UI_CAPTURING_INPUT.store(
+            self.capture_target.is_some(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         {
             let mut config = VIETNAMESE_INPUT_CONFIG.lock();
             config.enabled = self.state.vietnamese_input_enabled;
@@ -13109,18 +13157,6 @@ impl eframe::App for CrosshairApp {
                                         );
                                     }
                                 }
-                                VisionCaptureTarget::QuickActionsVideoRegion => {
-                                    self.state.quick_video_record_region =
-                                        Some((x, y, width, height));
-                                    self.state.quick_video_record_mode =
-                                        QuickVideoRecordMode::Region;
-                                    self.sync_quick_video_record_config();
-                                    self.persist();
-                                    self.status = format!(
-                                        "Video recording region set to {}x{} at {}, {}.",
-                                        width, height, x, y
-                                    );
-                                }
                                 _ => {}
                             }
                         }
@@ -13419,7 +13455,7 @@ impl eframe::App for CrosshairApp {
                 UiCommand::UpdateAvailable(version, body, url) => {
                     if self.update_check_was_automatic {
                         let message = match self.state.ui_language {
-                            UiLanguage::Vietnamese => format!("?? c? phi?n b?n m?i v{version}."),
+                            UiLanguage::Vietnamese => format!("Đã có phiên bản mới v{version}."),
                             UiLanguage::English | UiLanguage::Icon => {
                                 format!("New version v{version} is available.")
                             }
@@ -13720,7 +13756,7 @@ impl eframe::App for CrosshairApp {
                     self.status = Self::tr_lang(
                         self.state.ui_language,
                         "Screen recorder installed successfully.",
-                        "?? c?i c?ng c? quay m?n h?nh.",
+                        "Đã cài công cụ quay màn hình.",
                     )
                     .to_owned();
                 }
@@ -14064,7 +14100,7 @@ impl eframe::App for CrosshairApp {
                 toolbar_height,
             );
 
-            // Build without position every frame ? only set on first init
+            // Build without position every frame – only set on first init
             let mut builder = egui::ViewportBuilder::default()
                 .with_title("Drawing Toolbar")
                 .with_inner_size(egui::vec2(toolbar_width, TOOLBAR_HEIGHT))
@@ -14466,16 +14502,16 @@ impl eframe::App for CrosshairApp {
                                         }
                                     };
 
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Brush, "brush", self.tr("Brush", "C?"));
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Line, "line", self.tr("Line", "???ng"));
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Arrow, "arrow", self.tr("Arrow", "M?i t?n"));
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Rectangle, "rect", self.tr("Rectangle", "H?nh ch? nh?t"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Brush, "brush", self.tr("Brush", "Cọ"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Line, "line", self.tr("Line", "Đường"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Arrow, "arrow", self.tr("Arrow", "Mũi tên"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Rectangle, "rect", self.tr("Rectangle", "Hình chữ nhật"));
                                     tool_btn(ui, crate::model::QuickScreenDrawTool::Ellipse, "oval", self.tr("Ellipse", "Elip"));
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Circle, "circle", self.tr("Circle", "H?nh tr?n"));
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Polygon, "poly", self.tr("Polygon", "?a gi?c"));
-                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Text, "text", self.tr("Text", "Ch?"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Circle, "circle", self.tr("Circle", "Hình tròn"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Polygon, "poly", self.tr("Polygon", "Đa giác"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Text, "text", self.tr("Text", "Chữ"));
                                     // Eraser
-                                    if icon_btn(ui, eraser_active, "eraser", self.tr("Eraser", "T?y")).1 {
+                                    if icon_btn(ui, eraser_active, "eraser", self.tr("Eraser", "Tẩy")).1 {
                                         crate::overlay::screen_draw_set_eraser(!eraser_active);
                                     }
                                     let smoothing = crate::overlay::screen_draw_get_smoothing();
@@ -14483,7 +14519,7 @@ impl eframe::App for CrosshairApp {
                                         ui,
                                         smoothing,
                                         "smooth",
-                                        self.tr("Smooth line", "L?m m??t n?t"),
+                                        self.tr("Smooth line", "Làm mượt nét"),
                                     )
                                     .1;
                                     if smoothing_clicked {
@@ -14505,7 +14541,7 @@ impl eframe::App for CrosshairApp {
                                             )
                                             .on_hover_text(self.tr(
                                                 "Smoothing amount",
-                                                "M?c l?m m??t",
+                                                "Mức làm mượt",
                                             ));
                                         if amount_response.changed() {
                                             crate::overlay::screen_draw_set_smoothing_amount(amount);
@@ -14516,11 +14552,11 @@ impl eframe::App for CrosshairApp {
 
                                     // 4. Color Presets (No clipping popups)
                                     let color_presets = [
-                                        (self.tr("Red", "??"), egui::Color32::from_rgb(255, 80, 80), crate::model::RgbaColor { r: 255, g: 80, b: 80, a: 255 }),
-                                        (self.tr("Green", "Xanh l?"), egui::Color32::from_rgb(80, 220, 100), crate::model::RgbaColor { r: 80, g: 220, b: 100, a: 255 }),
-                                        (self.tr("Blue", "Xanh d??ng"), egui::Color32::from_rgb(80, 150, 255), crate::model::RgbaColor { r: 80, g: 150, b: 255, a: 255 }),
-                                        (self.tr("Yellow", "V?ng"), egui::Color32::from_rgb(255, 220, 50), crate::model::RgbaColor { r: 255, g: 220, b: 50, a: 255 }),
-                                        (self.tr("White", "Tr?ng"), egui::Color32::WHITE, crate::model::RgbaColor { r: 255, g: 255, b: 255, a: 255 }),
+                                        (self.tr("Red", "Đỏ"), egui::Color32::from_rgb(255, 80, 80), crate::model::RgbaColor { r: 255, g: 80, b: 80, a: 255 }),
+                                        (self.tr("Green", "Xanh lá"), egui::Color32::from_rgb(80, 220, 100), crate::model::RgbaColor { r: 80, g: 220, b: 100, a: 255 }),
+                                        (self.tr("Blue", "Xanh dương"), egui::Color32::from_rgb(80, 150, 255), crate::model::RgbaColor { r: 80, g: 150, b: 255, a: 255 }),
+                                        (self.tr("Yellow", "Vàng"), egui::Color32::from_rgb(255, 220, 50), crate::model::RgbaColor { r: 255, g: 220, b: 50, a: 255 }),
+                                        (self.tr("White", "Trắng"), egui::Color32::WHITE, crate::model::RgbaColor { r: 255, g: 255, b: 255, a: 255 }),
                                     ];
                                     let active_color = crate::overlay::screen_draw_get_color();
                                     for (name, c32, rgba) in color_presets.iter() {
@@ -14550,7 +14586,7 @@ impl eframe::App for CrosshairApp {
                                         ui,
                                         crate::overlay::screen_draw_get_color_pick_mode(),
                                         "dropper",
-                                        self.tr("Pick color from screen", "L?y m?u t? m?n h?nh"),
+                                        self.tr("Pick color from screen", "Lấy màu từ màn hình"),
                                     );
                                     if (crosshair_draw_mode && pick_color_resp.clicked())
                                         || (!crosshair_draw_mode && pick_color_activated)
@@ -14594,7 +14630,7 @@ impl eframe::App for CrosshairApp {
                                             ui,
                                             effect == 1,
                                             "effect_highlight",
-                                            self.tr("Highlight effect", "Hi?u ?ng t? s?ng"),
+                                            self.tr("Highlight effect", "Hiệu ứng tô sáng"),
                                         ).1 {
                                             crate::overlay::screen_draw_toggle_effect(1);
                                             crate::overlay::screen_draw_toolbar_interacted();
@@ -14603,7 +14639,7 @@ impl eframe::App for CrosshairApp {
                                             ui,
                                             effect == 2,
                                             "blur",
-                                            self.tr("Blur effect", "Hi?u ?ng l?m m?"),
+                                            self.tr("Blur effect", "Hiệu ứng làm mờ"),
                                         ).1 {
                                             crate::overlay::screen_draw_toggle_effect(2);
                                             crate::overlay::screen_draw_toolbar_interacted();
@@ -14615,7 +14651,7 @@ impl eframe::App for CrosshairApp {
                                     // 5. Brush Size Slider
                                     let mut brush_size = crate::overlay::screen_draw_get_brush_size();
                                     ui.add_space(4.0);
-                                    ui.add(egui::Label::new(self.tr("Size:", "C?:")));
+                                    ui.add(egui::Label::new(self.tr("Size:", "Cỡ:")));
                                     let slider_resp = ui.add_sized(
                                         [56.0, 20.0],
                                         egui::DragValue::new(&mut brush_size)
@@ -14636,18 +14672,18 @@ impl eframe::App for CrosshairApp {
 
                                     // 6. Capture Region
                                     if !crosshair_draw_mode {
-                                        if icon_btn(ui, false, "capture", self.tr("Capture Region", "Ch?p v?ng")).1 {
+                                        if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp vùng")).1 {
                                             crate::overlay::screen_draw_trigger_capture_region_from_toolbar();
                                         }
                                     }
                                     // 7. Clear Canvas
-                                    if icon_btn(ui, false, "clear", self.tr("Clear Canvas", "X?a n?t v?")).1 {
+                                    if icon_btn(ui, false, "clear", self.tr("Clear Canvas", "Xóa nét vẽ")).1 {
                                         crate::overlay::screen_draw_clear();
                                     }
 
                                     // 8. Exit Drawing Mode
                                     let (exit_resp, exit_activated) =
-                                        icon_btn(ui, false, "exit", self.tr("Exit Drawing Mode", "Tho?t ch? ?? v?"));
+                                        icon_btn(ui, false, "exit", self.tr("Exit Drawing Mode", "Thoát chế độ vẽ"));
                                     if exit_resp.is_pointer_button_down_on() {
                                         crate::overlay::screen_draw_deactivate_from_toolbar();
                                     }
