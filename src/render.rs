@@ -26,8 +26,8 @@ fn raster_asset_cache() -> &'static Mutex<HashMap<RasterAssetCacheKey, Arc<Dynam
 }
 
 fn raster_asset_cache_key(path: &Path) -> Result<RasterAssetCacheKey> {
-    let metadata =
-        fs::metadata(path).with_context(|| format!("Failed to read image metadata {}", path.display()))?;
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("Failed to read image metadata {}", path.display()))?;
     let modified_at_nanos = metadata
         .modified()
         .ok()

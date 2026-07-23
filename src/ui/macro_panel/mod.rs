@@ -883,18 +883,14 @@ impl CrosshairApp {
             .unwrap_or(false)
     }
 
-    fn set_macro_action_submenu_owner(
-        ui: &egui::Ui,
-        owner: Option<MacroActionSubmenuKind>,
-    ) {
+    fn set_macro_action_submenu_owner(ui: &egui::Ui, owner: Option<MacroActionSubmenuKind>) {
         let owner_id = egui::Id::new("macro-action-submenu-owner");
         let changed = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id))
             != owner;
         if changed {
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(owner_id, owner));
+            ui.ctx().data_mut(|data| data.insert_temp(owner_id, owner));
         }
         ui.ctx().request_repaint();
     }
@@ -906,8 +902,7 @@ impl CrosshairApp {
         let Some(pointer_pos) = ui.ctx().pointer_hover_pos() else {
             return false;
         };
-        let active_key_id =
-            egui::Id::new((id_source, "mouse-click-active-submenu-key"));
+        let active_key_id = egui::Id::new((id_source, "mouse-click-active-submenu-key"));
         let Some(active_key) = ui
             .ctx()
             .data(|data| data.get_temp::<Option<&'static str>>(active_key_id))
@@ -1270,7 +1265,9 @@ impl CrosshairApp {
             egui::ComboBox::from_id_salt((id_salt, "network_method"))
                 .width(170.0)
                 .selected_text(match method {
-                    1 => Self::tr_lang(language, "Internet route (Instant)", "Tuyến mạng (Tức thì)"),
+                    1 => {
+                        Self::tr_lang(language, "Internet route (Instant)", "Tuyến mạng (Tức thì)")
+                    }
                     2 => Self::tr_lang(language, "Radio (Fast)", "Radio (Nhanh)"),
                     _ => Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
                 })
@@ -1821,6 +1818,39 @@ impl CrosshairApp {
         ]
     }
 
+    fn is_mouse_click_action(action: MacroAction) -> bool {
+        matches!(
+            action,
+            MacroAction::MouseLeftClick
+                | MacroAction::MouseRightClick
+                | MacroAction::MouseMiddleClick
+                | MacroAction::MouseX1Click
+                | MacroAction::MouseX2Click
+        )
+    }
+
+    fn render_mouse_click_delay(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        step: &mut MacroStep,
+        live_sync: &mut bool,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(Self::tr_lang(
+                language,
+                "Mouse Click Delay:",
+                "Mouse Click Delay:",
+            ));
+            *live_sync |= ui
+                .add(
+                    egui::DragValue::new(&mut step.mouse_click_delay_ms)
+                        .range(0..=10_000)
+                        .suffix(" ms"),
+                )
+                .changed();
+        });
+    }
+
     fn mouse_leaf_action_groups() -> &'static [MacroAction] {
         &[
             MacroAction::MouseWheelUp,
@@ -1963,7 +1993,7 @@ impl CrosshairApp {
             MacroAction::IfStart | MacroAction::Else | MacroAction::IfEnd
         );
         let owner_id = egui::Id::new("macro-action-submenu-owner");
-        let popup_id = ui.make_persistent_id((id_source, "if-submenu-popup"));
+        let popup_id = egui::Id::new((id_source, "if-submenu-popup"));
         let popup_rect_id = ui.make_persistent_id((id_source, "if-submenu-rect"));
         let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
         let image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
@@ -2225,8 +2255,7 @@ impl CrosshairApp {
                         .ctx()
                         .pointer_hover_pos()
                         .and_then(|pos| ui.ctx().layer_id_at(pos));
-                    let mouse_popup_layer =
-                        egui::LayerId::new(egui::Order::Foreground, popup_id);
+                    let mouse_popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
                     let child_popup_layer = active_mouse_click_popup_key.map(|popup_key| {
                         egui::LayerId::new(
                             egui::Order::Foreground,
@@ -2397,8 +2426,9 @@ impl CrosshairApp {
                 if response.clicked() || (!hover_blocked && response.hovered()) {
                     Self::clear_macro_action_submenus(ui, id_source);
                     open = true;
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(owner_id, MacroActionSubmenuKind::Memory));
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(owner_id, MacroActionSubmenuKind::Memory)
+                    });
                 }
                 let popup_rect_id = ui.make_persistent_id((id_source, "memory-submenu-rect"));
                 egui::Popup::from_response(&response)
@@ -2444,15 +2474,11 @@ impl CrosshairApp {
                     }
                 }
                 ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
-                ui.label(
-                    RichText::new("RAM")
-                        .size(9.0)
-                        .color(if selected {
-                            ui.visuals().strong_text_color()
-                        } else {
-                            ui.visuals().text_color()
-                        }),
-                );
+                ui.label(RichText::new("RAM").size(9.0).color(if selected {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().text_color()
+                }));
                 response
             },
         );
@@ -9108,6 +9134,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         &mut audio_sense_presets_changed,
                                                     );
                                                 }
+                                            } else if Self::is_mouse_click_action(step.action) {
+                                                Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
                                             } else if Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
@@ -11453,6 +11481,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         &mut audio_sense_presets_changed,
                                                     );
                                                 }
+                                            } else if Self::is_mouse_click_action(step.action) {
+                                                Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
                                             } else if Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
@@ -15102,6 +15132,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::StopAudioSense
                                             ) {
                                                 ui.add_space(2.0);
+                                            } else if Self::is_mouse_click_action(step.action) {
+                                                Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
                                             } else if Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
@@ -16592,9 +16624,10 @@ if supports_move_mouse || show_detection_tuning {
             self.pending_macro_group_scroll_target = None;
         }
         });
-        if let Some(scroll_delta) = ui.ctx().data_mut(|data| {
-            data.remove_temp::<f32>(egui::Id::new("macro-action-popup-scroll"))
-        }) {
+        if let Some(scroll_delta) = ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<f32>(egui::Id::new("macro-action-popup-scroll")))
+        {
             macro_panel_scroll_output.state.offset.y =
                 (macro_panel_scroll_output.state.offset.y - scroll_delta).max(0.0);
             macro_panel_scroll_output
@@ -17000,9 +17033,13 @@ if supports_move_mouse || show_detection_tuning {
                             self.state.vietnamese_input_mode,
                             &mut val_buf,
                         );
-                        let enter_pressed = (name_response.has_focus() || value_response.has_focus())
-                            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                        let add_clicked = ui.button(Self::tr_lang(language, "Add", "Add")).clicked();
+                        let enter_pressed = (name_response.has_focus()
+                            || value_response.has_focus())
+                            && ui.input_mut(|i| {
+                                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            });
+                        let add_clicked =
+                            ui.button(Self::tr_lang(language, "Add", "Add")).clicked();
                         if add_clicked || enter_pressed {
                             let name_trimmed = name_buf.trim().to_owned();
                             if !name_trimmed.is_empty() {
@@ -17072,9 +17109,7 @@ if supports_move_mouse || show_detection_tuning {
                                         if let Some(idx) = to_remove_idx {
                                             let (removed_name, _) =
                                                 self.state.global_constants.remove(idx);
-                                            Self::remove_fixed_variable_from_overlay(
-                                                &removed_name,
-                                            );
+                                            Self::remove_fixed_variable_from_overlay(&removed_name);
                                             self.persist();
                                         }
                                     });
@@ -19970,8 +20005,9 @@ if supports_move_mouse || show_detection_tuning {
                 },
                 "window" => match prop_clean.as_str() {
                     "title" => VariableValueKind::Text,
-                    "width" | "height" | "x" | "y" | "right" | "bottom" | "centerx"
-                    | "centery" => VariableValueKind::Number,
+                    "width" | "height" | "x" | "y" | "right" | "bottom" | "centerx" | "centery" => {
+                        VariableValueKind::Number
+                    }
                     _ => VariableValueKind::Neutral,
                 },
                 "volume" => match prop_clean.as_str() {
@@ -20870,7 +20906,8 @@ if supports_move_mouse || show_detection_tuning {
             let previous_use_default_prompt = step.ai_response_use_default_prompt;
             let previous_system_prompt = step.ai_response_system_prompt.clone();
             let provider_response = egui::ComboBox::from_id_salt(if is_stop_action {
-                ui.id().with(format!("{}-ai-response-provider", stop_action_prefix))
+                ui.id()
+                    .with(format!("{}-ai-response-provider", stop_action_prefix))
             } else {
                 ui.id().with((step_index, "ai-response-provider"))
             })
@@ -20893,7 +20930,8 @@ if supports_move_mouse || show_detection_tuning {
             })
             .response;
             let var_name_id = if is_stop_action {
-                ui.id().with(format!("{}-ai-response-var-name", stop_action_prefix))
+                ui.id()
+                    .with(format!("{}-ai-response-var-name", stop_action_prefix))
             } else {
                 ui.id().with((step_index, "ai-response-var-name"))
             };
@@ -20903,7 +20941,8 @@ if supports_move_mouse || show_detection_tuning {
                 var_name_id,
                 76.0,
                 140.0,
-                21.0, 21.0,
+                21.0,
+                21.0,
                 Self::tr_lang(language, "variable", "variable"),
                 false,
             );
@@ -20915,7 +20954,8 @@ if supports_move_mouse || show_detection_tuning {
             );
 
             let req_id = if is_stop_action {
-                ui.id().with(format!("{}-ai-response-key", stop_action_prefix))
+                ui.id()
+                    .with(format!("{}-ai-response-key", stop_action_prefix))
             } else {
                 ui.id().with((step_index, "ai-response-key"))
             };
@@ -20938,7 +20978,8 @@ if supports_move_mouse || show_detection_tuning {
             );
 
             let settings_id = if is_stop_action {
-                ui.id().with(format!("{}-ai-response-settings", stop_action_prefix))
+                ui.id()
+                    .with(format!("{}-ai-response-settings", stop_action_prefix))
             } else {
                 ui.id().with((step_index, "ai-response-settings"))
             };
@@ -20958,34 +20999,34 @@ if supports_move_mouse || show_detection_tuning {
                 .width(320.0)
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .show(|ui| {
-                        ui.set_min_width(320.0);
-                        if step.ai_response_provider == AiResponseProvider::GeminiLive {
-                            ui.checkbox(
-                                &mut step.ai_response_web_search,
-                                Self::tr_lang(language, "Web search", "Tìm trên web"),
-                            );
-                        }
+                    ui.set_min_width(320.0);
+                    if step.ai_response_provider == AiResponseProvider::GeminiLive {
                         ui.checkbox(
-                            &mut step.ai_response_use_default_prompt,
-                            Self::tr_lang(language, "Use default prompt", "Dùng prompt mặc định"),
+                            &mut step.ai_response_web_search,
+                            Self::tr_lang(language, "Web search", "Tìm trên web"),
                         );
-                        if !step.ai_response_use_default_prompt {
-                            ui.label(Self::tr_lang(
-                                language,
-                                "Custom system prompt",
-                                "Prompt hệ thống riêng",
-                            ));
-                            let prompt_response = ui.add_sized(
-                                [ui.available_width(), 64.0],
-                                egui::TextEdit::multiline(&mut step.ai_response_system_prompt),
-                            );
-                            Self::apply_vietnamese_input_if_changed(
-                                &prompt_response,
-                                vietnamese_input_enabled,
-                                vietnamese_input_mode,
-                                &mut step.ai_response_system_prompt,
-                            );
-                        }
+                    }
+                    ui.checkbox(
+                        &mut step.ai_response_use_default_prompt,
+                        Self::tr_lang(language, "Use default prompt", "Dùng prompt mặc định"),
+                    );
+                    if !step.ai_response_use_default_prompt {
+                        ui.label(Self::tr_lang(
+                            language,
+                            "Custom system prompt",
+                            "Prompt hệ thống riêng",
+                        ));
+                        let prompt_response = ui.add_sized(
+                            [ui.available_width(), 64.0],
+                            egui::TextEdit::multiline(&mut step.ai_response_system_prompt),
+                        );
+                        Self::apply_vietnamese_input_if_changed(
+                            &prompt_response,
+                            vietnamese_input_enabled,
+                            vietnamese_input_mode,
+                            &mut step.ai_response_system_prompt,
+                        );
+                    }
                 });
             ui.ctx()
                 .data_mut(|data| data.insert_temp(settings_open_id, settings_open));
@@ -21002,7 +21043,8 @@ if supports_move_mouse || show_detection_tuning {
                 combined_response.mark_changed();
             }
             combined_response
-        }).inner
+        })
+        .inner
     }
 
     pub(crate) fn render_interpolated_text_edit(

@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{
-    default_crosshair_length, default_true, default_x_offset, default_y_offset,
-};
+use super::{default_crosshair_length, default_true, default_x_offset, default_y_offset};
 
 fn default_crosshair_ring_radius() -> f32 {
     18.0

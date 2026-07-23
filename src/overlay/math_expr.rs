@@ -736,7 +736,11 @@ fn evaluate_char_at_expression(args: &[String]) -> String {
     if index < 0 {
         return String::new();
     }
-    source.chars().nth(index as usize).map(String::from).unwrap_or_default()
+    source
+        .chars()
+        .nth(index as usize)
+        .map(String::from)
+        .unwrap_or_default()
 }
 
 fn evaluate_concat_expression(args: &[String]) -> String {
@@ -1409,10 +1413,16 @@ mod tests {
         smart_set_variable_from_expression("index", "2");
         smart_set_variable_from_expression("item[{index}]", "hello");
 
-        assert_eq!(resolve_text_variable_value("charat(text, 1)").as_deref(), Some(" "));
+        assert_eq!(
+            resolve_text_variable_value("charat(text, 1)").as_deref(),
+            Some(" ")
+        );
         assert_eq!(evaluate_math_expression("charat(text, 1) == \" \""), 1);
         assert_eq!(evaluate_math_expression("space == \" \""), 1);
-        assert_eq!(resolve_text_variable_value("item[2]").as_deref(), Some("hello"));
+        assert_eq!(
+            resolve_text_variable_value("item[2]").as_deref(),
+            Some("hello")
+        );
         assert_eq!(
             resolve_text_variable_value("item[{index}]").as_deref(),
             Some("hello")

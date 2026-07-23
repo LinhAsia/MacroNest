@@ -463,6 +463,9 @@ pub(crate) struct MemoryPanelState {
     scan_executable: bool,
     scan_copy_on_write: bool,
     scan_active_memory_only: bool,
+    scan_mem_private: bool,
+    scan_mem_image: bool,
+    scan_mem_mapped: bool,
     fast_scan: bool,
     fast_scan_alignment: String,
     pause_while_scanning: bool,
@@ -538,6 +541,9 @@ impl Default for MemoryPanelState {
             scan_executable: false,
             scan_copy_on_write: false,
             scan_active_memory_only: true,
+            scan_mem_private: true,
+            scan_mem_image: false,
+            scan_mem_mapped: false,
             fast_scan: true,
             fast_scan_alignment: "4".to_owned(),
             pause_while_scanning: false,
@@ -665,7 +671,7 @@ impl CrosshairApp {
         self.refresh_memory_values();
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Memory Scanner").strong().size(17.0));
+            ui.label(RichText::new(self.tr("Memory Scanner", "Memory Scanner")).strong().size(17.0));
             ui.separator();
             ui.label(RichText::new(&self.memory_panel.status).small().color(
                 if self.memory_panel.scanning {
@@ -676,28 +682,28 @@ impl CrosshairApp {
             ));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let pin_label = if self.memory_panel.pinned {
-                    "Unpin results"
+                    self.tr("Unpin results", "Unpin results")
                 } else {
-                    "Pin results"
+                    self.tr("Pin results", "Pin results")
                 };
                 if ui.button(pin_label).clicked() {
                     self.memory_panel.pinned = !self.memory_panel.pinned;
                 }
-                if ui.button("Memory settings").clicked() {
+                if ui.button(self.tr("Memory settings", "Memory settings")).clicked() {
                     self.memory_panel.memory_settings_open = true;
                 }
-                if ui.button("Advanced options").clicked() {
+                if ui.button(self.tr("Advanced options", "Advanced options")).clicked() {
                     self.memory_panel.code_list_open = true;
                 }
                 #[cfg(windows)]
-                ui.menu_button("Memory view", |ui| {
-                    if ui.button("Enumerate modules / DLLs").clicked() {
+                ui.menu_button(self.tr("Memory view", "Memory view"), |ui| {
+                    if ui.button(self.tr("Enumerate modules / DLLs", "Enumerate modules / DLLs")).clicked() {
                         self.open_memory_module_list();
                         ui.ctx().request_repaint();
                         ui.close();
                     }
                 });
-                if ui.button("Saved addresses").clicked() {
+                if ui.button(self.tr("Saved addresses", "Saved addresses")).clicked() {
                     self.memory_panel.saved_library_open = true;
                 }
             });
@@ -1138,11 +1144,12 @@ impl CrosshairApp {
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
                 ui.set_min_size(size - vec2(18.0, 18.0));
-                ui.label(RichText::new("Scan").strong());
+                ui.label(RichText::new(self.tr("Scan", "Scan")).strong());
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
+                    let select_process_str = self.tr("Select process", "Select process");
                     let process_label = if self.memory_panel.process_pid.is_none() {
-                        "Select process".to_owned()
+                        select_process_str.to_owned()
                     } else if let Some(label) = self
                         .memory_panel
                         .process_selector
@@ -1158,7 +1165,7 @@ impl CrosshairApp {
                             .iter()
                             .find(|window| window.selector == self.memory_panel.process_selector)
                             .map(|window| Self::simplify_window_title(&window.title))
-                            .unwrap_or_else(|| "Select process".to_owned())
+                            .unwrap_or_else(|| select_process_str.to_owned())
                     };
                     let missing_process = self.memory_panel.process_pid.is_none();
                     let process_combo = ui
@@ -1173,7 +1180,7 @@ impl CrosshairApp {
                                 .height(720.0)
                                 .selected_text(Self::truncate_window_title(&process_label, 52))
                                 .show_ui(ui, |ui| {
-                                    ui.label(RichText::new("Window processes (grouped)").strong());
+                                    ui.label(RichText::new(self.tr("Window processes (grouped)", "Window processes (grouped)")).strong());
                                     for window in self.open_window_infos.clone() {
                                         let selected =
                                             window.selector == self.memory_panel.process_selector;
@@ -1224,14 +1231,14 @@ impl CrosshairApp {
                                     if !self.memory_panel.process_choices.is_empty() {
                                         ui.separator();
                                         ui.label(
-                                            RichText::new("All processes (individual PID)")
+                                            RichText::new(self.tr("All processes (individual PID)", "All processes (individual PID)"))
                                                 .strong(),
                                         );
                                         ui.horizontal(|ui| {
                                             ui.add_space(24.0);
-                                            ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new("Name").strong()));
+                                            ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new(self.tr("Name", "Name")).strong()));
                                             ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new("PID").strong()));
-                                            ui.label(RichText::new("Path").strong());
+                                            ui.label(RichText::new(self.tr("Path", "Path")).strong());
                                         });
                                         let count = self.memory_panel.process_choices.len();
                                         egui::ScrollArea::vertical().max_height(620.0).show_rows(ui, 22.0, count, |ui, rows| {
@@ -1263,9 +1270,9 @@ impl CrosshairApp {
                     egui::ComboBox::from_id_salt("memory-value-type")
                         .width(110.0)
                         .selected_text(match self.memory_panel.text_encoding {
-                            Some(TextEncoding::Utf8) => "Text (UTF-8)",
-                            Some(TextEncoding::Utf16) => "Text (UTF-16)",
-                            None => memory_type_label(self.memory_panel.value_type),
+                            Some(TextEncoding::Utf8) => self.tr("Text (UTF-8)", "Text (UTF-8)"),
+                            Some(TextEncoding::Utf16) => self.tr("Text (UTF-16)", "Text (UTF-16)"),
+                            None => self.tr(memory_type_label(self.memory_panel.value_type), memory_type_label(self.memory_panel.value_type)),
                         })
                         .show_ui(ui, |ui| {
                             for value_type in [
@@ -1280,7 +1287,7 @@ impl CrosshairApp {
                                     .selectable_label(
                                         self.memory_panel.text_encoding.is_none()
                                             && self.memory_panel.value_type == value_type,
-                                        memory_type_label(value_type),
+                                        self.tr(memory_type_label(value_type), memory_type_label(value_type)),
                                     )
                                     .clicked()
                                 {
@@ -1297,7 +1304,7 @@ impl CrosshairApp {
                                 if ui
                                     .selectable_label(
                                         self.memory_panel.text_encoding == Some(encoding),
-                                        label,
+                                        self.tr(label, label),
                                     )
                                     .clicked()
                                 {
@@ -1307,10 +1314,17 @@ impl CrosshairApp {
                                 }
                             }
                         });
+                    let val_hint = self.tr("value", "value");
                     let value_response = ui.add(
                         egui::TextEdit::singleline(&mut self.memory_panel.value_input)
                             .desired_width(120.0)
-                            .hint_text("value"),
+                            .hint_text(val_hint),
+                    );
+                    Self::apply_vietnamese_input_if_changed(
+                        &value_response,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut self.memory_panel.value_input,
                     );
                     if value_response.gained_focus() {
                         Self::select_all_text(
@@ -1330,18 +1344,21 @@ impl CrosshairApp {
                         self.start_memory_action(action);
                     }
                     if self.memory_panel.text_encoding.is_some() {
-                        ui.checkbox(&mut self.memory_panel.text_case_sensitive, "Case");
+                        let case_label = self.tr("Case", "Case");
+                        ui.checkbox(&mut self.memory_panel.text_case_sensitive, case_label);
                     } else {
-                        ui.checkbox(&mut self.memory_panel.hex, "Hex");
+                        let hex_label = self.tr("Hex", "Hex");
+                        ui.checkbox(&mut self.memory_panel.hex, hex_label);
                     }
                 });
                 if self.memory_panel.text_encoding.is_some() {
                     ui.horizontal(|ui| {
+                        let null_label = self.tr("Null terminated", "Null terminated");
                         ui.checkbox(
                             &mut self.memory_panel.text_null_terminated,
-                            "Null terminated",
+                            null_label,
                         );
-                        ui.label(RichText::new("Exact text").weak().small());
+                        ui.label(RichText::new(self.tr("Exact text", "Exact text")).weak().small());
                     });
                 }
                 ui.add_space(8.0);
@@ -1372,14 +1389,26 @@ impl CrosshairApp {
                     ui.add_space(5.0);
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("Between").clicked() {
+                    if ui.button(self.tr("Between", "Between")).clicked() {
                         self.memory_panel.between_open = !self.memory_panel.between_open;
                     }
                     if self.memory_panel.between_open {
-                        ui.add(egui::TextEdit::singleline(&mut self.memory_panel.between_min_input).desired_width(80.0).hint_text("Min"));
-                        ui.label("to");
-                        ui.add(egui::TextEdit::singleline(&mut self.memory_panel.between_max_input).desired_width(80.0).hint_text("Max"));
-                        if ui.button("Scan").clicked() {
+                        let min_resp = ui.add(egui::TextEdit::singleline(&mut self.memory_panel.between_min_input).desired_width(80.0).hint_text("Min"));
+                        Self::apply_vietnamese_input_if_changed(
+                            &min_resp,
+                            self.state.vietnamese_input_enabled,
+                            self.state.vietnamese_input_mode,
+                            &mut self.memory_panel.between_min_input,
+                        );
+                        ui.label(self.tr("to", "to"));
+                        let max_resp = ui.add(egui::TextEdit::singleline(&mut self.memory_panel.between_max_input).desired_width(80.0).hint_text("Max"));
+                        Self::apply_vietnamese_input_if_changed(
+                            &max_resp,
+                            self.state.vietnamese_input_enabled,
+                            self.state.vietnamese_input_mode,
+                            &mut self.memory_panel.between_max_input,
+                        );
+                        if ui.button(self.tr("Scan", "Scan")).clicked() {
                             self.start_memory_action(MemoryScanAction::Between);
                         }
                     }
@@ -1387,50 +1416,85 @@ impl CrosshairApp {
                 ui.add_space(5.0);
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label("Limit");
-                    ui.add(
+                    ui.label(self.tr("Limit", "Limit"));
+                    let limit_resp = ui.add(
                         egui::TextEdit::singleline(&mut self.memory_panel.result_limit_input)
                             .desired_width(110.0),
                     );
+                    Self::apply_vietnamese_input_if_changed(
+                        &limit_resp,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut self.memory_panel.result_limit_input,
+                    );
                 });
+                let writable_label = self.tr("Writable", "Writable");
+                let executable_label = self.tr("Executable", "Executable");
+                let copy_label = self.tr("CopyOnWrite", "CopyOnWrite");
+                let active_label = self.tr("Active memory only", "Active memory only");
+                let private_label = self.tr("Heap/Stack (MEM_PRIVATE)", "Bộ nhớ động (MEM_PRIVATE)");
+                let image_label = self.tr("DLLs / Mapped memory", "DLL & Mapped file");
                 ui.columns(2, |columns| {
-                    columns[0].checkbox(&mut self.memory_panel.scan_writable, "Writable");
-                    columns[1].checkbox(&mut self.memory_panel.scan_executable, "Executable");
+                    columns[0].checkbox(&mut self.memory_panel.scan_writable, writable_label);
+                    columns[1].checkbox(&mut self.memory_panel.scan_executable, executable_label);
                     columns[0].checkbox(
                         &mut self.memory_panel.scan_copy_on_write,
-                        "CopyOnWrite",
+                        copy_label,
                     );
                     columns[1].checkbox(
                         &mut self.memory_panel.scan_active_memory_only,
-                        "Active memory only",
+                        active_label,
+                    );
+                    columns[0].checkbox(
+                        &mut self.memory_panel.scan_mem_private,
+                        private_label,
+                    );
+                    columns[1].checkbox(
+                        &mut self.memory_panel.scan_mem_image,
+                        image_label,
                     );
                 });
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.memory_panel.fast_scan, "Fast Scan");
-                    ui.add_enabled(
+                    let fast_scan_label = self.tr("Fast scan", "Fast scan");
+                    ui.checkbox(&mut self.memory_panel.fast_scan, fast_scan_label);
+                    let align_resp = ui.add_enabled(
                         self.memory_panel.fast_scan,
                         egui::TextEdit::singleline(
                             &mut self.memory_panel.fast_scan_alignment,
                         )
                         .desired_width(42.0),
                     );
-                    ui.label("Alignment");
+                    Self::apply_vietnamese_input_if_changed(
+                        &align_resp,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut self.memory_panel.fast_scan_alignment,
+                    );
+                    ui.label(self.tr("Alignment", "Alignment"));
                 });
+                let pause_label = self.tr("Pause while scanning", "Pause while scanning");
                 ui.checkbox(
                     &mut self.memory_panel.pause_while_scanning,
-                    "Pause the game while scanning",
+                    pause_label,
                 );
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
-                    ui.add(
+                    let addr_hint = self.tr("address / module+offset [offsets]", "address / module+offset [offsets]");
+                    let addr_resp = ui.add(
                         egui::TextEdit::singleline(&mut self.memory_panel.manual_address)
                             .desired_width(180.0)
-                            .hint_text("address / module+offset [offsets]"),
+                            .hint_text(addr_hint),
                     );
-                    if ui.button("Add address").clicked() {
+                    Self::apply_vietnamese_input_if_changed(
+                        &addr_resp,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut self.memory_panel.manual_address,
+                    );
+                    if ui.button(self.tr("Add address", "Add address")).clicked() {
                         self.add_manual_memory_address();
                     }
-                    if ui.button("View class").clicked() {
+                    if ui.button(self.tr("View class", "View class")).clicked() {
                         self.open_manual_structure_view();
                     }
                 });
@@ -1468,7 +1532,7 @@ impl CrosshairApp {
                                 if ui
                                     .add_enabled(
                                         !self.memory_panel.scanning,
-                                        Button::new("Reset")
+                                        Button::new(self.tr("Reset", "Reset"))
                                             .min_size(vec2((width - 34.0).max(52.0), 26.0)),
                                     )
                                     .clicked()
@@ -1486,6 +1550,7 @@ impl CrosshairApp {
 
     fn memory_action_button(&mut self, ui: &mut egui::Ui, action: MemoryScanAction, hotkey: bool) {
         let width = ui.available_width();
+        let action_btn_text = self.tr(action.label(), action.label());
         ui.horizontal(|ui| {
             let enabled = !self.memory_panel.scanning
                 && self.memory_panel.process_pid.is_some()
@@ -1503,7 +1568,7 @@ impl CrosshairApp {
                 .add_enabled_ui(enabled, |ui| {
                     ui.add_sized(
                         [(width - if hotkey { 34.0 } else { 0.0 }).max(52.0), 26.0],
-                        Button::new(action.label()),
+                        Button::new(action_btn_text),
                     )
                 })
                 .inner
@@ -1614,7 +1679,7 @@ impl CrosshairApp {
             ui.set_min_size(size - vec2(12.0, 12.0));
             if !pinned {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Scan results").strong());
+                    ui.label(RichText::new(self.tr("Scan results", "Scan results")).strong());
                     ui.label(format!(
                         "{}",
                         self.memory_panel
@@ -1623,7 +1688,7 @@ impl CrosshairApp {
                             .max(self.memory_panel.text_candidates.len())
                     ));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("Add ↓").clicked() {
+                        if ui.small_button(self.tr("Add ↓", "Add ↓")).clicked() {
                             self.add_selected_memory_results();
                         }
                     });
@@ -1632,12 +1697,12 @@ impl CrosshairApp {
             let result_column_width = (ui.available_width() / 3.0).max(80.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                Self::memory_table_cell(ui, result_column_width, RichText::new("Address").strong());
-                Self::memory_table_cell(ui, result_column_width, RichText::new("Current").strong());
+                Self::memory_table_cell(ui, result_column_width, RichText::new(self.tr("Address", "Address")).strong());
+                Self::memory_table_cell(ui, result_column_width, RichText::new(self.tr("Current", "Current")).strong());
                 Self::memory_table_cell(
                     ui,
                     result_column_width,
-                    RichText::new("Previous").strong(),
+                    RichText::new(self.tr("Previous", "Previous")).strong(),
                 );
             });
             ui.separator();
@@ -1656,7 +1721,7 @@ impl CrosshairApp {
             }
             if result_count == 0 && !self.memory_panel.scanning {
                 ui.centered_and_justified(|ui| {
-                    ui.label(RichText::new("No scan results").weak());
+                    ui.label(RichText::new(self.tr("No scan results", "No scan results")).weak());
                 });
                 return;
             }
@@ -1848,7 +1913,9 @@ impl CrosshairApp {
                 .max_rect(rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        cell_response.union(cell.add(label))
+        cell_response
+            .union(cell.add(label.selectable(false)))
+            .on_hover_cursor(egui::CursorIcon::Default)
     }
 
     fn select_memory_result(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
@@ -1930,23 +1997,23 @@ impl CrosshairApp {
             .show(ui, |ui| {
                 ui.set_min_size(size - vec2(14.0, 14.0));
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Address list").strong());
+                    ui.label(RichText::new(self.tr("Address list", "Address list")).strong());
                     let selected = self.memory_panel.selected_saved.len();
                     if selected > 0 {
-                        if ui.button("Delete").clicked() {
+                        if ui.button(self.tr("Delete", "Delete")).clicked() {
                             self.delete_selected_saved_memory();
                         }
                         if selected < self.memory_panel.saved.len()
-                            && ui.button("Delete unselected").clicked()
+                            && ui.button(self.tr("Delete unselected", "Delete unselected")).clicked()
                         {
                             self.delete_unselected_saved_memory();
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label = if self.memory_panel.address_list_pinned {
-                            "Unpin address list"
+                            self.tr("Unpin address list", "Unpin address list")
                         } else {
-                            "Pin address list"
+                            self.tr("Pin address list", "Pin address list")
                         };
                         if ui.button(label).clicked() {
                             self.memory_panel.address_list_pinned =
@@ -2027,22 +2094,22 @@ impl CrosshairApp {
                     Self::memory_table_cell(
                         ui,
                         header_column_width,
-                        RichText::new("Address").strong(),
+                        RichText::new(self.tr("Address", "Address")).strong(),
                     );
                     Self::memory_table_cell(
                         ui,
                         header_column_width,
-                        RichText::new("Type").strong(),
+                        RichText::new(self.tr("Type", "Type")).strong(),
                     );
                     Self::memory_table_cell(
                         ui,
                         header_column_width,
-                        RichText::new("Value").strong(),
+                        RichText::new(self.tr("Value", "Value")).strong(),
                     );
                     Self::memory_table_cell(
                         ui,
                         header_column_width,
-                        RichText::new("Description").strong(),
+                        RichText::new(self.tr("Description", "Description")).strong(),
                     );
                 });
                 ui.separator();
@@ -2459,7 +2526,7 @@ impl CrosshairApp {
                     });
                 if self.memory_panel.saved.is_empty() {
                     ui.centered_and_justified(|ui| {
-                        ui.label(RichText::new("No saved addresses").weak());
+                        ui.label(RichText::new(self.tr("No saved addresses", "No saved addresses")).weak());
                     });
                 }
             });
@@ -3027,10 +3094,16 @@ impl CrosshairApp {
                     {
                         add = Some(true);
                     }
-                    ui.add(
+                    let filter_resp = ui.add(
                         egui::TextEdit::singleline(&mut dialog.filter)
                             .desired_width(150.0)
                             .hint_text(RichText::new("Search module...").weak()),
+                    );
+                    Self::apply_vietnamese_input_if_changed(
+                        &filter_resp,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut dialog.filter,
                     );
                     ui.checkbox(&mut dialog.exe_only, "EXE only");
                 });
@@ -3236,10 +3309,16 @@ impl CrosshairApp {
                             if ui.button("Clear map A").clicked() {
                                 clear = true;
                             }
-                            ui.add(
+                            let filter_resp = ui.add(
                                 egui::TextEdit::singleline(&mut dialog.filter)
                                     .desired_width(150.0)
                                     .hint_text(RichText::new("Search module...").weak()),
+                            );
+                            Self::apply_vietnamese_input_if_changed(
+                                &filter_resp,
+                                self.state.vietnamese_input_enabled,
+                                self.state.vietnamese_input_mode,
+                                &mut dialog.filter,
                             );
                             ui.checkbox(&mut dialog.exe_only, "EXE only");
                         });
@@ -3365,11 +3444,13 @@ impl CrosshairApp {
                                         || "—".to_owned(),
                                         |value| editable_scan_value(value, false),
                                     );
-                                let response = ui.interact(
-                                    row_rect,
-                                    ui.id().with(("deep-pointer-row", index)),
-                                    Sense::click(),
-                                );
+                                let response = ui
+                                    .interact(
+                                        row_rect,
+                                        ui.id().with(("deep-pointer-row", index)),
+                                        Sense::click(),
+                                    )
+                                    .on_hover_cursor(egui::CursorIcon::Default);
                                 if dialog.selected.contains(&index) {
                                     ui.painter().rect_filled(
                                         row_rect,
@@ -4924,6 +5005,9 @@ impl CrosshairApp {
             executable: self.memory_panel.scan_executable,
             copy_on_write: self.memory_panel.scan_copy_on_write,
             active_memory_only: self.memory_panel.scan_active_memory_only,
+            mem_private: self.memory_panel.scan_mem_private,
+            mem_image: self.memory_panel.scan_mem_image,
+            mem_mapped: self.memory_panel.scan_mem_mapped,
             alignment: self.memory_panel.fast_scan.then_some(alignment),
         };
         let candidates = if action.comparison().is_some() && text_encoding.is_none() {
@@ -5370,6 +5454,12 @@ impl CrosshairApp {
                     let response = ui.add_sized(
                         [190.0, 24.0],
                         egui::TextEdit::singleline(&mut self.memory_panel.edit_value_input),
+                    );
+                    Self::apply_vietnamese_input_if_changed(
+                        &response,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut self.memory_panel.edit_value_input,
                     );
                     response.request_focus();
                     ui.horizontal(|ui| {

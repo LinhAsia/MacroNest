@@ -788,14 +788,12 @@ impl CrosshairApp {
                     _ => {}
                 }
                 if active_handle == SelectionDragHandle::Center {
-                    target_pos.x = target_pos.x.clamp(
-                        preview_rect.left(),
-                        preview_rect.right() - rect.width(),
-                    );
-                    target_pos.y = target_pos.y.clamp(
-                        preview_rect.top(),
-                        preview_rect.bottom() - rect.height(),
-                    );
+                    target_pos.x = target_pos
+                        .x
+                        .clamp(preview_rect.left(), preview_rect.right() - rect.width());
+                    target_pos.y = target_pos
+                        .y
+                        .clamp(preview_rect.top(), preview_rect.bottom() - rect.height());
                 }
 
                 match active_handle {
@@ -896,18 +894,19 @@ impl CrosshairApp {
                         rect = rect.translate(egui::vec2(preview_rect.right() - rect.right(), 0.0));
                     }
                     if rect.bottom() > preview_rect.bottom() {
-                        rect = rect.translate(egui::vec2(0.0, preview_rect.bottom() - rect.bottom()));
+                        rect =
+                            rect.translate(egui::vec2(0.0, preview_rect.bottom() - rect.bottom()));
                     }
                 }
 
-                rect.min.x = rect.min.x.clamp(
-                    preview_rect.left(),
-                    preview_rect.right() - min_size.x,
-                );
-                rect.min.y = rect.min.y.clamp(
-                    preview_rect.top(),
-                    preview_rect.bottom() - min_size.y,
-                );
+                rect.min.x = rect
+                    .min
+                    .x
+                    .clamp(preview_rect.left(), preview_rect.right() - min_size.x);
+                rect.min.y = rect
+                    .min
+                    .y
+                    .clamp(preview_rect.top(), preview_rect.bottom() - min_size.y);
                 rect.max.x = rect
                     .max
                     .x

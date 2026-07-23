@@ -17,8 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::os::windows::process::CommandExt;
 
 const GITHUB_RELEASES_PAGE_URL: &str = "https://github.com/LinhAsia/MacroNest/releases/latest";
-const UPDATE_MANIFEST_URL: &str =
-    "https://github.com/LinhAsia/MacroNest/raw/master/update.json";
+const UPDATE_MANIFEST_URL: &str = "https://github.com/LinhAsia/MacroNest/raw/master/update.json";
 const WINDOWS_STARTUP_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 const WINDOWS_STARTUP_VALUE: &str = "MacroNest";
 
@@ -93,7 +92,10 @@ impl CrosshairApp {
     }
 
     fn update_download_ready_path(version: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("{}.ready", Self::update_download_file_stem(version)))
+        std::env::temp_dir().join(format!(
+            "{}.ready",
+            Self::update_download_file_stem(version)
+        ))
     }
 
     pub(crate) fn render_settings_popup(&mut self, ui: &mut egui::Ui) {
@@ -219,7 +221,11 @@ impl CrosshairApp {
                                         ui.label("");
                                         if Self::settings_action_button_fixed(
                                             ui,
-                                            Self::tr_lang(language, "Get Gemini key", "Lấy khóa Gemini"),
+                                            Self::tr_lang(
+                                                language,
+                                                "Get Gemini key",
+                                                "Lấy khóa Gemini",
+                                            ),
                                             action_width,
                                         )
                                         .clicked()
@@ -362,16 +368,19 @@ impl CrosshairApp {
                             let cache_id = egui::Id::new("app-data-folder-size-cache");
                             let now = Instant::now();
                             let cached_size = ui.ctx().data(|data| {
-                                data.get_temp::<(Instant, u64)>(cache_id)
-                                    .filter(|(updated_at, _)| {
+                                data.get_temp::<(Instant, u64)>(cache_id).filter(
+                                    |(updated_at, _)| {
                                         now.duration_since(*updated_at) < Duration::from_secs(10)
-                                    })
+                                    },
+                                )
                             });
-                            let total_size = cached_size.map(|(_, size)| size).unwrap_or_else(|| {
-                                let size = Self::directory_size(&self.paths.root);
-                                ui.ctx().data_mut(|data| data.insert_temp(cache_id, (now, size)));
-                                size
-                            });
+                            let total_size =
+                                cached_size.map(|(_, size)| size).unwrap_or_else(|| {
+                                    let size = Self::directory_size(&self.paths.root);
+                                    ui.ctx()
+                                        .data_mut(|data| data.insert_temp(cache_id, (now, size)));
+                                    size
+                                });
                             ui.label(
                                 RichText::new(format!(
                                     "{}: {}",
@@ -482,46 +491,6 @@ impl CrosshairApp {
                         .min_col_width(0.0)
                         .spacing([12.0, 8.0])
                         .show(ui, |ui| {
-                            ui.label(Self::tr_lang(language, "Mouse Click Delay:", ""));
-                            ui.scope(|ui| {
-                                let visuals = ui.visuals_mut();
-                                visuals.widgets.inactive.bg_fill = slider_track_fill;
-                                visuals.widgets.inactive.bg_stroke =
-                                    Stroke::new(1.0, slider_track_stroke);
-                                visuals.widgets.hovered.bg_fill = slider_track_fill;
-                                visuals.widgets.hovered.bg_stroke =
-                                    Stroke::new(1.0, slider_track_stroke);
-                                visuals.widgets.active.bg_fill = slider_track_fill;
-                                visuals.widgets.active.bg_stroke =
-                                    Stroke::new(1.0, slider_track_stroke);
-                                visuals.selection.bg_fill = slider_handle_fill;
-                                let res = ui.add_sized(
-                                    [220.0, 22.0],
-                                    egui::Slider::new(
-                                        &mut self.state.macro_mouse_click_delay_ms,
-                                        0..=500,
-                                    )
-                                    .show_value(false),
-                                );
-                                if res.changed() {
-                                    delay_changed = true;
-                                }
-                            });
-                            if ui
-                                .add_sized(
-                                    [58.0, 24.0],
-                                    egui::DragValue::new(
-                                        &mut self.state.macro_mouse_click_delay_ms,
-                                    )
-                                    .range(0..=500)
-                                    .suffix(" ms"),
-                                )
-                                .changed()
-                            {
-                                delay_changed = true;
-                            }
-                            ui.end_row();
-
                             ui.label(Self::tr_lang(language, "Keyboard Press Delay:", ""));
                             ui.scope(|ui| {
                                 let visuals = ui.visuals_mut();
@@ -576,6 +545,7 @@ impl CrosshairApp {
         self.poll_mouse_tool_jobs();
         let language = self.state.ui_language;
         let opencv_path = self.paths.opencv_dll.clone();
+        let ffmpeg_path = self.paths.ffmpeg_exe.clone();
         let arduino_path = self.paths.avrdude_exe.clone();
         let opencv_progress = self
             .opencv_download_job
@@ -585,7 +555,10 @@ impl CrosshairApp {
             .interception_download_job
             .as_ref()
             .map(|_| self.interception_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
-        let ffmpeg_path = self.paths.ffmpeg_exe.clone();
+        let ffmpeg_progress = self
+            .ffmpeg_download_job
+            .as_ref()
+            .map(|_| self.ffmpeg_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
         let arduino_progress = self
             .arduino_download_job
             .as_ref()
@@ -595,10 +568,6 @@ impl CrosshairApp {
                 if Self::settings_section_button(
                     ui,
                     RichText::new(Self::tr_lang(language, "Downloaded Tools", ""))
-        let ffmpeg_progress = self
-            .ffmpeg_download_job
-            .as_ref()
-            .map(|_| self.ffmpeg_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
                         .strong()
                         .size(14.0),
                     self.downloaded_tools_open,
@@ -623,15 +592,6 @@ impl CrosshairApp {
                         Self::delete_opencv_tool,
                     );
                     ui.add_space(10.0);
-                    self.render_ocr_tool_entry(ui, language);
-                    ui.add_space(10.0);
-                    self.render_interception_driver_entry(ui, language, interception_progress);
-                    ui.add_space(10.0);
-                    self.render_downloaded_tool_entry(
-                        ui,
-                        language,
-                        "Arduino Tools",
-                        &arduino_path,
                     self.render_downloaded_tool_entry(
                         ui,
                         language,
@@ -643,12 +603,21 @@ impl CrosshairApp {
                         Self::tr_lang(
                             language,
                             "Screen recorder deleted.",
-                            "?? x?a c?ng c? quay m?n h?nh.",
+                            "Đã xóa công cụ quay màn hình.",
                         ),
                         Self::start_ffmpeg_download,
                         Self::delete_ffmpeg_tool,
                     );
                     ui.add_space(10.0);
+                    self.render_ocr_tool_entry(ui, language);
+                    ui.add_space(10.0);
+                    self.render_interception_driver_entry(ui, language, interception_progress);
+                    ui.add_space(10.0);
+                    self.render_downloaded_tool_entry(
+                        ui,
+                        language,
+                        "Arduino Tools",
+                        &arduino_path,
                         self.arduino_tools_downloaded,
                         arduino_progress,
                         1_000_000,
@@ -1662,15 +1631,6 @@ impl CrosshairApp {
         self.opencv_download_job = Some(job);
     }
 
-    pub(crate) fn start_ocr_download_for(&mut self, _language_code: &str) {
-        if self.ocr_download_job.is_some() {
-            return;
-        }
-
-        let progress = self.ocr_download_progress.clone();
-        progress.store(0, Ordering::SeqCst);
-
-        let job = std::thread::spawn(move || -> Result<()> {
     pub(crate) fn start_ffmpeg_download(&mut self) {
         if self.ffmpeg_download_job.is_some() || self.ffmpeg_installed {
             return;
@@ -1682,7 +1642,7 @@ impl CrosshairApp {
         self.status = Self::tr_lang(
             self.state.ui_language,
             "Downloading the screen recorder...",
-            "?ang t?i c?ng c? quay m?n h?nh...",
+            "Đang tải công cụ quay màn hình...",
         )
         .to_owned();
 
@@ -1728,6 +1688,15 @@ impl CrosshairApp {
         }));
     }
 
+    pub(crate) fn start_ocr_download_for(&mut self, _language_code: &str) {
+        if self.ocr_download_job.is_some() {
+            return;
+        }
+
+        let progress = self.ocr_download_progress.clone();
+        progress.store(0, Ordering::SeqCst);
+
+        let job = std::thread::spawn(move || -> Result<()> {
             crate::ocr::install_all_language_packs(|downloaded, total| {
                 let ratio = if total == 0 {
                     0.0
@@ -1801,21 +1770,12 @@ impl CrosshairApp {
         self.opencv_installed = false;
     }
 
-    fn delete_all_ocr_assets(&mut self) {
-        let _ = crate::ocr::delete_all_ocr_assets();
-    }
-
-    pub(crate) fn delete_interception_package(&mut self) {
-        let _ = fs::remove_file(&self.paths.interception_zip);
-        let _ = fs::remove_dir_all(&self.paths.interception_package_dir);
-        let _ = fs::remove_file(&self.paths.interception_dll);
-        self.interception_package_downloaded = false;
     fn delete_ffmpeg_tool(&mut self) {
         if crate::video_recorder::is_recording() || crate::video_recorder::is_busy() {
             self.status = Self::tr_lang(
                 self.state.ui_language,
                 "Stop recording before deleting FFmpeg.",
-                "H?y d?ng quay tr??c khi x?a FFmpeg.",
+                "Hãy dừng quay trước khi xóa FFmpeg.",
             )
             .to_owned();
             return;
@@ -1825,6 +1785,15 @@ impl CrosshairApp {
         self.ffmpeg_installed = false;
     }
 
+    fn delete_all_ocr_assets(&mut self) {
+        let _ = crate::ocr::delete_all_ocr_assets();
+    }
+
+    pub(crate) fn delete_interception_package(&mut self) {
+        let _ = fs::remove_file(&self.paths.interception_zip);
+        let _ = fs::remove_dir_all(&self.paths.interception_package_dir);
+        let _ = fs::remove_file(&self.paths.interception_dll);
+        self.interception_package_downloaded = false;
         self.interception_installed = false;
     }
 
@@ -1869,13 +1838,17 @@ impl CrosshairApp {
         }
         self.interception_install_job = Some(std::thread::spawn(move || -> Result<()> {
             let uninstall = crate::platform::run_hidden_process_as_admin_and_wait(
-                &installer, Some("/uninstall"), 60_000,
+                &installer,
+                Some("/uninstall"),
+                60_000,
             )?;
             if uninstall != 0 {
                 bail!("Interception uninstaller exited with code {uninstall}");
             }
             let install = crate::platform::run_hidden_process_as_admin_and_wait(
-                &installer, Some("/install"), 60_000,
+                &installer,
+                Some("/install"),
+                60_000,
             )?;
             if install != 0 {
                 bail!("Interception installer exited with code {install}");

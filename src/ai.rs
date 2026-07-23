@@ -422,12 +422,7 @@ pub fn generate_groq_ai_response(
     prompt: &str,
     system_instruction: &str,
 ) -> Result<String> {
-    groq_chat_completion_text(
-        settings,
-        prompt,
-        system_instruction,
-        None,
-    )
+    groq_chat_completion_text(settings, prompt, system_instruction, None)
 }
 
 pub fn generate_ai_response(
@@ -439,9 +434,12 @@ pub fn generate_ai_response(
 ) -> Result<String> {
     match provider {
         AiResponseProvider::Groq => generate_groq_ai_response(settings, prompt, system_instruction),
-        AiResponseProvider::GeminiLive => {
-            generate_gemini_text_ai_response(&settings.gemini_api_key, web_search, prompt, system_instruction)
-        }
+        AiResponseProvider::GeminiLive => generate_gemini_text_ai_response(
+            &settings.gemini_api_key,
+            web_search,
+            prompt,
+            system_instruction,
+        ),
     }
 }
 

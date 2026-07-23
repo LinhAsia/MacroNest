@@ -15236,7 +15236,7 @@ impl eframe::App for CrosshairApp {
                 );
 
                 ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
+                ui.horizontal(|ui| {
                     let panels = [
                         AppPanel::Macros,
                         AppPanel::Commands,
@@ -15249,8 +15249,6 @@ impl eframe::App for CrosshairApp {
                         AppPanel::Ocr,
                         AppPanel::Geometry,
                         AppPanel::Sound,
-                        AppPanel::Memory,
-                        AppPanel::Network,
                     ];
                     for panel in panels {
                         let selected = self.state.active_panel == panel;
@@ -15302,6 +15300,37 @@ impl eframe::App for CrosshairApp {
                     if response.clicked() {
                         self.state.active_panel = AppPanel::Timer;
                     }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let personal_warning = self.tr(
+                            "This feature was created by the author for personal use, so it may be difficult to use and does not have detailed instructions.",
+                            "Chức năng này do tác giả làm để phục vụ nhu cầu cá nhân, có thể khó sử dụng và không được hướng dẫn chi tiết.",
+                        );
+
+                        let selected = self.state.active_panel == AppPanel::Network;
+                        let text = RichText::new(self.panel_label(AppPanel::Network)).strong();
+                        let response = Self::add_with_show_hover_radius(
+                            ui,
+                            10,
+                            self.top_tab_button_danger(text, selected),
+                        )
+                        .on_hover_text(personal_warning);
+                        if response.clicked() {
+                            self.state.active_panel = AppPanel::Network;
+                        }
+
+                        let selected = self.state.active_panel == AppPanel::Memory;
+                        let text = RichText::new(self.panel_label(AppPanel::Memory)).strong();
+                        let response = Self::add_with_show_hover_radius(
+                            ui,
+                            10,
+                            self.top_tab_button_danger(text, selected),
+                        )
+                        .on_hover_text(personal_warning);
+                        if response.clicked() {
+                            self.state.active_panel = AppPanel::Memory;
+                        }
+                    });
                 });
             });
 

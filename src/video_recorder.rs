@@ -159,16 +159,13 @@ pub fn stop_blocking() {
 pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -> bool {
     let config = CONFIG.lock();
     let matches = config.enabled
-        && config
-            .hotkey
-            .as_ref()
-            .is_some_and(|trigger| {
-                if is_down {
-                    hotkey::binding_matches(trigger, binding)
-                } else {
-                    trigger.key.eq_ignore_ascii_case(&binding.key)
-                }
-            });
+        && config.hotkey.as_ref().is_some_and(|trigger| {
+            if is_down {
+                hotkey::binding_matches(trigger, binding)
+            } else {
+                trigger.key.eq_ignore_ascii_case(&binding.key)
+            }
+        });
     drop(config);
     if !matches {
         return false;
@@ -179,7 +176,9 @@ pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -
         }
         REGION_CAPTURE_ACTIVE.store(false, Ordering::Release);
         PRESS_HANDLED_ON_DOWN.store(false, Ordering::Release);
-        let press_id = HOTKEY_PRESS_ID.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        let press_id = HOTKEY_PRESS_ID
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
         if ACTIVE.load(Ordering::Acquire) || BUSY.load(Ordering::Acquire) {
             PRESS_HANDLED_ON_DOWN.store(true, Ordering::Release);
             toggle_async();
@@ -712,7 +711,9 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>)
     let fps = config.fps.clamp(1, 240);
     match config.mode {
         QuickVideoRecordMode::FullScreen => Ok((
-            format!("gfxcapture=monitor_idx=0:capture_cursor=1:display_border=1:max_framerate={fps}:width=-2:height=-2"),
+            format!(
+                "gfxcapture=monitor_idx=0:capture_cursor=1:display_border=1:max_framerate={fps}:width=-2:height=-2"
+            ),
             None,
         )),
         QuickVideoRecordMode::FocusedWindow => window_source(unsafe { GetForegroundWindow() }, fps),
@@ -725,12 +726,15 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>)
             let (x, y, width, height) = config
                 .region
                 .ok_or_else(|| "Select a screen region to record first.".to_owned())?;
-            region_source(RECT {
-                left: x,
-                top: y,
-                right: x.saturating_add(width.max(2)),
-                bottom: y.saturating_add(height.max(2)),
-            }, fps)
+            region_source(
+                RECT {
+                    left: x,
+                    top: y,
+                    right: x.saturating_add(width.max(2)),
+                    bottom: y.saturating_add(height.max(2)),
+                },
+                fps,
+            )
         }
     }
 }

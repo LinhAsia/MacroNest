@@ -1118,7 +1118,6 @@ impl CrosshairApp {
         .on_hover_text(Self::tr_lang(language, "Pick color", "Pick color"))
     }
 
-
     pub(crate) fn vision_template_file_for_preset(&self, preset_id: u32) -> PathBuf {
         self.paths.vision_template_file_for(preset_id)
     }
@@ -1183,8 +1182,8 @@ impl CrosshairApp {
             target,
             VisionCaptureTarget::QuickActionsCoordinates
                 | VisionCaptureTarget::QuickActionsColor
-                | VisionCaptureTarget::QuickActionsVideoRegion
                 | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+                | VisionCaptureTarget::QuickActionsVideoRegion
                 | VisionCaptureTarget::PinPresetColor(_)
                 | VisionCaptureTarget::PinPresetRegion(_)
                 | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -1465,8 +1464,8 @@ impl CrosshairApp {
                         }
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
-                        | VisionCaptureTarget::QuickActionsVideoRegion
                         | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+                        | VisionCaptureTarget::QuickActionsVideoRegion
                         | VisionCaptureTarget::PinPresetColor(_)
                         | VisionCaptureTarget::PinPresetRegion(_)
                         | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -1585,12 +1584,12 @@ impl CrosshairApp {
                                 format!("Key display position set: X={}, Y={}", screen_x, screen_y)
                             }
                         };
+                    }
                     VisionCaptureTarget::QuickActionsVideoRegion => {
                         self.cancel_image_search_capture_with_status(
                             ctx,
                             "Video recording regions require an area selection.",
                         );
-                    }
                     }
                     VisionCaptureTarget::PinPresetRegion(_)
                     | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -2035,8 +2034,8 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
-            | VisionCaptureTarget::QuickActionsVideoRegion
             | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+            | VisionCaptureTarget::QuickActionsVideoRegion
             | VisionCaptureTarget::PinPresetColor(_)
             | VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -2259,9 +2258,9 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                 "Key display position does not support color picking.".to_owned()
+            }
             VisionCaptureTarget::QuickActionsVideoRegion => {
                 "Video recording regions do not support color picking.".to_owned()
-            }
             }
             VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -2310,8 +2309,8 @@ impl CrosshairApp {
             }
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
-            | VisionCaptureTarget::QuickActionsVideoRegion
             | VisionCaptureTarget::QuickActionsKeyDisplayPosition
+            | VisionCaptureTarget::QuickActionsVideoRegion
             | VisionCaptureTarget::PinPresetColor(_)
             | VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)

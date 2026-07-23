@@ -204,4 +204,33 @@ impl CrosshairApp {
             .stroke(egui::Stroke::new(1.0, stroke))
             .corner_radius(10.0)
     }
+
+    pub(crate) fn top_tab_button_danger(
+        &self,
+        text: RichText,
+        selected: bool,
+    ) -> Button<'static> {
+        let (fill, stroke) = match (self.state.ui_theme, selected) {
+            (UiThemeMode::Dark, true) => (
+                Color32::from_rgba_premultiplied(160, 48, 64, 164),
+                Color32::from_rgb(235, 100, 115),
+            ),
+            (UiThemeMode::Dark, false) => (
+                Color32::from_rgba_premultiplied(68, 30, 38, 100),
+                Color32::from_rgb(170, 65, 75),
+            ),
+            (UiThemeMode::Light, true) => (
+                Color32::from_rgba_premultiplied(220, 80, 90, 140),
+                Color32::from_rgb(190, 40, 50),
+            ),
+            (UiThemeMode::Light, false) => (
+                Color32::from_rgba_premultiplied(250, 222, 225, 190),
+                Color32::from_rgb(225, 140, 148),
+            ),
+        };
+        Button::new(text)
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, stroke))
+            .corner_radius(10.0)
+    }
 }

@@ -25,7 +25,14 @@ impl CrosshairApp {
         let mut remove_id = None;
         let mut changed = false;
         let mut open_ai_dialog: Option<u32> = None;
+        let mut copy_preset = None;
+        let mut paste_after = None;
+        let can_paste = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::Command(_))
+        );
         for index in 0..self.state.command_presets.len() {
+            let snapshot = self.state.command_presets[index].clone();
             let preset = &mut self.state.command_presets[index];
             preset.target_window_title = None;
             preset.extra_target_window_titles.clear();
@@ -198,6 +205,24 @@ impl CrosshairApp {
                     changed = true;
                 }
             });
+        }
+
+        if let Some(preset) = copy_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::Command(preset));
+        }
+        if let Some(index) = paste_after
+            && let Some(crate::ui::PresetClipboard::Command(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.command_presets,
+                &mut self.state.next_command_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} Copy", preset.name);
+            preset.collapsed = true;
+            self.state.command_presets.insert(index + 1, preset);
+            changed = true;
         }
 
         if let Some(id) = remove_id {

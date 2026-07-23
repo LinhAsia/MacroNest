@@ -66,6 +66,9 @@ pub struct MemoryScanOptions {
     pub executable: bool,
     pub copy_on_write: bool,
     pub active_memory_only: bool,
+    pub mem_private: bool,
+    pub mem_image: bool,
+    pub mem_mapped: bool,
     pub alignment: Option<usize>,
 }
 
@@ -76,6 +79,9 @@ impl Default for MemoryScanOptions {
             executable: false,
             copy_on_write: false,
             active_memory_only: true,
+            mem_private: true,
+            mem_image: false,
+            mem_mapped: false,
             alignment: Some(4),
         }
     }
@@ -1072,6 +1078,14 @@ fn scan_exact_matches(current: ScanValue, expected: ScanValue) -> bool {
     }
 }
 
+fn is_valid_unknown_scan_value(value: ScanValue) -> bool {
+    match value {
+        ScanValue::F32(v) => v.is_finite() && (v == 0.0 || (v.abs() >= 1e-30 && v.abs() <= 1e30)),
+        ScanValue::F64(v) => v.is_finite() && (v == 0.0 || (v.abs() >= 1e-300 && v.abs() <= 1e300)),
+        _ => true,
+    }
+}
+
 fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<ScanRegion> {
     let mut regions = Vec::new();
     let mut address = 0usize;
@@ -1109,8 +1123,14 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
                 | PAGE_EXECUTE_READWRITE
                 | PAGE_EXECUTE_WRITECOPY
         );
+        let is_kind_allowed = match information.kind {
+            MEM_PRIVATE => options.mem_private,
+            MEM_IMAGE => options.mem_image,
+            MEM_MAPPED => options.mem_mapped,
+            _ => true,
+        };
         if information.state == MEM_COMMIT
-            && matches!(information.kind, MEM_PRIVATE | MEM_MAPPED | MEM_IMAGE)
+            && is_kind_allowed
             && readable
             && (!options.writable || writable || (options.copy_on_write && copy_on_write))
             && (options.executable || !executable)
@@ -1265,6 +1285,7 @@ fn scan_region_bucket(
                         let value = value_type.decode(&buffer[offset..]).expect("value width");
                         if exact.is_none_or(|expected| scan_exact_matches(value, expected))
                             && range.is_none_or(|(min, max)| scan_value_between(value, min, max))
+                            && (exact.is_some() || range.is_some() || is_valid_unknown_scan_value(value))
                         {
                             found.push(ScanCandidate::new(chunk_base + offset, value));
                         }

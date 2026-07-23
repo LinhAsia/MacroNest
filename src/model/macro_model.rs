@@ -224,6 +224,8 @@ pub struct MacroStep {
     pub delay_ms: u64,
     #[serde(default)]
     pub delay_expr: String,
+    #[serde(default)]
+    pub mouse_click_delay_ms: u32,
     #[serde(default = "default_true")]
     pub enabled: bool,
     pub x: i32,
@@ -410,6 +412,7 @@ impl Default for MacroStep {
             action: MacroAction::KeyPress,
             delay_ms: 0,
             delay_expr: String::new(),
+            mouse_click_delay_ms: 0,
             enabled: true,
             x: 0,
             y: 0,

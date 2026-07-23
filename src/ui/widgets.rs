@@ -92,18 +92,17 @@ impl CrosshairApp {
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
         let dark_mode = ui.visuals().dark_mode;
-        let res = Self::preset_frame(ui, enabled)
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                let previous = ui.visuals().override_text_color;
-                if dark_mode {
-                    ui.visuals_mut().override_text_color =
-                        Some(Self::preset_body_text_color(dark_mode, enabled));
-                }
-                let output = add_contents(ui);
-                ui.visuals_mut().override_text_color = previous;
-                output
-            });
+        let res = Self::preset_frame(ui, enabled).show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            let previous = ui.visuals().override_text_color;
+            if dark_mode {
+                ui.visuals_mut().override_text_color =
+                    Some(Self::preset_body_text_color(dark_mode, enabled));
+            }
+            let output = add_contents(ui);
+            ui.visuals_mut().override_text_color = previous;
+            output
+        });
 
         // ponytail: collapsed cards are header-height; expanded cards should stay visually clear.
         if res.response.hovered() && res.response.rect.height() <= 44.0 {
@@ -117,11 +116,8 @@ impl CrosshairApp {
             } else {
                 Color32::from_rgba_unmultiplied(42, 106, 166, 110)
             };
-            ui.painter().rect_filled(
-                res.response.rect,
-                egui::CornerRadius::same(6),
-                hover_fill,
-            );
+            ui.painter()
+                .rect_filled(res.response.rect, egui::CornerRadius::same(6), hover_fill);
             ui.painter().rect_stroke(
                 res.response.rect,
                 egui::CornerRadius::same(6),
@@ -245,11 +241,8 @@ impl CrosshairApp {
             } else {
                 Color32::from_rgba_unmultiplied(42, 106, 166, 110)
             };
-            ui.painter().rect_filled(
-                res.response.rect,
-                egui::CornerRadius::same(6),
-                hover_fill,
-            );
+            ui.painter()
+                .rect_filled(res.response.rect, egui::CornerRadius::same(6), hover_fill);
             ui.painter().rect_stroke(
                 res.response.rect,
                 egui::CornerRadius::same(6),

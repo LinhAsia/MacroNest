@@ -1126,79 +1126,101 @@ impl CrosshairApp {
         }
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Network").strong().size(17.0));
+            ui.label(RichText::new(self.tr("Network", "Network")).strong().size(17.0));
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .button(if self.network_panel.pinned {
-                        "Unpin network"
+                        self.tr("Unpin network", "Unpin network")
                     } else {
-                        "Pin network"
+                        self.tr("Pin network", "Pin network")
                     })
                     .clicked()
                 {
                     self.network_panel.pinned = !self.network_panel.pinned;
                 }
-                if ui.button("Clear").clicked() {
+                if ui.button(self.tr("Clear", "Clear")).clicked() {
                     self.network_panel.entries.clear();
                     self.network_panel.selected_id = None;
                 }
-                if ui.button("Restore proxy").clicked() {
+                if ui.button(self.tr("Restore proxy", "Restore proxy")).clicked() {
                     self.network_panel.restore_proxy();
                 }
                 if running {
-                    if ui.button("Stop").clicked() {
+                    if ui.button(self.tr("Stop", "Stop")).clicked() {
                         self.network_panel.stop();
                     }
-                } else if ui.button("Start").clicked() {
+                } else if ui.button(self.tr("Start", "Start")).clicked() {
                     self.network_panel.start();
                 }
             });
         });
         ui.horizontal(|ui| {
-            ui.add(egui::Label::new(&self.network_panel.status).wrap());
+            let status_text = if self.network_panel.status == "Stopped" {
+                self.tr("Stopped", "Stopped")
+            } else if self.network_panel.status == "Ready" {
+                self.tr("Ready", "Ready")
+            } else {
+                &self.network_panel.status
+            };
+            ui.add(egui::Label::new(status_text).wrap());
             if self.network_panel.status.contains("failed")
                 || self.network_panel.status.contains("error")
             {
-                if ui.small_button("Copy error").clicked() {
+                if ui.small_button(self.tr("Copy error", "Copy error")).clicked() {
                     ui.ctx().copy_text(self.network_panel.status.clone());
                 }
             }
         });
         ui.add_space(5.0);
         ui.horizontal(|ui| {
-            ui.label("Proxy");
-            ui.add_enabled(
+            ui.label(self.tr("Proxy", "Proxy"));
+            let bind_resp = ui.add_enabled(
                 !running,
                 egui::TextEdit::singleline(&mut self.network_panel.bind_address)
                     .desired_width(150.0),
             );
-            if ui.button("Copy").clicked() {
+            Self::apply_vietnamese_input_if_changed(
+                &bind_resp,
+                self.state.vietnamese_input_enabled,
+                self.state.vietnamese_input_mode,
+                &mut self.network_panel.bind_address,
+            );
+            if ui.button(self.tr("Copy", "Copy")).clicked() {
                 ui.ctx().copy_text(self.network_panel.bind_address.clone());
             }
             ui.separator();
-            if ui.add_enabled(!self.network_panel.ca_installed, egui::Button::new("Install CA")).clicked() {
+            if ui.add_enabled(!self.network_panel.ca_installed, egui::Button::new(self.tr("Install CA", "Install CA"))).clicked() {
                 self.network_panel.install_ca();
             }
-            if ui.add_enabled(self.network_panel.ca_installed, egui::Button::new("Remove CA")).clicked() {
+            if ui.add_enabled(self.network_panel.ca_installed, egui::Button::new(self.tr("Remove CA", "Remove CA"))).clicked() {
                 self.network_panel.remove_ca();
             }
+            let decrypt_label = self.tr("Decrypt HTTPS", "Decrypt HTTPS");
             ui.add_enabled(
                 !running && self.network_panel.ca_installed,
-                egui::Checkbox::new(&mut self.network_panel.decrypt_https, "Decrypt HTTPS"),
+                egui::Checkbox::new(&mut self.network_panel.decrypt_https, decrypt_label),
             );
-            ui.checkbox(&mut self.network_panel.remove_ca_on_exit, "Remove CA on exit");
+            let remove_ca_label = self.tr("Remove CA on exit", "Remove CA on exit");
+            ui.checkbox(&mut self.network_panel.remove_ca_on_exit, remove_ca_label);
             ui.separator();
-            ui.label("Filter");
-            ui.add(
+            ui.label(self.tr("Filter", "Filter"));
+            let filter_resp = ui.add(
                 egui::TextEdit::singleline(&mut self.network_panel.filter)
                     .desired_width(f32::INFINITY),
             );
+            Self::apply_vietnamese_input_if_changed(
+                &filter_resp,
+                self.state.vietnamese_input_enabled,
+                self.state.vietnamese_input_mode,
+                &mut self.network_panel.filter,
+            );
         });
-        ui.label(RichText::new("Press Start to capture domains safely. Enable Decrypt HTTPS only when the target accepts the MacroNest CA; the CA is installed once and reused.").small().weak());
+        let proxy_hint = self.tr("Press Start to capture domains safely. Enable Decrypt HTTPS only when the target accepts the MacroNest CA; the CA is installed once and reused.", "Press Start to capture domains safely. Enable Decrypt HTTPS only when the target accepts the MacroNest CA; the CA is installed once and reused.");
+        ui.label(RichText::new(proxy_hint).small().weak());
         ui.group(|ui| {
-            ui.label(RichText::new("Frida injection (certificate pinning only)").strong());
-            ui.label(RichText::new("Attaching Frida alone does not bypass TLS. Use this only with a hook script for the target app's TLS stack.").small().weak());
+            ui.label(RichText::new(self.tr("Frida injection (certificate pinning only)", "Frida injection (certificate pinning only)")).strong());
+            ui.label(RichText::new(self.tr("Attaching Frida alone does not bypass TLS. Use this only with a hook script for the target app's TLS stack.", "Attaching Frida alone does not bypass TLS. Use this only with a hook script for the target app's TLS stack.")).small().weak());
             let selected = self
                 .network_panel
                 .frida_pid
@@ -1209,13 +1231,13 @@ impl CrosshairApp {
                         .find(|item| item.pid == pid)
                 })
                 .map(|process| format!("{} — PID {}", process.name, process.pid))
-                .unwrap_or_else(|| "Select process".to_owned());
+                .unwrap_or_else(|| self.tr("Select process", "Select process").to_owned());
             let process_picker = egui::ComboBox::from_id_salt("network-frida-process")
                 .height(720.0)
                 .selected_text(Self::truncate_window_title(&selected, 52))
                 .show_ui(ui, |ui| {
                     ui.set_min_height(480.0);
-                    ui.label(RichText::new("Window processes (grouped)").strong());
+                    ui.label(RichText::new(self.tr("Window processes (grouped)", "Window processes (grouped)")).strong());
                     for window in self.open_window_infos.clone() {
                         let Some(pid) = crate::window_list::process_id_for_window(Some(&window.selector)) else { continue };
                         if pid == std::process::id() { continue; }
@@ -1230,7 +1252,7 @@ impl CrosshairApp {
                         }
                     }
                     ui.separator();
-                    ui.label(RichText::new("All processes (individual PID)").strong());
+                    ui.label(RichText::new(self.tr("All processes (individual PID)", "All processes (individual PID)")).strong());
                     ui.horizontal(|ui| {
                         ui.add_space(24.0);
                         ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new("Name").strong()));
@@ -1255,13 +1277,13 @@ impl CrosshairApp {
             if process_picker.response.clicked() { self.ensure_open_windows_ready(true); }
             ui.horizontal(|ui| {
                 if self.network_panel.frida_session.is_some() {
-                    if ui.button("Detach").clicked() {
+                    if ui.button(self.tr("Detach", "Detach")).clicked() {
                         self.network_panel.frida_session.take();
                     }
                 } else if ui
                     .add_enabled(
                         self.network_panel.frida_pid.is_some(),
-                        egui::Button::new("Attach Frida agent"),
+                        egui::Button::new(self.tr("Attach Frida agent", "Attach Frida agent")),
                     )
                     .clicked()
                 {
@@ -1275,15 +1297,21 @@ impl CrosshairApp {
                         ));
                 }
             });
-            ui.collapsing("Advanced options", |ui| {
-                ui.label("Custom Frida JavaScript");
-                ui.add(
+            ui.collapsing(self.tr("Advanced options", "Advanced options"), |ui| {
+                ui.label(self.tr("Custom Frida JavaScript", "Custom Frida JavaScript"));
+                let script_resp = ui.add(
                     egui::TextEdit::multiline(&mut self.network_panel.frida_script)
                         .code_editor()
                         .desired_width(f32::INFINITY)
                         .desired_rows(7),
                 );
-                if ui.button("Clear log").clicked() { self.network_panel.frida_log.clear(); }
+                Self::apply_vietnamese_input_if_changed(
+                    &script_resp,
+                    self.state.vietnamese_input_enabled,
+                    self.state.vietnamese_input_mode,
+                    &mut self.network_panel.frida_script,
+                );
+                if ui.button(self.tr("Clear log", "Clear log")).clicked() { self.network_panel.frida_log.clear(); }
                 if !self.network_panel.frida_log.is_empty() { readonly_text(ui, self.network_panel.frida_log.clone()); }
             });
         });
@@ -1314,9 +1342,10 @@ impl CrosshairApp {
 
     fn render_network_list(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Host").strong());
+            ui.label(RichText::new(self.tr("Host", "Host")).strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(format!("{} request(s)", self.network_panel.entries.len()));
+                let req_text = self.tr("request(s)", "request(s)");
+                ui.label(format!("{} {req_text}", self.network_panel.entries.len()));
             });
         });
         ui.separator();
@@ -1441,18 +1470,18 @@ impl CrosshairApp {
             .cloned()
         else {
             ui.centered_and_justified(|ui| {
-                ui.label("Select a request");
+                ui.label(self.tr("Select a request", "Select a request"));
             });
             return;
         };
         ui.horizontal_wrapped(|ui| {
             for (tab, label) in [
-                (DetailTab::Overview, "Overview"),
-                (DetailTab::Contents, "Contents"),
-                (DetailTab::Ssl, "SSL"),
-                (DetailTab::Summary, "Summary"),
-                (DetailTab::Chart, "Chart"),
-                (DetailTab::Notes, "Notes"),
+                (DetailTab::Overview, self.tr("Overview", "Overview")),
+                (DetailTab::Contents, self.tr("Contents", "Contents")),
+                (DetailTab::Ssl, self.tr("SSL", "SSL")),
+                (DetailTab::Summary, self.tr("Summary", "Summary")),
+                (DetailTab::Chart, self.tr("Chart", "Chart")),
+                (DetailTab::Notes, self.tr("Notes", "Notes")),
             ] {
                 if ui
                     .selectable_label(self.network_panel.detail_tab == tab, label)
@@ -1468,14 +1497,14 @@ impl CrosshairApp {
             DetailTab::Contents => {
                 ui.horizontal_wrapped(|ui| {
                     for (tab, label) in [
-                        (ContentTab::Headers, "Headers"),
-                        (ContentTab::Query, "Query String"),
-                        (ContentTab::Cookies, "Cookies"),
-                        (ContentTab::Text, "Text"),
-                        (ContentTab::Hex, "Hex"),
-                        (ContentTab::Form, "Form"),
-                        (ContentTab::Json, "JSON"),
-                        (ContentTab::Raw, "Raw"),
+                        (ContentTab::Headers, self.tr("Headers", "Headers")),
+                        (ContentTab::Query, self.tr("Query", "Query")),
+                        (ContentTab::Cookies, self.tr("Cookies", "Cookies")),
+                        (ContentTab::Text, self.tr("Text", "Text")),
+                        (ContentTab::Hex, self.tr("Hex", "Hex")),
+                        (ContentTab::Form, self.tr("Form", "Form")),
+                        (ContentTab::Json, self.tr("Json", "Json")),
+                        (ContentTab::Raw, self.tr("Raw", "Raw")),
                     ] {
                         ui.add_enabled_ui(
                             !entry.secure_tunnel || tab == ContentTab::Headers,
@@ -1515,11 +1544,17 @@ impl CrosshairApp {
                     .iter_mut()
                     .find(|item| item.id == entry.id)
                 {
-                    ui.add(
+                    let notes_resp = ui.add(
                         egui::TextEdit::multiline(&mut selected.notes)
                             .hint_text("Notes for this request...")
                             .desired_width(f32::INFINITY)
                             .desired_rows(12),
+                    );
+                    Self::apply_vietnamese_input_if_changed(
+                        &notes_resp,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut selected.notes,
                     );
                 }
             }

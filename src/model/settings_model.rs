@@ -1116,10 +1116,12 @@ mod tests {
             collapsed: false,
             ..Default::default()
         });
-        state.mouse_sensitivity_presets.push(super::MouseSensitivityPreset {
-            collapsed: false,
-            ..Default::default()
-        });
+        state
+            .mouse_sensitivity_presets
+            .push(super::MouseSensitivityPreset {
+                collapsed: false,
+                ..Default::default()
+            });
         state.zoom_presets.push(super::ZoomPreset {
             collapsed: false,
             preview_enabled: true,
@@ -1177,42 +1179,116 @@ mod tests {
             preview_enabled: true,
             ..Default::default()
         });
-        state.audio_settings.library.push(crate::model::SoundLibraryItem {
-            collapsed: false,
-            ..Default::default()
-        });
-        state.audio_settings.presets.push(crate::model::SoundPreset {
-            collapsed: false,
-            ..Default::default()
-        });
+        state
+            .audio_settings
+            .library
+            .push(crate::model::SoundLibraryItem {
+                collapsed: false,
+                ..Default::default()
+            });
+        state
+            .audio_settings
+            .presets
+            .push(crate::model::SoundPreset {
+                collapsed: false,
+                ..Default::default()
+            });
 
         assert!(state.reset_session_preset_visibility());
 
         assert!(state.profiles.iter().all(|preset| preset.collapsed));
-        assert!(state.window_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
+        assert!(
+            state
+                .window_presets
+                .iter()
+                .all(|preset| preset.collapsed && !preset.preview_enabled)
+        );
         assert!(state.window_layouts.iter().all(|preset| preset.collapsed));
-        assert!(state.window_focus_presets.iter().all(|preset| preset.collapsed));
-        assert!(state.pin_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
-        assert!(state.mouse_path_presets.iter().all(|preset| preset.collapsed));
-        assert!(state.mouse_sensitivity_presets.iter().all(|preset| preset.collapsed));
-        assert!(state.zoom_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
-        assert!(state.hud_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
+        assert!(
+            state
+                .window_focus_presets
+                .iter()
+                .all(|preset| preset.collapsed)
+        );
+        assert!(
+            state
+                .pin_presets
+                .iter()
+                .all(|preset| preset.collapsed && !preset.preview_enabled)
+        );
+        assert!(
+            state
+                .mouse_path_presets
+                .iter()
+                .all(|preset| preset.collapsed)
+        );
+        assert!(
+            state
+                .mouse_sensitivity_presets
+                .iter()
+                .all(|preset| preset.collapsed)
+        );
+        assert!(
+            state
+                .zoom_presets
+                .iter()
+                .all(|preset| preset.collapsed && !preset.preview_enabled)
+        );
+        assert!(
+            state
+                .hud_presets
+                .iter()
+                .all(|preset| preset.collapsed && !preset.preview_enabled)
+        );
         assert!(state.command_presets.iter().all(|preset| preset.collapsed));
         assert!(state.master_presets.iter().all(|preset| preset.collapsed));
         assert!(state.macro_folders.iter().all(|preset| preset.collapsed));
         assert!(state.macro_groups.iter().all(|preset| {
-            preset.collapsed && preset.presets.iter().all(|macro_preset| macro_preset.collapsed)
+            preset.collapsed
+                && preset
+                    .presets
+                    .iter()
+                    .all(|macro_preset| macro_preset.collapsed)
         }));
         assert!(state.macro_presets.iter().all(|preset| preset.collapsed));
         assert!(state.geometry_presets.iter().all(|preset| preset.collapsed));
-        assert!(state
-            .vision_presets
-            .iter()
-            .all(|preset| preset.collapsed && !preset.show_search_region_overlay));
-        assert!(state.audio_sense_presets.iter().all(|preset| preset.collapsed));
-        assert!(state.timer_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
-        assert!(state.ocr_presets.iter().all(|preset| preset.collapsed && !preset.preview_enabled));
-        assert!(state.audio_settings.library.iter().all(|preset| preset.collapsed));
-        assert!(state.audio_settings.presets.iter().all(|preset| preset.collapsed));
+        assert!(
+            state
+                .vision_presets
+                .iter()
+                .all(|preset| preset.collapsed && !preset.show_search_region_overlay)
+        );
+        assert!(
+            state
+                .audio_sense_presets
+                .iter()
+                .all(|preset| preset.collapsed)
+        );
+        assert!(
+            state
+                .timer_presets
+                .iter()
+                .all(|preset| preset.collapsed && !preset.preview_enabled)
+        );
+        assert!(
+            state
+                .ocr_presets
+                .iter()
+                .all(|preset| preset.collapsed && !preset.preview_enabled)
+        );
+        assert!(
+            state
+                .audio_settings
+                .library
+                .iter()
+                .all(|preset| preset.collapsed)
+        );
+        assert!(
+            state
+                .audio_settings
+                .presets
+                .iter()
+                .all(|preset| preset.collapsed)
+        );
     }
 }

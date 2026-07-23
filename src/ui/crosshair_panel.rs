@@ -17,8 +17,8 @@ impl CrosshairApp {
 
         if ext == "svg" {
             let bytes = std::fs::read(&asset_path).ok()?;
-            let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default())
-                .ok()?;
+            let tree =
+                resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default()).ok()?;
             let size = tree.size();
             return Some(size.width().max(size.height()).round().clamp(16.0, 4096.0));
         }
@@ -64,7 +64,11 @@ impl CrosshairApp {
                     [24.0, 21.0],
                     Button::new(Self::material_icon_text(0xe3b8, 16.0)).selected(picking_active),
                 )
-                .on_hover_text(Self::tr_lang(language, "Pick from screen", "Pick from screen"))
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Pick from screen",
+                    "Pick from screen",
+                ))
                 .clicked()
             {
                 *pending_color_pick_target = Some(target);

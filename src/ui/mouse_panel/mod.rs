@@ -167,8 +167,9 @@ impl CrosshairApp {
                                 "Nạp firmware xong. Hãy khởi động lại Windows một lần để hoàn tất thiết lập Arduino.",
                             ).to_owned();
                         } else {
-                            self.arduino_flash_status =
-                                self.tr("Flash Success!", "Nạp firmware thành công!").to_owned();
+                            self.arduino_flash_status = self
+                                .tr("Flash Success!", "Nạp firmware thành công!")
+                                .to_owned();
                         }
                     }
                     Err(e) => {
@@ -403,7 +404,10 @@ impl CrosshairApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let mut spoof_enabled = self.state.vision_settings.arduino_spoof_type > 0;
-                let spoof_cb = ui.checkbox(&mut spoof_enabled, self.tr("Spoof USB Device", "Giả mạo thiết bị USB"));
+                let spoof_cb = ui.checkbox(
+                    &mut spoof_enabled,
+                    self.tr("Spoof USB Device", "Giả mạo thiết bị USB"),
+                );
                 if spoof_cb.changed() {
                     if spoof_enabled {
                         self.state.vision_settings.arduino_spoof_type = 1;
@@ -427,10 +431,18 @@ impl CrosshairApp {
                         })
                         .show_ui(ui, |ui| {
                             let mut changed = false;
-                            changed |= ui.selectable_value(&mut current_type, 0, "Default Arduino").changed();
-                            changed |= ui.selectable_value(&mut current_type, 1, "Logitech G Pro Wireless").changed();
-                            changed |= ui.selectable_value(&mut current_type, 2, "Razer DeathAdder V2").changed();
-                            changed |= ui.selectable_value(&mut current_type, 3, "SteelSeries Sensei").changed();
+                            changed |= ui
+                                .selectable_value(&mut current_type, 0, "Default Arduino")
+                                .changed();
+                            changed |= ui
+                                .selectable_value(&mut current_type, 1, "Logitech G Pro Wireless")
+                                .changed();
+                            changed |= ui
+                                .selectable_value(&mut current_type, 2, "Razer DeathAdder V2")
+                                .changed();
+                            changed |= ui
+                                .selectable_value(&mut current_type, 3, "SteelSeries Sensei")
+                                .changed();
                             changed
                         });
                     if resp.inner.unwrap_or(false) {
@@ -483,10 +495,12 @@ impl CrosshairApp {
                 );
                 if test_button.clicked() {
                     self.arduino_flash_status = match crate::overlay::test_arduino_mouse_direct() {
-                        Ok(()) => self.tr(
-                            "Arduino test passed: cursor moved right.",
-                            "Kiểm tra Arduino thành công: con trỏ đã di chuyển sang phải.",
-                        ).to_owned(),
+                        Ok(()) => self
+                            .tr(
+                                "Arduino test passed: cursor moved right.",
+                                "Kiểm tra Arduino thành công: con trỏ đã di chuyển sang phải.",
+                            )
+                            .to_owned(),
                         Err(error) => format!(
                             "{}: {error}",
                             self.tr("Arduino test failed", "Kiểm tra Arduino thất bại")
@@ -552,7 +566,6 @@ impl CrosshairApp {
             }
 
             ui.add_space(6.0);
-
         });
         self.mouse_input_arduino_open = arduino_open;
 
@@ -2694,7 +2707,8 @@ impl CrosshairApp {
             self.arduino_available_ports.clear();
             return;
         };
-        let preferred_port = preferred_arduino_port(&ports, self.state.vision_settings.arduino_spoof_type);
+        let preferred_port =
+            preferred_arduino_port(&ports, self.state.vision_settings.arduino_spoof_type);
         self.arduino_available_ports = ports.into_iter().map(|p| p.port_name).collect();
         self.arduino_available_ports.sort();
 
@@ -2813,7 +2827,6 @@ impl CrosshairApp {
         }
         self.arduino_flash_running = true;
         self.arduino_flash_status = format!("Preparing flash: releasing {port}...");
-
 
         let paths = self.paths.clone();
         let flash_result = self.arduino_flash_result.clone();
@@ -2941,8 +2954,8 @@ impl CrosshairApp {
                 }
 
                 set_progress("Flash complete. Waiting for the firmware COM port...".to_owned());
-                let reconnect_deadline = std::time::Instant::now()
-                    + std::time::Duration::from_secs(15);
+                let reconnect_deadline =
+                    std::time::Instant::now() + std::time::Duration::from_secs(15);
                 let (expected_vid, expected_pid) = get_arduino_vid_pid(spoof_type);
                 loop {
                     let ports = serialport::available_ports().unwrap_or_default();
@@ -2961,7 +2974,8 @@ impl CrosshairApp {
                     }
                     if std::time::Instant::now() >= reconnect_deadline {
                         anyhow::bail!(
-                            "Flash verification failed: Arduino did not restart with PID {:04X}", expected_pid
+                            "Flash verification failed: Arduino did not restart with PID {:04X}",
+                            expected_pid
                         );
                     }
                     std::thread::sleep(std::time::Duration::from_millis(250));
@@ -3212,7 +3226,7 @@ fn patch_arduino_firmware_hex(hex_content: &str, spoof_type: u32) -> anyhow::Res
     let (vid, pid) = get_arduino_vid_pid(spoof_type);
     let mut modified_lines = Vec::new();
     let mut found = false;
-    
+
     for line in hex_content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with(':') && trimmed.len() >= 11 {
@@ -3222,14 +3236,16 @@ fn patch_arduino_firmware_hex(hex_content: &str, spoof_type: u32) -> anyhow::Res
                 let data_hex = &trimmed[9..9 + 2 * byte_count];
                 let mut data_bytes = Vec::new();
                 for i in 0..byte_count {
-                    let b = u8::from_str_radix(&data_hex[2*i..2*i+2], 16)?;
+                    let b = u8::from_str_radix(&data_hex[2 * i..2 * i + 2], 16)?;
                     data_bytes.push(b);
                 }
-                
+
                 for offset in 0..=byte_count.saturating_sub(14) {
                     if data_bytes[offset] == 0x12 && data_bytes[offset + 1] == 0x01 {
-                        let current_vid = (data_bytes[offset + 9] as u16) << 8 | (data_bytes[offset + 8] as u16);
-                        let current_pid = (data_bytes[offset + 11] as u16) << 8 | (data_bytes[offset + 10] as u16);
+                        let current_vid =
+                            (data_bytes[offset + 9] as u16) << 8 | (data_bytes[offset + 8] as u16);
+                        let current_pid = (data_bytes[offset + 11] as u16) << 8
+                            | (data_bytes[offset + 10] as u16);
                         if current_vid == 0x2341 && current_pid == 0x8037 {
                             data_bytes[offset + 8] = (vid & 0xFF) as u8;
                             data_bytes[offset + 9] = ((vid >> 8) & 0xFF) as u8;
@@ -3239,7 +3255,7 @@ fn patch_arduino_firmware_hex(hex_content: &str, spoof_type: u32) -> anyhow::Res
                         }
                     }
                 }
-                
+
                 if found {
                     let addr_str = &trimmed[3..7];
                     let mut line_bytes = Vec::new();
@@ -3248,10 +3264,10 @@ fn patch_arduino_firmware_hex(hex_content: &str, spoof_type: u32) -> anyhow::Res
                     line_bytes.push(u8::from_str_radix(&addr_str[2..4], 16)?);
                     line_bytes.push(0u8);
                     line_bytes.extend(&data_bytes);
-                    
+
                     let sum: u32 = line_bytes.iter().map(|&b| b as u32).sum();
                     let checksum = ((0x100 - (sum & 0xFF)) & 0xFF) as u8;
-                    
+
                     let mut new_line = format!(":{:02X}{}{:02X}", byte_count, addr_str, 0);
                     for b in data_bytes {
                         new_line.push_str(&format!("{:02X}", b));
@@ -3265,7 +3281,6 @@ fn patch_arduino_firmware_hex(hex_content: &str, spoof_type: u32) -> anyhow::Res
         }
         modified_lines.push(trimmed.to_owned());
     }
-    
+
     Ok(modified_lines.join("\n"))
 }
-

@@ -116,18 +116,12 @@ impl AppPaths {
         fs::create_dir_all(&self.bin_dir)?;
         fs::create_dir_all(&self.ocr_dir)?;
         ensure_opencv_videoio_ffmpeg_plugin(&self.opencv_videoio_ffmpeg_dll);
-        ensure_bundled_file(
-            &self.arduino_firmware_hex,
-            BUNDLED_ARDUINO_SERIAL_FIRMWARE,
-        )?;
+        ensure_bundled_file(&self.arduino_firmware_hex, BUNDLED_ARDUINO_SERIAL_FIRMWARE)?;
         Ok(())
     }
 
     pub fn ensure_arduino_runtime_files(&self) -> Result<()> {
-        ensure_bundled_file(
-            &self.arduino_firmware_hex,
-            BUNDLED_ARDUINO_SERIAL_FIRMWARE,
-        )?;
+        ensure_bundled_file(&self.arduino_firmware_hex, BUNDLED_ARDUINO_SERIAL_FIRMWARE)?;
         Ok(())
     }
 

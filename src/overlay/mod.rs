@@ -82,19 +82,17 @@ mod windows_overlay {
                 },
                 Gdi::{
                     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
-                    BITMAPINFOHEADER, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
-                    ClientToScreen, CombineRgn, CreateBitmap, CreateCompatibleDC,
-                    CreateDIBSection, CreateFontW, CreateRectRgn, CreateRoundRectRgn,
-                    DEFAULT_CHARSET, DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER,
-                    DT_EDITCONTROL, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER,
-                    DT_WORDBREAK, DeleteDC, DeleteObject, DrawTextW, EndPaint, FF_DONTCARE,
-                    FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW, GetTextExtentPoint32W,
-                    GetTextMetricsW, HDC, HGDIOBJ, MONITOR_DEFAULTTONEAREST, MONITORINFO,
-                    MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PatBlt, ReleaseDC,
-                    BLACKNESS, SRCCOPY,
-                    SelectObject, SetBkColor, SetBkMode, SetTextAlign, SetTextColor, SetWindowRgn,
-                    RGN_DIFF, StretchDIBits, TA_BASELINE, TA_CENTER, TEXTMETRICW, TRANSPARENT,
-                    TextOutW,
+                    BITMAPINFOHEADER, BLACKNESS, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
+                    ClientToScreen, CombineRgn, CreateBitmap, CreateCompatibleDC, CreateDIBSection,
+                    CreateFontW, CreateRectRgn, CreateRoundRectRgn, DEFAULT_CHARSET,
+                    DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS,
+                    DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, DeleteDC, DeleteObject,
+                    DrawTextW, EndPaint, FF_DONTCARE, FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW,
+                    GetTextExtentPoint32W, GetTextMetricsW, HDC, HGDIOBJ, MONITOR_DEFAULTTONEAREST,
+                    MONITORINFO, MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PatBlt,
+                    RGN_DIFF, ReleaseDC, SRCCOPY, SelectObject, SetBkColor, SetBkMode,
+                    SetTextAlign, SetTextColor, SetWindowRgn, StretchDIBits, TA_BASELINE,
+                    TA_CENTER, TEXTMETRICW, TRANSPARENT, TextOutW,
                 },
             },
             Media::Audio::{
@@ -127,34 +125,32 @@ mod windows_overlay {
                     NOTIFYICONDATAW, Shell_NotifyIconW,
                 },
                 WindowsAndMessaging::{
-                    AppendMenuW, CREATESTRUCTW, CallNextHookEx, CreateIconIndirect, CreatePopupMenu,
-                    CreateWindowExW, DefWindowProcW, DestroyCursor, DestroyIcon, DestroyMenu,
-                    DestroyWindow, DispatchMessageW,
-                    EVENT_SYSTEM_FOREGROUND, GA_ROOT, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA,
-                    GetAncestor, GetClassNameW, GetClientRect, GetCursorPos, GetForegroundWindow,
-                    GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW,
-                    GetWindowRect, GetWindowThreadProcessId, HC_ACTION, HCURSOR, HHOOK, HMENU,
-                    HTCLIENT,
-                    HTTRANSPARENT, HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IMAGE_ICON, IsZoomed,
-                    KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LoadCursorW, LoadImageW,
-                    MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT, PostMessageW,
-                    PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN, SM_CYSCREEN,
-                    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SPI_GETMOUSESPEED,
-                    SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA, SWP_FRAMECHANGED,
-                    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-                    SetCursor, SetCursorPos, SetForegroundWindow, SetLayeredWindowAttributes,
-                    SetTimer, SetWindowLongPtrW, SetWindowLongW, SetWindowPos, SetWindowsHookExW,
-                    ShowWindow, LWA_ALPHA,
-                    SystemParametersInfoW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu,
-                    TranslateMessage, ULW_ALPHA, UnhookWindowsHookEx, UpdateLayeredWindow,
-                    WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX,
-                    WINEVENT_OUTOFCONTEXT, WM_APP, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY,
-                    WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP,
-                    WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE,
-                    WM_NCCREATE, WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR,
-                    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, ICONINFO,
-                    WNDCLASSW,
-                    WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                    AppendMenuW, CREATESTRUCTW, CallNextHookEx, CreateIconIndirect,
+                    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyCursor, DestroyIcon,
+                    DestroyMenu, DestroyWindow, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
+                    GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor, GetClassNameW,
+                    GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
+                    GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
+                    GetWindowThreadProcessId, HC_ACTION, HCURSOR, HHOOK, HMENU, HTCLIENT,
+                    HTTRANSPARENT, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS, IMAGE_ICON,
+                    IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LWA_ALPHA, LoadCursorW,
+                    LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
+                    PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN,
+                    SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+                    SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA,
+                    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                    SWP_SHOWWINDOW, SetCursor, SetCursorPos, SetForegroundWindow,
+                    SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowLongW,
+                    SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
+                    TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
+                    UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
+                    WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
+                    WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
+                    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+                    WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE,
+                    WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYDOWN,
+                    WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION,
+                    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
                     WS_EX_TRANSPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
                 },
             },
@@ -181,12 +177,12 @@ mod windows_overlay {
     use crate::{
         ai, audio, audiosense, hotkey,
         model::{
-            AudioSensePreset, AudioSenseSpec, AudioSettings, CommandPreset,
-            CrosshairStyle, GeometryShapeKind, GeometrySpec, HotkeyBinding, HudPreset,
-            IfConditionType, MacroAction, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode,
-            MousePathEvent, MousePathEventKind, MousePathPreset, MouseSensitivityPreset,
-            PinOverlayStyle, PinPreset, ProfileRecord, QuickKeyDisplayMode, RgbaColor,
-            SoundLibraryItem, SoundPreset, TimerPreset, VisionPreset, VisionSettings, WindowAnchor,
+            AudioSensePreset, AudioSenseSpec, AudioSettings, CommandPreset, CrosshairStyle,
+            GeometryShapeKind, GeometrySpec, HotkeyBinding, HudPreset, IfConditionType,
+            MacroAction, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MousePathEvent,
+            MousePathEventKind, MousePathPreset, MouseSensitivityPreset, PinOverlayStyle,
+            PinPreset, ProfileRecord, QuickKeyDisplayMode, RgbaColor, SoundLibraryItem,
+            SoundPreset, TimerPreset, VisionPreset, VisionSettings, WindowAnchor,
             WindowExpandControls, WindowExpandDirection, WindowFocusPreset, WindowPreset,
         },
         render::{RenderedSvgImage, render_crosshair, render_svg_image},
@@ -3498,7 +3494,12 @@ mod windows_overlay {
                 Some(instance),
                 None,
             )?;
-            let mut focus_highlight_hwnds = [focus_highlight_hwnd, HWND::default(), HWND::default(), HWND::default()];
+            let mut focus_highlight_hwnds = [
+                focus_highlight_hwnd,
+                HWND::default(),
+                HWND::default(),
+                HWND::default(),
+            ];
             for hwnd in focus_highlight_hwnds.iter_mut().skip(1) {
                 *hwnd = CreateWindowExW(
                     WS_EX_LAYERED
@@ -4727,7 +4728,8 @@ mod windows_overlay {
                         )
                     };
                     if sound_enabled {
-                        let is_repeat = if let Some(key_name) = hotkey::vk_to_key_name(info.vkCode) {
+                        let is_repeat = if let Some(key_name) = hotkey::vk_to_key_name(info.vkCode)
+                        {
                             is_repeat_key(key_name)
                         } else {
                             false
@@ -4755,7 +4757,8 @@ mod windows_overlay {
                 let modifier_passthrough =
                     SCREEN_DRAW_TEXT_MODIFIER_PASSTHROUGH.load(Ordering::Acquire);
                 if modifier_bit != 0
-                    && (text_session_active || (is_key_up && modifier_passthrough & modifier_bit != 0))
+                    && (text_session_active
+                        || (is_key_up && modifier_passthrough & modifier_bit != 0))
                 {
                     let next_modifiers = if is_key_down {
                         SCREEN_DRAW_TEXT_MODIFIER_PASSTHROUGH
@@ -4838,9 +4841,6 @@ mod windows_overlay {
                         true
                     };
                     let binding = binding_from_trigger_event(&key_name);
-                    if is_key_down {
-                        if screen_draw_trigger_allowed && process_screen_draw_hotkey(&binding, is_repeat_key(&key_name)) {
-                            update_held_key(info.vkCode, is_key_down, is_key_up);
                     if screen_draw_trigger_allowed
                         && crate::video_recorder::process_hotkey(
                             &binding,
@@ -4853,10 +4853,18 @@ mod windows_overlay {
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
+                    if is_key_down {
+                        if screen_draw_trigger_allowed
+                            && process_screen_draw_hotkey(&binding, is_repeat_key(&key_name))
+                        {
+                            update_held_key(info.vkCode, is_key_down, is_key_up);
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
                         }
-                    } else if is_key_up && screen_draw_trigger_allowed && process_screen_draw_hotkey_release(&binding) {
+                    } else if is_key_up
+                        && screen_draw_trigger_allowed
+                        && process_screen_draw_hotkey_release(&binding)
+                    {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
                         update_modifier_state(info.vkCode, is_key_down);
                         if !is_ui_in_foreground() {
@@ -4932,7 +4940,8 @@ mod windows_overlay {
                     }
                 }
 
-                let ui_is_foreground = is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
+                let ui_is_foreground = is_app_ui_currently_foreground()
+                    || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
                 if ui_is_foreground {
                     if let Some(key_name) = key_name.as_ref() {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
@@ -5407,6 +5416,10 @@ mod windows_overlay {
                     message,
                     ((info.mouseData >> 16) & 0xFFFF) as u16,
                 );
+                if crate::video_recorder::process_hotkey(&binding, is_down, false) {
+                    request_ui_repaint();
+                    return LRESULT(1);
+                }
                 if let Some(swallow) = process_screen_draw_mouse_hotkey_event(message, mouse_data) {
                     if swallow {
                         return LRESULT(1);
@@ -5416,10 +5429,6 @@ mod windows_overlay {
                 if !is_ui_in_foreground()
                     && let Some(key_name) = event_key_name
                 {
-                if crate::video_recorder::process_hotkey(&binding, is_down, false) {
-                    request_ui_repaint();
-                    return LRESULT(1);
-                }
                     let is_key_up = matches!(
                         message,
                         WM_LBUTTONUP
@@ -6365,7 +6374,8 @@ mod windows_overlay {
                     .is_some_and(|h| hotkey::binding_matches(h, binding))
             })
         };
-        let ui_is_foreground = is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
+        let ui_is_foreground =
+            is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
         if ui_is_foreground && !is_record_hotkey {
             return Some(false);
         }
@@ -9319,9 +9329,7 @@ mod windows_overlay {
 
         let needs_sync = changed || committed || cancelled;
         if needs_sync {
-            if changed
-                && let Some(session) = state.text_session.as_mut()
-            {
+            if changed && let Some(session) = state.text_session.as_mut() {
                 autofit_screen_draw_text_session(&mut session.stroke);
                 session.caret_started_at = Instant::now();
                 session.caret_offset = screen_draw_text_measured_width(
@@ -10265,16 +10273,28 @@ mod windows_overlay {
                         state.enabled = enabled;
                         state.trigger = trigger;
                         state.effect = match tool {
-                            crate::model::QuickScreenDrawTool::Highlight => ScreenDrawEffect::Highlight,
+                            crate::model::QuickScreenDrawTool::Highlight => {
+                                ScreenDrawEffect::Highlight
+                            }
                             crate::model::QuickScreenDrawTool::Blur => ScreenDrawEffect::Blur,
                             _ => state.effect,
                         };
                         state.color = if color == SCREEN_DRAW_HIGHLIGHT_COLOR {
                             state.effect = ScreenDrawEffect::Highlight;
-                            RgbaColor { r: 255, g: 220, b: 50, a: 255 }
+                            RgbaColor {
+                                r: 255,
+                                g: 220,
+                                b: 50,
+                                a: 255,
+                            }
                         } else if color == SCREEN_DRAW_BLUR_COLOR {
                             state.effect = ScreenDrawEffect::Blur;
-                            RgbaColor { r: 200, g: 220, b: 255, a: 255 }
+                            RgbaColor {
+                                r: 200,
+                                g: 220,
+                                b: 255,
+                                a: 255,
+                            }
                         } else {
                             color
                         };
@@ -11681,13 +11701,7 @@ mod windows_overlay {
                 pixels[offset + 3] = alpha;
             }
         }
-        let color_bitmap = CreateBitmap(
-            side,
-            side,
-            1,
-            32,
-            Some(pixels.as_ptr().cast::<c_void>()),
-        );
+        let color_bitmap = CreateBitmap(side, side, 1, 32, Some(pixels.as_ptr().cast::<c_void>()));
         let mask_stride = ((side + 15) / 16 * 2) as usize;
         let mask_pixels = vec![0u8; mask_stride * side as usize];
         let mask_bitmap = CreateBitmap(
@@ -11735,7 +11749,10 @@ mod windows_overlay {
         }
         let key = screen_draw_brush_cursor_key(state);
         let mut cached = SCREEN_DRAW_BRUSH_CURSOR.lock();
-        if cached.as_ref().is_none_or(|(cached_key, _)| *cached_key != key) {
+        if cached
+            .as_ref()
+            .is_none_or(|(cached_key, _)| *cached_key != key)
+        {
             let cursor = match create_screen_draw_brush_cursor(key) {
                 Some(cursor) => cursor,
                 None => return false,
@@ -13553,10 +13570,8 @@ mod windows_overlay {
             state.current_stroke_release_seen_at = None;
             if !stroke.points.is_empty() {
                 if stroke.tool == ScreenDrawTool::Text && !stroke.eraser {
-                    state.text_session = finalize_screen_draw_text_stroke(
-                        stroke,
-                        state.text_vietnamese_input,
-                    );
+                    state.text_session =
+                        finalize_screen_draw_text_stroke(stroke, state.text_vietnamese_input);
                 } else if stroke.effect == ScreenDrawEffect::Blur && !stroke.eraser {
                     if screen_draw_prepare_blur_patch(&state, &mut stroke) {
                         if state.canvas_width > 0
@@ -14380,8 +14395,13 @@ mod windows_overlay {
                 height_f,
             ),
             vietnamese_button: screen_draw_text_local_to_world(
-                left_f, top_f, width_f, height_f, rotation_deg,
-                width_f * 0.5 - 64.0, control_local_y,
+                left_f,
+                top_f,
+                width_f,
+                height_f,
+                rotation_deg,
+                width_f * 0.5 - 64.0,
+                control_local_y,
             ),
         })
     }
@@ -14958,10 +14978,8 @@ mod windows_overlay {
         }
         session.cursor_char = cursor_char;
         session.selected_all = false;
-        session.caret_offset = screen_draw_text_measured_width(
-            font_size,
-            screen_draw_text_before_cursor(session),
-        );
+        session.caret_offset =
+            screen_draw_text_measured_width(font_size, screen_draw_text_before_cursor(session));
         session.caret_started_at = Instant::now();
         if session.vietnamese_input {
             rebase_screen_draw_vietnamese_cursor(session);
@@ -15193,7 +15211,11 @@ mod windows_overlay {
             pixmap,
             geometry.vietnamese_button,
             10.0,
-            if session.vietnamese_input { [37, 99, 235, 245] } else { [71, 85, 105, 235] },
+            if session.vietnamese_input {
+                [37, 99, 235, 245]
+            } else {
+                [71, 85, 105, 235]
+            },
         );
         stroke_screen_draw_editor_circle(
             pixmap,
@@ -15203,9 +15225,33 @@ mod windows_overlay {
             [239, 246, 255, 245],
         );
         // Compact "VI" icon for this text editor's independent Telex input.
-        draw_screen_draw_editor_line(pixmap, geometry.vietnamese_button.0 - 5.0, geometry.vietnamese_button.1 - 4.0, geometry.vietnamese_button.0 - 2.0, geometry.vietnamese_button.1 + 4.0, [255, 255, 255, 255], 1.5);
-        draw_screen_draw_editor_line(pixmap, geometry.vietnamese_button.0 - 2.0, geometry.vietnamese_button.1 + 4.0, geometry.vietnamese_button.0 + 1.0, geometry.vietnamese_button.1 - 4.0, [255, 255, 255, 255], 1.5);
-        draw_screen_draw_editor_line(pixmap, geometry.vietnamese_button.0 + 4.0, geometry.vietnamese_button.1 - 4.0, geometry.vietnamese_button.0 + 4.0, geometry.vietnamese_button.1 + 4.0, [255, 255, 255, 255], 1.5);
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.vietnamese_button.0 - 5.0,
+            geometry.vietnamese_button.1 - 4.0,
+            geometry.vietnamese_button.0 - 2.0,
+            geometry.vietnamese_button.1 + 4.0,
+            [255, 255, 255, 255],
+            1.5,
+        );
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.vietnamese_button.0 - 2.0,
+            geometry.vietnamese_button.1 + 4.0,
+            geometry.vietnamese_button.0 + 1.0,
+            geometry.vietnamese_button.1 - 4.0,
+            [255, 255, 255, 255],
+            1.5,
+        );
+        draw_screen_draw_editor_line(
+            pixmap,
+            geometry.vietnamese_button.0 + 4.0,
+            geometry.vietnamese_button.1 - 4.0,
+            geometry.vietnamese_button.0 + 4.0,
+            geometry.vietnamese_button.1 + 4.0,
+            [255, 255, 255, 255],
+            1.5,
+        );
 
         // Rotate: Blue
         fill_screen_draw_editor_circle(pixmap, geometry.rotate_handle, 10.0, [59, 130, 246, 240]);
@@ -26469,7 +26515,12 @@ mod windows_overlay {
             return false;
         }
         let utf16 = |value: &[u16]| {
-            String::from_utf16_lossy(&value[..value.iter().position(|unit| *unit == 0).unwrap_or(value.len())])
+            String::from_utf16_lossy(
+                &value[..value
+                    .iter()
+                    .position(|unit| *unit == 0)
+                    .unwrap_or(value.len())],
+            )
         };
         let alias = utf16(&interface.Alias);
         let description = utf16(&interface.Description);
@@ -26511,9 +26562,8 @@ mod windows_overlay {
             .context("Saved route is not a native route")?;
         let bytes = base64::engine::general_purpose::STANDARD.decode(encoded)?;
         if bytes.len()
-            != std::mem::size_of::<
-                windows::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2,
-            >()
+            != std::mem::size_of::<windows::Win32::NetworkManagement::IpHelper::MIB_IPFORWARD_ROW2>(
+            )
         {
             bail!("Saved route has an invalid size");
         }
@@ -26592,29 +26642,29 @@ mod windows_overlay {
             };
             let message = match result {
                 Ok(routes) => {
-                        let mut hook_state = HOOK_STATE.lock();
+                    let mut hook_state = HOOK_STATE.lock();
+                    if cut {
+                        for route in &routes {
+                            hook_state
+                                .cut_internet_routes_this_session
+                                .insert(route.clone());
+                        }
+                    } else {
+                        for route in &routes {
+                            hook_state.cut_internet_routes_this_session.remove(route);
+                        }
+                    }
+                    if routes.is_empty() {
                         if cut {
-                            for route in &routes {
-                                hook_state
-                                    .cut_internet_routes_this_session
-                                    .insert(route.clone());
-                            }
+                            format!("No default internet route found for {target_label}.")
                         } else {
-                            for route in &routes {
-                                hook_state.cut_internet_routes_this_session.remove(route);
-                            }
+                            "No saved internet routes to restore.".to_owned()
                         }
-                        if routes.is_empty() {
-                            if cut {
-                                format!("No default internet route found for {target_label}.")
-                            } else {
-                                "No saved internet routes to restore.".to_owned()
-                            }
-                        } else if cut {
-                            format!("Cut internet route for {target_label}.")
-                        } else {
-                            "Restored internet route.".to_owned()
-                        }
+                    } else if cut {
+                        format!("Cut internet route for {target_label}.")
+                    } else {
+                        "Restored internet route.".to_owned()
+                    }
                 }
                 Err(error) => format!("Internet route action failed: {error}"),
             };
@@ -26878,7 +26928,10 @@ mod windows_overlay {
             crate::model::AiResponseProvider::GeminiLive => "Gemini",
         };
         if lower.contains("api key is empty") {
-            return (format!("Enter a {provider_name} API key in Settings."), true);
+            return (
+                format!("Enter a {provider_name} API key in Settings."),
+                true,
+            );
         }
         if lower.contains("401")
             || lower.contains("403")
@@ -26997,7 +27050,10 @@ mod windows_overlay {
         let status = match &result {
             Ok(ai_response) => {
                 set_text_variable_value(&target_var, ai_response);
-                format!("AI Response saved to variable {}: {}", target_var, ai_response)
+                format!(
+                    "AI Response saved to variable {}: {}",
+                    target_var, ai_response
+                )
             }
             Err(error) => {
                 let (short_message, needs_settings) =
@@ -29450,9 +29506,9 @@ mod windows_overlay {
                     let _ = start_vision_following(
                         &step.key,
                         Some(&step.if_variable_name),
-                    step.vision_move_axis_lock,
-                    step.vision_move_relative,
-                    step.vision_move_offset_x,
+                        step.vision_move_axis_lock,
+                        step.vision_move_relative,
+                        step.vision_move_offset_x,
                         step.vision_move_offset_y,
                         step.vision_move_passes,
                         step.vision_move_delay_ms,
@@ -29475,9 +29531,9 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_x),
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
-                        step.vision_move_axis_lock,
-                        step.vision_move_relative,
-                        step.vision_move_offset_x,
+                            step.vision_move_axis_lock,
+                            step.vision_move_relative,
+                            step.vision_move_offset_x,
                             step.vision_move_offset_y,
                             step.vision_move_passes,
                             step.vision_move_delay_ms,
@@ -29724,7 +29780,8 @@ mod windows_overlay {
             // Only abort due to window focus if a specific target was configured.
             // Without a target window, global macros should always run to completion
             // even if focus changes during long-running steps (e.g. AiResponse).
-            let has_target = target_window_title.is_some() || !extra_target_window_titles.is_empty();
+            let has_target =
+                target_window_title.is_some() || !extra_target_window_titles.is_empty();
             if has_target
                 && !macro_runtime_target_matches(
                     target_window_title,
@@ -30386,7 +30443,7 @@ mod windows_overlay {
 
     fn parse_pointer_offsets(text: &str) -> Option<Vec<usize>> {
         text.replace("->", ",")
-            .replace('?', ",")
+            .replace('→', ",")
             .split([',', ';', ' '])
             .filter(|part| !part.trim().is_empty())
             .map(|part| {
@@ -30470,8 +30527,12 @@ mod windows_overlay {
         };
         let raw_value = interpolate_variables(&step.memory_write_value);
         let value = match step.memory_value_type {
-            crate::model::MemoryValueType::I8 if raw_value.trim().parse::<i8>().is_ok() => raw_value,
-            crate::model::MemoryValueType::I16 if raw_value.trim().parse::<i16>().is_ok() => raw_value,
+            crate::model::MemoryValueType::I8 if raw_value.trim().parse::<i8>().is_ok() => {
+                raw_value
+            }
+            crate::model::MemoryValueType::I16 if raw_value.trim().parse::<i16>().is_ok() => {
+                raw_value
+            }
             crate::model::MemoryValueType::I32 if raw_value.trim().parse::<i32>().is_ok() => {
                 raw_value
             }
@@ -30481,7 +30542,9 @@ mod windows_overlay {
             crate::model::MemoryValueType::F32 if raw_value.trim().parse::<f32>().is_ok() => {
                 raw_value
             }
-            crate::model::MemoryValueType::F64 if raw_value.trim().parse::<f64>().is_ok() => raw_value,
+            crate::model::MemoryValueType::F64 if raw_value.trim().parse::<f64>().is_ok() => {
+                raw_value
+            }
             crate::model::MemoryValueType::I8 => {
                 let value = evaluate_math_expression_f64(&raw_value);
                 if !value.is_finite() || value < i8::MIN as f64 || value > i8::MAX as f64 {
@@ -32592,13 +32655,22 @@ mod windows_overlay {
                 ki: KEYBDINPUT {
                     wVk: VIRTUAL_KEY(vk),
                     wScan: 0,
-                    dwFlags: if key_up { KEYEVENTF_KEYUP } else { Default::default() },
+                    dwFlags: if key_up {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        Default::default()
+                    },
                     time: 0,
                     dwExtraInfo: 0,
                 },
             },
         };
-        let inputs = [key(0x11, false), key(0x56, false), key(0x56, true), key(0x11, true)];
+        let inputs = [
+            key(0x11, false),
+            key(0x56, false),
+            key(0x56, true),
+            key(0x11, true),
+        ];
         unsafe {
             if SendInput(&inputs, size_of::<INPUT>() as i32) != inputs.len() as u32 {
                 bail!("SendInput paste failed");
@@ -32608,7 +32680,9 @@ mod windows_overlay {
     }
 
     fn arduino_packet(command: u8, payload: [u8; 5]) -> [u8; 8] {
-        let mut packet = [0xA5, command, payload[0], payload[1], payload[2], payload[3], payload[4], 0];
+        let mut packet = [
+            0xA5, command, payload[0], payload[1], payload[2], payload[3], payload[4], 0,
+        ];
         packet[7] = packet[..7].iter().fold(0, |checksum, byte| checksum ^ byte);
         packet
     }
@@ -32617,17 +32691,29 @@ mod windows_overlay {
         use std::io::{Read, Write};
         let (enabled, com_port, flashing) = {
             let state = HOOK_STATE.lock();
-            (state.use_arduino_mouse, state.arduino_com_port.clone(), state.arduino_flash_in_progress)
+            (
+                state.use_arduino_mouse,
+                state.arduino_com_port.clone(),
+                state.arduino_flash_in_progress,
+            )
         };
-        if !enabled { anyhow::bail!("Arduino mouse is disabled"); }
-        if flashing { anyhow::bail!("Arduino flash is in progress"); }
+        if !enabled {
+            anyhow::bail!("Arduino mouse is disabled");
+        }
+        if flashing {
+            anyhow::bail!("Arduino flash is in progress");
+        }
         let mut port = ARDUINO_PORT.lock();
         let result = (|| {
-            let serial = port.as_mut().ok_or_else(|| anyhow::anyhow!("Arduino is not connected on {com_port}"))?;
+            let serial = port
+                .as_mut()
+                .ok_or_else(|| anyhow::anyhow!("Arduino is not connected on {com_port}"))?;
             serial.write_all(bytes)?;
             let mut reply = [0u8; 2];
             serial.read_exact(&mut reply)?;
-            if reply != [0x5A, 0] { anyhow::bail!("Arduino rejected command (status {})", reply[1]); }
+            if reply != [0x5A, 0] {
+                anyhow::bail!("Arduino rejected command (status {})", reply[1]);
+            }
             Ok(())
         })();
         if result.is_err() {
@@ -32650,12 +32736,24 @@ mod windows_overlay {
             let send_btn = |button: u8, down: u8| {
                 write_arduino_data(&arduino_packet(2, [button, down, 0, 0, 0]))
             };
-            if dw_flags.contains(MOUSEEVENTF_LEFTDOWN) { send_btn(1, 1)?; }
-            if dw_flags.contains(MOUSEEVENTF_LEFTUP) { send_btn(1, 0)?; }
-            if dw_flags.contains(MOUSEEVENTF_RIGHTDOWN) { send_btn(2, 1)?; }
-            if dw_flags.contains(MOUSEEVENTF_RIGHTUP) { send_btn(2, 0)?; }
-            if dw_flags.contains(MOUSEEVENTF_MIDDLEDOWN) { send_btn(3, 1)?; }
-            if dw_flags.contains(MOUSEEVENTF_MIDDLEUP) { send_btn(3, 0)?; }
+            if dw_flags.contains(MOUSEEVENTF_LEFTDOWN) {
+                send_btn(1, 1)?;
+            }
+            if dw_flags.contains(MOUSEEVENTF_LEFTUP) {
+                send_btn(1, 0)?;
+            }
+            if dw_flags.contains(MOUSEEVENTF_RIGHTDOWN) {
+                send_btn(2, 1)?;
+            }
+            if dw_flags.contains(MOUSEEVENTF_RIGHTUP) {
+                send_btn(2, 0)?;
+            }
+            if dw_flags.contains(MOUSEEVENTF_MIDDLEDOWN) {
+                send_btn(3, 1)?;
+            }
+            if dw_flags.contains(MOUSEEVENTF_MIDDLEUP) {
+                send_btn(3, 0)?;
+            }
             if dw_flags.contains(MOUSEEVENTF_WHEEL) {
                 let value = ((mouse_data as i32) / 120).clamp(-127, 127) as i8 as u8;
                 write_arduino_data(&arduino_packet(3, [value, 0, 0, 0, 0]))?;
@@ -32833,6 +32931,7 @@ mod windows_overlay {
     }
 
     fn send_mouse_event(step: &MacroStep) -> Result<()> {
+        let delay_ms = step.mouse_click_delay_ms;
         let use_arduino = HOOK_STATE.lock().use_arduino_mouse;
         if use_arduino {
             let click_button = match step.action {
@@ -32843,10 +32942,12 @@ mod windows_overlay {
             };
             if let Some(button) = click_button {
                 write_arduino_data(&arduino_packet(2, [button, 1, 0, 0, 0]))?;
+                if delay_ms > 0 {
+                    thread::sleep(Duration::from_millis(delay_ms as u64));
+                }
                 return write_arduino_data(&arduino_packet(2, [button, 0, 0, 0, 0]));
             }
         }
-        let delay_ms = HOOK_STATE.lock().macro_mouse_click_delay_ms;
         match step.action {
             MacroAction::MouseMoveAbsolute => {
                 return send_mouse_move_absolute(step.get_x(), step.get_y());
@@ -32925,13 +33026,16 @@ mod windows_overlay {
     fn send_arduino_relative_move_packet(dx: i32, dy: i32) -> Result<()> {
         let dx = dx.clamp(i16::MIN as i32, i16::MAX as i32);
         let dy = dy.clamp(i16::MIN as i32, i16::MAX as i32);
-        let packet = arduino_packet(1, [
-            ((dx >> 8) & 0xFF) as u8,
-            (dx & 0xFF) as u8,
-            ((dy >> 8) & 0xFF) as u8,
-            (dy & 0xFF) as u8,
-            0,
-        ]);
+        let packet = arduino_packet(
+            1,
+            [
+                ((dx >> 8) & 0xFF) as u8,
+                (dx & 0xFF) as u8,
+                ((dy >> 8) & 0xFF) as u8,
+                (dy & 0xFF) as u8,
+                0,
+            ],
+        );
         write_arduino_data(&packet)
     }
 
@@ -32979,13 +33083,16 @@ mod windows_overlay {
                 / (screen_width - 1).max(1) as i64) as u16;
             let absolute_y = ((y.clamp(0, screen_height - 1) as i64 * 32767)
                 / (screen_height - 1).max(1) as i64) as u16;
-            write_arduino_data(&arduino_packet(5, [
-                (absolute_x >> 8) as u8,
-                absolute_x as u8,
-                (absolute_y >> 8) as u8,
-                absolute_y as u8,
-                0,
-            ]))?;
+            write_arduino_data(&arduino_packet(
+                5,
+                [
+                    (absolute_x >> 8) as u8,
+                    absolute_x as u8,
+                    (absolute_y >> 8) as u8,
+                    absolute_y as u8,
+                    0,
+                ],
+            ))?;
             update_mouse_lock_anchor_after_macro_move(target_point);
             return Ok(());
         }

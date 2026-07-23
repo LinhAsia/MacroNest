@@ -947,8 +947,10 @@ impl CrosshairApp {
                         {
                             preset.collapsed = !preset.collapsed;
                             if !preset.collapsed {
-                                activate_preview_target =
-                                    Some((AudioEditorTarget::Preset(preset.id), preset.clip.start_ms));
+                                activate_preview_target = Some((
+                                    AudioEditorTarget::Preset(preset.id),
+                                    preset.clip.start_ms,
+                                ));
                             }
                         }
                     });
