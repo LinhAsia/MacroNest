@@ -120,12 +120,16 @@ impl CrosshairApp {
         let mut next_mouse_sensitivity_capture_target = None;
         let mut cancel_active_capture_sensitivity = false;
         let mut mouse_sensitivity_live_sync = false;
+        let mut copy_sensitivity_preset = None;
+        let mut paste_sensitivity_after = None;
 
         let mut remove_id = None;
         let mut next_capture_target = None;
         let mut live_sync = false;
         let mut cancel_active_capture = false;
         let mut draw_preset_id = None;
+        let mut copy_mouse_path_preset = None;
+        let mut paste_mouse_path_after = None;
         let mut mouse_path_timeline_zoom = self.trim_timeline_zoom;
         let mouse_path_options: Vec<(u32, String)> = self
             .state
@@ -657,7 +661,13 @@ impl CrosshairApp {
                 );
                 ui.add_space(4.0);
 
+                let can_paste_sensitivity = matches!(
+                    self.preset_clipboard,
+                    Some(crate::ui::PresetClipboard::MouseSensitivity(_))
+                );
+
                 for index in 0..self.state.mouse_sensitivity_presets.len() {
+                    let sensitivity_snapshot = self.state.mouse_sensitivity_presets[index].clone();
                     let active_capture_target = self.capture_target.clone();
                     let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
                     let preset = &mut self.state.mouse_sensitivity_presets[index];
@@ -827,6 +837,19 @@ impl CrosshairApp {
                                         mouse_sensitivity_live_sync = true;
                                     }
 
+                                    if ui
+                                        .add_enabled(
+                                            can_paste_sensitivity,
+                                            Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        paste_sensitivity_after = Some(index);
+                                    }
+                                    if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                                        copy_sensitivity_preset = Some(sensitivity_snapshot.clone());
+                                    }
+
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_mouse_sensitivity_id = Some(preset.id);
                                     }
@@ -875,7 +898,13 @@ impl CrosshairApp {
                     );
                 });
 
+                let can_paste_mouse_path = matches!(
+                    self.preset_clipboard,
+                    Some(crate::ui::PresetClipboard::MousePath(_))
+                );
+
                 for index in 0..self.state.mouse_path_presets.len() {
+                    let mouse_path_snapshot = self.state.mouse_path_presets[index].clone();
                     let active_capture_target = self.capture_target.clone();
                     let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
                     let preset = &mut self.state.mouse_path_presets[index];
@@ -899,6 +928,19 @@ impl CrosshairApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
+                                    if ui
+                                        .add_enabled(
+                                            can_paste_mouse_path,
+                                            Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        paste_mouse_path_after = Some(index);
+                                    }
+                                    if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                                        copy_mouse_path_preset = Some(mouse_path_snapshot.clone());
+                                    }
+
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_id = Some(preset.id);
                                     }
@@ -1066,6 +1108,41 @@ impl CrosshairApp {
             });
 
         // --- Post UI Side-Effects ---
+        if let Some(preset) = copy_sensitivity_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::MouseSensitivity(preset));
+        }
+        if let Some(index) = paste_sensitivity_after
+            && let Some(crate::ui::PresetClipboard::MouseSensitivity(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.mouse_sensitivity_presets,
+                &mut self.state.next_mouse_sensitivity_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.mouse_sensitivity_presets.insert(index + 1, preset);
+            mouse_sensitivity_live_sync = true;
+        }
+
+        if let Some(preset) = copy_mouse_path_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::MousePath(preset));
+        }
+        if let Some(index) = paste_mouse_path_after
+            && let Some(crate::ui::PresetClipboard::MousePath(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.mouse_path_presets,
+                &mut self.state.next_mouse_path_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.mouse_path_presets.insert(index + 1, preset);
+            self.persist_mouse_path_presets();
+            live_sync = true;
+        }
+
         if let Some(remove_mouse_sensitivity_id) = remove_mouse_sensitivity_id {
             self.state
                 .mouse_sensitivity_presets

@@ -60,8 +60,15 @@ impl CrosshairApp {
         let mut preview_toggled_preset_id = None;
         let mut start_ocr_capture_preset_id = None;
         let mut start_ocr_download_language_code = None;
+        let mut copy_ocr_preset = None;
+        let mut paste_ocr_after = None;
+        let can_paste_ocr = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::Ocr(_))
+        );
         // Render card-based presets list
         for index in 0..self.state.ocr_presets.len() {
+            let ocr_snapshot = self.state.ocr_presets[index].clone();
             let preset = &mut self.state.ocr_presets[index];
             preset.enabled = true; // Always enabled for macros
 
@@ -94,6 +101,19 @@ impl CrosshairApp {
                         if run_response.clicked() {
                             run_test_preset_id = Some(preset.id);
                         }
+                        if ui
+                            .add_enabled(
+                                can_paste_ocr,
+                                egui::Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_ocr_after = Some(index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_ocr_preset = Some(ocr_snapshot.clone());
+                        }
+
                         // Delete Button
                         if Self::sound_style_remove_button(ui).clicked() {
                             remove_id = Some(preset.id);
@@ -422,6 +442,23 @@ impl CrosshairApp {
                     }
                 }
             });
+        }
+
+        if let Some(preset) = copy_ocr_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::Ocr(preset));
+        }
+        if let Some(index) = paste_ocr_after
+            && let Some(crate::ui::PresetClipboard::Ocr(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.ocr_presets,
+                &mut self.state.next_ocr_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.ocr_presets.insert(index + 1, preset);
+            live_sync = true;
         }
 
         if let Some(id) = remove_id {

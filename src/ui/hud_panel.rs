@@ -31,7 +31,14 @@ impl CrosshairApp {
         let mut active_preview: Option<HudPreset> = None;
         let mut preview_toggled_preset_id = None;
         let mut begin_hud_picker_preset_id = None;
+        let mut copy_hud_preset = None;
+        let mut paste_hud_after = None;
+        let can_paste_hud = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::Hud(_))
+        );
         for index in 0..self.state.hud_presets.len() {
+            let hud_snapshot = self.state.hud_presets[index].clone();
             let language = self.state.ui_language;
             let preset = &mut self.state.hud_presets[index];
             Self::show_preset_card(ui, false, |ui| {
@@ -67,6 +74,19 @@ impl CrosshairApp {
                             }
                             changed = true;
                         }
+                        if ui
+                            .add_enabled(
+                                can_paste_hud,
+                                egui::Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_hud_after = Some(index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_hud_preset = Some(hud_snapshot.clone());
+                        }
+
                         if Self::sound_style_remove_button(ui).clicked() {
                             remove_id = Some(preset.id);
                         }
@@ -220,6 +240,23 @@ impl CrosshairApp {
             );
         }
 
+        if let Some(preset) = copy_hud_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::Hud(preset));
+        }
+        if let Some(index) = paste_hud_after
+            && let Some(crate::ui::PresetClipboard::Hud(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.hud_presets,
+                &mut self.state.next_hud_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.hud_presets.insert(index + 1, preset);
+            changed = true;
+        }
+
         if let Some(id) = remove_id {
             self.state.hud_presets.retain(|preset| preset.id != id);
             changed = true;
@@ -278,7 +315,14 @@ impl CrosshairApp {
         );
         ui.add_space(4.0);
 
+        let mut copy_timer_preset = None;
+        let mut paste_timer_after = None;
+        let can_paste_timer = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::Timer(_))
+        );
         for index in 0..self.state.timer_presets.len() {
+            let timer_snapshot = self.state.timer_presets[index].clone();
             let preset = &mut self.state.timer_presets[index];
             if preset.show_progress_bar || !preset.show_text {
                 preset.show_progress_bar = false;
@@ -302,6 +346,19 @@ impl CrosshairApp {
                     );
                     timer_changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                can_paste_timer,
+                                egui::Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_timer_after = Some(index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_timer_preset = Some(timer_snapshot.clone());
+                        }
+
                         if Self::sound_style_remove_button(ui).clicked() {
                             remove_timer_id = Some(preset.id);
                         }
@@ -522,6 +579,23 @@ impl CrosshairApp {
                     active_timer_preview = Some(preset.clone());
                 }
             });
+        }
+
+        if let Some(preset) = copy_timer_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::Timer(preset));
+        }
+        if let Some(index) = paste_timer_after
+            && let Some(crate::ui::PresetClipboard::Timer(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.timer_presets,
+                &mut self.state.next_timer_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.timer_presets.insert(index + 1, preset);
+            timer_changed = true;
         }
 
         if let Some(id) = remove_timer_id {

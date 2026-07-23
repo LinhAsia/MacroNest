@@ -142,6 +142,13 @@ impl CrosshairApp {
             ),
         ];
 
+        let mut copy_vision_preset = None;
+        let mut paste_vision_after = None;
+        let can_paste_vision = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::Vision(_))
+        );
+
         for (title, filter_color, filter_counter) in categories {
             ui.add_space(8.0);
             ui.label(egui::RichText::new(title).strong().size(14.0));
@@ -309,6 +316,19 @@ impl CrosshairApp {
                                 preset.trigger_keys.clear();
                                 preset.enabled = false;
                                 live_sync = true;
+                            }
+
+                            if ui
+                                .add_enabled(
+                                    can_paste_vision,
+                                    Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                                )
+                                .clicked()
+                            {
+                                paste_vision_after = Some(index);
+                            }
+                            if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                                copy_vision_preset = Some(preset_snapshot.clone());
                             }
 
                             if Self::sound_style_remove_button(ui).clicked() {
@@ -927,6 +947,29 @@ impl CrosshairApp {
             self.cancel_mouse_move_absolute_capture(ctx);
         } else if let Some(target) = next_mouse_move_absolute_capture_target {
             self.begin_mouse_move_absolute_capture(ctx, target);
+        }
+
+        if let Some(preset) = copy_vision_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::Vision(preset));
+        }
+        if let Some(index) = paste_vision_after
+            && let Some(crate::ui::PresetClipboard::Vision(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.vision_presets,
+                &mut self.state.next_vision_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            let old_template = self.vision_template_file_for_preset(old_id);
+            let new_template = self.vision_template_file_for_preset(preset.id);
+            if old_template.exists() {
+                let _ = fs::copy(&old_template, &new_template);
+            }
+            self.state.vision_presets.insert(index + 1, preset);
+            live_sync = true;
         }
 
         if live_sync {

@@ -181,6 +181,12 @@ impl CrosshairApp {
 
         let mut remove_id = None;
         let mut changed = false;
+        let mut copy_audiosense_preset = None;
+        let mut paste_audiosense_after = None;
+        let can_paste_audiosense = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::AudioSense(_))
+        );
         ui.add_space(8.0);
         ui.label(
             egui::RichText::new(Self::tr_lang(language, "Detect Pitch", "Phát hiện cao độ"))
@@ -198,6 +204,7 @@ impl CrosshairApp {
             .collect::<Vec<_>>();
 
         for (position, preset_index) in matching_indices.iter().copied().enumerate() {
+            let preset_snapshot = self.state.audio_sense_presets[preset_index].clone();
             let preset = &mut self.state.audio_sense_presets[preset_index];
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
@@ -213,6 +220,19 @@ impl CrosshairApp {
                     changed |= response.changed();
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                can_paste_audiosense,
+                                egui::Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_audiosense_after = Some(preset_index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_audiosense_preset = Some(preset_snapshot.clone());
+                        }
+
                         if Self::sound_style_remove_button(ui).clicked() {
                             remove_id = Some(preset.id);
                         }
@@ -366,6 +386,23 @@ impl CrosshairApp {
                 self.pitch_monitor.stop();
                 self.active_pitch_preview_preset_id = None;
             }
+            changed = true;
+        }
+
+        if let Some(preset) = copy_audiosense_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::AudioSense(preset));
+        }
+        if let Some(index) = paste_audiosense_after
+            && let Some(crate::ui::PresetClipboard::AudioSense(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.audio_sense_presets,
+                &mut self.state.next_audio_sense_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.audio_sense_presets.insert(index + 1, preset);
             changed = true;
         }
 

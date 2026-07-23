@@ -887,7 +887,14 @@ impl CrosshairApp {
         ui.add_space(4.0);
 
         let mut remove_sound_preset = None;
+        let mut copy_sound_preset = None;
+        let mut paste_sound_after = None;
+        let can_paste_sound = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::Sound(_))
+        );
         for index in 0..self.state.audio_settings.presets.len() {
+            let sound_snapshot = self.state.audio_settings.presets[index].clone();
             let mut choose_file_for = None;
             let mut open_editor_target = None;
             let mut activate_preview_target = None;
@@ -925,6 +932,19 @@ impl CrosshairApp {
                     );
                     changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                can_paste_sound,
+                                Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_sound_after = Some(index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_sound_preset = Some(sound_snapshot.clone());
+                        }
+
                         if Self::sound_style_remove_button(ui)
                             .on_hover_text(Self::tr_lang(
                                 language,
@@ -1007,6 +1027,23 @@ impl CrosshairApp {
                 .retain(|preset| preset.id != preset_id);
             self.sound_preset_clip_duration_ms.remove(&preset_id);
             self.show_sound_preset_audio_editor.remove(&preset_id);
+        }
+
+        if let Some(preset) = copy_sound_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::Sound(preset));
+        }
+        if let Some(index) = paste_sound_after
+            && let Some(crate::ui::PresetClipboard::Sound(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.audio_settings.presets,
+                &mut self.state.audio_settings.next_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.audio_settings.presets.insert(index + 1, preset);
+            changed = true;
         }
 
         if changed {

@@ -123,7 +123,15 @@ impl CrosshairApp {
 
         ui.add_space(8.0);
 
+        let mut copy_geometry_preset = None;
+        let mut paste_geometry_after = None;
+        let can_paste_geometry = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::Geometry(_))
+        );
+
         for preset_index in 0..self.state.geometry_presets.len() {
+            let geometry_snapshot = self.state.geometry_presets[preset_index].clone();
             let preset = &mut self.state.geometry_presets[preset_index];
             if preset.objects.is_empty() {
                 preset.objects.push(crate::model::GeometryObject::new(
@@ -145,6 +153,19 @@ impl CrosshairApp {
                     );
                     changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                can_paste_geometry,
+                                Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_geometry_after = Some(preset_index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_geometry_preset = Some(geometry_snapshot.clone());
+                        }
+
                         if Self::sound_style_remove_button(ui)
                             .on_hover_text(Self::tr_lang(
                                 language,
@@ -286,6 +307,23 @@ impl CrosshairApp {
             self.state
                 .geometry_presets
                 .retain(|preset| preset.id != preset_id);
+            changed = true;
+        }
+
+        if let Some(preset) = copy_geometry_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::Geometry(preset));
+        }
+        if let Some(index) = paste_geometry_after
+            && let Some(crate::ui::PresetClipboard::Geometry(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.geometry_presets,
+                &mut self.state.next_geometry_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.geometry_presets.insert(index + 1, preset);
             changed = true;
         }
 

@@ -3225,8 +3225,16 @@ impl CrosshairApp {
         );
         ui.add_space(4.0);
 
+        let mut copy_layout_preset = None;
+        let mut paste_layout_after = None;
+        let can_paste_layout = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::WindowLayout(_))
+        );
+
         let layouts_count = self.state.window_layouts.len();
         for index in 0..layouts_count {
+            let layout_snapshot = self.state.window_layouts[index].clone();
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
             let mut run_layout_now = false;
@@ -3385,6 +3393,19 @@ impl CrosshairApp {
                             ));
                             if run_response.clicked() {
                                 run_layout_now = true;
+                            }
+
+                            if ui
+                                .add_enabled(
+                                    can_paste_layout,
+                                    Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                                )
+                                .clicked()
+                            {
+                                paste_layout_after = Some(index);
+                            }
+                            if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                                copy_layout_preset = Some(layout_snapshot.clone());
                             }
 
                             if Self::sound_style_remove_button(ui).clicked() {
@@ -4847,6 +4868,24 @@ impl CrosshairApp {
                     .send(OverlayCommand::ApplyWindowLayout(layout));
                 self.status = format!("Applied layout preset {}.", layout_name);
             }
+        }
+
+        if let Some(preset) = copy_layout_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::WindowLayout(preset));
+        }
+        if let Some(index) = paste_layout_after
+            && let Some(crate::ui::PresetClipboard::WindowLayout(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.window_layouts,
+                &mut self.state.next_window_layout_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.window_layouts.insert(index + 1, preset);
+            self.persist_window_layouts();
+            live_sync = true;
         }
 
         if live_sync {

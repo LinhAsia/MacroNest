@@ -615,6 +615,7 @@ enum PresetClipboard {
     Sound(SoundPreset),
     Hud(HudPreset),
     Timer(TimerPreset),
+    WindowLayout(crate::model::WindowLayout),
 }
 
 pub struct CrosshairApp {
