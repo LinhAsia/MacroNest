@@ -386,6 +386,7 @@ impl CrosshairApp {
             fps: self.state.quick_video_record_fps,
             copy_after_recording: self.state.quick_video_copy_after_recording,
             ffmpeg_exe: self.paths.ffmpeg_exe.clone(),
+            ui_language: self.state.ui_language,
         });
     }
 

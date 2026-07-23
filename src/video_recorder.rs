@@ -41,6 +41,7 @@ pub struct VideoRecorderConfig {
     pub fps: u32,
     pub copy_after_recording: bool,
     pub ffmpeg_exe: PathBuf,
+    pub ui_language: crate::model::UiLanguage,
 }
 
 impl Default for VideoRecorderConfig {
@@ -55,6 +56,7 @@ impl Default for VideoRecorderConfig {
             fps: 60,
             copy_after_recording: true,
             ffmpeg_exe: PathBuf::new(),
+            ui_language: crate::model::UiLanguage::English,
         }
     }
 }
@@ -64,11 +66,13 @@ struct RecordingProcess {
     output_path: PathBuf,
     log_path: PathBuf,
     region_border: Option<RegionBorder>,
+    region_rect: Option<RECT>,
     audio_stop: Arc<AtomicBool>,
     audio_thread: Option<JoinHandle<Result<(), String>>>,
     audio_path: PathBuf,
     copy_after_recording: bool,
     ffmpeg_exe: PathBuf,
+    ui_language: crate::model::UiLanguage,
 }
 
 static CONFIG: Lazy<Mutex<VideoRecorderConfig>> =
@@ -102,7 +106,6 @@ fn prepare_hardware_encoding_async(ffmpeg_exe: &Path) {
     *prepared = Some(signature);
     let ffmpeg_exe = ffmpeg_exe.to_owned();
     thread::spawn(move || {
-        thread::sleep(Duration::from_secs(2));
         hardware_encoding_available(&ffmpeg_exe);
     });
 }
@@ -298,11 +301,13 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         output_path: output_path.clone(),
         log_path,
         region_border,
+        region_rect: border_rect,
         audio_stop,
         audio_thread: Some(audio_thread),
         audio_path,
         copy_after_recording: config.copy_after_recording,
         ffmpeg_exe: config.ffmpeg_exe,
+        ui_language: config.ui_language,
     });
     ACTIVE.store(true, Ordering::Release);
     *STATUS.lock() = format!("Recording: {}", output_path.display());
@@ -364,7 +369,10 @@ fn stop_recording_inner() {
     };
     if recording.copy_after_recording {
         match copy_video_to_clipboard(&recording.output_path) {
-            Ok(()) => status.push_str(" - copied"),
+            Ok(()) => {
+                status.push_str(" - copied");
+                show_video_copy_toast_async(recording.region_rect, recording.ui_language);
+            }
             Err(error) => status.push_str(&format!(" - copy failed: {error}")),
         }
     }
@@ -710,12 +718,21 @@ fn copy_video_to_clipboard(video_path: &Path) -> Result<(), String> {
 fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>), String> {
     let fps = config.fps.clamp(1, 240);
     match config.mode {
-        QuickVideoRecordMode::FullScreen => Ok((
-            format!(
-                "gfxcapture=monitor_idx=0:capture_cursor=1:display_border=1:max_framerate={fps}:width=-2:height=-2"
-            ),
-            None,
-        )),
+        QuickVideoRecordMode::FullScreen => {
+            let screen_w = unsafe { windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN) };
+            let screen_h = unsafe { windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN) };
+            Ok((
+                format!(
+                    "gfxcapture=monitor_idx=0:capture_cursor=1:display_border=1:max_framerate={fps}:width=-2:height=-2"
+                ),
+                Some(RECT {
+                    left: 0,
+                    top: 0,
+                    right: screen_w,
+                    bottom: screen_h,
+                }),
+            ))
+        }
         QuickVideoRecordMode::FocusedWindow => window_source(unsafe { GetForegroundWindow() }, fps),
         QuickVideoRecordMode::SelectedWindow => {
             let hwnd = selector_hwnd(&config.target_window)
@@ -834,22 +851,30 @@ impl Drop for RegionBorder {
 #[cfg(windows)]
 fn run_region_border(rect: RECT, stop: std::sync::Arc<AtomicBool>) {
     use windows::{
+        core::{PCWSTR, w},
         Win32::{
-            Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM},
+            Foundation::{COLORREF, HINSTANCE, LPARAM, LRESULT, WPARAM},
             Graphics::Gdi::{
-                CombineRgn, CreateRectRgn, CreateSolidBrush, DeleteObject, HGDIOBJ, RGN_DIFF,
-                SetWindowRgn,
+                CombineRgn, CreateFontW, CreateRectRgn, CreateSolidBrush,
+                DeleteObject, DrawTextW, FillRect, GetDC, HGDIOBJ, RGN_DIFF, RGN_OR,
+                ReleaseDC, DT_CENTER, DT_SINGLELINE, DT_VCENTER, FW_SEMIBOLD,
+                FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY,
+                SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT,
             },
             System::LibraryLoader::GetModuleHandleW,
             UI::WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE,
-                PeekMessageW, RegisterClassW, SW_SHOWNOACTIVATE, SetWindowDisplayAffinity,
-                ShowWindow, TranslateMessage, WDA_EXCLUDEFROMCAPTURE, WNDCLASSW, WS_EX_NOACTIVATE,
-                WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+                MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SW_SHOWNOACTIVATE,
+                SetWindowDisplayAffinity, ShowWindow, TranslateMessage,
+                WDA_EXCLUDEFROMCAPTURE, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+                WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
             },
         },
-        core::{PCWSTR, w},
     };
+
+    let start_instant = Instant::now();
+    let width = (rect.right - rect.left).max(10);
+    let height = (rect.bottom - rect.top).max(10);
 
     unsafe extern "system" fn wnd_proc(
         hwnd: HWND,
@@ -871,15 +896,14 @@ fn run_region_border(rect: RECT, stop: std::sync::Arc<AtomicBool>) {
                 lpfnWndProc: Some(wnd_proc),
                 hInstance: HINSTANCE(module.0),
                 lpszClassName: class_name,
-                hbrBackground: CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x0000_CCFF)),
+                hbrBackground: CreateSolidBrush(COLORREF(0x0000_CCFF)),
                 ..Default::default()
             };
             RegisterClassW(&class) != 0
         }) {
             return;
         }
-        let width = (rect.right - rect.left).max(2);
-        let height = (rect.bottom - rect.top).max(2);
+
         let Ok(hwnd) = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
             class_name,
@@ -896,22 +920,289 @@ fn run_region_border(rect: RECT, stop: std::sync::Arc<AtomicBool>) {
         ) else {
             return;
         };
-        let outer = CreateRectRgn(0, 0, width, height);
-        let inner = CreateRectRgn(3, 3, (width - 3).max(3), (height - 3).max(3));
-        let _ = CombineRgn(Some(outer), Some(outer), Some(inner), RGN_DIFF);
-        let _ = DeleteObject(HGDIOBJ(inner.0));
-        let _ = SetWindowRgn(hwnd, Some(outer), true);
+
+        let outer_rgn = CreateRectRgn(0, 0, width, height);
+        let inner_rgn = CreateRectRgn(3, 3, (width - 3).max(3), (height - 3).max(3));
+        let badge_w = 86.min(width - 6);
+        let badge_h = 24.min(height - 6);
+        let badge_rgn = CreateRectRgn(3, 3, 3 + badge_w, 3 + badge_h);
+
+        let _ = CombineRgn(Some(outer_rgn), Some(outer_rgn), Some(inner_rgn), RGN_DIFF);
+        let _ = CombineRgn(Some(outer_rgn), Some(outer_rgn), Some(badge_rgn), RGN_OR);
+        let _ = DeleteObject(HGDIOBJ(inner_rgn.0));
+        let _ = DeleteObject(HGDIOBJ(badge_rgn.0));
+
+        let _ = SetWindowRgn(hwnd, Some(outer_rgn), true);
         let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 
+        let font = CreateFontW(
+            13,
+            0,
+            0,
+            0,
+            FW_SEMIBOLD.0 as i32,
+            0,
+            0,
+            0,
+            FONT_CHARSET(0),
+            FONT_OUTPUT_PRECISION(0),
+            FONT_CLIP_PRECISION(0),
+            FONT_QUALITY(0),
+            0,
+            w!("Segoe UI"),
+        );
+
+        let dark_brush = CreateSolidBrush(COLORREF(0x001A_1A1A));
+        let red_brush = CreateSolidBrush(COLORREF(0x0033_33FF));
+
+        let mut last_secs = u64::MAX;
         let mut message = MSG::default();
+
         while !stop.load(Ordering::Acquire) {
             while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
                 let _ = TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
+
+            let elapsed_secs = start_instant.elapsed().as_secs();
+            if elapsed_secs != last_secs {
+                last_secs = elapsed_secs;
+                let hdc = GetDC(Some(hwnd));
+                if !hdc.0.is_null() {
+                    let badge_rect = RECT {
+                        left: 3,
+                        top: 3,
+                        right: 3 + badge_w,
+                        bottom: 3 + badge_h,
+                    };
+                    FillRect(hdc, &badge_rect, dark_brush);
+
+                    let dot_rect = RECT {
+                        left: 9,
+                        top: 10,
+                        right: 17,
+                        bottom: 18,
+                    };
+                    FillRect(hdc, &dot_rect, red_brush);
+
+                    let mins = elapsed_secs / 60;
+                    let secs = elapsed_secs % 60;
+                    let mut time_str: Vec<u16> = format!("{mins:02}:{secs:02}").encode_utf16().chain(std::iter::once(0)).collect();
+                    let mut text_rect = RECT {
+                        left: 20,
+                        top: 3,
+                        right: 3 + badge_w,
+                        bottom: 3 + badge_h,
+                    };
+                    let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
+                    SetBkMode(hdc, TRANSPARENT);
+                    SetTextColor(hdc, COLORREF(0x00FF_FF_FF));
+                    DrawTextW(hdc, &mut time_str, &mut text_rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                    windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
+                    let _ = ReleaseDC(Some(hwnd), hdc);
+                }
+            }
+
+            thread::sleep(Duration::from_millis(50));
+        }
+
+        let _ = DeleteObject(HGDIOBJ(font.0));
+        let _ = DeleteObject(HGDIOBJ(dark_brush.0));
+        let _ = DeleteObject(HGDIOBJ(red_brush.0));
+        let _ = DestroyWindow(hwnd);
+    }
+}
+
+#[cfg(windows)]
+fn show_video_copy_toast_async(rect: Option<RECT>, language: crate::model::UiLanguage) {
+    thread::spawn(move || run_video_copy_toast(rect, language));
+}
+
+#[cfg(windows)]
+fn run_video_copy_toast(rect: Option<RECT>, language: crate::model::UiLanguage) {
+    use windows::{
+        core::{PCWSTR, w},
+        Win32::{
+            Foundation::{COLORREF, HINSTANCE, LPARAM, LRESULT, WPARAM},
+            Graphics::Gdi::{
+                CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, FillRect, GetDC,
+                HGDIOBJ, ReleaseDC, DT_CENTER, DT_SINGLELINE, DT_VCENTER, FW_BOLD,
+                FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY,
+                SetBkMode, SetTextColor, TRANSPARENT,
+            },
+            System::LibraryLoader::GetModuleHandleW,
+            UI::WindowsAndMessaging::{
+                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetSystemMetrics,
+                LWA_ALPHA, MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SW_SHOWNOACTIVATE,
+                SM_CXSCREEN, SM_CYSCREEN, SetLayeredWindowAttributes, ShowWindow, TranslateMessage,
+                WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                WS_EX_TRANSPARENT, WS_POPUP,
+            },
+        },
+    };
+
+    let toast_w = 260;
+    let toast_h = 44;
+
+    let (center_x, center_y) = if let Some(r) = rect {
+        ((r.left + r.right) / 2, (r.top + r.bottom) / 2)
+    } else {
+        let sw = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+        let sh = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+        (sw / 2, sh / 2)
+    };
+
+    let toast_x = center_x - toast_w / 2;
+    let toast_y = center_y - toast_h / 2;
+
+    unsafe extern "system" fn wnd_proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+    }
+
+    unsafe {
+        let Ok(module) = GetModuleHandleW(None) else {
+            return;
+        };
+        let class_name = w!("MacroNestVideoCopyToast");
+        static CLASS_REGISTERED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*CLASS_REGISTERED.get_or_init(|| {
+            let class = WNDCLASSW {
+                lpfnWndProc: Some(wnd_proc),
+                hInstance: HINSTANCE(module.0),
+                lpszClassName: class_name,
+                hbrBackground: CreateSolidBrush(COLORREF(0x0022_2222)),
+                ..Default::default()
+            };
+            RegisterClassW(&class) != 0
+        }) {
+            return;
+        }
+
+        let Ok(hwnd) = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED,
+            class_name,
+            PCWSTR::null(),
+            WS_POPUP,
+            toast_x,
+            toast_y,
+            toast_w,
+            toast_h,
+            None,
+            None,
+            Some(HINSTANCE(module.0)),
+            None,
+        ) else {
+            return;
+        };
+
+        let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 0, LWA_ALPHA);
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+
+        let font = CreateFontW(
+            14,
+            0,
+            0,
+            0,
+            FW_BOLD.0 as i32,
+            0,
+            0,
+            0,
+            FONT_CHARSET(0),
+            FONT_OUTPUT_PRECISION(0),
+            FONT_CLIP_PRECISION(0),
+            FONT_QUALITY(0),
+            0,
+            w!("Segoe UI"),
+        );
+
+        let bg_brush = CreateSolidBrush(COLORREF(0x002A_2620));
+        let border_brush = CreateSolidBrush(COLORREF(0x0000_CCFF));
+
+        let hdc = GetDC(Some(hwnd));
+        if !hdc.0.is_null() {
+            let full_rect = RECT {
+                left: 0,
+                top: 0,
+                right: toast_w,
+                bottom: toast_h,
+            };
+            FillRect(hdc, &full_rect, bg_brush);
+
+            let top_b = RECT { left: 0, top: 0, right: toast_w, bottom: 2 };
+            let bot_b = RECT { left: 0, top: toast_h - 2, right: toast_w, bottom: toast_h };
+            let left_b = RECT { left: 0, top: 0, right: 2, bottom: toast_h };
+            let right_b = RECT { left: toast_w - 2, top: 0, right: toast_w, bottom: toast_h };
+            FillRect(hdc, &top_b, border_brush);
+            FillRect(hdc, &bot_b, border_brush);
+            FillRect(hdc, &left_b, border_brush);
+            FillRect(hdc, &right_b, border_brush);
+
+            let msg = if language == crate::model::UiLanguage::Vietnamese {
+                "✓ Đã sao chép video vào bộ nhớ tạm"
+            } else {
+                "✓ Video Copied to Clipboard"
+            };
+            let mut text_utf16: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut text_rect = RECT {
+                left: 6,
+                top: 2,
+                right: toast_w - 6,
+                bottom: toast_h - 2,
+            };
+            let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, COLORREF(0x00FF_FF_FF));
+            DrawTextW(hdc, &mut text_utf16, &mut text_rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
+            let _ = ReleaseDC(Some(hwnd), hdc);
+        }
+
+        let _ = DeleteObject(HGDIOBJ(font.0));
+        let _ = DeleteObject(HGDIOBJ(bg_brush.0));
+        let _ = DeleteObject(HGDIOBJ(border_brush.0));
+
+        let mut message = MSG::default();
+
+        let start_fade_in = Instant::now();
+        while start_fade_in.elapsed() < Duration::from_millis(150) {
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            let progress = (start_fade_in.elapsed().as_secs_f32() / 0.15).clamp(0.0, 1.0);
+            let alpha = (progress * 240.0) as u8;
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
             thread::sleep(Duration::from_millis(16));
         }
+        let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 240, LWA_ALPHA);
+
+        let start_hold = Instant::now();
+        while start_hold.elapsed() < Duration::from_millis(1200) {
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            thread::sleep(Duration::from_millis(30));
+        }
+
+        let start_fade_out = Instant::now();
+        while start_fade_out.elapsed() < Duration::from_millis(200) {
+            while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+            let progress = (1.0 - start_fade_out.elapsed().as_secs_f32() / 0.20).clamp(0.0, 1.0);
+            let alpha = (progress * 240.0) as u8;
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
+            thread::sleep(Duration::from_millis(16));
+        }
+
         let _ = DestroyWindow(hwnd);
     }
 }
