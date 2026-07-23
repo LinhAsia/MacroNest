@@ -684,9 +684,11 @@ pub fn scan_memory_range_with_progress(
         .map(|region| region.size / value_type.width())
         .fold(0usize, usize::saturating_add);
     let alignment = options.alignment.unwrap_or(1).max(1);
-    // ponytail: Memory reads become bandwidth-bound quickly; raise this cap only after profiling.
-    // Large unknown scans stay single-owner: merging worker Vecs temporarily doubles peak RAM.
-    let worker_count = if exact.is_none() && slots > 10_000_000 {
+    // ponytail: merging worker Vecs temporarily raises peak RAM, so only parallelize unknown
+    // scans whose result storage remains modest; a chunked result store is the upgrade path.
+    const MAX_PARALLEL_UNKNOWN_BYTES: usize = 512 * 1024 * 1024;
+    let estimated_result_bytes = slots.saturating_mul(std::mem::size_of::<ScanCandidate>());
+    let worker_count = if exact.is_none() && estimated_result_bytes > MAX_PARALLEL_UNKNOWN_BYTES {
         1
     } else {
         thread::available_parallelism()

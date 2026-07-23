@@ -975,7 +975,8 @@ impl CrosshairApp {
 
     fn render_memory_popup_resize_handles(ctx: &egui::Context) {
         let rect = ctx.content_rect();
-        let edge = 8.0;
+        // Keep resize hitboxes clear of egui scrollbars along the viewport edges.
+        let edge = 3.0;
         let corner = 18.0;
         let handles = [
             (
@@ -3873,7 +3874,9 @@ impl CrosshairApp {
         });
         ui.separator();
         egui::ScrollArea::vertical()
+            .id_salt("instruction-watch-hits")
             .max_height(210.0)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .show(ui, |ui| {
                 for (index, hit) in dialog.hits.iter().enumerate() {
                     let instruction_width = (ui.available_width() - 290.0).max(180.0);
@@ -4529,7 +4532,11 @@ impl CrosshairApp {
                                 ui.add(egui::TextEdit::singleline(&mut class.name).desired_width(140.0).hint_text("Class name"));
                             }
                         });
-                        egui::ScrollArea::both().max_height(ui.available_height()).show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes));
+                        egui::ScrollArea::both()
+                            .id_salt("structure-elements")
+                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                            .max_height(ui.available_height())
+                            .show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes));
                     });
                 });
                 if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
