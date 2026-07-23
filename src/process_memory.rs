@@ -645,6 +645,53 @@ pub fn write_text_memory(
     }
 }
 
+pub fn write_code_bytes(pid: u32, address: usize, bytes: &[u8]) -> io::Result<()> {
+    let process = ScanProcess::open(pid, true)?;
+    let mut old_protect = 0u32;
+    let protect_ok = unsafe {
+        VirtualProtectEx(
+            process.handle,
+            address as *mut c_void,
+            bytes.len(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old_protect,
+        )
+    };
+
+    let mut written = 0;
+    let ok = unsafe {
+        WriteProcessMemory(
+            process.handle,
+            address as *mut c_void,
+            bytes.as_ptr().cast(),
+            bytes.len(),
+            &mut written,
+        )
+    };
+
+    if protect_ok != 0 {
+        let mut temp = 0u32;
+        unsafe {
+            VirtualProtectEx(
+                process.handle,
+                address as *mut c_void,
+                bytes.len(),
+                old_protect,
+                &mut temp,
+            );
+        }
+    }
+    unsafe {
+        FlushInstructionCache(process.handle, address as *const c_void, bytes.len());
+    }
+
+    if ok == 0 || written != bytes.len() {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 pub fn scan_memory_with_progress(
     pid: u32,
     exact: Option<ScanValue>,
@@ -1494,6 +1541,18 @@ unsafe extern "system" {
         length: usize,
     ) -> usize;
     fn K32QueryWorkingSetEx(process: *mut c_void, information: *mut c_void, length: u32) -> i32;
+    fn VirtualProtectEx(
+        process: *mut c_void,
+        address: *mut c_void,
+        size: usize,
+        new_protect: u32,
+        old_protect: *mut u32,
+    ) -> i32;
+    fn FlushInstructionCache(
+        process: *mut c_void,
+        address: *const c_void,
+        size: usize,
+    ) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
 }
 

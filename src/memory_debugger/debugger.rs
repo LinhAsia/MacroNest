@@ -798,6 +798,16 @@ pub fn instruction_writes_memory(pid: u32, address: usize) -> io::Result<bool> {
     )?))
 }
 
+pub fn get_instruction_bytes(pid: u32, address: usize) -> io::Result<Vec<u8>> {
+    let architecture = target_architecture(pid, MemoryDebuggerArchitecture::Auto)?;
+    let process = Process::open(pid)?;
+    let instruction = decode_at(&process, address, architecture)?;
+    let len = instruction.len();
+    let mut bytes = vec![0u8; len];
+    process.read(address, &mut bytes)?;
+    Ok(bytes)
+}
+
 pub fn disassemble_from(
     pid: u32,
     address: usize,

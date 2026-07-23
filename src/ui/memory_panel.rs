@@ -23,7 +23,7 @@ use crate::{
         filter_scan_candidates, filter_text_scan_candidates, query_memory_region,
         read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
         scan_memory_range_with_progress, scan_pointer_paths, scan_text_memory_with_progress,
-        write_scan_value, write_text_memory,
+        write_code_bytes, write_scan_value, write_text_memory,
     },
     window_list,
 };
@@ -31,7 +31,7 @@ use crate::{
 #[cfg(windows)]
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, WatchEvent, WriteWatch, disassemble_from,
-    instruction_writes_memory, list_process_details, module_offset_for_address, process_modules,
+    get_instruction_bytes, instruction_writes_memory, list_process_details, module_offset_for_address, process_modules,
     process_pointer_width, resolve_module_offset, ProcessInfo,
 };
 
@@ -2721,36 +2721,129 @@ impl CrosshairApp {
         if corrected_actions {
             self.persist();
         }
-        let mut start = None;
-        let mut delete = None;
+
+        enum CodeAction {
+            OpenDisassembler(usize),
+            ReplaceNop(usize),
+            RestoreOriginal(usize),
+            StartAccessWatch(usize),
+            Delete(usize),
+            ReplaceAll,
+        }
+
+        let mut pending_action = None;
+
         egui::CentralPanel::default()
             .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    Self::memory_view_cell(ui, 190.0, "Module + offset");
-                    Self::memory_view_cell(ui, 310.0, "Instruction");
-                    Self::memory_view_cell(ui, 150.0, "Action");
+                    Self::memory_view_cell(ui, 190.0, "Address / Module");
+                    Self::memory_view_cell(ui, 310.0, "Name / Instruction");
+                    Self::memory_view_cell(ui, 150.0, "Action / Status");
                 });
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            Self::memory_view_cell(
-                                ui,
-                                190.0,
-                                &format!("{}+{:X}", entry.module, entry.offset),
-                            );
-                            Self::memory_view_cell(ui, 310.0, &entry.instruction);
-                            let action = if entry.writes {
-                                "Find written addresses"
+                        let address_str = format!("{}+{:X}", entry.module, entry.offset);
+                        let instruction_text = if entry.replaced {
+                            format!("{} (Replaced: NOP)", entry.name)
+                        } else if !entry.name.is_empty() && entry.name != entry.instruction {
+                            format!("{}: {}", entry.name, entry.instruction)
+                        } else {
+                            entry.instruction.clone()
+                        };
+
+                        let row_res = ui
+                            .horizontal(|ui| {
+                                Self::memory_view_cell(ui, 190.0, &address_str);
+                                Self::memory_view_cell(ui, 310.0, &instruction_text);
+                                let action_label = if entry.replaced {
+                                    "NOP Active"
+                                } else if entry.writes {
+                                    "Find written"
+                                } else {
+                                    "Find accessed"
+                                };
+                                if ui.button(action_label).clicked() {
+                                    pending_action = Some(CodeAction::StartAccessWatch(index));
+                                }
+                                if ui.small_button("Del").clicked() {
+                                    pending_action = Some(CodeAction::Delete(index));
+                                }
+                            })
+                            .response;
+
+                        row_res.context_menu(|ui| {
+                            let is_vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+
+                            let disasm_label = if is_vietnamese {
+                                "Mở bộ gỡ mã (Disassembler) tại đây"
                             } else {
-                                "Find accessed addresses"
+                                "Open the disassembler at this location"
                             };
-                            if ui.button(action).clicked() {
-                                start = Some(index);
+                            if ui.button(disasm_label).clicked() {
+                                pending_action = Some(CodeAction::OpenDisassembler(index));
+                                ui.close_menu();
                             }
-                            if ui.small_button("Delete").clicked() {
-                                delete = Some(index);
+
+                            ui.separator();
+
+                            let nop_label = if is_vietnamese {
+                                "Thay thế bằng mã không làm gì (Replace with code that does nothing)"
+                            } else {
+                                "Replace with code that does nothing"
+                            };
+                            if ui
+                                .add_enabled(!entry.replaced, egui::Button::new(nop_label))
+                                .clicked()
+                            {
+                                pending_action = Some(CodeAction::ReplaceNop(index));
+                                ui.close_menu();
+                            }
+
+                            let restore_label = if is_vietnamese {
+                                "Khôi phục mã gốc (Restore with original code)"
+                            } else {
+                                "Restore with original code"
+                            };
+                            if ui
+                                .add_enabled(entry.replaced, egui::Button::new(restore_label))
+                                .clicked()
+                            {
+                                pending_action = Some(CodeAction::RestoreOriginal(index));
+                                ui.close_menu();
+                            }
+
+                            ui.separator();
+
+                            let watch_label = if entry.writes {
+                                if is_vietnamese {
+                                    "Tìm các địa chỉ được ghi bởi mã này"
+                                } else {
+                                    "Find out what addresses this code writes to"
+                                }
+                            } else if is_vietnamese {
+                                "Tìm các địa chỉ được truy cập bởi mã này"
+                            } else {
+                                "Find out what addresses this code accesses"
+                            };
+                            if ui.button(watch_label).clicked() {
+                                pending_action = Some(CodeAction::StartAccessWatch(index));
+                                ui.close_menu();
+                            }
+
+                            ui.separator();
+
+                            let del_label = if is_vietnamese { "Xóa khỏi danh sách" } else { "Remove from list" };
+                            if ui.button(del_label).clicked() {
+                                pending_action = Some(CodeAction::Delete(index));
+                                ui.close_menu();
+                            }
+
+                            let replace_all_label = if is_vietnamese { "Thay thế tất cả (Replace all)" } else { "Replace all" };
+                            if ui.button(replace_all_label).clicked() {
+                                pending_action = Some(CodeAction::ReplaceAll);
+                                ui.close_menu();
                             }
                         });
                     }
@@ -2761,13 +2854,144 @@ impl CrosshairApp {
                     });
                 }
             });
-        if let Some(index) = delete {
-            self.state.memory_code_list.remove(index);
-            self.persist();
+
+        match pending_action {
+            Some(CodeAction::OpenDisassembler(index)) => {
+                #[cfg(windows)]
+                if let Some(pid) = self.memory_panel.process_pid
+                    && let Some(entry) = self.state.memory_code_list.get(index)
+                    && let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset)
+                {
+                    self.open_disassembler_at_address(address);
+                }
+            }
+            Some(CodeAction::ReplaceNop(index)) => {
+                #[cfg(windows)]
+                self.replace_code_entry_with_nop(index);
+            }
+            Some(CodeAction::RestoreOriginal(index)) => {
+                #[cfg(windows)]
+                self.restore_code_entry_with_original_bytes(index);
+            }
+            Some(CodeAction::StartAccessWatch(index)) => {
+                #[cfg(windows)]
+                self.open_code_access_watch(index);
+            }
+            Some(CodeAction::Delete(index)) => {
+                #[cfg(windows)]
+                if self.state.memory_code_list[index].replaced {
+                    self.restore_code_entry_with_original_bytes(index);
+                }
+                self.state.memory_code_list.remove(index);
+                self.persist();
+            }
+            Some(CodeAction::ReplaceAll) => {
+                #[cfg(windows)]
+                for i in 0..self.state.memory_code_list.len() {
+                    if !self.state.memory_code_list[i].replaced {
+                        self.replace_code_entry_with_nop(i);
+                    }
+                }
+            }
+            None => {}
         }
-        #[cfg(windows)]
-        if let Some(index) = start {
-            self.open_code_access_watch(index);
+    }
+
+    #[cfg(windows)]
+    fn open_disassembler_at_address(&mut self, address: usize) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process first".to_owned();
+            return;
+        };
+        let (lines, status) = match disassemble_from(
+            pid,
+            address,
+            self.state.memory_debugger_architecture,
+            30,
+        ) {
+            Ok(lines) => (lines, "Disassembler active".to_owned()),
+            Err(error) => (Vec::new(), format!("Disassembly failed: {error}")),
+        };
+        self.memory_panel.disassembler_dialog = Some(DisassemblerDialog {
+            address,
+            lines,
+            status,
+        });
+    }
+
+    #[cfg(windows)]
+    fn replace_code_entry_with_nop(&mut self, code_index: usize) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process first".to_owned();
+            return;
+        };
+        let Some(entry) = self.state.memory_code_list.get(code_index) else {
+            return;
+        };
+        let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset) else {
+            self.memory_panel.status = format!("Unable to resolve address for {}", entry.name);
+            return;
+        };
+
+        let original_bytes = match &entry.original_bytes {
+            Some(bytes) if !bytes.is_empty() => bytes.clone(),
+            _ => match get_instruction_bytes(pid, address) {
+                Ok(bytes) if !bytes.is_empty() => bytes,
+                _ => {
+                    self.memory_panel.status = format!("Could not read instruction bytes at 0x{address:X}");
+                    return;
+                }
+            },
+        };
+
+        let len = original_bytes.len();
+        let nop_bytes = vec![0x90u8; len];
+
+        match write_code_bytes(pid, address, &nop_bytes) {
+            Ok(()) => {
+                let entry = &mut self.state.memory_code_list[code_index];
+                entry.original_bytes = Some(original_bytes);
+                entry.replaced = true;
+                self.memory_panel.status = format!("Replaced '{}' with code that does nothing (NOP)", entry.name);
+                self.persist();
+            }
+            Err(error) => {
+                self.memory_panel.status = format!("Failed to replace instruction with NOP: {error}");
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn restore_code_entry_with_original_bytes(&mut self, code_index: usize) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process first".to_owned();
+            return;
+        };
+        let Some(entry) = self.state.memory_code_list.get(code_index) else {
+            return;
+        };
+        let Some(original_bytes) = &entry.original_bytes else {
+            return;
+        };
+        if !entry.replaced || original_bytes.is_empty() {
+            return;
+        }
+        let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset) else {
+            self.memory_panel.status = format!("Unable to resolve address for {}", entry.name);
+            return;
+        };
+
+        let bytes_to_restore = original_bytes.clone();
+        match write_code_bytes(pid, address, &bytes_to_restore) {
+            Ok(()) => {
+                let entry = &mut self.state.memory_code_list[code_index];
+                entry.replaced = false;
+                self.memory_panel.status = format!("Restored original code for '{}'", entry.name);
+                self.persist();
+            }
+            Err(error) => {
+                self.memory_panel.status = format!("Failed to restore original instruction: {error}");
+            }
         }
     }
 
@@ -2796,6 +3020,8 @@ impl CrosshairApp {
             offset,
             instruction: instruction.to_owned(),
             writes,
+            original_bytes: None,
+            replaced: false,
         });
         self.memory_panel.code_list_open = true;
         self.memory_panel.status = "Instruction added to code list".to_owned();

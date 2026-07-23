@@ -466,6 +466,10 @@ pub struct MemoryCodeEntry {
     pub offset: usize,
     pub instruction: String,
     pub writes: bool,
+    #[serde(default)]
+    pub original_bytes: Option<Vec<u8>>,
+    #[serde(default)]
+    pub replaced: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
