@@ -6740,6 +6740,8 @@ impl CrosshairApp {
                                                         next_capture_target = Some(capture_target);
                                                     }
                                                 }
+                                            } else {
+                                                ui.add_sized([64.0, 24.0], egui::Label::new(""));
                                             }
                                             if Self::sized_button(
                                                 ui,
@@ -15578,7 +15580,7 @@ if supports_move_mouse || show_detection_tuning {
                                                   } else if ui
                                                       .add(
                                                           Button::new(Self::tr_lang(language, "Copy", "Copy"))
-                                                              .min_size(vec2(40.0, 18.0)),
+                                                              .min_size(vec2(42.0, 18.0)),
                                                       )
                                                       .on_hover_text(Self::tr_lang(
                                                           language,

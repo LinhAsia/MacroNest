@@ -105,6 +105,18 @@ impl CrosshairApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
+                                    if ui
+                                        .add_enabled(
+                                            can_paste,
+                                            Button::new("Paste").min_size(vec2(84.0, 24.0)),
+                                        )
+                                        .clicked()
+                                    {
+                                        paste_after = Some(index);
+                                    }
+                                    if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                                        copy_preset = Some(preset_snapshot.clone());
+                                    }
                                     let capture_active =
                                         active_capture_target.as_ref() == Some(&capture_target);
                                     let capture_time = ui.ctx().input(|input| input.time) as f32;
@@ -522,6 +534,18 @@ impl CrosshairApp {
                         preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                can_paste,
+                                Button::new("Paste").min_size(vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_after = Some(index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_preset = Some(preset_snapshot.clone());
+                        }
                         let capture_active =
                             active_capture_target.as_ref() == Some(&capture_target);
                         let capture_time = ui.ctx().input(|input| input.time) as f32;

@@ -73,6 +73,18 @@ impl CrosshairApp {
                         .changed();
                     ui.add_space(6.0);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                can_paste,
+                                Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_after = Some(index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_preset = Some(snapshot.clone());
+                        }
                         let is_generating = self
                             .command_ai_job
                             .as_ref()
