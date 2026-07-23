@@ -234,6 +234,14 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         .map_err(|error| format!("Could not create the video folder: {error}"))?;
 
     let (source, border_rect) = capture_source(&config)?;
+    let (region_border, recording_active_signal) = match border_rect {
+        Some(rect) => {
+            let (border, signal) = RegionBorder::start(rect, config.ui_language);
+            (Some(border), Some(signal))
+        }
+        None => (None, None),
+    };
+
     let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
     let output_path = unique_output_path(&config.output_dir, &format!("MacroNest_{timestamp}"));
     let audio_path = config.output_dir.join(format!(
@@ -294,7 +302,9 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         }
     };
     let _ = audio_start.send(());
-    let region_border = border_rect.and_then(RegionBorder::start);
+    if let Some(signal) = recording_active_signal {
+        signal.store(true, Ordering::Release);
+    }
     let session_id = SESSION_ID.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
     *PROCESS.lock() = Some(RecordingProcess {
         child,
@@ -827,17 +837,20 @@ fn unique_output_path(dir: &Path, stem: &str) -> PathBuf {
 }
 
 #[cfg(windows)]
+#[cfg(windows)]
 struct RegionBorder {
     stop: std::sync::Arc<AtomicBool>,
 }
 
 #[cfg(windows)]
 impl RegionBorder {
-    fn start(rect: RECT) -> Option<Self> {
+    fn start(rect: RECT, language: crate::model::UiLanguage) -> (Self, std::sync::Arc<AtomicBool>) {
         let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let recording_active = std::sync::Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
-        thread::spawn(move || run_region_border(rect, thread_stop));
-        Some(Self { stop })
+        let thread_active = recording_active.clone();
+        thread::spawn(move || run_region_border(rect, thread_stop, thread_active, language));
+        (Self { stop }, recording_active)
     }
 }
 
@@ -849,7 +862,12 @@ impl Drop for RegionBorder {
 }
 
 #[cfg(windows)]
-fn run_region_border(rect: RECT, stop: std::sync::Arc<AtomicBool>) {
+fn run_region_border(
+    rect: RECT,
+    stop: std::sync::Arc<AtomicBool>,
+    recording_active: std::sync::Arc<AtomicBool>,
+    language: crate::model::UiLanguage,
+) {
     use windows::{
         core::{PCWSTR, w},
         Win32::{
@@ -921,11 +939,12 @@ fn run_region_border(rect: RECT, stop: std::sync::Arc<AtomicBool>) {
             return;
         };
 
+        let prep_badge_w = 135.min(width - 6);
+        let badge_h = 24.min(height - 6);
+
         let outer_rgn = CreateRectRgn(0, 0, width, height);
         let inner_rgn = CreateRectRgn(3, 3, (width - 3).max(3), (height - 3).max(3));
-        let badge_w = 86.min(width - 6);
-        let badge_h = 24.min(height - 6);
-        let badge_rgn = CreateRectRgn(3, 3, 3 + badge_w, 3 + badge_h);
+        let badge_rgn = CreateRectRgn(3, 3, 3 + prep_badge_w, 3 + badge_h);
 
         let _ = CombineRgn(Some(outer_rgn), Some(outer_rgn), Some(inner_rgn), RGN_DIFF);
         let _ = CombineRgn(Some(outer_rgn), Some(outer_rgn), Some(badge_rgn), RGN_OR);
@@ -955,8 +974,12 @@ fn run_region_border(rect: RECT, stop: std::sync::Arc<AtomicBool>) {
 
         let dark_brush = CreateSolidBrush(COLORREF(0x001A_1A1A));
         let red_brush = CreateSolidBrush(COLORREF(0x0033_33FF));
+        let prep_text_color = COLORREF(0x0000_E6FF);
 
-        let mut last_secs = u64::MAX;
+        let mut rec_start: Option<Instant> = None;
+        let mut last_rendered_secs = u64::MAX;
+        let mut last_prep_frame = usize::MAX;
+
         let mut message = MSG::default();
 
         while !stop.load(Ordering::Acquire) {
@@ -965,46 +988,94 @@ fn run_region_border(rect: RECT, stop: std::sync::Arc<AtomicBool>) {
                 DispatchMessageW(&message);
             }
 
-            let elapsed_secs = start_instant.elapsed().as_secs();
-            if elapsed_secs != last_secs {
-                last_secs = elapsed_secs;
-                let hdc = GetDC(Some(hwnd));
-                if !hdc.0.is_null() {
-                    let badge_rect = RECT {
-                        left: 3,
-                        top: 3,
-                        right: 3 + badge_w,
-                        bottom: 3 + badge_h,
-                    };
-                    FillRect(hdc, &badge_rect, dark_brush);
+            let is_active = recording_active.load(Ordering::Acquire);
+            if is_active {
+                let rec_instant = *rec_start.get_or_insert_with(Instant::now);
+                let elapsed_secs = rec_instant.elapsed().as_secs();
 
-                    let dot_rect = RECT {
-                        left: 9,
-                        top: 10,
-                        right: 17,
-                        bottom: 18,
-                    };
-                    FillRect(hdc, &dot_rect, red_brush);
+                if elapsed_secs != last_rendered_secs {
+                    last_rendered_secs = elapsed_secs;
+                    let hdc = GetDC(Some(hwnd));
+                    if !hdc.0.is_null() {
+                        let rec_badge_w = 86.min(width - 6);
+                        let badge_rect = RECT {
+                            left: 3,
+                            top: 3,
+                            right: 3 + rec_badge_w,
+                            bottom: 3 + badge_h,
+                        };
+                        FillRect(hdc, &badge_rect, dark_brush);
 
-                    let mins = elapsed_secs / 60;
-                    let secs = elapsed_secs % 60;
-                    let mut time_str: Vec<u16> = format!("{mins:02}:{secs:02}").encode_utf16().chain(std::iter::once(0)).collect();
-                    let mut text_rect = RECT {
-                        left: 20,
-                        top: 3,
-                        right: 3 + badge_w,
-                        bottom: 3 + badge_h,
-                    };
-                    let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
-                    SetBkMode(hdc, TRANSPARENT);
-                    SetTextColor(hdc, COLORREF(0x00FF_FF_FF));
-                    DrawTextW(hdc, &mut time_str, &mut text_rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-                    windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
-                    let _ = ReleaseDC(Some(hwnd), hdc);
+                        let dot_rect = RECT {
+                            left: 9,
+                            top: 10,
+                            right: 17,
+                            bottom: 18,
+                        };
+                        FillRect(hdc, &dot_rect, red_brush);
+
+                        let mins = elapsed_secs / 60;
+                        let secs = elapsed_secs % 60;
+                        let mut time_str: Vec<u16> = format!("{mins:02}:{secs:02}")
+                            .encode_utf16()
+                            .chain(std::iter::once(0))
+                            .collect();
+                        let mut text_rect = RECT {
+                            left: 20,
+                            top: 3,
+                            right: 3 + rec_badge_w,
+                            bottom: 3 + badge_h,
+                        };
+                        let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
+                        SetBkMode(hdc, TRANSPARENT);
+                        SetTextColor(hdc, COLORREF(0x00FF_FF_FF));
+                        DrawTextW(hdc, &mut time_str, &mut text_rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                        windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
+                        let _ = ReleaseDC(Some(hwnd), hdc);
+                    }
+                }
+            } else {
+                let prep_frame = (start_instant.elapsed().as_millis() / 250) as usize % 3;
+                if prep_frame != last_prep_frame {
+                    last_prep_frame = prep_frame;
+                    let hdc = GetDC(Some(hwnd));
+                    if !hdc.0.is_null() {
+                        let badge_rect = RECT {
+                            left: 3,
+                            top: 3,
+                            right: 3 + prep_badge_w,
+                            bottom: 3 + badge_h,
+                        };
+                        FillRect(hdc, &badge_rect, dark_brush);
+
+                        let dots = match prep_frame {
+                            0 => ".",
+                            1 => "..",
+                            _ => "...",
+                        };
+                        let msg = if language == crate::model::UiLanguage::Vietnamese {
+                            format!("⏳ Đang chuẩn bị{dots}")
+                        } else {
+                            format!("⏳ Preparing{dots}")
+                        };
+                        let mut msg_utf16: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+                        let mut text_rect = RECT {
+                            left: 6,
+                            top: 3,
+                            right: 3 + prep_badge_w,
+                            bottom: 3 + badge_h,
+                        };
+                        let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
+                        SetBkMode(hdc, TRANSPARENT);
+                        SetTextColor(hdc, prep_text_color);
+                        DrawTextW(hdc, &mut msg_utf16, &mut text_rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                        windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
+                        let _ = ReleaseDC(Some(hwnd), hdc);
+                    }
                 }
             }
 
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(35));
         }
 
         let _ = DeleteObject(HGDIOBJ(font.0));
