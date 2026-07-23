@@ -303,7 +303,21 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     };
     let _ = audio_start.send(());
     if let Some(signal) = recording_active_signal {
-        signal.store(true, Ordering::Release);
+        let output_check = output_path.clone();
+        thread::spawn(move || {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_millis(1500) {
+                if fs::metadata(&output_check).map(|m| m.len() > 0).unwrap_or(false) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(40));
+            }
+            let elapsed = start.elapsed();
+            if elapsed < Duration::from_millis(500) {
+                thread::sleep(Duration::from_millis(500) - elapsed);
+            }
+            signal.store(true, Ordering::Release);
+        });
     }
     let session_id = SESSION_ID.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
     *PROCESS.lock() = Some(RecordingProcess {
@@ -939,7 +953,7 @@ fn run_region_border(
             return;
         };
 
-        let prep_badge_w = 135.min(width - 6);
+        let prep_badge_w = 145.min(width - 6);
         let badge_h = 24.min(height - 6);
 
         let outer_rgn = CreateRectRgn(0, 0, width, height);
@@ -997,14 +1011,13 @@ fn run_region_border(
                     last_rendered_secs = elapsed_secs;
                     let hdc = GetDC(Some(hwnd));
                     if !hdc.0.is_null() {
-                        let rec_badge_w = 86.min(width - 6);
-                        let badge_rect = RECT {
+                        let full_badge_rect = RECT {
                             left: 3,
                             top: 3,
-                            right: 3 + rec_badge_w,
+                            right: 3 + prep_badge_w,
                             bottom: 3 + badge_h,
                         };
-                        FillRect(hdc, &badge_rect, dark_brush);
+                        FillRect(hdc, &full_badge_rect, dark_brush);
 
                         let dot_rect = RECT {
                             left: 9,
@@ -1023,7 +1036,7 @@ fn run_region_border(
                         let mut text_rect = RECT {
                             left: 20,
                             top: 3,
-                            right: 3 + rec_badge_w,
+                            right: 3 + prep_badge_w,
                             bottom: 3 + badge_h,
                         };
                         let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
@@ -1054,13 +1067,13 @@ fn run_region_border(
                             _ => "...",
                         };
                         let msg = if language == crate::model::UiLanguage::Vietnamese {
-                            format!("⏳ Đang chuẩn bị{dots}")
+                            format!("Đang chuẩn bị{dots}")
                         } else {
-                            format!("⏳ Preparing{dots}")
+                            format!("Preparing{dots}")
                         };
                         let mut msg_utf16: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
                         let mut text_rect = RECT {
-                            left: 6,
+                            left: 3,
                             top: 3,
                             right: 3 + prep_badge_w,
                             bottom: 3 + badge_h,
