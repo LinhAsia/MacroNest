@@ -784,12 +784,24 @@ fn window_source(hwnd: HWND, fps: u32) -> Result<(String, Option<RECT>), String>
     if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
         return Err("The selected window is no longer available.".to_owned());
     }
+    let mut rect = RECT::default();
+    let border_rect = if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) }.is_ok() {
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width > 20 && height > 20 {
+            Some(rect)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     Ok((
         format!(
             "gfxcapture=hwnd={}:monitor_idx=window:capture_cursor=1:capture_border=1:display_border=1:max_framerate={fps}:width=-2:height=-2",
             hwnd.0 as usize
         ),
-        None,
+        border_rect,
     ))
 }
 
