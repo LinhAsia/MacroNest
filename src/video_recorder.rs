@@ -259,8 +259,20 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::from(log))
-        .args([
+        .stderr(Stdio::from(log));
+
+    if source.starts_with("gdigrab:") {
+        let args_str = &source["gdigrab:".len()..];
+        let parts: Vec<&str> = args_str.split('|').collect();
+        command.args(["-y", "-hide_banner", "-loglevel", "error", "-f", "gdigrab", "-draw_mouse", "1"]);
+        for part in parts {
+            if let Some((k, v)) = part.split_once('=') {
+                command.arg(k).arg(v);
+            }
+        }
+        command.args(["-vf", "format=nv12", "-an", "-c:v", "h264_mf"]);
+    } else {
+        command.args([
             "-y",
             "-hide_banner",
             "-loglevel",
@@ -275,6 +287,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             "-c:v",
             "h264_mf",
         ]);
+    }
     if hardware_encoding {
         command.args(["-hw_encoding", "1"]);
     }
@@ -742,9 +755,7 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>)
             let screen_w = unsafe { windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN) };
             let screen_h = unsafe { windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN) };
             Ok((
-                format!(
-                    "gfxcapture=monitor_idx=0:capture_cursor=1:display_border=1:max_framerate={fps}:width=-2:height=-2"
-                ),
+                format!("gdigrab:-framerate={fps}|-i=desktop"),
                 Some(RECT {
                     left: 0,
                     top: 0,
@@ -793,10 +804,7 @@ fn window_source(hwnd: HWND, fps: u32) -> Result<(String, Option<RECT>), String>
         None
     };
     Ok((
-        format!(
-            "gfxcapture=hwnd={}:monitor_idx=window:capture_cursor=1:capture_border=1:display_border=1:max_framerate={fps}:width=-2:height=-2",
-            hwnd.0 as usize
-        ),
+        format!("gdigrab:-framerate={fps}|-hwnd=0x{:x}|-i=title=", hwnd.0 as usize),
         border_rect,
     ))
 }
@@ -827,14 +835,12 @@ fn region_source(mut region: RECT, fps: u32) -> Result<(String, Option<RECT>), S
     if (region.bottom - region.top) % 2 != 0 {
         region.bottom -= 1;
     }
-    let crop_left = region.left - info.rcMonitor.left;
-    let crop_top = region.top - info.rcMonitor.top;
-    let crop_right = info.rcMonitor.right - region.right;
-    let crop_bottom = info.rcMonitor.bottom - region.bottom;
+    let width = region.right - region.left;
+    let height = region.bottom - region.top;
     Ok((
         format!(
-            "gfxcapture=hmonitor={}:capture_cursor=1:display_border=0:max_framerate={fps}:crop_left={crop_left}:crop_top={crop_top}:crop_right={crop_right}:crop_bottom={crop_bottom}:width=-2:height=-2",
-            monitor.0 as usize
+            "gdigrab:-framerate={fps}|-offset_x={}|-offset_y={}|-video_size={}x{}|-i=desktop",
+            region.left, region.top, width, height
         ),
         Some(region),
     ))
