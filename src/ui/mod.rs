@@ -4578,12 +4578,34 @@ impl CrosshairApp {
                     ui.ctx().data_mut(|data| {
                         data.insert_temp(qa_hover_card_key, true);
                     });
-                    let pos = button_response.rect.left_bottom() + vec2(-42.0, 4.0);
+                    let opens_up = matches!(
+                        action_kind,
+                        TitlebarQuickActionKind::Taskbar
+                            | TitlebarQuickActionKind::WindowsKey
+                            | TitlebarQuickActionKind::WindowPin
+                            | TitlebarQuickActionKind::FocusHighlight
+                            | TitlebarQuickActionKind::FocusMode
+                            | TitlebarQuickActionKind::WindowOpacity
+                            | TitlebarQuickActionKind::Protractor
+                            | TitlebarQuickActionKind::Ruler
+                    );
+                    let (pos, pivot) = if opens_up {
+                        (
+                            button_response.rect.left_top() + vec2(-42.0, -4.0),
+                            egui::Align2::LEFT_BOTTOM,
+                        )
+                    } else {
+                        (
+                            button_response.rect.left_bottom() + vec2(-42.0, 4.0),
+                            egui::Align2::LEFT_TOP,
+                        )
+                    };
                     let parent_layer = ui.layer_id();
                     let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
                     let mut content_rect = egui::Rect::NOTHING;
                     let area_response = egui::Area::new(popup_id)
                         .order(egui::Order::Foreground)
+                        .pivot(pivot)
                         .fixed_pos(pos)
                         .show(ui.ctx(), |ui| {
                             let frame_response = egui::Frame::popup(ui.style())
