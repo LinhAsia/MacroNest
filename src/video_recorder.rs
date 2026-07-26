@@ -217,7 +217,7 @@ pub fn inspect_recorded_video(
             .to_rgba8();
         Some((image.width(), image.height(), image.into_raw()))
     } else {
-        None
+        return Err("FFmpeg could not extract a preview frame from this video.".to_owned());
     };
     let (width, height, rgba) = rgba
         .map(|(width, height, rgba)| (width, height, Some(rgba)))
@@ -318,17 +318,13 @@ fn export_trim(
     let mut command = Command::new(ffmpeg_exe);
     command
         .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
-        .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-ss"])
+        .arg(format!("{:.3}", start_seconds.max(0.0)))
+        .args(["-i"])
         .arg(input_path)
-        .args([
-            "-ss",
-            &format!("{:.3}", start_seconds.max(0.0)),
-            "-t",
-            &format!("{duration:.3}"),
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a?",
+        .args(["-t", &format!("{duration:.3}"), "-map", "0:v:0", "-map", "0:a?"]);
+    if let Some(target_size_mb) = target_size_mb {
+        command.args([
             "-c:v",
             "libx264",
             "-preset",
@@ -338,7 +334,6 @@ fn export_trim(
             "-b:a",
             "96k",
         ]);
-    if let Some(target_size_mb) = target_size_mb {
         let target_kbps = ((target_size_mb as f64 * 8192.0 / duration) - 96.0)
             .round()
             .clamp(100.0, 80_000.0) as u32;
@@ -351,7 +346,8 @@ fn export_trim(
             &format!("{}k", target_kbps.saturating_mul(2)),
         ]);
     } else {
-        command.args(["-crf", "18"]);
+        // ponytail: a normal trim is a stream copy; use Compress when re-encoding is required.
+        command.args(["-c", "copy"]);
     }
     let status = command
         .args(["-movflags", "+faststart"])
@@ -980,7 +976,7 @@ fn mux_system_audio(ffmpeg_exe: &Path, audio_path: &Path, video_path: &Path) -> 
     fs::rename(&muxed_path, video_path).map_err(|error| error.to_string())
 }
 
-fn copy_video_to_clipboard(video_path: &Path) -> Result<(), String> {
+pub fn copy_video_to_clipboard(video_path: &Path) -> Result<(), String> {
     let mut last_error = None;
     for _ in 0..3 {
         match crate::platform::copy_folder_to_clipboard(video_path) {

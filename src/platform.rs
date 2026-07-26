@@ -650,6 +650,27 @@ mod windows_platform {
         Ok(())
     }
 
+    pub fn open_file(path: &Path) -> Result<()> {
+        if !path.is_file() {
+            bail!("File does not exist: {}", path.display());
+        }
+        let path_wide = widestring(path.as_os_str().to_string_lossy().as_ref());
+        unsafe {
+            let result = ShellExecuteW(
+                Some(HWND(std::ptr::null_mut())),
+                w!("open"),
+                PCWSTR(path_wide.as_ptr()),
+                PCWSTR::null(),
+                PCWSTR::null(),
+                SW_SHOWNORMAL,
+            );
+            if (result.0 as usize) <= 32 {
+                bail!("Failed to open file: {}", path.display());
+            }
+        }
+        Ok(())
+    }
+
     pub fn open_url_in_browser(url: &str) -> Result<()> {
         let url_wide = widestring(url);
         unsafe {
@@ -793,6 +814,10 @@ mod fallback {
     }
 
     pub fn reveal_file_in_explorer(_path: &std::path::Path) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn open_file(_path: &std::path::Path) -> Result<()> {
         Ok(())
     }
 
