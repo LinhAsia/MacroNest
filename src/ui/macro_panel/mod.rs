@@ -1168,7 +1168,7 @@ impl CrosshairApp {
                 ),
                 2 => custom_name.as_str(),
                 _ => Self::tr_lang(language, "Wi-Fi", "Wi-Fi"),
-            }).size(12.0))
+            }).size(13.0))
             .show_ui(ui, |ui| {
                 for (mode_value, label, value) in [
                     (0_u8, Self::tr_lang(language, "Wi-Fi", "Wi-Fi"), "wifi"),
@@ -1270,7 +1270,7 @@ impl CrosshairApp {
                     }
                     2 => Self::tr_lang(language, "Radio (Fast)", "Radio (Nhanh)"),
                     _ => Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
-                }).size(12.0))
+                }).size(13.0))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut method,
@@ -1299,7 +1299,7 @@ impl CrosshairApp {
                     Self::tr_lang(language, "On", "Bật")
                 } else {
                     Self::tr_lang(language, "Off", "Tắt")
-                }).size(12.0))
+                }).size(13.0))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut is_enable,
@@ -1835,12 +1835,15 @@ impl CrosshairApp {
         step: &mut MacroStep,
         live_sync: &mut bool,
     ) {
-        ui.horizontal(|ui| {
-            ui.label(Self::tr_lang(
+        ui.scope(|ui| {
+            ui.style_mut().text_styles.insert(egui::TextStyle::Body, egui::FontId::proportional(13.0));
+            ui.style_mut().text_styles.insert(egui::TextStyle::Button, egui::FontId::proportional(13.0));
+            ui.horizontal(|ui| {
+            ui.label(RichText::new(Self::tr_lang(
                 language,
                 "Mouse Click Delay:",
                 "Mouse Click Delay:",
-            ));
+            )).size(13.0));
             *live_sync |= ui
                 .add(
                     egui::DragValue::new(&mut step.mouse_click_delay_ms)
@@ -1848,6 +1851,7 @@ impl CrosshairApp {
                         .suffix(" ms"),
                 )
                 .changed();
+            });
         });
     }
 
