@@ -1159,7 +1159,7 @@ impl CrosshairApp {
         }
         egui::ComboBox::from_id_salt(combo_id)
             .width(width)
-            .selected_text(match mode {
+            .selected_text(RichText::new(match mode {
                 1 => Self::tr_lang(language, "Ethernet", "Ethernet"),
                 2 if custom_name.trim().is_empty() => Self::tr_lang(
                     language,
@@ -1168,7 +1168,7 @@ impl CrosshairApp {
                 ),
                 2 => custom_name.as_str(),
                 _ => Self::tr_lang(language, "Wi-Fi", "Wi-Fi"),
-            })
+            }).size(12.0))
             .show_ui(ui, |ui| {
                 for (mode_value, label, value) in [
                     (0_u8, Self::tr_lang(language, "Wi-Fi", "Wi-Fi"), "wifi"),
@@ -1178,7 +1178,7 @@ impl CrosshairApp {
                         "ethernet",
                     ),
                 ] {
-                    if ui.selectable_label(mode == mode_value, label).clicked() {
+                    if ui.selectable_label(mode == mode_value, RichText::new(label).size(12.0)).clicked() {
                         mode = mode_value;
                         *step_key = value.to_owned();
                         *live_sync = true;
@@ -1188,21 +1188,21 @@ impl CrosshairApp {
                 if adapter_names.is_empty() {
                     ui.add_enabled(
                         false,
-                        egui::Label::new(Self::tr_lang(
+                        egui::Label::new(RichText::new(Self::tr_lang(
                             language,
                             "Loading adapters...",
                             "\u{0110}ang t\u{1ea3}i adapter...",
-                        )),
+                        )).size(12.0)),
                     );
                 } else {
                     for adapter_name in &adapter_names {
                         if ui
                             .selectable_label(
                                 mode == 2 && custom_name == *adapter_name,
-                                format!(
+                                RichText::new(format!(
                                     "{}: {adapter_name}",
                                     Self::tr_lang(language, "Adapter", "Adapter")
-                                ),
+                                )).size(12.0),
                             )
                             .clicked()
                         {
@@ -1264,13 +1264,13 @@ impl CrosshairApp {
             // 2. CHỌN TỐC ĐỘ (Method/Speed dropdown)
             egui::ComboBox::from_id_salt((id_salt, "network_method"))
                 .width(170.0)
-                .selected_text(match method {
+                .selected_text(RichText::new(match method {
                     1 => {
                         Self::tr_lang(language, "Internet route (Instant)", "Tuyến mạng (Tức thì)")
                     }
                     2 => Self::tr_lang(language, "Radio (Fast)", "Radio (Nhanh)"),
                     _ => Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
-                })
+                }).size(12.0))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut method,
@@ -1295,11 +1295,11 @@ impl CrosshairApp {
             // 3. CHỌN TRẠNG THÁI (State On/Off dropdown)
             egui::ComboBox::from_id_salt((id_salt, "network_state"))
                 .width(72.0)
-                .selected_text(if is_enable {
+                .selected_text(RichText::new(if is_enable {
                     Self::tr_lang(language, "On", "Bật")
                 } else {
                     Self::tr_lang(language, "Off", "Tắt")
-                })
+                }).size(12.0))
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut is_enable,
@@ -4317,7 +4317,7 @@ impl CrosshairApp {
                     ))
                     .clicked()
                 {
-                    self.import_macro_group_from_clipboard(None, None);
+                    self.import_macro_group_from_clipboard(active_folder_for_controls, None);
                 }
             }
             let clipboard_feedback_active =
