@@ -28346,10 +28346,12 @@ mod windows_overlay {
                                 }
                             }
 
-                            if loop_end_delay_ms > 0
-                                && sleep_for_macro_delay(
+                            // ponytail: an infinite zero-delay loop can otherwise monopolize
+                            // this worker and flood the input queue. One millisecond is only a
+                            // scheduler yield; explicit loop delays still take precedence.
+                            if sleep_for_macro_delay(
                                     preset_id,
-                                    loop_end_delay_ms,
+                                    loop_end_delay_ms.max(1),
                                     stop_immediately_on_retrigger,
                                     target_window_title,
                                     extra_target_window_titles,
@@ -29132,10 +29134,11 @@ mod windows_overlay {
                                 );
                             }
 
-                            if loop_end_delay_ms > 0
-                                && sleep_for_hold_delay(
+                            // ponytail: see the press-loop equivalent above. Hold loops need
+                            // the same yield so releasing the trigger can be observed promptly.
+                            if sleep_for_hold_delay(
                                     preset_id,
-                                    loop_end_delay_ms,
+                                    loop_end_delay_ms.max(1),
                                     stop_immediately_on_retrigger,
                                     run_token,
                                     target_window_title,
