@@ -231,21 +231,23 @@ impl AppPaths {
             }
         };
 
-        let mut disk_profiles = self.load_profiles().unwrap_or_default();
-        let mut migrated = false;
-        if !state.profiles.is_empty() {
-            for sp in &state.profiles {
-                if !disk_profiles.iter().any(|dp| dp.name == sp.name) {
-                    disk_profiles.push(sp.clone());
-                    migrated = true;
+        let disk_profiles = self.load_profiles().unwrap_or_default();
+        if state.profiles.is_empty() {
+            // Legacy fallback for installations that only have individual profile files.
+            state.profiles = disk_profiles;
+        } else {
+            // The state snapshot is written together with every edit and therefore owns the
+            // current X/Y offsets. Individual files can be stale after an interrupted save.
+            for profile in disk_profiles {
+                if !state
+                    .profiles
+                    .iter()
+                    .any(|saved| saved.name == profile.name)
+                {
+                    state.profiles.push(profile);
                 }
             }
         }
-        if migrated {
-            let _ = self.save_profiles(&disk_profiles);
-        }
-
-        state.profiles = disk_profiles;
 
         if state.profiles.is_empty() {
             state.selected_profile = None;
