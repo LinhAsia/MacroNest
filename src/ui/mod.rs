@@ -819,6 +819,15 @@ pub struct CrosshairApp {
     ffmpeg_download_job: Option<JoinHandle<Result<()>>>,
     ffmpeg_download_progress: Arc<AtomicU32>,
     ffmpeg_installed: bool,
+    video_library_open: bool,
+    video_library_selected: Option<PathBuf>,
+    video_library_preview: Option<crate::video_recorder::VideoLibraryPreview>,
+    video_library_preview_texture: Option<TextureHandle>,
+    video_library_preview_rx:
+        Option<Receiver<(PathBuf, Result<crate::video_recorder::VideoLibraryPreview, String>)>>,
+    video_library_trim_start_seconds: f64,
+    video_library_trim_end_seconds: f64,
+    video_library_target_size_mb: u32,
     ocr_download_job: Option<JoinHandle<Result<()>>>,
     ocr_download_progress: Arc<AtomicU32>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
@@ -1134,6 +1143,14 @@ impl CrosshairApp {
             ffmpeg_download_job: None,
             ffmpeg_download_progress: Arc::new(AtomicU32::new(0)),
             ffmpeg_installed,
+            video_library_open: false,
+            video_library_selected: None,
+            video_library_preview: None,
+            video_library_preview_texture: None,
+            video_library_preview_rx: None,
+            video_library_trim_start_seconds: 0.0,
+            video_library_trim_end_seconds: 0.0,
+            video_library_target_size_mb: 12,
             ocr_download_job: None,
             ocr_download_progress: Arc::new(AtomicU32::new(0)),
             interception_download_job: None,
@@ -6640,6 +6657,17 @@ impl CrosshairApp {
                                     }
                                 }
 
+                                if ui
+                                    .add_sized(
+                                        [186.0, 22.0],
+                                        Button::new("Video library / Trim & compress"),
+                                    )
+                                    .clicked()
+                                {
+                                    self.video_library_open = true;
+                                    keep_open = true;
+                                }
+
                                 let copy_response = ui.add_enabled(
                                     !recording && !recorder_busy,
                                     egui::Checkbox::new(
@@ -6894,6 +6922,306 @@ impl CrosshairApp {
             .data(|data| data.get_temp::<bool>(qa_hover_card_key))
             .unwrap_or(false);
         keep_menu_open || any_hover_card_visible
+    }
+
+    fn request_video_library_preview(&mut self, video_path: PathBuf, preview_at_seconds: f64) {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let ffmpeg_exe = self.paths.ffmpeg_exe.clone();
+        std::thread::spawn(move || {
+            let result = crate::video_recorder::inspect_recorded_video(
+                &ffmpeg_exe,
+                &video_path,
+                preview_at_seconds,
+            );
+            let _ = tx.send((video_path, result));
+        });
+        self.video_library_preview_rx = Some(rx);
+    }
+
+    fn render_video_library(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.video_library_preview_rx {
+            match rx.try_recv() {
+                Ok((path, Ok(preview))) => {
+                    if self.video_library_selected.as_ref() == Some(&path) {
+                        self.video_library_trim_start_seconds = self
+                            .video_library_trim_start_seconds
+                            .clamp(0.0, preview.duration_seconds);
+                        self.video_library_trim_end_seconds = if self.video_library_trim_end_seconds
+                            <= self.video_library_trim_start_seconds
+                        {
+                            preview.duration_seconds
+                        } else {
+                            self.video_library_trim_end_seconds
+                                .clamp(self.video_library_trim_start_seconds, preview.duration_seconds)
+                        };
+                        self.video_library_preview_texture = preview.rgba.as_ref().map(|rgba| {
+                            ctx.load_texture(
+                                format!("video-library-preview-{}", path.display()),
+                                ColorImage::from_rgba_unmultiplied(
+                                    [preview.width as usize, preview.height as usize],
+                                    rgba,
+                                ),
+                                TextureOptions::LINEAR,
+                            )
+                        });
+                        self.video_library_preview = Some(preview);
+                    }
+                    self.video_library_preview_rx = None;
+                }
+                Ok((_, Err(error))) => {
+                    self.status = format!("Video preview failed: {error}");
+                    self.video_library_preview_rx = None;
+                }
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    self.video_library_preview_rx = None;
+                }
+                Err(crossbeam_channel::TryRecvError::Empty) => {}
+            }
+        }
+
+        if !self.video_library_open {
+            return;
+        }
+
+        let output_dir = PathBuf::from(&self.state.quick_video_record_output_dir);
+        let videos = crate::video_recorder::recorded_videos(&output_dir);
+        if self
+            .video_library_selected
+            .as_ref()
+            .is_some_and(|path| !path.is_file())
+        {
+            self.video_library_selected = None;
+            self.video_library_preview = None;
+            self.video_library_preview_texture = None;
+        }
+
+        let mut open = self.video_library_open;
+        let mut select_video = None;
+        let mut refresh_preview = None;
+        let mut reveal_video = None;
+        let mut export_request = None;
+        egui::Window::new("Video library")
+            .open(&mut open)
+            .default_width(820.0)
+            .default_height(560.0)
+            .min_width(680.0)
+            .min_height(420.0)
+            .resizable(true)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.scope(|ui| {
+                    ui.style_mut()
+                        .text_styles
+                        .insert(egui::TextStyle::Body, egui::FontId::proportional(13.0));
+                    ui.style_mut()
+                        .text_styles
+                        .insert(egui::TextStyle::Button, egui::FontId::proportional(13.0));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Recorded videos").strong().size(13.0));
+                        ui.label(
+                            RichText::new(format!("{} video(s)", videos.len()))
+                                .size(12.0)
+                                .weak(),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Open folder").clicked() {
+                                let _ = fs::create_dir_all(&output_dir);
+                                if let Err(error) = crate::platform::open_folder_in_explorer(&output_dir) {
+                                    self.status = format!("Could not open video folder: {error}");
+                                }
+                            }
+                        });
+                    });
+                    ui.separator();
+                    ui.columns(2, |columns| {
+                        columns[0].set_min_width(255.0);
+                        columns[0].set_max_width(300.0);
+                        egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
+                            if videos.is_empty() {
+                                ui.label(RichText::new("No recorded videos yet.").weak());
+                            }
+                            for video in &videos {
+                                let selected = self.video_library_selected.as_ref() == Some(video);
+                                let name = video
+                                    .file_name()
+                                    .and_then(|name| name.to_str())
+                                    .unwrap_or("video");
+                                let bytes = fs::metadata(video).map(|metadata| metadata.len()).unwrap_or(0);
+                                if ui
+                                    .add_sized(
+                                        [ui.available_width(), 30.0],
+                                        Button::new(format!("{name}\n{:.1} MB", bytes as f64 / 1_048_576.0))
+                                            .selected(selected),
+                                    )
+                                    .clicked()
+                                {
+                                    select_video = Some(video.clone());
+                                }
+                            }
+                        });
+
+                        columns[1].vertical(|ui| {
+                            let Some(selected_path) = self.video_library_selected.as_ref() else {
+                                ui.centered_and_justified(|ui| {
+                                    ui.label(RichText::new("Choose a video to preview, trim, or compress.").weak());
+                                });
+                                return;
+                            };
+                            let selected_path = selected_path.clone();
+                            ui.label(
+                                RichText::new(
+                                    selected_path
+                                        .file_name()
+                                        .and_then(|name| name.to_str())
+                                        .unwrap_or("video"),
+                                )
+                                .strong(),
+                            );
+                            if let Some(texture) = &self.video_library_preview_texture {
+                                ui.add(Image::new(texture).max_width(500.0).max_height(260.0));
+                            } else if self.video_library_preview_rx.is_some() {
+                                ui.add(egui::Spinner::new());
+                                ui.label(RichText::new("Loading preview…").weak());
+                            } else {
+                                ui.label(RichText::new("Preview frame unavailable.").weak());
+                            }
+
+                            if let Some(preview) = &self.video_library_preview {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Duration: {}  •  Size: {:.1} MB",
+                                        Self::format_video_seconds(preview.duration_seconds),
+                                        preview.file_size as f64 / 1_048_576.0
+                                    ))
+                                    .size(12.0)
+                                    .weak(),
+                                );
+                                let duration = preview.duration_seconds.max(0.1);
+                                let start_before = self.video_library_trim_start_seconds;
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.video_library_trim_start_seconds,
+                                        0.0..=duration,
+                                    )
+                                    .text("Start")
+                                    .custom_formatter(|value, _| Self::format_video_seconds(value)),
+                                );
+                                self.video_library_trim_end_seconds = self
+                                    .video_library_trim_end_seconds
+                                    .clamp(self.video_library_trim_start_seconds, duration);
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.video_library_trim_end_seconds,
+                                        self.video_library_trim_start_seconds..=duration,
+                                    )
+                                    .text("End")
+                                    .custom_formatter(|value, _| Self::format_video_seconds(value)),
+                                );
+                                ui.horizontal(|ui| {
+                                    if ui.button("Preview at start").clicked()
+                                        || (start_before != self.video_library_trim_start_seconds
+                                            && !ui.input(|input| input.pointer.any_down()))
+                                    {
+                                        refresh_preview = Some((
+                                            selected_path.clone(),
+                                            self.video_library_trim_start_seconds,
+                                        ));
+                                    }
+                                    if ui.button("Open file location").clicked() {
+                                        reveal_video = Some(selected_path.clone());
+                                    }
+                                });
+                                ui.separator();
+                                ui.horizontal(|ui| {
+                                    if ui
+                                        .add_enabled(
+                                            !crate::video_recorder::is_editing(),
+                                            Button::new("Export trim"),
+                                        )
+                                        .clicked()
+                                    {
+                                        export_request = Some((
+                                            selected_path.clone(),
+                                            self.video_library_trim_start_seconds,
+                                            self.video_library_trim_end_seconds,
+                                            None,
+                                        ));
+                                    }
+                                    ui.label("Target size");
+                                    ui.add_sized(
+                                        [68.0, 22.0],
+                                        egui::DragValue::new(&mut self.video_library_target_size_mb)
+                                            .range(1..=2048)
+                                            .suffix(" MB"),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            !crate::video_recorder::is_editing(),
+                                            Button::new("Compress"),
+                                        )
+                                        .clicked()
+                                    {
+                                        export_request = Some((
+                                            selected_path,
+                                            self.video_library_trim_start_seconds,
+                                            self.video_library_trim_end_seconds,
+                                            Some(self.video_library_target_size_mb),
+                                        ));
+                                    }
+                                });
+                                ui.label(
+                                    RichText::new("Compress uses the selected target as an approximate final size.")
+                                        .size(11.0)
+                                        .weak(),
+                                );
+                            }
+                            ui.add_space(4.0);
+                            ui.label(RichText::new(crate::video_recorder::edit_status()).size(11.0).weak());
+                        });
+                    });
+                });
+            });
+
+        self.video_library_open = open;
+        if let Some(path) = select_video {
+            self.video_library_selected = Some(path.clone());
+            self.video_library_preview = None;
+            self.video_library_preview_texture = None;
+            self.video_library_trim_start_seconds = 0.0;
+            self.video_library_trim_end_seconds = 0.0;
+            self.request_video_library_preview(path, 0.0);
+        }
+        if let Some((path, at_seconds)) = refresh_preview {
+            self.request_video_library_preview(path, at_seconds);
+        }
+        if let Some(path) = reveal_video
+            && let Err(error) = crate::platform::reveal_file_in_explorer(&path)
+        {
+            self.status = format!("Could not reveal video: {error}");
+        }
+        if let Some((input, start, end, target_size_mb)) = export_request {
+            crate::video_recorder::export_trim_async(
+                self.paths.ffmpeg_exe.clone(),
+                input,
+                output_dir,
+                start,
+                end,
+                target_size_mb,
+            );
+        }
+        if self.video_library_preview_rx.is_some() || crate::video_recorder::is_editing() {
+            ctx.request_repaint_after(Duration::from_millis(80));
+        }
+    }
+
+    fn format_video_seconds(seconds: f64) -> String {
+        let total_seconds = seconds.max(0.0).round() as u64;
+        format!(
+            "{:02}:{:02}:{:02}",
+            total_seconds / 3600,
+            (total_seconds / 60) % 60,
+            total_seconds % 60
+        )
     }
 
     fn render_multi_window_targets(
@@ -15546,6 +15874,7 @@ impl eframe::App for CrosshairApp {
 
         self.render_custom_ai_modal(ctx);
         self.render_update_notice(ctx);
+        self.render_video_library(ctx);
 
         if self.variable_inspector_open {
             if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {

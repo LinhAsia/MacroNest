@@ -88,6 +88,17 @@ static PRESS_HANDLED_ON_DOWN: AtomicBool = AtomicBool::new(false);
 static SESSION_ID: AtomicU64 = AtomicU64::new(0);
 static HARDWARE_ENCODING: Lazy<Mutex<Option<(String, bool)>>> = Lazy::new(|| Mutex::new(None));
 static PREPARED_FFMPEG: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+static VIDEO_EDIT_BUSY: AtomicBool = AtomicBool::new(false);
+static VIDEO_EDIT_STATUS: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("Ready".to_owned()));
+
+#[derive(Clone)]
+pub struct VideoLibraryPreview {
+    pub duration_seconds: f64,
+    pub file_size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Option<Vec<u8>>,
+}
 
 pub fn set_config(config: VideoRecorderConfig) {
     prepare_hardware_encoding_async(&config.ffmpeg_exe);
@@ -120,6 +131,239 @@ pub fn is_recording() -> bool {
 
 pub fn is_busy() -> bool {
     BUSY.load(Ordering::Acquire)
+}
+
+pub fn is_editing() -> bool {
+    VIDEO_EDIT_BUSY.load(Ordering::Acquire)
+}
+
+pub fn edit_status() -> String {
+    VIDEO_EDIT_STATUS.lock().clone()
+}
+
+pub fn recorded_videos(directory: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut videos = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| {
+                        matches!(
+                            extension.to_ascii_lowercase().as_str(),
+                            "mp4" | "mkv" | "mov" | "webm" | "avi"
+                        )
+                    })
+        })
+        .collect::<Vec<_>>();
+    videos.sort_by_key(|path| {
+        fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(UNIX_EPOCH)
+    });
+    videos.reverse();
+    videos
+}
+
+pub fn inspect_recorded_video(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+    preview_at_seconds: f64,
+) -> Result<VideoLibraryPreview, String> {
+    if !ffmpeg_exe.exists() {
+        return Err("FFmpeg is not installed.".to_owned());
+    }
+    let file_size = fs::metadata(video_path)
+        .map_err(|error| format!("Could not read video: {error}"))?
+        .len();
+    let duration_seconds = probe_video_duration(ffmpeg_exe, video_path).unwrap_or(0.0);
+    let preview_at_seconds = preview_at_seconds
+        .max(0.0)
+        .min((duration_seconds - 0.05).max(0.0));
+    let output = Command::new(ffmpeg_exe)
+        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            &format!("{preview_at_seconds:.3}"),
+            "-i",
+        ])
+        .arg(video_path)
+        .args([
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=560:-2",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "png",
+            "pipe:1",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|error| format!("Could not create video preview: {error}"))?;
+    let rgba = if output.status.success() && !output.stdout.is_empty() {
+        let image = image::load_from_memory(&output.stdout)
+            .map_err(|error| format!("Could not decode video preview: {error}"))?
+            .to_rgba8();
+        Some((image.width(), image.height(), image.into_raw()))
+    } else {
+        None
+    };
+    let (width, height, rgba) = rgba
+        .map(|(width, height, rgba)| (width, height, Some(rgba)))
+        .unwrap_or((0, 0, None));
+    Ok(VideoLibraryPreview {
+        duration_seconds,
+        file_size,
+        width,
+        height,
+        rgba,
+    })
+}
+
+pub fn export_trim_async(
+    ffmpeg_exe: PathBuf,
+    input_path: PathBuf,
+    output_dir: PathBuf,
+    start_seconds: f64,
+    end_seconds: f64,
+    target_size_mb: Option<u32>,
+) {
+    if VIDEO_EDIT_BUSY.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    *VIDEO_EDIT_STATUS.lock() = "Preparing video…".to_owned();
+    thread::spawn(move || {
+        let result = export_trim(
+            &ffmpeg_exe,
+            &input_path,
+            &output_dir,
+            start_seconds,
+            end_seconds,
+            target_size_mb,
+        );
+        *VIDEO_EDIT_STATUS.lock() = match result {
+            Ok(path) => format!("Saved: {}", path.display()),
+            Err(error) => format!("Video export failed: {error}"),
+        };
+        VIDEO_EDIT_BUSY.store(false, Ordering::Release);
+    });
+}
+
+fn probe_video_duration(ffmpeg_exe: &Path, video_path: &Path) -> Option<f64> {
+    let ffprobe_exe = ffmpeg_exe.with_file_name("ffprobe.exe");
+    if ffprobe_exe.exists() {
+        let output = Command::new(ffprobe_exe)
+            .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+            ])
+            .arg(video_path)
+            .output()
+            .ok()?;
+        return String::from_utf8_lossy(&output.stdout).trim().parse::<f64>().ok();
+    }
+
+    // ponytail: MacroNest's bundled FFmpeg does not include ffprobe, so reuse the
+    // available executable instead of requiring another tool just to read duration.
+    let output = Command::new(ffmpeg_exe)
+        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+        .args(["-hide_banner", "-i"])
+        .arg(video_path)
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stderr);
+    let duration = text.split("Duration: ").nth(1)?.split(',').next()?.trim();
+    let mut parts = duration.split(':').map(|part| part.parse::<f64>().ok());
+    Some(parts.next()?? * 3600.0 + parts.next()?? * 60.0 + parts.next()??)
+}
+
+fn export_trim(
+    ffmpeg_exe: &Path,
+    input_path: &Path,
+    output_dir: &Path,
+    start_seconds: f64,
+    end_seconds: f64,
+    target_size_mb: Option<u32>,
+) -> Result<PathBuf, String> {
+    if !ffmpeg_exe.exists() {
+        return Err("FFmpeg is not installed.".to_owned());
+    }
+    let duration = end_seconds - start_seconds;
+    if !duration.is_finite() || duration <= 0.05 {
+        return Err("Choose an end time after the start time.".to_owned());
+    }
+    fs::create_dir_all(output_dir).map_err(|error| error.to_string())?;
+    let stem = input_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("video");
+    let suffix = if target_size_mb.is_some() { "compressed" } else { "trimmed" };
+    let output_path = unique_output_path(output_dir, &format!("{stem}_{suffix}"));
+    let mut command = Command::new(ffmpeg_exe);
+    command
+        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
+        .arg(input_path)
+        .args([
+            "-ss",
+            &format!("{:.3}", start_seconds.max(0.0)),
+            "-t",
+            &format!("{duration:.3}"),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "96k",
+        ]);
+    if let Some(target_size_mb) = target_size_mb {
+        let target_kbps = ((target_size_mb as f64 * 8192.0 / duration) - 96.0)
+            .round()
+            .clamp(100.0, 80_000.0) as u32;
+        command.args([
+            "-b:v",
+            &format!("{target_kbps}k"),
+            "-maxrate",
+            &format!("{target_kbps}k"),
+            "-bufsize",
+            &format!("{}k", target_kbps.saturating_mul(2)),
+        ]);
+    } else {
+        command.args(["-crf", "18"]);
+    }
+    let status = command
+        .args(["-movflags", "+faststart"])
+        .arg(&output_path)
+        .status()
+        .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
+    if !status.success() || fs::metadata(&output_path).map_or(true, |metadata| metadata.len() == 0)
+    {
+        let _ = fs::remove_file(&output_path);
+        return Err("FFmpeg could not export this video.".to_owned());
+    }
+    Ok(output_path)
 }
 
 pub fn toggle_async() {

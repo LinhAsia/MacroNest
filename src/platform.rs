@@ -8,7 +8,7 @@ mod windows_platform {
         time::{Duration, Instant},
     };
 
-    use anyhow::{Result, bail};
+    use anyhow::{Context, Result, bail};
     use eframe::Frame;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows::{
@@ -639,6 +639,17 @@ mod windows_platform {
         Ok(())
     }
 
+    pub fn reveal_file_in_explorer(path: &Path) -> Result<()> {
+        if !path.is_file() {
+            bail!("File does not exist: {}", path.display());
+        }
+        Command::new("explorer.exe")
+            .arg(format!("/select,{}", path.display()))
+            .spawn()
+            .with_context(|| format!("Failed to reveal {}", path.display()))?;
+        Ok(())
+    }
+
     pub fn open_url_in_browser(url: &str) -> Result<()> {
         let url_wide = widestring(url);
         unsafe {
@@ -778,6 +789,10 @@ mod fallback {
     }
 
     pub fn open_folder_in_explorer(_path: &std::path::Path) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn reveal_file_in_explorer(_path: &std::path::Path) -> Result<()> {
         Ok(())
     }
 
