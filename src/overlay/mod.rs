@@ -34299,40 +34299,7 @@ mod windows_overlay {
     }
 
     fn resolve_variables_in_text(text: &str) -> String {
-        let mut result = String::new();
-        let mut chars = text.chars().peekable();
-        while let Some(ch) = chars.next() {
-            if ch == '{' {
-                let mut var_name = String::new();
-                let mut found_close = false;
-                while let Some(&next_ch) = chars.peek() {
-                    if next_ch == '}' {
-                        chars.next(); // consume '}'
-
-                        found_close = true;
-                        break;
-                    } else {
-                        var_name.push(chars.next().unwrap());
-                    }
-                }
-
-                if found_close {
-                    let trimmed = var_name.trim();
-                    if let Some(text_val) = resolve_text_variable_value(trimmed) {
-                        result.push_str(&text_val);
-                    } else {
-                        result.push_str("0");
-                    }
-                } else {
-                    result.push('{');
-                    result.push_str(&var_name);
-                }
-            } else {
-                result.push(ch);
-            }
-        }
-
-        result
+        interpolate_variables(text)
     }
 
     fn stop_vision_waiting(spec: &str) -> Result<()> {
