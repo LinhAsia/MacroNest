@@ -92,7 +92,7 @@ static VIDEO_EDIT_BUSY: AtomicBool = AtomicBool::new(false);
 static VIDEO_EDIT_STATUS: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("Ready".to_owned()));
 const LIBRARY_PLAYBACK_WIDTH: usize = 640;
 const LIBRARY_PLAYBACK_HEIGHT: usize = 360;
-const LIBRARY_PLAYBACK_FPS: u64 = 24;
+const LIBRARY_PLAYBACK_FPS: u64 = 60;
 
 #[derive(Clone)]
 pub struct VideoLibraryPreview {
@@ -351,7 +351,7 @@ pub fn start_video_library_playback(
                     &format!("{duration:.3}"),
                     "-an",
                     "-vf",
-                    "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=24",
+                    "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=60",
                     "-pix_fmt",
                     "rgba",
                     "-f",

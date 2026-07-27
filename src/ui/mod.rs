@@ -7575,7 +7575,16 @@ impl CrosshairApp {
                             self.video_library_trim_end_seconds
                                 .clamp(self.video_library_trim_start_seconds, preview.duration_seconds)
                         };
-                        self.video_library_preview_texture = texture;
+                        self.video_library_preview_texture = preview.rgba.as_ref().map(|rgba| {
+                            ctx.load_texture(
+                                format!("video-library-preview-{}", path.display()),
+                                ColorImage::from_rgba_unmultiplied(
+                                    [preview.width as usize, preview.height as usize],
+                                    rgba,
+                                ),
+                                TextureOptions::LINEAR,
+                            )
+                        });
                         self.video_library_preview = Some(preview);
                     }
                     self.video_library_preview_rx = None;
@@ -7948,9 +7957,10 @@ impl CrosshairApp {
                 let _ = sender.send((path, result));
             });
         }
-        if self.video_library_preview_rx.is_some()
+        if self.video_library_playback.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        } else if self.video_library_preview_rx.is_some()
             || !self.video_library_thumbnail_jobs.is_empty()
-            || self.video_library_playback.is_some()
             || crate::video_recorder::is_editing()
         {
             ctx.request_repaint_after(Duration::from_millis(50));
