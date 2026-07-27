@@ -395,10 +395,6 @@ fn start_video_library_playback_inner(
                     "64K",
                     "-analyzeduration",
                     "0",
-                    "-threads",
-                    "1",
-                    "-flags",
-                    "low_delay",
                     "-ss",
                 ])
                 .arg(format!("{:.3}", start_seconds.max(0.0)))
