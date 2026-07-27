@@ -4676,6 +4676,16 @@ impl CrosshairApp {
                                 .inner_margin(8.0)
                                 .stroke(egui::Stroke::new(1.0, ui.visuals().window_stroke.color))
                                 .show(ui, |ui| {
+                                    let font = egui::FontId::proportional(12.0);
+                                    ui.style_mut()
+                                        .text_styles
+                                        .insert(egui::TextStyle::Body, font.clone());
+                                    ui.style_mut()
+                                        .text_styles
+                                        .insert(egui::TextStyle::Button, font.clone());
+                                    ui.style_mut()
+                                        .text_styles
+                                        .insert(egui::TextStyle::Small, font);
                                     ui.set_width(180.0);
                                     ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
                                     draw_controls(ui)
@@ -4932,10 +4942,10 @@ impl CrosshairApp {
                                     ui.label(
                                         RichText::new(Self::tr_lang(
                                             self.state.ui_language,
-                                            "Target Window",
-                                            "Target Window",
+                                            "Target window",
+                                            "Cửa sổ mục tiêu",
                                         ))
-                                        .size(10.0),
+                                        .size(12.0),
                                     );
 
                                     let selected_window_text = if pinned_window_active {
@@ -4966,7 +4976,7 @@ impl CrosshairApp {
 
                                     let selector_button = Button::new(
                                         RichText::new(format!("{selected_window_text}  v"))
-                                            .size(10.0),
+                                            .size(12.0),
                                     )
                                     .fill(Color32::from_rgba_premultiplied(60, 60, 60, 220));
                                     let selector_response =
@@ -5117,9 +5127,9 @@ impl CrosshairApp {
                                             RichText::new(Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Color",
-                                                "Color",
+                                                "Màu",
                                             ))
-                                            .size(10.0),
+                                            .size(12.0),
                                         );
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
@@ -5142,9 +5152,9 @@ impl CrosshairApp {
                                         RichText::new(Self::tr_lang(
                                             self.state.ui_language,
                                             "Decoration",
-                                            "Decoration",
+                                            "Trang trí",
                                         ))
-                                        .size(10.0),
+                                        .size(12.0),
                                     );
 
                                     let selected_text = match self.state.focus_highlight_decoration
@@ -6611,7 +6621,7 @@ impl CrosshairApp {
                                             "Hold trigger to select and record a region",
                                             "Giữ trigger để chọn và quay một vùng",
                                         ))
-                                        .size(9.0)
+                                        .size(12.0)
                                         .weak(),
                                     );
 
@@ -6706,7 +6716,11 @@ impl CrosshairApp {
                                 if ui
                                     .add_sized(
                                         [186.0, 22.0],
-                                        Button::new("Video library / Trim & compress"),
+                                        Button::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Video library / Trim & compress",
+                                            "Thư viện video / Cắt & nén",
+                                        )),
                                     )
                                     .clicked()
                                 {
@@ -6759,10 +6773,19 @@ impl CrosshairApp {
                                         keep_open = true;
                                     }
                                 }
+                                let recorder_status = crate::video_recorder::status();
                                 ui.label(
-                                    RichText::new(crate::video_recorder::status())
-                                        .size(9.0)
-                                        .weak(),
+                                    RichText::new(if recorder_status == "Ready" {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Ready",
+                                            "Sẵn sàng",
+                                        )
+                                    } else {
+                                        recorder_status.as_str()
+                                    })
+                                    .size(12.0)
+                                    .weak(),
                                 );
                                 recording || recorder_busy || keep_open
                             },

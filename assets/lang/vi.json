@@ -1204,5 +1204,6 @@
   "Compress": "Nén",
   "Export trim is fast but starts at the nearest keyframe. Compress re-encodes and is slower.": "Xuất đoạn cắt nhanh nhưng bắt đầu ở keyframe gần nhất. Nén sẽ mã hóa lại nên chậm hơn.",
   "Video deleted.": "Đã xóa video.",
-  "Deleting video...": "Đang xóa video..."
+  "Deleting video...": "Đang xóa video...",
+  "Video library / Trim & compress": "Thư viện video / Cắt & nén"
 }
