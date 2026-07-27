@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     fs::{self, File},
-    io::{BufWriter, Write},
+    io::{BufWriter, Read, Write},
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -90,6 +90,9 @@ static HARDWARE_ENCODING: Lazy<Mutex<Option<(String, bool)>>> = Lazy::new(|| Mut
 static PREPARED_FFMPEG: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 static VIDEO_EDIT_BUSY: AtomicBool = AtomicBool::new(false);
 static VIDEO_EDIT_STATUS: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("Ready".to_owned()));
+const LIBRARY_PLAYBACK_WIDTH: usize = 640;
+const LIBRARY_PLAYBACK_HEIGHT: usize = 360;
+const LIBRARY_PLAYBACK_FPS: u64 = 24;
 
 #[derive(Clone)]
 pub struct VideoLibraryPreview {
@@ -98,6 +101,41 @@ pub struct VideoLibraryPreview {
     pub width: u32,
     pub height: u32,
     pub rgba: Option<Vec<u8>>,
+}
+
+pub enum VideoPlaybackEvent {
+    Frame {
+        rgba: Vec<u8>,
+        position_seconds: f64,
+    },
+    Finished,
+    Error(String),
+}
+
+pub struct VideoPlaybackSession {
+    receiver: Receiver<VideoPlaybackEvent>,
+    stop: Arc<AtomicBool>,
+    finished: Arc<AtomicBool>,
+}
+
+impl VideoPlaybackSession {
+    pub fn try_recv(&self) -> Option<VideoPlaybackEvent> {
+        self.receiver.try_recv().ok()
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::Acquire)
+    }
+
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Release);
+    }
+}
+
+impl Drop for VideoPlaybackSession {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 pub fn set_config(config: VideoRecorderConfig) {
@@ -231,6 +269,148 @@ pub fn inspect_recorded_video(
     })
 }
 
+pub fn inspect_recorded_video_thumbnail(
+    ffmpeg_exe: &Path,
+    video_path: &Path,
+) -> Result<VideoLibraryPreview, String> {
+    if !ffmpeg_exe.exists() {
+        return Err("FFmpeg is not installed.".to_owned());
+    }
+    let file_size = fs::metadata(video_path)
+        .map_err(|error| format!("Could not read video: {error}"))?
+        .len();
+    let output = Command::new(ffmpeg_exe)
+        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            "0.500",
+            "-i",
+        ])
+        .arg(video_path)
+        .args([
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=320:-2",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "png",
+            "pipe:1",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|error| format!("Could not create video thumbnail: {error}"))?;
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err("FFmpeg could not extract a thumbnail from this video.".to_owned());
+    }
+    let image = image::load_from_memory(&output.stdout)
+        .map_err(|error| format!("Could not decode video thumbnail: {error}"))?
+        .to_rgba8();
+    Ok(VideoLibraryPreview {
+        duration_seconds: 0.0,
+        file_size,
+        width: image.width(),
+        height: image.height(),
+        rgba: Some(image.into_raw()),
+    })
+}
+
+pub fn start_video_library_playback(
+    ffmpeg_exe: PathBuf,
+    video_path: PathBuf,
+    start_seconds: f64,
+    end_seconds: f64,
+) -> Result<VideoPlaybackSession, String> {
+    if !ffmpeg_exe.exists() {
+        return Err("FFmpeg is not installed.".to_owned());
+    }
+    if !video_path.is_file() {
+        return Err("Video file was not found.".to_owned());
+    }
+    let duration = (end_seconds - start_seconds).max(0.05);
+    let (sender, receiver) = sync_channel(2);
+    let stop = Arc::new(AtomicBool::new(false));
+    let finished = Arc::new(AtomicBool::new(false));
+    let worker_stop = stop.clone();
+    let worker_finished = finished.clone();
+    thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            let mut child = Command::new(ffmpeg_exe)
+                .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+                .args(["-hide_banner", "-loglevel", "error", "-ss"])
+                .arg(format!("{:.3}", start_seconds.max(0.0)))
+                .args(["-i"])
+                .arg(video_path)
+                .args([
+                    "-t",
+                    &format!("{duration:.3}"),
+                    "-an",
+                    "-vf",
+                    "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=24",
+                    "-pix_fmt",
+                    "rgba",
+                    "-f",
+                    "rawvideo",
+                    "pipe:1",
+                ])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|error| format!("Could not start embedded video playback: {error}"))?;
+            let mut stdout = child
+                .stdout
+                .take()
+                .ok_or_else(|| "FFmpeg playback output was unavailable.".to_owned())?;
+            let mut frame = vec![0_u8; LIBRARY_PLAYBACK_WIDTH * LIBRARY_PLAYBACK_HEIGHT * 4];
+            let started_at = Instant::now();
+            let mut frame_index = 0_u64;
+            loop {
+                if worker_stop.load(Ordering::Acquire) {
+                    let _ = child.kill();
+                    break;
+                }
+                match stdout.read_exact(&mut frame) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                    Err(error) => return Err(format!("Could not decode video frame: {error}")),
+                }
+                let due =
+                    Duration::from_secs_f64(frame_index as f64 / LIBRARY_PLAYBACK_FPS as f64);
+                if let Some(wait) = due.checked_sub(started_at.elapsed()) {
+                    thread::sleep(wait);
+                }
+                let event = VideoPlaybackEvent::Frame {
+                    rgba: frame.clone(),
+                    position_seconds: start_seconds
+                        + frame_index as f64 / LIBRARY_PLAYBACK_FPS as f64,
+                };
+                if sender.send(event).is_err() {
+                    let _ = child.kill();
+                    break;
+                }
+                frame_index += 1;
+            }
+            let _ = child.wait();
+            Ok(())
+        })();
+        let _ = sender.send(match result {
+            Ok(()) => VideoPlaybackEvent::Finished,
+            Err(error) => VideoPlaybackEvent::Error(error),
+        });
+        worker_finished.store(true, Ordering::Release);
+    });
+    Ok(VideoPlaybackSession {
+        receiver,
+        stop,
+        finished,
+    })
+}
+
 pub fn export_trim_async(
     ffmpeg_exe: PathBuf,
     input_path: PathBuf,
@@ -328,7 +508,7 @@ fn export_trim(
             "-c:v",
             "libx264",
             "-preset",
-            "medium",
+            "veryfast",
             "-c:a",
             "aac",
             "-b:a",
