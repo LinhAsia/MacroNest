@@ -7536,12 +7536,18 @@ impl CrosshairApp {
         let mut reveal_video = None;
         let mut copy_video = None;
         let mut export_request = None;
+        let library_bounds = ctx.content_rect().shrink(8.0);
+        let default_width = (library_bounds.width() * 0.92).clamp(760.0, 980.0);
+        let default_height = (library_bounds.height() * 0.86).clamp(440.0, 600.0);
         egui::Window::new("Video library")
             .open(&mut open)
-            .default_width(980.0)
-            .default_height(600.0)
-            .min_width(760.0)
-            .min_height(440.0)
+            .default_width(default_width)
+            .default_height(default_height)
+            .min_width(620.0_f32.min(library_bounds.width()))
+            .min_height(400.0_f32.min(library_bounds.height()))
+            .max_width(library_bounds.width())
+            .max_height(library_bounds.height())
+            .constrain_to(library_bounds)
             .resizable(true)
             .collapsible(false)
             .show(ctx, |ui| {
@@ -7575,26 +7581,30 @@ impl CrosshairApp {
                             ui.columns(2, |cards| {
                                 for (index, video) in videos.iter().enumerate() {
                                     let ui = &mut cards[index % 2];
+                                    let card_width = ui.available_width().max(120.0);
+                                    let thumbnail_size = vec2(
+                                        (card_width - 12.0).max(108.0),
+                                        ((card_width - 12.0) * 9.0 / 16.0).clamp(72.0, 132.0),
+                                    );
                                     let name = video.file_name().and_then(|name| name.to_str()).unwrap_or("video");
                                     let bytes = fs::metadata(video).map(|metadata| metadata.len()).unwrap_or(0);
                                     let selected = self.video_library_selected.as_ref() == Some(video);
                                     let card = Frame::group(ui.style())
                                         .fill(if selected { Color32::from_rgb(37, 107, 82) } else { Color32::TRANSPARENT })
                                         .show(ui, |ui| {
+                                            ui.set_width(card_width - 8.0);
                                             if let Some(texture) = self.video_library_thumbnails.get(video) {
-                                                ui.add_sized(
-                                                    vec2(ui.available_width(), 106.0),
-                                                    Image::new(texture),
-                                                );
+                                                ui.add(Image::new(texture).fit_to_exact_size(thumbnail_size));
                                             } else {
-                                                ui.centered_and_justified(|ui| {
-                                                    ui.add_sized(
-                                                        vec2(ui.available_width(), 106.0),
-                                                        egui::Label::new(RichText::new("Loading thumbnail...").weak()),
-                                                    );
-                                                });
+                                                ui.add_sized(
+                                                    thumbnail_size,
+                                                    egui::Label::new(RichText::new("Loading thumbnail...").weak()),
+                                                );
                                             }
-                                            ui.label(RichText::new(name).size(12.0));
+                                            ui.add(
+                                                egui::Label::new(RichText::new(name).size(12.0))
+                                                    .truncate(),
+                                            );
                                             ui.label(RichText::new(format!("{:.1} MB", bytes as f64 / 1_048_576.0)).size(11.0).weak());
                                         });
                                     if ui
@@ -7620,17 +7630,18 @@ impl CrosshairApp {
                             );
                             ui.add_space(6.0);
                             if let Some(texture) = &self.video_library_preview_texture {
-                                ui.add_sized(
-                                    vec2(ui.available_width(), (ui.available_width() * 9.0 / 16.0).min(270.0)),
-                                    Image::new(texture),
+                                let preview_size = vec2(
+                                    ui.available_width().max(1.0),
+                                    (ui.available_width() * 9.0 / 16.0).min(270.0),
                                 );
+                                ui.add(Image::new(texture).fit_to_exact_size(preview_size));
                             } else if self.video_library_preview_rx.is_some() {
                                 ui.add(egui::Spinner::new());
                                 ui.label(RichText::new("Loading preview frame...").weak());
                             } else {
                                 ui.label(RichText::new("Preview frame unavailable.").weak());
                             }
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 if ui.button("Play video").clicked() {
                                     play_video = Some(selected_path.clone());
                                 }
@@ -7661,7 +7672,7 @@ impl CrosshairApp {
                                     &mut self.video_library_trim_start_seconds,
                                     &mut self.video_library_trim_end_seconds,
                                 );
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     if ui.button("Preview frame").clicked() {
                                         refresh_preview = Some((
                                             selected_path.clone(),
