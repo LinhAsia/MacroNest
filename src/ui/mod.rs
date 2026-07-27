@@ -7628,20 +7628,36 @@ impl CrosshairApp {
                                     let card = Frame::group(ui.style())
                                         .fill(if selected { Color32::from_rgb(37, 107, 82) } else { Color32::TRANSPARENT })
                                         .show(ui, |ui| {
-                                            ui.set_width(card_width - 8.0);
-                                            if let Some(texture) = self.video_library_thumbnails.get(video) {
-                                                ui.add(Image::new(texture).fit_to_exact_size(thumbnail_size));
-                                            } else {
+                                            ui.set_min_width(card_width - 8.0);
+                                            ui.set_max_width(card_width - 8.0);
+                                            ui.vertical(|ui| {
+                                                ui.set_min_width(card_width - 8.0);
+                                                ui.set_max_width(card_width - 8.0);
+                                                if let Some(texture) = self.video_library_thumbnails.get(video) {
+                                                    ui.add(Image::new(texture).fit_to_exact_size(thumbnail_size));
+                                                } else {
+                                                    ui.add_sized(
+                                                        thumbnail_size,
+                                                        egui::Label::new(RichText::new("Loading thumbnail...").weak()),
+                                                    );
+                                                }
                                                 ui.add_sized(
-                                                    thumbnail_size,
-                                                    egui::Label::new(RichText::new("Loading thumbnail...").weak()),
+                                                    [thumbnail_size.x, 18.0],
+                                                    egui::Label::new(RichText::new(name).size(12.0))
+                                                        .truncate(),
                                                 );
-                                            }
-                                            ui.add(
-                                                egui::Label::new(RichText::new(name).size(12.0))
-                                                    .truncate(),
-                                            );
-                                            ui.label(RichText::new(format!("{:.1} MB", bytes as f64 / 1_048_576.0)).size(11.0).weak());
+                                                ui.add_sized(
+                                                    [thumbnail_size.x, 16.0],
+                                                    egui::Label::new(
+                                                        RichText::new(format!(
+                                                            "{:.1} MB",
+                                                            bytes as f64 / 1_048_576.0,
+                                                        ))
+                                                        .size(11.0)
+                                                        .weak(),
+                                                    ),
+                                                );
+                                            });
                                         });
                                     if ui
                                         .interact(card.response.rect, ui.make_persistent_id(("video-card", video)), Sense::click())
