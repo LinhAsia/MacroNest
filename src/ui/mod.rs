@@ -7621,6 +7621,13 @@ impl CrosshairApp {
         let mut reveal_video = None;
         let mut copy_video = None;
         let mut export_request = None;
+        if ctx.input(|input| input.key_pressed(egui::Key::Space))
+            && !ctx.wants_keyboard_input()
+            && let Some(path) = self.video_library_selected.as_ref()
+            && self.video_library_preview.is_some()
+        {
+            toggle_playback = Some(path.clone());
+        }
         let library_bounds = ctx.content_rect().shrink(8.0);
         egui::Window::new("Video library")
             .open(&mut open)
@@ -7992,6 +7999,20 @@ impl CrosshairApp {
         let start_x = to_x(*start);
         let end_x = to_x(*end);
         let mut playhead_changed = false;
+        if let Some(pointer) = response.hover_pos() {
+            let over_trim_handle =
+                (pointer.x - start_x).abs().min((pointer.x - end_x).abs()) <= 8.0;
+            ui.ctx().set_cursor_icon(if over_trim_handle {
+                egui::CursorIcon::ResizeHorizontal
+            } else {
+                egui::CursorIcon::PointingHand
+            });
+            response.clone().on_hover_text(if over_trim_handle {
+                "Drag this green handle to change the trim range."
+            } else {
+                "Click or drag to move the playhead. Press Space to play or stop."
+            });
+        }
         if response.drag_started() {
             if let Some(pointer) = response.interact_pointer_pos() {
                 let start_distance = (pointer.x - start_x).abs();
@@ -8047,6 +8068,14 @@ impl CrosshairApp {
             painter.line_segment(
                 [pos2(x, rect.top() + 6.0), pos2(x, rect.bottom() - 8.0)],
                 Stroke::new(2.0, Color32::from_rgb(113, 214, 162)),
+            );
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    pos2(x, rect.center().y),
+                    vec2(10.0, 22.0),
+                ),
+                3.0,
+                Color32::from_rgb(113, 214, 162),
             );
         }
         let playhead_x = to_x(*playhead);
