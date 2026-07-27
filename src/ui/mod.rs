@@ -859,6 +859,8 @@ pub struct CrosshairApp {
     video_library_trim_end_seconds: f64,
     video_library_target_size_mb: u32,
     video_library_delete_armed: Option<PathBuf>,
+    video_library_delete_rx:
+        Option<Receiver<(PathBuf, std::result::Result<(), String>)>>,
     ocr_download_job: Option<JoinHandle<Result<()>>>,
     ocr_download_progress: Arc<AtomicU32>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
@@ -1194,6 +1196,7 @@ impl CrosshairApp {
             video_library_trim_end_seconds: 0.0,
             video_library_target_size_mb: 12,
             video_library_delete_armed: None,
+            video_library_delete_rx: None,
             ocr_download_job: None,
             ocr_download_progress: Arc::new(AtomicU32::new(0)),
             interception_download_job: None,
@@ -7631,6 +7634,28 @@ impl CrosshairApp {
         if let Some(error) = prepared_error {
             self.status = format!("Could not prepare video preview: {error}");
         }
+        let delete_result = self
+            .video_library_delete_rx
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        if let Some((path, result)) = delete_result {
+            self.video_library_delete_rx = None;
+            match result {
+                Ok(()) => {
+                    self.video_library_thumbnails.remove(&path);
+                    if self.video_library_selected.as_ref() == Some(&path) {
+                        self.video_library_selected = None;
+                        self.video_library_preview = None;
+                        self.video_library_preview_texture = None;
+                    }
+                    self.video_library_delete_armed = None;
+                    self.status =
+                        Self::tr_lang(self.state.ui_language, "Video deleted.", "Đã xóa video.")
+                            .to_owned();
+                }
+                Err(error) => self.status = format!("Could not delete video: {error}"),
+            }
+        }
         if let Some(rx) = &self.video_library_preview_rx {
             match rx.try_recv() {
                 Ok((path, Ok(preview))) => {
@@ -7861,9 +7886,14 @@ impl CrosshairApp {
                                     let name = video.file_name().and_then(|name| name.to_str()).unwrap_or("video");
                                     let bytes = fs::metadata(video).map(|metadata| metadata.len()).unwrap_or(0);
                                     let selected = self.video_library_selected.as_ref() == Some(video);
+                                    let armed =
+                                        self.video_library_delete_armed.as_ref() == Some(video);
                                     let card = Frame::group(ui.style())
                                         .fill(if selected { Color32::from_rgb(37, 107, 82) } else { Color32::TRANSPARENT })
                                         .show(ui, |ui| {
+                                            let mut card_clicked = false;
+                                            let mut copy_clicked = false;
+                                            let mut delete_clicked = false;
                                             ui.set_min_width(card_width - 8.0);
                                             ui.set_max_width(card_width - 8.0);
                                             ui.with_layout(
@@ -7872,9 +7902,16 @@ impl CrosshairApp {
                                                 ui.set_min_width(card_width - 8.0);
                                                 ui.set_max_width(card_width - 8.0);
                                                 if let Some(texture) = self.video_library_thumbnails.get(video) {
-                                                    ui.add(Image::new(texture).fit_to_exact_size(thumbnail_size));
+                                                    card_clicked |= ui
+                                                        .add(
+                                                            Image::new(texture)
+                                                                .fit_to_exact_size(thumbnail_size)
+                                                                .sense(Sense::click()),
+                                                        )
+                                                        .clicked();
                                                 } else {
-                                                    ui.add_sized(
+                                                    card_clicked |= ui
+                                                        .add_sized(
                                                         thumbnail_size,
                                                         egui::Label::new(
                                                             RichText::new(Self::tr_lang(
@@ -7883,15 +7920,18 @@ impl CrosshairApp {
                                                                 "Đang tải ảnh thu nhỏ...",
                                                             ))
                                                             .weak(),
-                                                        ),
-                                                    );
+                                                        )
+                                                        .sense(Sense::click()),
+                                                    )
+                                                        .clicked();
                                                 }
-                                                ui.add_sized(
+                                                card_clicked |= ui.add_sized(
                                                     [thumbnail_size.x, 18.0],
                                                     egui::Label::new(RichText::new(name).size(12.0))
-                                                        .truncate(),
-                                                );
-                                                ui.add_sized(
+                                                        .truncate()
+                                                        .sense(Sense::click()),
+                                                ).clicked();
+                                                card_clicked |= ui.add_sized(
                                                     [thumbnail_size.x, 16.0],
                                                     egui::Label::new(
                                                         RichText::new(format!(
@@ -7900,15 +7940,69 @@ impl CrosshairApp {
                                                         ))
                                                         .size(11.0)
                                                         .weak(),
-                                                    ),
-                                                );
+                                                    )
+                                                    .sense(Sense::click()),
+                                                ).clicked();
+                                                ui.horizontal(|ui| {
+                                                    copy_clicked = ui
+                                                        .add_sized(
+                                                            [28.0, 26.0],
+                                                            Button::new(
+                                                                Self::material_icon_text(
+                                                                    0xe14d, 15.0,
+                                                                ),
+                                                            ),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Copy video",
+                                                            "Sao chép video",
+                                                        ))
+                                                        .clicked();
+                                                    delete_clicked = ui
+                                                        .add_sized(
+                                                            [28.0, 26.0],
+                                                            Button::new(
+                                                                Self::material_icon_text(
+                                                                    0xe872, 15.0,
+                                                                )
+                                                                .color(if armed {
+                                                                    Color32::from_rgb(255, 130, 130)
+                                                                } else {
+                                                                    ui.visuals().text_color()
+                                                                }),
+                                                            ),
+                                                        )
+                                                        .on_hover_text(if armed {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Confirm delete",
+                                                                "Xác nhận xóa",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Delete video",
+                                                                "Xóa video",
+                                                            )
+                                                        })
+                                                        .clicked();
+                                                });
                                             });
+                                            (card_clicked, copy_clicked, delete_clicked)
                                         });
-                                    if ui
-                                        .interact(card.response.rect, ui.make_persistent_id(("video-card", video)), Sense::click())
-                                        .clicked()
-                                    {
+                                    if card.inner.0 {
                                         select_video = Some(video.clone());
+                                    }
+                                    if card.inner.1 {
+                                        copy_video = Some(video.clone());
+                                    }
+                                    if card.inner.2 {
+                                        if armed {
+                                            delete_video = Some(video.clone());
+                                        } else {
+                                            self.video_library_delete_armed = Some(video.clone());
+                                        }
                                     }
                                     if index % 2 == 1 {
                                         ui.end_row();
@@ -8010,12 +8104,6 @@ impl CrosshairApp {
                                     toggle_playback = Some(selected_path.clone());
                                 }
                                 if ui
-                                    .button(Self::tr_lang(language, "Copy video", "Sao chép video"))
-                                    .clicked()
-                                {
-                                    copy_video = Some(selected_path.clone());
-                                }
-                                if ui
                                     .button(Self::tr_lang(
                                         language,
                                         "Open file location",
@@ -8025,27 +8113,6 @@ impl CrosshairApp {
                                 {
                                     reveal_video = Some(selected_path.clone());
                                     self.status = "Opening file location\u{2026}".to_owned();
-                                }
-                                let armed =
-                                    self.video_library_delete_armed.as_ref() == Some(&selected_path);
-                                if ui
-                                    .button(if armed {
-                                        Self::tr_lang(
-                                            language,
-                                            "Confirm delete",
-                                            "Xác nhận xóa",
-                                        )
-                                    } else {
-                                        Self::tr_lang(language, "Delete video", "Xóa video")
-                                    })
-                                    .clicked()
-                                {
-                                    if armed {
-                                        delete_video = Some(selected_path.clone());
-                                    } else {
-                                        self.video_library_delete_armed =
-                                            Some(selected_path.clone());
-                                    }
                                 }
                             });
                             if let Some(preview) = &self.video_library_preview {
@@ -8278,18 +8345,31 @@ impl CrosshairApp {
         if let Some(path) = delete_video {
             self.stop_video_library_playback();
             self.video_library_preloaded_playback = None;
-            match fs::remove_file(&path) {
-                Ok(()) => {
-                    self.video_library_thumbnails.remove(&path);
-                    self.video_library_selected = None;
-                    self.video_library_preview = None;
-                    self.video_library_preview_texture = None;
-                    self.video_library_delete_armed = None;
-                    self.status =
-                        Self::tr_lang(language, "Video deleted.", "Đã xóa video.").to_owned();
+            let (sender, receiver) = crossbeam_channel::unbounded();
+            self.video_library_delete_rx = Some(receiver);
+            self.status = Self::tr_lang(language, "Deleting video...", "Đang xóa video...")
+                .to_owned();
+            std::thread::spawn(move || {
+                let mut last_error = None;
+                for _ in 0..40 {
+                    match fs::remove_file(&path) {
+                        Ok(()) => {
+                            let _ = sender.send((path, Ok(())));
+                            return;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            let _ = sender.send((path, Ok(())));
+                            return;
+                        }
+                        Err(error) => last_error = Some(error),
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
                 }
-                Err(error) => self.status = format!("Could not delete video: {error}"),
-            }
+                let error = last_error
+                    .map(|error| error.to_string())
+                    .unwrap_or_else(|| "The file is still in use.".to_owned());
+                let _ = sender.send((path, Err(error)));
+            });
         }
         if self.video_library_playback.is_none()
             && self.video_library_preloaded_playback.is_none()
@@ -8340,6 +8420,7 @@ impl CrosshairApp {
         {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if self.video_library_preview_rx.is_some()
+            || self.video_library_delete_rx.is_some()
             || !self.video_library_thumbnail_jobs.is_empty()
             || crate::video_recorder::is_editing()
         {
