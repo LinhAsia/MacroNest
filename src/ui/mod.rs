@@ -7689,7 +7689,7 @@ impl CrosshairApp {
         {
             toggle_playback = Some(path.clone());
         }
-        let library_bounds = ctx.content_rect().shrink(8.0);
+        let library_bounds = ctx.content_rect().shrink(16.0);
         egui::Window::new("Video library")
             .order(Order::Foreground)
             .fixed_pos(library_bounds.min)
@@ -7878,12 +7878,17 @@ impl CrosshairApp {
                                     path == &selected_path && !playback.is_ready()
                                 });
                             let video_buffering = playback_buffering || seek_buffering;
-                            if video_buffering {
-                                ui.horizontal(|ui| {
+                            ui.allocate_ui_with_layout(
+                                vec2(ui.available_width(), 24.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    if !video_buffering {
+                                        return;
+                                    }
                                     ui.add(egui::Spinner::new());
                                     ui.label(RichText::new("Loading preview\u{2026}").weak());
-                                });
-                            }
+                                },
+                            );
                             ui.horizontal_wrapped(|ui| {
                                 let playing = self.video_library_playback_path.as_ref()
                                     == Some(&selected_path);
@@ -7904,6 +7909,7 @@ impl CrosshairApp {
                                 }
                                 if ui.button("Open file location").clicked() {
                                     reveal_video = Some(selected_path.clone());
+                                    self.status = "Opening file location\u{2026}".to_owned();
                                 }
                             });
                             if let Some(preview) = &self.video_library_preview {
