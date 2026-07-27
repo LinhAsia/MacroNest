@@ -7571,20 +7571,56 @@ impl CrosshairApp {
                         });
                     });
                     ui.separator();
-                    ui.columns(2, |columns| {
-                        columns[0].set_min_width(360.0);
-                        columns[1].set_min_width(340.0);
-                        egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
+                    let content_rect = ui.available_rect_before_wrap();
+                    let divider_width = 10.0;
+                    let left_width = (content_rect.width() * 0.52)
+                        .clamp(320.0, (content_rect.width() - 300.0).max(320.0));
+                    let left_rect = egui::Rect::from_min_max(
+                        content_rect.min,
+                        pos2(content_rect.left() + left_width, content_rect.bottom()),
+                    );
+                    let right_rect = egui::Rect::from_min_max(
+                        pos2(left_rect.right() + divider_width, content_rect.top()),
+                        content_rect.max,
+                    );
+                    ui.allocate_rect(content_rect, Sense::hover());
+                    let mut left_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(left_rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    let mut right_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(right_rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    ui.painter().line_segment(
+                        [
+                            pos2(left_rect.right() + divider_width * 0.5, content_rect.top()),
+                            pos2(left_rect.right() + divider_width * 0.5, content_rect.bottom()),
+                        ],
+                        Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                    );
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(&mut left_ui, |ui| {
+                            ui.set_width(left_rect.width());
                             if videos.is_empty() {
                                 ui.label(RichText::new("No recorded videos yet.").weak());
                             }
-                            ui.columns(2, |cards| {
+                            let card_spacing = 8.0;
+                            let card_width = ((left_rect.width() - card_spacing - 14.0) * 0.5)
+                                .max(120.0);
+                            egui::Grid::new("video-library-thumbnail-grid")
+                                .num_columns(2)
+                                .spacing([card_spacing, card_spacing])
+                                .min_col_width(card_width)
+                                .max_col_width(card_width)
+                                .show(ui, |ui| {
                                 for (index, video) in videos.iter().enumerate() {
-                                    let ui = &mut cards[index % 2];
-                                    let card_width = ui.available_width().max(120.0);
                                     let thumbnail_size = vec2(
-                                        (card_width - 12.0).max(108.0),
-                                        ((card_width - 12.0) * 9.0 / 16.0).clamp(72.0, 132.0),
+                                        (card_width - 10.0).max(108.0),
+                                        ((card_width - 10.0) * 9.0 / 16.0).clamp(72.0, 132.0),
                                     );
                                     let name = video.file_name().and_then(|name| name.to_str()).unwrap_or("video");
                                     let bytes = fs::metadata(video).map(|metadata| metadata.len()).unwrap_or(0);
@@ -7613,12 +7649,14 @@ impl CrosshairApp {
                                     {
                                         select_video = Some(video.clone());
                                     }
-                                    ui.add_space(8.0);
+                                    if index % 2 == 1 {
+                                        ui.end_row();
+                                    }
                                 }
                             });
                         });
 
-                        columns[1].vertical_centered(|ui| {
+                        right_ui.vertical_centered(|ui| {
                             let Some(selected_path) = self.video_library_selected.as_ref().cloned() else {
                                 ui.add_space(100.0);
                                 ui.label(RichText::new("Select a video on the left.").weak());
@@ -7711,7 +7749,6 @@ impl CrosshairApp {
                             }
                             ui.label(RichText::new(crate::video_recorder::edit_status()).size(11.0).weak());
                         });
-                    });
                 });
             });
 
