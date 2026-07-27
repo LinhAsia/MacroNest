@@ -386,7 +386,7 @@ fn start_video_library_playback_inner(
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
             let mut child = Command::new(ffmpeg_exe)
-                .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+                .creation_flags(CREATE_NO_WINDOW)
                 .args([
                     "-hide_banner",
                     "-loglevel",
@@ -439,6 +439,16 @@ fn start_video_library_playback_inner(
                 }
                 if frame_index == 0 {
                     worker_ready.store(true, Ordering::Release);
+                    if sender
+                        .send(VideoPlaybackEvent::Frame {
+                            rgba: frame.clone(),
+                            position_seconds: start_seconds,
+                        })
+                        .is_err()
+                    {
+                        let _ = child.kill();
+                        break;
+                    }
                     while !worker_play.load(Ordering::Acquire) {
                         if worker_stop.load(Ordering::Acquire) {
                             let _ = child.kill();
@@ -447,6 +457,8 @@ fn start_video_library_playback_inner(
                         thread::sleep(Duration::from_millis(2));
                     }
                     started_at = Some(Instant::now());
+                    frame_index = 1;
+                    continue;
                 }
                 let due =
                     Duration::from_secs_f64(frame_index as f64 / LIBRARY_PLAYBACK_FPS as f64);

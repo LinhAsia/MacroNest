@@ -7561,6 +7561,44 @@ impl CrosshairApp {
         if let Some(error) = playback_error {
             self.status = format!("Could not play video: {error}");
         }
+        let mut prepared_finished = false;
+        let mut prepared_error = None;
+        if let Some((_, _, _, playback)) = &self.video_library_preloaded_playback {
+            while let Some(event) = playback.try_recv() {
+                match event {
+                    crate::video_recorder::VideoPlaybackEvent::Frame {
+                        rgba,
+                        position_seconds,
+                    } => {
+                        let image = ColorImage::from_rgba_unmultiplied([640, 360], &rgba);
+                        if let Some(texture) = &mut self.video_library_preview_texture {
+                            texture.set(image, TextureOptions::LINEAR);
+                        } else {
+                            self.video_library_preview_texture = Some(ctx.load_texture(
+                                "video-library-prebuffered-frame",
+                                image,
+                                TextureOptions::LINEAR,
+                            ));
+                        }
+                        self.video_library_playback_position_seconds = position_seconds;
+                    }
+                    crate::video_recorder::VideoPlaybackEvent::Finished => {
+                        prepared_finished = true;
+                    }
+                    crate::video_recorder::VideoPlaybackEvent::Error(error) => {
+                        prepared_error = Some(error);
+                        prepared_finished = true;
+                    }
+                }
+            }
+            prepared_finished |= playback.is_finished();
+        }
+        if prepared_finished {
+            self.video_library_preloaded_playback = None;
+        }
+        if let Some(error) = prepared_error {
+            self.status = format!("Could not prepare video preview: {error}");
+        }
         if let Some(rx) = &self.video_library_preview_rx {
             match rx.try_recv() {
                 Ok((path, Ok(preview))) => {
@@ -7628,7 +7666,6 @@ impl CrosshairApp {
         let mut open = self.video_library_open;
         let mut close_library = false;
         let mut select_video = None;
-        let mut refresh_preview = None;
         let mut toggle_playback = None;
         let mut reveal_video = None;
         let mut copy_video = None;
@@ -7870,10 +7907,6 @@ impl CrosshairApp {
                                 if playhead_changed {
                                     self.stop_video_library_playback();
                                     self.video_library_preloaded_playback = None;
-                                    refresh_preview = Some((
-                                        selected_path.clone(),
-                                        self.video_library_playback_position_seconds,
-                                    ));
                                 }
                                 ui.horizontal_wrapped(|ui| {
                                     if ui.add_enabled(!crate::video_recorder::is_editing(), Button::new("Export trim")).clicked() {
@@ -7936,9 +7969,6 @@ impl CrosshairApp {
             self.video_library_target_size_mb =
                 (source_mb * 0.65).round().clamp(1.0, 2048.0) as u32;
             self.video_library_pending_preview = Some((path, 0.5));
-        }
-        if let Some(request) = refresh_preview {
-            self.video_library_pending_preview = Some(request);
         }
         if let Some(path) = toggle_playback {
             if self.video_library_playback_path.as_ref() == Some(&path) {
@@ -8047,7 +8077,10 @@ impl CrosshairApp {
                     Some((path.clone(), start, end, playback));
             }
         }
-        while self.video_library_thumbnail_jobs.len() < 3 {
+        while self.video_library_playback.is_none()
+            && self.video_library_preloaded_playback.is_none()
+            && self.video_library_thumbnail_jobs.len() < 3
+        {
             let Some(path) = videos.iter().find(|path| {
                 !self.video_library_thumbnails.contains_key(*path)
                     && !self.video_library_thumbnail_jobs.contains(*path)
@@ -8154,6 +8187,8 @@ impl CrosshairApp {
                 }
             }
         }
+        let timeline_committed =
+            (playhead_changed && response.clicked()) || response.drag_stopped();
         *playhead = playhead.clamp(*start, *end);
         if !ui.input(|input| input.pointer.primary_down()) {
             ui.ctx().data_mut(|data| data.remove::<VideoTrimHandle>(handle_id));
@@ -8209,7 +8244,7 @@ impl CrosshairApp {
             egui::TextStyle::Small.resolve(ui.style()),
             Color32::WHITE,
         );
-        playhead_changed
+        timeline_committed
     }
 
     fn format_video_seconds(seconds: f64) -> String {
