@@ -296,7 +296,7 @@ mod windows_overlay {
     }
 
     pub(crate) fn take_memory_trigger_events() -> Vec<HotkeyBinding> {
-        if is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed) {
+        if is_ui_in_foreground() {
             MEMORY_TRIGGER_EVENTS.lock().clear();
             return Vec::new();
         }
@@ -4940,8 +4940,7 @@ mod windows_overlay {
                     }
                 }
 
-                let ui_is_foreground = is_app_ui_currently_foreground()
-                    || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
+                let ui_is_foreground = is_ui_in_foreground();
                 if ui_is_foreground {
                     if let Some(key_name) = key_name.as_ref() {
                         update_held_key(info.vkCode, is_key_down, is_key_up);
@@ -6374,8 +6373,7 @@ mod windows_overlay {
                     .is_some_and(|h| hotkey::binding_matches(h, binding))
             })
         };
-        let ui_is_foreground =
-            is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed);
+        let ui_is_foreground = is_ui_in_foreground();
         if ui_is_foreground && !is_record_hotkey {
             return Some(false);
         }
@@ -34499,7 +34497,14 @@ mod windows_overlay {
         if screen_draw_active() {
             return false;
         }
-        is_app_ui_currently_foreground() || UI_WINDOW_FOREGROUND.load(Ordering::Relaxed)
+        unsafe {
+            // ponytail: trust the live foreground window during Alt+Tab; the UI-thread cache can
+            // lag briefly and must only be a fallback while Windows has no foreground window.
+            if !GetForegroundWindow().0.is_null() {
+                return is_app_ui_currently_foreground();
+            }
+        }
+        UI_WINDOW_FOREGROUND.load(Ordering::Relaxed)
     }
 
     pub fn find_app_ui_window_for_ui_thread() -> Option<windows::Win32::Foundation::HWND> {
