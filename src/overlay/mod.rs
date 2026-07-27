@@ -1790,6 +1790,7 @@ mod windows_overlay {
         PreviewGeometrySpec(Option<GeometrySpec>),
         PreviewGeometryPreset(Option<u32>),
         RefreshSearchAreaOverlay,
+        RefreshHud,
         InvalidateVisionWaits(Vec<u32>),
         ApplyMouseSensitivityPreset(u32),
         RestoreMouseSensitivity,
@@ -9961,6 +9962,10 @@ mod windows_overlay {
                 OverlayCommand::RefreshSearchAreaOverlay => {
                     SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
                     let _ = refresh_search_area_overlay(runtime);
+                }
+
+                OverlayCommand::RefreshHud => {
+                    let _ = refresh_hud(runtime);
                 }
 
                 OverlayCommand::InvalidateVisionWaits(preset_ids) => {
@@ -32103,7 +32108,7 @@ mod windows_overlay {
             show_legacy_hud_text(owner_preset_id, step);
         }
 
-        wake_command_queue();
+        send_overlay_command(OverlayCommand::RefreshHud);
     }
 
     pub(crate) fn hide_hud_now() {
@@ -37888,6 +37893,7 @@ mod fallback {
             keyboard_key_press_delay_ms: u32,
         },
         UpdateVisionPresets(Vec<VisionPreset>),
+        RefreshHud,
         SetArduinoFlashInProgress(bool),
         SetMacrosMasterEnabled(bool),
         SetNativeFocusHighlightEnabled(bool),
