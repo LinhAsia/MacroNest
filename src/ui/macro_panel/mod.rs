@@ -9044,7 +9044,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   live_sync |= response.changed();
                                                                   ui.label(" = ");
                                                                   let var_val_id = ui.id().with("hold-stop-set-var-val");
-                                                                  let response2 = Self::render_plain_text_edit(
+                                                                  let response2 = Self::render_interpolated_text_edit(
                                                                       ui,
                                                                       &mut step.key,
                                                                       var_val_id,
@@ -11391,7 +11391,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   live_sync |= response.changed();
                                                                   ui.label(" = ");
                                                                   let var_val_id = ui.id().with("press-stop-set-var-val");
-                                                                  let response2 = Self::render_plain_text_edit(
+                                                                  let response2 = Self::render_interpolated_text_edit(
                                                                       ui,
                                                                       &mut step.key,
                                                                       var_val_id,
@@ -14871,7 +14871,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   live_sync |= response.changed();
                                                                   ui.label(" = ");
                                                                   let var_val_id = ui.id().with((step_index, "regular-set-var-val"));
-                                                                  let response2 = Self::render_plain_text_edit(
+                                                                  let response2 = Self::render_interpolated_text_edit(
                                                                       ui,
                                                                       &mut step.key,
                                                                       var_val_id,
