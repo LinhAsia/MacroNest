@@ -15,6 +15,9 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
+const MACRO_STEP_TEXT_SIZE: f32 = 13.0;
+const MACRO_STEP_CONTROL_HEIGHT: f32 = 21.0;
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
@@ -1836,14 +1839,20 @@ impl CrosshairApp {
         live_sync: &mut bool,
     ) {
         ui.scope(|ui| {
-            ui.style_mut().text_styles.insert(egui::TextStyle::Body, egui::FontId::proportional(13.0));
-            ui.style_mut().text_styles.insert(egui::TextStyle::Button, egui::FontId::proportional(13.0));
+            ui.style_mut().text_styles.insert(
+                egui::TextStyle::Body,
+                egui::FontId::proportional(MACRO_STEP_TEXT_SIZE),
+            );
+            ui.style_mut().text_styles.insert(
+                egui::TextStyle::Button,
+                egui::FontId::proportional(MACRO_STEP_TEXT_SIZE),
+            );
             ui.horizontal(|ui| {
             ui.label(RichText::new(Self::tr_lang(
                 language,
                 "Mouse Click Delay:",
                 "Mouse Click Delay:",
-            )).size(13.0));
+            )).size(MACRO_STEP_TEXT_SIZE));
             *live_sync |= ui
                 .add(
                     egui::DragValue::new(&mut step.mouse_click_delay_ms)
@@ -12252,6 +12261,21 @@ if supports_move_mouse || show_detection_tuning {
                                     .stroke(border_stroke)
                                     .inner_margin(egui::Margin::symmetric(4, 2))
                                     .show(ui, |ui| ui.push_id((preset.id, step_index), |ui| {
+                                        let step_font = egui::FontId::proportional(MACRO_STEP_TEXT_SIZE);
+                                        for text_style in [
+                                            egui::TextStyle::Body,
+                                            egui::TextStyle::Button,
+                                            egui::TextStyle::Monospace,
+                                            egui::TextStyle::Small,
+                                        ] {
+                                            ui.style_mut()
+                                                .text_styles
+                                                .insert(text_style, step_font.clone());
+                                        }
+                                        ui.spacing_mut().interact_size.y = MACRO_STEP_CONTROL_HEIGHT;
+                                        ui.spacing_mut().button_padding.y = 0.0;
+                                        ui.set_min_height(MACRO_STEP_CONTROL_HEIGHT);
+                                        ui.set_max_height(MACRO_STEP_CONTROL_HEIGHT);
                                         ui.horizontal(|ui| {
                                             const STEP_TOOLBAR_BUTTON: [f32; 2] = [20.0, 20.0];
                                             const STEP_TOOLBAR_ICON_SMALL: f32 = 14.0;
@@ -14020,7 +14044,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                          ui.add_space(2.0);
                                                                          ui.label(
                                                                              RichText::new(format!("({})", val_str))
-                                                                                 .size(10.0)
+                                                                                 .size(MACRO_STEP_TEXT_SIZE)
                                                                                  .color(Color32::from_rgb(0, 191, 255))
                                                                          ).on_hover_text(Self::tr_lang(language, "Current runtime value", "Current runtime value"));
                                                                      }
@@ -14515,7 +14539,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                            ui.add_space(2.0);
                                                                            ui.label(
                                                                                RichText::new(format!("({})", left_val))
-                                                                                   .size(10.0)
+                                                                                   .size(MACRO_STEP_TEXT_SIZE)
                                                                                    .color(Color32::from_rgb(0, 191, 255))
                                                                            ).on_hover_text(Self::tr_lang(language, "Evaluated left expression", "Evaluated left expression"));
                                                                        }
@@ -14872,7 +14896,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                     ui.add_space(2.0);
                                                                     ui.label(
                                                                         RichText::new(format!("({})", val_str))
-                                                                            .size(10.0)
+                                                                            .size(MACRO_STEP_TEXT_SIZE)
                                                                             .color(Color32::from_rgb(0, 191, 255))
                                                                     ).on_hover_text(Self::tr_lang(language, "Current runtime value", "Current runtime value"));
                                                                 }
