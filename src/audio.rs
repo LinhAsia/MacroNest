@@ -2,7 +2,10 @@ use std::{
     fs::File,
     io::BufReader,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -203,6 +206,7 @@ impl PreviewState {
 static PREVIEW_STATE: Lazy<Mutex<Option<PreviewState>>> = Lazy::new(|| Mutex::new(None));
 static VIDEO_PREVIEW_STATE: Lazy<Mutex<Option<VideoPreviewAudioState>>> =
     Lazy::new(|| Mutex::new(None));
+static VIDEO_PREVIEW_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 struct VideoPreviewAudioState {
     _stream: rodio::OutputStream,
@@ -440,14 +444,39 @@ pub fn play_video_audio_preview(path: &str, start_ms: u64, end_ms: u64) -> Resul
     if trimmed.is_empty() {
         bail!("Choose a video file first");
     }
+    let generation = VIDEO_PREVIEW_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let decoded = decode_media_audio(trimmed)?;
+    if generation != VIDEO_PREVIEW_GENERATION.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    install_video_audio_preview(trimmed, decoded, start_ms, end_ms)
+}
 
+pub fn play_video_audio_preview_async(path: String, start_ms: u64, end_ms: u64) {
+    let generation = VIDEO_PREVIEW_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    thread::spawn(move || {
+        let Ok(decoded) = decode_media_audio(&path) else {
+            return;
+        };
+        if generation != VIDEO_PREVIEW_GENERATION.load(Ordering::Acquire) {
+            return;
+        }
+        let _ = install_video_audio_preview(&path, decoded, start_ms, end_ms);
+    });
+}
+
+fn install_video_audio_preview(
+    path: &str,
+    decoded: CachedAudio,
+    start_ms: u64,
+    end_ms: u64,
+) -> Result<()> {
     let mut state = video_preview_state()?;
     let state = state
         .as_mut()
         .expect("video preview state should be initialized");
     state.stop();
 
-    let decoded = decode_media_audio(trimmed)?;
     let channels = decoded.channels.max(1);
     let sample_rate = decoded.sample_rate.max(1);
     let clip_end_ms = end_ms.max(start_ms.saturating_add(1));
@@ -472,7 +501,7 @@ pub fn play_video_audio_preview(path: &str, start_ms: u64, end_ms: u64) -> Resul
         decoded.samples[start_sample..end_sample].to_vec(),
     ));
     sink.play();
-    state.path = trimmed.to_owned();
+    state.path = path.to_owned();
     state.start_ms = start_ms;
     state.end_ms = clip_end_ms;
     state.sink = Some(sink);
@@ -480,6 +509,7 @@ pub fn play_video_audio_preview(path: &str, start_ms: u64, end_ms: u64) -> Resul
 }
 
 pub fn stop_video_audio_preview() {
+    VIDEO_PREVIEW_GENERATION.fetch_add(1, Ordering::AcqRel);
     if let Ok(mut state) = video_preview_state() {
         state
             .as_mut()

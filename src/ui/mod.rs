@@ -6964,6 +6964,16 @@ impl CrosshairApp {
         self.video_library_preview_rx = Some(rx);
     }
 
+    fn stop_video_library_playback(&mut self) {
+        let was_playing =
+            self.video_library_playback.is_some() || self.video_library_playback_path.is_some();
+        self.video_library_playback = None;
+        self.video_library_playback_path = None;
+        if was_playing {
+            audio::stop_video_audio_preview();
+        }
+    }
+
     #[allow(dead_code)]
     fn render_video_library_legacy(&mut self, ctx: &egui::Context) {
         if let Some(rx) = &self.video_library_preview_rx {
@@ -7543,8 +7553,7 @@ impl CrosshairApp {
             playback_finished |= playback.is_finished();
         }
         if playback_finished {
-            self.video_library_playback = None;
-            self.video_library_playback_path = None;
+            self.stop_video_library_playback();
         }
         if let Some(error) = playback_error {
             self.status = format!("Could not play video: {error}");
@@ -7600,8 +7609,7 @@ impl CrosshairApp {
             }
         }
         if !self.video_library_open {
-            self.video_library_playback = None;
-            self.video_library_playback_path = None;
+            self.stop_video_library_playback();
             return;
         }
         self.render_modal_backdrop(ctx, true);
@@ -7615,6 +7623,7 @@ impl CrosshairApp {
         }
 
         let mut open = self.video_library_open;
+        let mut close_library = false;
         let mut select_video = None;
         let mut refresh_preview = None;
         let mut toggle_playback = None;
@@ -7630,13 +7639,14 @@ impl CrosshairApp {
         }
         let library_bounds = ctx.content_rect().shrink(8.0);
         egui::Window::new("Video library")
-            .open(&mut open)
             .order(Order::Foreground)
             .fixed_pos(library_bounds.min)
             .fixed_size(library_bounds.size())
             .constrain_to(library_bounds)
             .resizable(false)
             .collapsible(false)
+            .title_bar(false)
+            .frame(Frame::window(ctx.style().as_ref()).corner_radius(14.0))
             .show(ctx, |ui| {
                 ui.scope(|ui| {
                     ui.style_mut()
@@ -7645,6 +7655,27 @@ impl CrosshairApp {
                     ui.style_mut()
                         .text_styles
                         .insert(egui::TextStyle::Button, egui::FontId::proportional(13.0));
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Video library").strong().size(18.0));
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if ui
+                                    .add_sized(
+                                        [36.0, 30.0],
+                                        Button::new(RichText::new("×").strong().size(20.0))
+                                            .fill(Color32::from_rgb(174, 55, 76))
+                                            .corner_radius(7.0),
+                                    )
+                                    .on_hover_text("Close video library")
+                                    .clicked()
+                                {
+                                    close_library = true;
+                                }
+                            },
+                        );
+                    });
+                    ui.separator();
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Recorded videos").strong());
                         ui.label(RichText::new(format!("{} video(s)", videos.len())).size(12.0).weak());
@@ -7717,7 +7748,9 @@ impl CrosshairApp {
                                         .show(ui, |ui| {
                                             ui.set_min_width(card_width - 8.0);
                                             ui.set_max_width(card_width - 8.0);
-                                            ui.vertical(|ui| {
+                                            ui.with_layout(
+                                                egui::Layout::top_down(egui::Align::Center),
+                                                |ui| {
                                                 ui.set_min_width(card_width - 8.0);
                                                 ui.set_max_width(card_width - 8.0);
                                                 if let Some(texture) = self.video_library_thumbnails.get(video) {
@@ -7832,8 +7865,7 @@ impl CrosshairApp {
                                     &mut self.video_library_playback_position_seconds,
                                 );
                                 if playhead_changed {
-                                    self.video_library_playback = None;
-                                    self.video_library_playback_path = None;
+                                    self.stop_video_library_playback();
                                     refresh_preview = Some((
                                         selected_path.clone(),
                                         self.video_library_playback_position_seconds,
@@ -7875,14 +7907,17 @@ impl CrosshairApp {
                 });
             });
 
+        if close_library
+            || ctx.input(|input| input.key_pressed(egui::Key::Escape))
+        {
+            open = false;
+        }
         self.video_library_open = open;
         if !open {
-            self.video_library_playback = None;
-            self.video_library_playback_path = None;
+            self.stop_video_library_playback();
         }
         if let Some(path) = select_video {
-            self.video_library_playback = None;
-            self.video_library_playback_path = None;
+            self.stop_video_library_playback();
             self.video_library_selected = Some(path.clone());
             self.video_library_preview = None;
             self.video_library_preview_texture = None;
@@ -7901,10 +7936,9 @@ impl CrosshairApp {
         }
         if let Some(path) = toggle_playback {
             if self.video_library_playback_path.as_ref() == Some(&path) {
-                self.video_library_playback = None;
-                self.video_library_playback_path = None;
+                self.stop_video_library_playback();
             } else {
-                self.video_library_playback = None;
+                self.stop_video_library_playback();
                 let playback_start = if self.video_library_playback_position_seconds
                     >= self.video_library_trim_end_seconds - 0.05
                 {
@@ -7922,6 +7956,13 @@ impl CrosshairApp {
                     self.video_library_trim_end_seconds,
                 ) {
                     Ok(playback) => {
+                        audio::play_video_audio_preview_async(
+                            path.to_string_lossy().into_owned(),
+                            (playback_start * 1000.0).round().max(0.0) as u64,
+                            (self.video_library_trim_end_seconds * 1000.0)
+                                .round()
+                                .max(1.0) as u64,
+                        );
                         self.video_library_playback = Some(playback);
                         self.video_library_playback_path = Some(path);
                         self.video_library_playback_position_seconds = playback_start;
@@ -7992,16 +8033,20 @@ impl CrosshairApp {
     ) -> bool {
         let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click_and_drag());
         let handle_id = ui.make_persistent_id("video-library-trim-handle");
-        let width = rect.width().max(1.0);
-        let to_x = |seconds: f64| rect.left() + (seconds / duration) as f32 * width;
-        let to_seconds = |x: f32| (((x - rect.left()) / width) as f64 * duration).clamp(0.0, duration);
+        let track_rect = rect.shrink2(vec2(7.0, 0.0));
+        let width = track_rect.width().max(1.0);
+        let to_x = |seconds: f64| track_rect.left() + (seconds / duration) as f32 * width;
+        let to_seconds =
+            |x: f32| (((x - track_rect.left()) / width) as f64 * duration).clamp(0.0, duration);
         *playhead = playhead.clamp(*start, *end);
         let start_x = to_x(*start);
         let end_x = to_x(*end);
+        const TRIM_HANDLE_HITBOX: f32 = 14.0;
         let mut playhead_changed = false;
         if let Some(pointer) = response.hover_pos() {
             let over_trim_handle =
-                (pointer.x - start_x).abs().min((pointer.x - end_x).abs()) <= 8.0;
+                (pointer.x - start_x).abs().min((pointer.x - end_x).abs())
+                    <= TRIM_HANDLE_HITBOX;
             ui.ctx().set_cursor_icon(if over_trim_handle {
                 egui::CursorIcon::ResizeHorizontal
             } else {
@@ -8013,11 +8058,16 @@ impl CrosshairApp {
                 "Click or drag to move the playhead. Press Space to play or stop."
             });
         }
-        if response.drag_started() {
-            if let Some(pointer) = response.interact_pointer_pos() {
+        let active_handle =
+            ui.ctx().data(|data| data.get_temp::<VideoTrimHandle>(handle_id));
+        if response.is_pointer_button_down_on() && active_handle.is_none() {
+            if let Some(pointer) = ui
+                .input(|input| input.pointer.press_origin())
+                .or_else(|| response.interact_pointer_pos())
+            {
                 let start_distance = (pointer.x - start_x).abs();
                 let end_distance = (pointer.x - end_x).abs();
-                let handle = if start_distance.min(end_distance) > 8.0 {
+                let handle = if start_distance.min(end_distance) > TRIM_HANDLE_HITBOX {
                     VideoTrimHandle::Playhead
                 } else if start_distance <= end_distance {
                     VideoTrimHandle::Start
@@ -8033,7 +8083,8 @@ impl CrosshairApp {
         }
         if response.clicked()
             && let Some(pointer) = response.interact_pointer_pos()
-            && (pointer.x - start_x).abs().min((pointer.x - end_x).abs()) > 8.0
+            && (pointer.x - start_x).abs().min((pointer.x - end_x).abs())
+                > TRIM_HANDLE_HITBOX
         {
             *playhead = to_seconds(pointer.x).clamp(*start, *end);
             playhead_changed = true;
@@ -8057,6 +8108,8 @@ impl CrosshairApp {
         if !ui.input(|input| input.pointer.primary_down()) {
             ui.ctx().data_mut(|data| data.remove::<VideoTrimHandle>(handle_id));
         }
+        let start_x = to_x(*start);
+        let end_x = to_x(*end);
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 4.0, Color32::from_rgb(41, 45, 54));
         painter.rect_filled(
@@ -16606,7 +16659,9 @@ impl eframe::App for CrosshairApp {
             matches!(self.state.active_panel, AppPanel::Sound | AppPanel::Media);
         if !app_focused || !audio_panel_active {
             audio::stop_preview();
-            audio::stop_video_audio_preview();
+            if self.video_library_playback.is_none() {
+                audio::stop_video_audio_preview();
+            }
         }
 
         egui::CentralPanel::default()
