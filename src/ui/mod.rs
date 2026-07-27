@@ -7861,11 +7861,34 @@ impl CrosshairApp {
                             } else {
                                 ui.label(RichText::new("Preview frame unavailable.").weak());
                             }
+                            let playback_buffering = self
+                                .video_library_playback
+                                .as_ref()
+                                .is_some_and(|playback| !playback.is_ready());
+                            let seek_buffering = self
+                                .video_library_preloaded_playback
+                                .as_ref()
+                                .is_some_and(|(path, _, _, playback)| {
+                                    path == &selected_path && !playback.is_ready()
+                                });
+                            let video_buffering = playback_buffering || seek_buffering;
+                            if video_buffering {
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Spinner::new());
+                                    ui.label(RichText::new("Loading preview\u{2026}").weak());
+                                });
+                            }
                             ui.horizontal_wrapped(|ui| {
                                 let playing = self.video_library_playback_path.as_ref()
                                     == Some(&selected_path);
                                 if ui
-                                    .button(if playing { "Stop video" } else { "Play video" })
+                                    .button(if playing && video_buffering {
+                                        "Stop loading"
+                                    } else if playing {
+                                        "Stop video"
+                                    } else {
+                                        "Play video"
+                                    })
                                     .clicked()
                                 {
                                     toggle_playback = Some(selected_path.clone());
@@ -8012,7 +8035,6 @@ impl CrosshairApp {
                     .filter(|(prepared_path, prepared_start, _, playback)| {
                         prepared_path == &path
                             && (*prepared_start - playback_start).abs() < 0.001
-                            && playback.is_ready()
                             && !playback.is_finished()
                     })
                     .map(|(_, _, _, playback)| {
@@ -8116,7 +8138,9 @@ impl CrosshairApp {
                 let _ = sender.send((path, result));
             });
         }
-        if self.video_library_playback.is_some() {
+        if self.video_library_playback.is_some()
+            || self.video_library_preloaded_playback.is_some()
+        {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if self.video_library_preview_rx.is_some()
             || !self.video_library_thumbnail_jobs.is_empty()
