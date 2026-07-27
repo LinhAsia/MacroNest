@@ -116,6 +116,8 @@ pub struct VideoPlaybackSession {
     receiver: Receiver<VideoPlaybackEvent>,
     stop: Arc<AtomicBool>,
     finished: Arc<AtomicBool>,
+    play: Arc<AtomicBool>,
+    ready: Arc<AtomicBool>,
 }
 
 impl VideoPlaybackSession {
@@ -129,6 +131,14 @@ impl VideoPlaybackSession {
 
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Release);
+    }
+
+    pub fn play(&self) {
+        self.play.store(true, Ordering::Release);
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.ready.load(Ordering::Acquire)
     }
 }
 
@@ -326,6 +336,37 @@ pub fn start_video_library_playback(
     start_seconds: f64,
     end_seconds: f64,
 ) -> Result<VideoPlaybackSession, String> {
+    start_video_library_playback_inner(
+        ffmpeg_exe,
+        video_path,
+        start_seconds,
+        end_seconds,
+        true,
+    )
+}
+
+pub fn prepare_video_library_playback(
+    ffmpeg_exe: PathBuf,
+    video_path: PathBuf,
+    start_seconds: f64,
+    end_seconds: f64,
+) -> Result<VideoPlaybackSession, String> {
+    start_video_library_playback_inner(
+        ffmpeg_exe,
+        video_path,
+        start_seconds,
+        end_seconds,
+        false,
+    )
+}
+
+fn start_video_library_playback_inner(
+    ffmpeg_exe: PathBuf,
+    video_path: PathBuf,
+    start_seconds: f64,
+    end_seconds: f64,
+    play_immediately: bool,
+) -> Result<VideoPlaybackSession, String> {
     if !ffmpeg_exe.exists() {
         return Err("FFmpeg is not installed.".to_owned());
     }
@@ -336,8 +377,12 @@ pub fn start_video_library_playback(
     let (sender, receiver) = sync_channel(2);
     let stop = Arc::new(AtomicBool::new(false));
     let finished = Arc::new(AtomicBool::new(false));
+    let play = Arc::new(AtomicBool::new(play_immediately));
+    let ready = Arc::new(AtomicBool::new(false));
     let worker_stop = stop.clone();
     let worker_finished = finished.clone();
+    let worker_play = play.clone();
+    let worker_ready = ready.clone();
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
             let mut child = Command::new(ffmpeg_exe)
@@ -380,8 +425,8 @@ pub fn start_video_library_playback(
                 .take()
                 .ok_or_else(|| "FFmpeg playback output was unavailable.".to_owned())?;
             let mut frame = vec![0_u8; LIBRARY_PLAYBACK_WIDTH * LIBRARY_PLAYBACK_HEIGHT * 4];
-            let started_at = Instant::now();
             let mut frame_index = 0_u64;
+            let mut started_at = None;
             loop {
                 if worker_stop.load(Ordering::Acquire) {
                     let _ = child.kill();
@@ -392,9 +437,22 @@ pub fn start_video_library_playback(
                     Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => break,
                     Err(error) => return Err(format!("Could not decode video frame: {error}")),
                 }
+                if frame_index == 0 {
+                    worker_ready.store(true, Ordering::Release);
+                    while !worker_play.load(Ordering::Acquire) {
+                        if worker_stop.load(Ordering::Acquire) {
+                            let _ = child.kill();
+                            return Ok(());
+                        }
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                    started_at = Some(Instant::now());
+                }
                 let due =
                     Duration::from_secs_f64(frame_index as f64 / LIBRARY_PLAYBACK_FPS as f64);
-                if let Some(wait) = due.checked_sub(started_at.elapsed()) {
+                if let Some(wait) =
+                    due.checked_sub(started_at.unwrap_or_else(Instant::now).elapsed())
+                {
                     thread::sleep(wait);
                 }
                 let event = VideoPlaybackEvent::Frame {
@@ -421,6 +479,8 @@ pub fn start_video_library_playback(
         receiver,
         stop,
         finished,
+        play,
+        ready,
     })
 }
 

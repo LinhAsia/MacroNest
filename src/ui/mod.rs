@@ -839,6 +839,8 @@ pub struct CrosshairApp {
         Receiver<(PathBuf, Result<crate::video_recorder::VideoLibraryPreview, String>)>,
     video_library_thumbnail_jobs: HashSet<PathBuf>,
     video_library_playback: Option<crate::video_recorder::VideoPlaybackSession>,
+    video_library_preloaded_playback:
+        Option<(PathBuf, f64, f64, crate::video_recorder::VideoPlaybackSession)>,
     video_library_playback_path: Option<PathBuf>,
     video_library_playback_position_seconds: f64,
     video_library_pending_preview: Option<(PathBuf, f64)>,
@@ -1172,6 +1174,7 @@ impl CrosshairApp {
             video_library_thumbnail_rx,
             video_library_thumbnail_jobs: HashSet::new(),
             video_library_playback: None,
+            video_library_preloaded_playback: None,
             video_library_playback_path: None,
             video_library_playback_position_seconds: 0.0,
             video_library_pending_preview: None,
@@ -7866,6 +7869,7 @@ impl CrosshairApp {
                                 );
                                 if playhead_changed {
                                     self.stop_video_library_playback();
+                                    self.video_library_preloaded_playback = None;
                                     refresh_preview = Some((
                                         selected_path.clone(),
                                         self.video_library_playback_position_seconds,
@@ -7915,9 +7919,11 @@ impl CrosshairApp {
         self.video_library_open = open;
         if !open {
             self.stop_video_library_playback();
+            self.video_library_preloaded_playback = None;
         }
         if let Some(path) = select_video {
             self.stop_video_library_playback();
+            self.video_library_preloaded_playback = None;
             self.video_library_selected = Some(path.clone());
             self.video_library_preview = None;
             self.video_library_preview_texture = None;
@@ -7949,12 +7955,30 @@ impl CrosshairApp {
                         self.video_library_trim_end_seconds,
                     )
                 };
-                match crate::video_recorder::start_video_library_playback(
-                    self.paths.ffmpeg_exe.clone(),
-                    path.clone(),
-                    playback_start,
-                    self.video_library_trim_end_seconds,
-                ) {
+                let playback_end = self.video_library_trim_end_seconds;
+                let prepared = self
+                    .video_library_preloaded_playback
+                    .take()
+                    .filter(|(prepared_path, prepared_start, prepared_end, playback)| {
+                        prepared_path == &path
+                            && (*prepared_start - playback_start).abs() < 0.001
+                            && (*prepared_end - playback_end).abs() < 0.001
+                            && playback.is_ready()
+                            && !playback.is_finished()
+                    })
+                    .map(|(_, _, _, playback)| {
+                        playback.play();
+                        playback
+                    });
+                let playback = prepared.map(Ok).unwrap_or_else(|| {
+                    crate::video_recorder::start_video_library_playback(
+                        self.paths.ffmpeg_exe.clone(),
+                        path.clone(),
+                        playback_start,
+                        playback_end,
+                    )
+                });
+                match playback {
                     Ok(playback) => {
                         audio::play_video_audio_preview_async(
                             path.to_string_lossy().into_owned(),
@@ -7995,6 +8019,32 @@ impl CrosshairApp {
         if self.video_library_preview_rx.is_none() {
             if let Some((path, at_seconds)) = self.video_library_pending_preview.take() {
                 self.request_video_library_preview(path, at_seconds);
+            }
+        }
+        if self.video_library_playback.is_none()
+            && self.video_library_preloaded_playback.is_none()
+            && let (Some(path), Some(preview)) = (
+                self.video_library_selected.as_ref(),
+                self.video_library_preview.as_ref(),
+            )
+        {
+            let start = self.video_library_playback_position_seconds.clamp(
+                self.video_library_trim_start_seconds,
+                self.video_library_trim_end_seconds,
+            );
+            let end = self
+                .video_library_trim_end_seconds
+                .min(preview.duration_seconds);
+            if end > start
+                && let Ok(playback) = crate::video_recorder::prepare_video_library_playback(
+                    self.paths.ffmpeg_exe.clone(),
+                    path.clone(),
+                    start,
+                    end,
+                )
+            {
+                self.video_library_preloaded_playback =
+                    Some((path.clone(), start, end, playback));
             }
         }
         while self.video_library_thumbnail_jobs.len() < 3 {
