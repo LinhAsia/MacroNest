@@ -342,7 +342,20 @@ pub fn start_video_library_playback(
         let result = (|| -> Result<(), String> {
             let mut child = Command::new(ffmpeg_exe)
                 .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
-                .args(["-hide_banner", "-loglevel", "error", "-ss"])
+                .args([
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-probesize",
+                    "64K",
+                    "-analyzeduration",
+                    "0",
+                    "-threads",
+                    "1",
+                    "-flags",
+                    "low_delay",
+                    "-ss",
+                ])
                 .arg(format!("{:.3}", start_seconds.max(0.0)))
                 .args(["-i"])
                 .arg(video_path)
