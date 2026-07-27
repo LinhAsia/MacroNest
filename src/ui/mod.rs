@@ -7532,6 +7532,12 @@ impl CrosshairApp {
                         rgba,
                         position_seconds,
                     } => {
+                        if position_seconds >= self.video_library_trim_end_seconds {
+                            self.video_library_playback_position_seconds =
+                                self.video_library_trim_end_seconds;
+                            playback_finished = true;
+                            continue;
+                        }
                         let image = ColorImage::from_rgba_unmultiplied([640, 360], &rgba);
                         if let Some(texture) = &mut self.video_library_preview_texture {
                             texture.set(image, TextureOptions::LINEAR);
@@ -7906,7 +7912,21 @@ impl CrosshairApp {
                                 );
                                 if playhead_changed {
                                     self.stop_video_library_playback();
-                                    self.video_library_preloaded_playback = None;
+                                    let prepared_still_matches = self
+                                        .video_library_preloaded_playback
+                                        .as_ref()
+                                        .is_some_and(|(path, start, _, playback)| {
+                                            path == &selected_path
+                                                && (*start
+                                                    - self
+                                                        .video_library_playback_position_seconds)
+                                                    .abs()
+                                                    < 0.001
+                                                && !playback.is_finished()
+                                        });
+                                    if !prepared_still_matches {
+                                        self.video_library_preloaded_playback = None;
+                                    }
                                 }
                                 ui.horizontal_wrapped(|ui| {
                                     if ui.add_enabled(!crate::video_recorder::is_editing(), Button::new("Export trim")).clicked() {
@@ -7989,10 +8009,9 @@ impl CrosshairApp {
                 let prepared = self
                     .video_library_preloaded_playback
                     .take()
-                    .filter(|(prepared_path, prepared_start, prepared_end, playback)| {
+                    .filter(|(prepared_path, prepared_start, _, playback)| {
                         prepared_path == &path
                             && (*prepared_start - playback_start).abs() < 0.001
-                            && (*prepared_end - playback_end).abs() < 0.001
                             && playback.is_ready()
                             && !playback.is_finished()
                     })
@@ -8062,9 +8081,9 @@ impl CrosshairApp {
                 self.video_library_trim_start_seconds,
                 self.video_library_trim_end_seconds,
             );
-            let end = self
-                .video_library_trim_end_seconds
-                .min(preview.duration_seconds);
+            // ponytail: keep the decoder warm through the source duration; trim end is enforced
+            // by the UI so resizing either trim handle does not destroy the playback buffer.
+            let end = preview.duration_seconds;
             if end > start
                 && let Ok(playback) = crate::video_recorder::prepare_video_library_playback(
                     self.paths.ffmpeg_exe.clone(),
