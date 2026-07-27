@@ -162,6 +162,7 @@ enum TitlebarQuickActionKind {
 enum VideoTrimHandle {
     Start,
     End,
+    Playhead,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7398,6 +7399,7 @@ impl CrosshairApp {
                                 duration,
                                 &mut self.video_library_trim_start_seconds,
                                 &mut self.video_library_trim_end_seconds,
+                                &mut self.video_library_playback_position_seconds,
                             );
                             ui.horizontal(|ui| {
                                 if ui.button("Preview frame").clicked() {
@@ -7620,19 +7622,13 @@ impl CrosshairApp {
         let mut copy_video = None;
         let mut export_request = None;
         let library_bounds = ctx.content_rect().shrink(8.0);
-        let default_width = (library_bounds.width() * 0.92).clamp(760.0, 980.0);
-        let default_height = (library_bounds.height() * 0.86).clamp(440.0, 600.0);
         egui::Window::new("Video library")
             .open(&mut open)
             .order(Order::Foreground)
-            .default_width(default_width)
-            .default_height(default_height)
-            .min_width(620.0_f32.min(library_bounds.width()))
-            .min_height(400.0_f32.min(library_bounds.height()))
-            .max_width(library_bounds.width())
-            .max_height(library_bounds.height())
+            .fixed_pos(library_bounds.min)
+            .fixed_size(library_bounds.size())
             .constrain_to(library_bounds)
-            .resizable(true)
+            .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
                 ui.scope(|ui| {
@@ -7821,19 +7817,22 @@ impl CrosshairApp {
                                     .size(12.0)
                                     .weak(),
                                 );
-                                Self::render_video_trim_timeline(
+                                let playhead_changed = Self::render_video_trim_timeline(
                                     ui,
                                     duration,
                                     &mut self.video_library_trim_start_seconds,
                                     &mut self.video_library_trim_end_seconds,
+                                    &mut self.video_library_playback_position_seconds,
                                 );
+                                if playhead_changed {
+                                    self.video_library_playback = None;
+                                    self.video_library_playback_path = None;
+                                    refresh_preview = Some((
+                                        selected_path.clone(),
+                                        self.video_library_playback_position_seconds,
+                                    ));
+                                }
                                 ui.horizontal_wrapped(|ui| {
-                                    if ui.button("Preview frame").clicked() {
-                                        refresh_preview = Some((
-                                            selected_path.clone(),
-                                            self.video_library_trim_start_seconds,
-                                        ));
-                                    }
                                     if ui.add_enabled(!crate::video_recorder::is_editing(), Button::new("Export trim")).clicked() {
                                         export_request = Some((
                                             selected_path.clone(),
@@ -7882,6 +7881,7 @@ impl CrosshairApp {
             self.video_library_preview_texture = None;
             self.video_library_trim_start_seconds = 0.0;
             self.video_library_trim_end_seconds = 0.0;
+            self.video_library_playback_position_seconds = 0.0;
             let source_mb = fs::metadata(&path)
                 .map(|metadata| metadata.len() as f64 / 1_048_576.0)
                 .unwrap_or(1.0);
@@ -7898,17 +7898,26 @@ impl CrosshairApp {
                 self.video_library_playback_path = None;
             } else {
                 self.video_library_playback = None;
+                let playback_start = if self.video_library_playback_position_seconds
+                    >= self.video_library_trim_end_seconds - 0.05
+                {
+                    self.video_library_trim_start_seconds
+                } else {
+                    self.video_library_playback_position_seconds.clamp(
+                        self.video_library_trim_start_seconds,
+                        self.video_library_trim_end_seconds,
+                    )
+                };
                 match crate::video_recorder::start_video_library_playback(
                     self.paths.ffmpeg_exe.clone(),
                     path.clone(),
-                    self.video_library_trim_start_seconds,
+                    playback_start,
                     self.video_library_trim_end_seconds,
                 ) {
                     Ok(playback) => {
                         self.video_library_playback = Some(playback);
                         self.video_library_playback_path = Some(path);
-                        self.video_library_playback_position_seconds =
-                            self.video_library_trim_start_seconds;
+                        self.video_library_playback_position_seconds = playback_start;
                     }
                     Err(error) => self.status = format!("Could not play video: {error}"),
                 }
@@ -7972,23 +7981,41 @@ impl CrosshairApp {
         duration: f64,
         start: &mut f64,
         end: &mut f64,
-    ) {
+        playhead: &mut f64,
+    ) -> bool {
         let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click_and_drag());
         let handle_id = ui.make_persistent_id("video-library-trim-handle");
         let width = rect.width().max(1.0);
         let to_x = |seconds: f64| rect.left() + (seconds / duration) as f32 * width;
         let to_seconds = |x: f32| (((x - rect.left()) / width) as f64 * duration).clamp(0.0, duration);
+        *playhead = playhead.clamp(*start, *end);
         let start_x = to_x(*start);
         let end_x = to_x(*end);
+        let mut playhead_changed = false;
         if response.drag_started() {
             if let Some(pointer) = response.interact_pointer_pos() {
-                let handle = if (pointer.x - start_x).abs() <= (pointer.x - end_x).abs() {
+                let start_distance = (pointer.x - start_x).abs();
+                let end_distance = (pointer.x - end_x).abs();
+                let handle = if start_distance.min(end_distance) > 8.0 {
+                    VideoTrimHandle::Playhead
+                } else if start_distance <= end_distance {
                     VideoTrimHandle::Start
                 } else {
                     VideoTrimHandle::End
                 };
+                if handle == VideoTrimHandle::Playhead {
+                    *playhead = to_seconds(pointer.x).clamp(*start, *end);
+                    playhead_changed = true;
+                }
                 ui.ctx().data_mut(|data| data.insert_temp(handle_id, handle));
             }
+        }
+        if response.clicked()
+            && let Some(pointer) = response.interact_pointer_pos()
+            && (pointer.x - start_x).abs().min((pointer.x - end_x).abs()) > 8.0
+        {
+            *playhead = to_seconds(pointer.x).clamp(*start, *end);
+            playhead_changed = true;
         }
         if response.dragged() {
             if let (Some(handle), Some(pointer)) = (
@@ -7998,9 +8025,14 @@ impl CrosshairApp {
                 match handle {
                     VideoTrimHandle::Start => *start = to_seconds(pointer.x).min((*end - 0.05).max(0.0)),
                     VideoTrimHandle::End => *end = to_seconds(pointer.x).max((*start + 0.05).min(duration)),
+                    VideoTrimHandle::Playhead => {
+                        *playhead = to_seconds(pointer.x).clamp(*start, *end);
+                        playhead_changed = true;
+                    }
                 }
             }
         }
+        *playhead = playhead.clamp(*start, *end);
         if !ui.input(|input| input.pointer.primary_down()) {
             ui.ctx().data_mut(|data| data.remove::<VideoTrimHandle>(handle_id));
         }
@@ -8017,6 +8049,20 @@ impl CrosshairApp {
                 Stroke::new(2.0, Color32::from_rgb(113, 214, 162)),
             );
         }
+        let playhead_x = to_x(*playhead);
+        painter.line_segment(
+            [pos2(playhead_x, rect.top() + 4.0), pos2(playhead_x, rect.bottom() - 6.0)],
+            Stroke::new(2.0, Color32::WHITE),
+        );
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                pos2(playhead_x - 5.0, rect.top() + 4.0),
+                pos2(playhead_x + 5.0, rect.top() + 4.0),
+                pos2(playhead_x, rect.top() + 11.0),
+            ],
+            Color32::WHITE,
+            Stroke::NONE,
+        ));
         painter.text(
             pos2(rect.left() + 6.0, rect.top() + 2.0),
             egui::Align2::LEFT_TOP,
@@ -8031,6 +8077,7 @@ impl CrosshairApp {
             egui::TextStyle::Small.resolve(ui.style()),
             Color32::WHITE,
         );
+        playhead_changed
     }
 
     fn format_video_seconds(seconds: f64) -> String {
