@@ -7524,6 +7524,7 @@ impl CrosshairApp {
             }
         }
         let mut playback_finished = false;
+        let mut playback_reached_end = false;
         let mut playback_error = None;
         if let Some(playback) = &self.video_library_playback {
             while let Some(event) = playback.try_recv() {
@@ -7552,6 +7553,7 @@ impl CrosshairApp {
                     }
                     crate::video_recorder::VideoPlaybackEvent::Finished => {
                         playback_finished = true;
+                        playback_reached_end = true;
                     }
                     crate::video_recorder::VideoPlaybackEvent::Error(error) => {
                         playback_error = Some(error);
@@ -7560,6 +7562,10 @@ impl CrosshairApp {
                 }
             }
             playback_finished |= playback.is_finished();
+        }
+        if playback_reached_end {
+            self.video_library_playback_position_seconds =
+                self.video_library_trim_end_seconds;
         }
         if playback_finished {
             self.stop_video_library_playback();
