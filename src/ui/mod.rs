@@ -109,8 +109,7 @@ static LIVE_WINDOW_TARGET_COMBO_WINDOWS: Lazy<Mutex<Option<Vec<WindowInfo>>>> =
     Lazy::new(|| Mutex::new(None));
 static PROCESS_ICON_TEXTURES: Lazy<Mutex<HashMap<String, Option<TextureHandle>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-static PROCESS_PATHS: Lazy<Mutex<HashMap<u32, String>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static PROCESS_PATHS: Lazy<Mutex<HashMap<u32, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) enum UpdateStatus {
@@ -830,23 +829,36 @@ pub struct CrosshairApp {
     video_library_selected: Option<PathBuf>,
     video_library_preview: Option<crate::video_recorder::VideoLibraryPreview>,
     video_library_preview_texture: Option<TextureHandle>,
-    video_library_preview_rx:
-        Option<Receiver<(PathBuf, Result<crate::video_recorder::VideoLibraryPreview, String>)>>,
+    video_library_preview_rx: Option<
+        Receiver<(
+            PathBuf,
+            Result<crate::video_recorder::VideoLibraryPreview, String>,
+        )>,
+    >,
     video_library_thumbnails: HashMap<PathBuf, TextureHandle>,
-    video_library_thumbnail_tx:
-        Sender<(PathBuf, Result<crate::video_recorder::VideoLibraryPreview, String>)>,
-    video_library_thumbnail_rx:
-        Receiver<(PathBuf, Result<crate::video_recorder::VideoLibraryPreview, String>)>,
+    video_library_thumbnail_tx: Sender<(
+        PathBuf,
+        Result<crate::video_recorder::VideoLibraryPreview, String>,
+    )>,
+    video_library_thumbnail_rx: Receiver<(
+        PathBuf,
+        Result<crate::video_recorder::VideoLibraryPreview, String>,
+    )>,
     video_library_thumbnail_jobs: HashSet<PathBuf>,
     video_library_playback: Option<crate::video_recorder::VideoPlaybackSession>,
-    video_library_preloaded_playback:
-        Option<(PathBuf, f64, f64, crate::video_recorder::VideoPlaybackSession)>,
+    video_library_preloaded_playback: Option<(
+        PathBuf,
+        f64,
+        f64,
+        crate::video_recorder::VideoPlaybackSession,
+    )>,
     video_library_playback_path: Option<PathBuf>,
     video_library_playback_position_seconds: f64,
     video_library_pending_preview: Option<(PathBuf, f64)>,
     video_library_trim_start_seconds: f64,
     video_library_trim_end_seconds: f64,
     video_library_target_size_mb: u32,
+    video_library_delete_armed: Option<PathBuf>,
     ocr_download_job: Option<JoinHandle<Result<()>>>,
     ocr_download_progress: Arc<AtomicU32>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
@@ -1181,6 +1193,7 @@ impl CrosshairApp {
             video_library_trim_start_seconds: 0.0,
             video_library_trim_end_seconds: 0.0,
             video_library_target_size_mb: 12,
+            video_library_delete_armed: None,
             ocr_download_job: None,
             ocr_download_progress: Arc::new(AtomicU32::new(0)),
             interception_download_job: None,
@@ -6991,8 +7004,10 @@ impl CrosshairApp {
                         {
                             preview.duration_seconds
                         } else {
-                            self.video_library_trim_end_seconds
-                                .clamp(self.video_library_trim_start_seconds, preview.duration_seconds)
+                            self.video_library_trim_end_seconds.clamp(
+                                self.video_library_trim_start_seconds,
+                                preview.duration_seconds,
+                            )
                         };
                         self.video_library_preview_texture = preview.rgba.as_ref().map(|rgba| {
                             ctx.load_texture(
@@ -7268,8 +7283,10 @@ impl CrosshairApp {
                         {
                             preview.duration_seconds
                         } else {
-                            self.video_library_trim_end_seconds
-                                .clamp(self.video_library_trim_start_seconds, preview.duration_seconds)
+                            self.video_library_trim_end_seconds.clamp(
+                                self.video_library_trim_start_seconds,
+                                preview.duration_seconds,
+                            )
                         };
                         self.video_library_preview_texture = preview.rgba.as_ref().map(|rgba| {
                             ctx.load_texture(
@@ -7299,7 +7316,11 @@ impl CrosshairApp {
 
         let output_dir = PathBuf::from(&self.state.quick_video_record_output_dir);
         let videos = crate::video_recorder::recorded_videos(&output_dir);
-        if self.video_library_selected.as_ref().is_some_and(|path| !path.is_file()) {
+        if self
+            .video_library_selected
+            .as_ref()
+            .is_some_and(|path| !path.is_file())
+        {
             self.video_library_selected = None;
             self.video_library_preview = None;
             self.video_library_preview_texture = None;
@@ -7564,8 +7585,7 @@ impl CrosshairApp {
             playback_finished |= playback.is_finished();
         }
         if playback_reached_end {
-            self.video_library_playback_position_seconds =
-                self.video_library_trim_end_seconds;
+            self.video_library_playback_position_seconds = self.video_library_trim_end_seconds;
         }
         if playback_finished {
             self.stop_video_library_playback();
@@ -7625,7 +7645,8 @@ impl CrosshairApp {
                         )
                     });
                     if let Some(texture) = &texture {
-                        self.video_library_thumbnails.insert(path.clone(), texture.clone());
+                        self.video_library_thumbnails
+                            .insert(path.clone(), texture.clone());
                     }
                     if self.video_library_selected.as_ref() == Some(&path) {
                         self.video_library_trim_start_seconds = self
@@ -7636,8 +7657,10 @@ impl CrosshairApp {
                         {
                             preview.duration_seconds
                         } else {
-                            self.video_library_trim_end_seconds
-                                .clamp(self.video_library_trim_start_seconds, preview.duration_seconds)
+                            self.video_library_trim_end_seconds.clamp(
+                                self.video_library_trim_start_seconds,
+                                preview.duration_seconds,
+                            )
                         };
                         self.video_library_preview_texture = preview.rgba.as_ref().map(|rgba| {
                             ctx.load_texture(
@@ -7669,7 +7692,11 @@ impl CrosshairApp {
 
         let output_dir = PathBuf::from(&self.state.quick_video_record_output_dir);
         let videos = crate::video_recorder::recorded_videos(&output_dir);
-        if self.video_library_selected.as_ref().is_some_and(|path| !path.is_file()) {
+        if self
+            .video_library_selected
+            .as_ref()
+            .is_some_and(|path| !path.is_file())
+        {
             self.video_library_selected = None;
             self.video_library_preview = None;
             self.video_library_preview_texture = None;
@@ -7681,7 +7708,9 @@ impl CrosshairApp {
         let mut toggle_playback = None;
         let mut reveal_video = None;
         let mut copy_video = None;
+        let mut delete_video = None;
         let mut export_request = None;
+        let language = self.state.ui_language;
         if ctx.input(|input| input.key_pressed(egui::Key::Space))
             && !ctx.wants_keyboard_input()
             && let Some(path) = self.video_library_selected.as_ref()
@@ -7689,8 +7718,8 @@ impl CrosshairApp {
         {
             toggle_playback = Some(path.clone());
         }
-        let library_bounds = ctx.content_rect().shrink(16.0);
-        egui::Window::new("Video library")
+        let library_bounds = ctx.content_rect().shrink2(vec2(24.0, 18.0));
+        egui::Window::new("video-library")
             .order(Order::Foreground)
             .fixed_pos(library_bounds.min)
             .fixed_size(library_bounds.size())
@@ -7708,7 +7737,15 @@ impl CrosshairApp {
                         .text_styles
                         .insert(egui::TextStyle::Button, egui::FontId::proportional(13.0));
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Video library").strong().size(18.0));
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Video library",
+                                "Thư viện video",
+                            ))
+                            .strong()
+                            .size(18.0),
+                        );
                         ui.with_layout(
                             egui::Layout::right_to_left(egui::Align::Center),
                             |ui| {
@@ -7719,7 +7756,11 @@ impl CrosshairApp {
                                             .fill(Color32::from_rgb(174, 55, 76))
                                             .corner_radius(7.0),
                                     )
-                                    .on_hover_text("Close video library")
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Close video library",
+                                        "Đóng thư viện video",
+                                    ))
                                     .clicked()
                                 {
                                     close_library = true;
@@ -7729,10 +7770,28 @@ impl CrosshairApp {
                     });
                     ui.separator();
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Recorded videos").strong());
-                        ui.label(RichText::new(format!("{} video(s)", videos.len())).size(12.0).weak());
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Recorded videos",
+                                "Video đã quay",
+                            ))
+                            .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} {}",
+                                videos.len(),
+                                Self::tr_lang(language, "videos", "video")
+                            ))
+                            .size(12.0)
+                            .weak(),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Open folder").clicked() {
+                            if ui
+                                .button(Self::tr_lang(language, "Open folder", "Mở thư mục"))
+                                .clicked()
+                            {
                                 let _ = fs::create_dir_all(&output_dir);
                                 if let Err(error) = crate::platform::open_folder_in_explorer(&output_dir) {
                                     self.status = format!("Could not open video folder: {error}");
@@ -7776,7 +7835,14 @@ impl CrosshairApp {
                         .show(&mut left_ui, |ui| {
                             ui.set_width(left_rect.width());
                             if videos.is_empty() {
-                                ui.label(RichText::new("No recorded videos yet.").weak());
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "No recorded videos yet.",
+                                        "Chưa có video nào.",
+                                    ))
+                                    .weak(),
+                                );
                             }
                             let card_spacing = 8.0;
                             let card_width = ((left_rect.width() - card_spacing - 14.0) * 0.5)
@@ -7810,7 +7876,14 @@ impl CrosshairApp {
                                                 } else {
                                                     ui.add_sized(
                                                         thumbnail_size,
-                                                        egui::Label::new(RichText::new("Loading thumbnail...").weak()),
+                                                        egui::Label::new(
+                                                            RichText::new(Self::tr_lang(
+                                                                language,
+                                                                "Loading thumbnail...",
+                                                                "Đang tải ảnh thu nhỏ...",
+                                                            ))
+                                                            .weak(),
+                                                        ),
                                                     );
                                                 }
                                                 ui.add_sized(
@@ -7847,7 +7920,14 @@ impl CrosshairApp {
                         right_ui.vertical_centered(|ui| {
                             let Some(selected_path) = self.video_library_selected.as_ref().cloned() else {
                                 ui.add_space(100.0);
-                                ui.label(RichText::new("Select a video on the left.").weak());
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Select a video on the left.",
+                                        "Chọn một video ở bên trái.",
+                                    ))
+                                    .weak(),
+                                );
                                 return;
                             };
                             ui.label(
@@ -7863,9 +7943,23 @@ impl CrosshairApp {
                                 ui.add(Image::new(texture).fit_to_exact_size(preview_size));
                             } else if self.video_library_preview_rx.is_some() {
                                 ui.add(egui::Spinner::new());
-                                ui.label(RichText::new("Loading preview frame...").weak());
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Loading preview frame...",
+                                        "Đang tải khung xem trước...",
+                                    ))
+                                    .weak(),
+                                );
                             } else {
-                                ui.label(RichText::new("Preview frame unavailable.").weak());
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Preview frame unavailable.",
+                                        "Không thể xem trước khung hình.",
+                                    ))
+                                    .weak(),
+                                );
                             }
                             let playback_buffering = self
                                 .video_library_playback
@@ -7878,38 +7972,80 @@ impl CrosshairApp {
                                     path == &selected_path && !playback.is_ready()
                                 });
                             let video_buffering = playback_buffering || seek_buffering;
-                            ui.allocate_ui_with_layout(
+                            let (loading_rect, _) = ui.allocate_exact_size(
                                 vec2(ui.available_width(), 24.0),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    if !video_buffering {
-                                        return;
-                                    }
-                                    ui.add(egui::Spinner::new());
-                                    ui.label(RichText::new("Loading preview\u{2026}").weak());
-                                },
+                                Sense::hover(),
                             );
+                            if video_buffering {
+                                let mut loading_ui = ui.new_child(
+                                    egui::UiBuilder::new()
+                                        .max_rect(loading_rect)
+                                        .layout(egui::Layout::left_to_right(
+                                            egui::Align::Center,
+                                        )),
+                                );
+                                loading_ui.add(egui::Spinner::new());
+                                loading_ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Loading preview...",
+                                        "Đang tải xem trước...",
+                                    ))
+                                    .weak(),
+                                );
+                            }
                             ui.horizontal_wrapped(|ui| {
                                 let playing = self.video_library_playback_path.as_ref()
                                     == Some(&selected_path);
                                 if ui
                                     .button(if playing && video_buffering {
-                                        "Stop loading"
+                                        Self::tr_lang(language, "Stop loading", "Dừng tải")
                                     } else if playing {
-                                        "Stop video"
+                                        Self::tr_lang(language, "Stop video", "Dừng video")
                                     } else {
-                                        "Play video"
+                                        Self::tr_lang(language, "Play video", "Phát video")
                                     })
                                     .clicked()
                                 {
                                     toggle_playback = Some(selected_path.clone());
                                 }
-                                if ui.button("Copy video").clicked() {
+                                if ui
+                                    .button(Self::tr_lang(language, "Copy video", "Sao chép video"))
+                                    .clicked()
+                                {
                                     copy_video = Some(selected_path.clone());
                                 }
-                                if ui.button("Open file location").clicked() {
+                                if ui
+                                    .button(Self::tr_lang(
+                                        language,
+                                        "Open file location",
+                                        "Mở vị trí tệp",
+                                    ))
+                                    .clicked()
+                                {
                                     reveal_video = Some(selected_path.clone());
                                     self.status = "Opening file location\u{2026}".to_owned();
+                                }
+                                let armed =
+                                    self.video_library_delete_armed.as_ref() == Some(&selected_path);
+                                if ui
+                                    .button(if armed {
+                                        Self::tr_lang(
+                                            language,
+                                            "Confirm delete",
+                                            "Xác nhận xóa",
+                                        )
+                                    } else {
+                                        Self::tr_lang(language, "Delete video", "Xóa video")
+                                    })
+                                    .clicked()
+                                {
+                                    if armed {
+                                        delete_video = Some(selected_path.clone());
+                                    } else {
+                                        self.video_library_delete_armed =
+                                            Some(selected_path.clone());
+                                    }
                                 }
                             });
                             if let Some(preview) = &self.video_library_preview {
@@ -7938,15 +8074,20 @@ impl CrosshairApp {
                                     .size(12.0)
                                     .weak(),
                                 );
-                                let playhead_changed = Self::render_video_trim_timeline(
+                                let (playhead_changed, timeline_interacting) =
+                                    Self::render_video_trim_timeline(
                                     ui,
                                     duration,
                                     &mut self.video_library_trim_start_seconds,
                                     &mut self.video_library_trim_end_seconds,
                                     &mut self.video_library_playback_position_seconds,
                                 );
-                                if playhead_changed {
+                                if timeline_interacting
+                                    && self.video_library_playback.is_some()
+                                {
                                     self.stop_video_library_playback();
+                                }
+                                if playhead_changed {
                                     let prepared_still_matches = self
                                         .video_library_preloaded_playback
                                         .as_ref()
@@ -7964,7 +8105,14 @@ impl CrosshairApp {
                                     }
                                 }
                                 ui.horizontal_wrapped(|ui| {
-                                    if ui.add_enabled(!crate::video_recorder::is_editing(), Button::new("Export trim")).clicked() {
+                                    if ui.add_enabled(
+                                        !crate::video_recorder::is_editing(),
+                                        Button::new(Self::tr_lang(
+                                            language,
+                                            "Export trim",
+                                            "Xuất đoạn cắt",
+                                        )),
+                                    ).clicked() {
                                         export_request = Some((
                                             selected_path.clone(),
                                             self.video_library_trim_start_seconds,
@@ -7972,14 +8120,25 @@ impl CrosshairApp {
                                             None,
                                         ));
                                     }
-                                    ui.label("Compress to");
+                                    ui.label(Self::tr_lang(
+                                        language,
+                                        "Compress to",
+                                        "Nén xuống",
+                                    ));
                                     ui.add_sized(
                                         [70.0, 22.0],
                                         egui::DragValue::new(&mut self.video_library_target_size_mb)
                                             .range(1..=2048)
                                             .suffix(" MB"),
                                     );
-                                    if ui.add_enabled(!crate::video_recorder::is_editing(), Button::new("Compress")).clicked() {
+                                    if ui.add_enabled(
+                                        !crate::video_recorder::is_editing(),
+                                        Button::new(Self::tr_lang(
+                                            language,
+                                            "Compress",
+                                            "Nén",
+                                        )),
+                                    ).clicked() {
                                         export_request = Some((
                                             selected_path,
                                             self.video_library_trim_start_seconds,
@@ -7989,9 +8148,21 @@ impl CrosshairApp {
                                     }
                                 });
                                 ui.label(
-                                    RichText::new("Export trim is fast but starts at the nearest keyframe. Compress re-encodes and is slower.")
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Export trim is fast but starts at the nearest keyframe. Compress re-encodes and is slower.",
+                                        "Xuất đoạn cắt nhanh nhưng bắt đầu ở keyframe gần nhất. Nén sẽ mã hóa lại nên chậm hơn.",
+                                    ))
                                         .size(11.0)
                                         .weak(),
+                                );
+                            }
+                            if let Some(progress) = crate::video_recorder::edit_progress() {
+                                ui.add(
+                                    egui::ProgressBar::new(progress)
+                                        .show_percentage()
+                                        .animate(true)
+                                        .desired_width(ui.available_width()),
                                 );
                             }
                             ui.label(RichText::new(crate::video_recorder::edit_status()).size(11.0).weak());
@@ -7999,9 +8170,7 @@ impl CrosshairApp {
                 });
             });
 
-        if close_library
-            || ctx.input(|input| input.key_pressed(egui::Key::Escape))
-        {
+        if close_library || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             open = false;
         }
         self.video_library_open = open;
@@ -8014,6 +8183,7 @@ impl CrosshairApp {
             self.video_library_preloaded_playback = None;
             audio::preload_video_audio_preview_async(path.to_string_lossy().into_owned());
             self.video_library_selected = Some(path.clone());
+            self.video_library_delete_armed = None;
             self.video_library_preview = None;
             self.video_library_preview_texture = None;
             self.video_library_trim_start_seconds = 0.0;
@@ -8105,6 +8275,22 @@ impl CrosshairApp {
                 self.request_video_library_preview(path, at_seconds);
             }
         }
+        if let Some(path) = delete_video {
+            self.stop_video_library_playback();
+            self.video_library_preloaded_playback = None;
+            match fs::remove_file(&path) {
+                Ok(()) => {
+                    self.video_library_thumbnails.remove(&path);
+                    self.video_library_selected = None;
+                    self.video_library_preview = None;
+                    self.video_library_preview_texture = None;
+                    self.video_library_delete_armed = None;
+                    self.status =
+                        Self::tr_lang(language, "Video deleted.", "Đã xóa video.").to_owned();
+                }
+                Err(error) => self.status = format!("Could not delete video: {error}"),
+            }
+        }
         if self.video_library_playback.is_none()
             && self.video_library_preloaded_playback.is_none()
             && let (Some(path), Some(preview)) = (
@@ -8127,8 +8313,7 @@ impl CrosshairApp {
                     end,
                 )
             {
-                self.video_library_preloaded_playback =
-                    Some((path.clone(), start, end, playback));
+                self.video_library_preloaded_playback = Some((path.clone(), start, end, playback));
             }
         }
         while self.video_library_playback.is_none()
@@ -8151,8 +8336,7 @@ impl CrosshairApp {
                 let _ = sender.send((path, result));
             });
         }
-        if self.video_library_playback.is_some()
-            || self.video_library_preloaded_playback.is_some()
+        if self.video_library_playback.is_some() || self.video_library_preloaded_playback.is_some()
         {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if self.video_library_preview_rx.is_some()
@@ -8169,8 +8353,9 @@ impl CrosshairApp {
         start: &mut f64,
         end: &mut f64,
         playhead: &mut f64,
-    ) -> bool {
-        let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click_and_drag());
+    ) -> (bool, bool) {
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click_and_drag());
         let handle_id = ui.make_persistent_id("video-library-trim-handle");
         let track_rect = rect.shrink2(vec2(7.0, 0.0));
         let width = track_rect.width().max(1.0);
@@ -8184,8 +8369,7 @@ impl CrosshairApp {
         let mut playhead_changed = false;
         if let Some(pointer) = response.hover_pos() {
             let over_trim_handle =
-                (pointer.x - start_x).abs().min((pointer.x - end_x).abs())
-                    <= TRIM_HANDLE_HITBOX;
+                (pointer.x - start_x).abs().min((pointer.x - end_x).abs()) <= TRIM_HANDLE_HITBOX;
             ui.ctx().set_cursor_icon(if over_trim_handle {
                 egui::CursorIcon::ResizeHorizontal
             } else {
@@ -8197,8 +8381,9 @@ impl CrosshairApp {
                 "Click or drag to move the playhead. Press Space to play or stop."
             });
         }
-        let active_handle =
-            ui.ctx().data(|data| data.get_temp::<VideoTrimHandle>(handle_id));
+        let active_handle = ui
+            .ctx()
+            .data(|data| data.get_temp::<VideoTrimHandle>(handle_id));
         if response.is_pointer_button_down_on() && active_handle.is_none() {
             if let Some(pointer) = ui
                 .input(|input| input.pointer.press_origin())
@@ -8217,25 +8402,30 @@ impl CrosshairApp {
                     *playhead = to_seconds(pointer.x).clamp(*start, *end);
                     playhead_changed = true;
                 }
-                ui.ctx().data_mut(|data| data.insert_temp(handle_id, handle));
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(handle_id, handle));
             }
         }
         if response.clicked()
             && let Some(pointer) = response.interact_pointer_pos()
-            && (pointer.x - start_x).abs().min((pointer.x - end_x).abs())
-                > TRIM_HANDLE_HITBOX
+            && (pointer.x - start_x).abs().min((pointer.x - end_x).abs()) > TRIM_HANDLE_HITBOX
         {
             *playhead = to_seconds(pointer.x).clamp(*start, *end);
             playhead_changed = true;
         }
         if response.dragged() {
             if let (Some(handle), Some(pointer)) = (
-                ui.ctx().data(|data| data.get_temp::<VideoTrimHandle>(handle_id)),
+                ui.ctx()
+                    .data(|data| data.get_temp::<VideoTrimHandle>(handle_id)),
                 response.interact_pointer_pos(),
             ) {
                 match handle {
-                    VideoTrimHandle::Start => *start = to_seconds(pointer.x).min((*end - 0.05).max(0.0)),
-                    VideoTrimHandle::End => *end = to_seconds(pointer.x).max((*start + 0.05).min(duration)),
+                    VideoTrimHandle::Start => {
+                        *start = to_seconds(pointer.x).min((*end - 0.05).max(0.0))
+                    }
+                    VideoTrimHandle::End => {
+                        *end = to_seconds(pointer.x).max((*start + 0.05).min(duration))
+                    }
                     VideoTrimHandle::Playhead => {
                         *playhead = to_seconds(pointer.x).clamp(*start, *end);
                         playhead_changed = true;
@@ -8243,11 +8433,13 @@ impl CrosshairApp {
                 }
             }
         }
+        let timeline_interacting = response.is_pointer_button_down_on() || response.dragged();
         let timeline_committed =
             (playhead_changed && response.clicked()) || response.drag_stopped();
         *playhead = playhead.clamp(*start, *end);
         if !ui.input(|input| input.pointer.primary_down()) {
-            ui.ctx().data_mut(|data| data.remove::<VideoTrimHandle>(handle_id));
+            ui.ctx()
+                .data_mut(|data| data.remove::<VideoTrimHandle>(handle_id));
         }
         let start_x = to_x(*start);
         let end_x = to_x(*end);
@@ -8264,17 +8456,17 @@ impl CrosshairApp {
                 Stroke::new(2.0, Color32::from_rgb(113, 214, 162)),
             );
             painter.rect_filled(
-                egui::Rect::from_center_size(
-                    pos2(x, rect.center().y),
-                    vec2(10.0, 22.0),
-                ),
+                egui::Rect::from_center_size(pos2(x, rect.center().y), vec2(10.0, 22.0)),
                 3.0,
                 Color32::from_rgb(113, 214, 162),
             );
         }
         let playhead_x = to_x(*playhead);
         painter.line_segment(
-            [pos2(playhead_x, rect.top() + 4.0), pos2(playhead_x, rect.bottom() - 6.0)],
+            [
+                pos2(playhead_x, rect.top() + 4.0),
+                pos2(playhead_x, rect.bottom() - 6.0),
+            ],
             Stroke::new(2.0, Color32::WHITE),
         );
         painter.add(egui::Shape::convex_polygon(
@@ -8300,7 +8492,7 @@ impl CrosshairApp {
             egui::TextStyle::Small.resolve(ui.style()),
             Color32::WHITE,
         );
-        timeline_committed
+        (timeline_committed, timeline_interacting)
     }
 
     fn format_video_seconds(seconds: f64) -> String {
@@ -8505,7 +8697,9 @@ impl CrosshairApp {
     }
 
     fn process_icon_texture(ctx: &egui::Context, path: &str) -> Option<TextureHandle> {
-        if path.is_empty() { return None; }
+        if path.is_empty() {
+            return None;
+        }
         if let Some(cached) = PROCESS_ICON_TEXTURES.lock().get(path).cloned() {
             return cached;
         }
@@ -8516,13 +8710,19 @@ impl CrosshairApp {
                 TextureOptions::LINEAR,
             )
         });
-        PROCESS_ICON_TEXTURES.lock().insert(path.to_owned(), texture.clone());
+        PROCESS_ICON_TEXTURES
+            .lock()
+            .insert(path.to_owned(), texture.clone());
         texture
     }
 
     fn lazy_process_path(pid: u32, known_path: &str) -> String {
-        if !known_path.is_empty() { return known_path.to_owned(); }
-        if let Some(path) = PROCESS_PATHS.lock().get(&pid).cloned() { return path; }
+        if !known_path.is_empty() {
+            return known_path.to_owned();
+        }
+        if let Some(path) = PROCESS_PATHS.lock().get(&pid).cloned() {
+            return path;
+        }
         let path = crate::memory_debugger::debugger::process_path(pid);
         PROCESS_PATHS.lock().insert(pid, path.clone());
         path
@@ -8538,11 +8738,19 @@ impl CrosshairApp {
         let width = ui.available_width();
         let (rect, slot) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
         if selected || ui.rect_contains_pointer(rect) {
-            let color = if selected { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.hovered.bg_fill };
+            let color = if selected {
+                ui.visuals().selection.bg_fill
+            } else {
+                ui.visuals().widgets.hovered.bg_fill
+            };
             ui.painter().rect_filled(rect, 2.0, color);
         }
         let path = Self::lazy_process_path(pid, path);
-        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
         row.horizontal(|ui| {
             if let Some(texture) = Self::process_icon_texture(ui.ctx(), &path) {
                 ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
@@ -8565,19 +8773,36 @@ impl CrosshairApp {
         let width = ui.available_width();
         let (rect, slot) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
         if selected || ui.rect_contains_pointer(rect) {
-            let color = if selected { ui.visuals().selection.bg_fill } else { ui.visuals().widgets.hovered.bg_fill };
+            let color = if selected {
+                ui.visuals().selection.bg_fill
+            } else {
+                ui.visuals().widgets.hovered.bg_fill
+            };
             ui.painter().rect_filled(rect, 2.0, color);
         }
-        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let mut row = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
         row.horizontal(|ui| {
-                if let Some(texture) = Self::process_icon_texture(ui.ctx(), path) {
-                    ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
-                } else {
-                    ui.label(Self::material_icon_text(0xe30a, 16.0));
-                }
-                ui.add_sized([190.0, 20.0], egui::Label::new(name).selectable(false).truncate());
-                ui.add_sized([70.0, 20.0], egui::Label::new(pid.to_string()).selectable(false));
-                ui.add_sized([ui.available_width(), 20.0], egui::Label::new(path).selectable(false).truncate());
+            if let Some(texture) = Self::process_icon_texture(ui.ctx(), path) {
+                ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
+            } else {
+                ui.label(Self::material_icon_text(0xe30a, 16.0));
+            }
+            ui.add_sized(
+                [190.0, 20.0],
+                egui::Label::new(name).selectable(false).truncate(),
+            );
+            ui.add_sized(
+                [70.0, 20.0],
+                egui::Label::new(pid.to_string()).selectable(false),
+            );
+            ui.add_sized(
+                [ui.available_width(), 20.0],
+                egui::Label::new(path).selectable(false).truncate(),
+            );
         });
         ui.interact(rect, slot.id.with("process-detail-row"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::Default)
@@ -8650,10 +8875,16 @@ impl CrosshairApp {
             .data(|data| data.get_temp::<String>(popup_state_id));
 
         if let Some(window) = target.as_deref().and_then(|selector| {
-            effective_open_windows.iter().find(|window| window.selector == selector)
+            effective_open_windows
+                .iter()
+                .find(|window| window.selector == selector)
         }) {
             let path = if window.process_path.is_empty() {
-                PROCESS_PATHS.lock().get(&window.process_id).cloned().unwrap_or_default()
+                PROCESS_PATHS
+                    .lock()
+                    .get(&window.process_id)
+                    .cloned()
+                    .unwrap_or_default()
             } else {
                 window.process_path.clone()
             };
@@ -8701,8 +8932,13 @@ impl CrosshairApp {
                         .map(|window| window.process_id)
                         .unwrap_or_default();
                     let row_response = Self::selectable_process_row(
-                        ui, main_selected, truncated_row_label, process_id, process_path)
-                        .on_hover_text(&title);
+                        ui,
+                        main_selected,
+                        truncated_row_label,
+                        process_id,
+                        process_path,
+                    )
+                    .on_hover_text(&title);
 
                     if row_response.hovered() && has_duplicates {
                         expanded_title = Some(title.clone());
@@ -8790,8 +9026,13 @@ impl CrosshairApp {
                                         .map(|window| window.process_id)
                                         .unwrap_or_default();
                                     let child_response = Self::selectable_process_row(
-                                        ui, child_selected, truncated_selector, process_id, process_path)
-                                        .on_hover_text(selector);
+                                        ui,
+                                        child_selected,
+                                        truncated_selector,
+                                        process_id,
+                                        process_path,
+                                    )
+                                    .on_hover_text(selector);
                                     child_hovered |= child_response.hovered();
                                     if child_response.clicked() {
                                         *target = Some(selector.clone());

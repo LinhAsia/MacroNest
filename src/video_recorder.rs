@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     fs::{self, File},
-    io::{BufWriter, Read, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -89,6 +89,7 @@ static SESSION_ID: AtomicU64 = AtomicU64::new(0);
 static HARDWARE_ENCODING: Lazy<Mutex<Option<(String, bool)>>> = Lazy::new(|| Mutex::new(None));
 static PREPARED_FFMPEG: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 static VIDEO_EDIT_BUSY: AtomicBool = AtomicBool::new(false);
+static VIDEO_EDIT_PROGRESS: AtomicU64 = AtomicU64::new(0);
 static VIDEO_EDIT_STATUS: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("Ready".to_owned()));
 const LIBRARY_PLAYBACK_WIDTH: usize = 640;
 const LIBRARY_PLAYBACK_HEIGHT: usize = 360;
@@ -187,6 +188,10 @@ pub fn is_editing() -> bool {
 
 pub fn edit_status() -> String {
     VIDEO_EDIT_STATUS.lock().clone()
+}
+
+pub fn edit_progress() -> Option<f32> {
+    is_editing().then(|| VIDEO_EDIT_PROGRESS.load(Ordering::Acquire) as f32 / 1000.0)
 }
 
 pub fn recorded_videos(directory: &Path) -> Vec<PathBuf> {
@@ -291,14 +296,7 @@ pub fn inspect_recorded_video_thumbnail(
         .len();
     let output = Command::new(ffmpeg_exe)
         .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-ss",
-            "0.500",
-            "-i",
-        ])
+        .args(["-hide_banner", "-loglevel", "error", "-ss", "0.500", "-i"])
         .arg(video_path)
         .args([
             "-frames:v",
@@ -336,13 +334,7 @@ pub fn start_video_library_playback(
     start_seconds: f64,
     end_seconds: f64,
 ) -> Result<VideoPlaybackSession, String> {
-    start_video_library_playback_inner(
-        ffmpeg_exe,
-        video_path,
-        start_seconds,
-        end_seconds,
-        true,
-    )
+    start_video_library_playback_inner(ffmpeg_exe, video_path, start_seconds, end_seconds, true)
 }
 
 pub fn prepare_video_library_playback(
@@ -351,13 +343,7 @@ pub fn prepare_video_library_playback(
     start_seconds: f64,
     end_seconds: f64,
 ) -> Result<VideoPlaybackSession, String> {
-    start_video_library_playback_inner(
-        ffmpeg_exe,
-        video_path,
-        start_seconds,
-        end_seconds,
-        false,
-    )
+    start_video_library_playback_inner(ffmpeg_exe, video_path, start_seconds, end_seconds, false)
 }
 
 fn start_video_library_playback_inner(
@@ -456,8 +442,7 @@ fn start_video_library_playback_inner(
                     frame_index = 1;
                     continue;
                 }
-                let due =
-                    Duration::from_secs_f64(frame_index as f64 / LIBRARY_PLAYBACK_FPS as f64);
+                let due = Duration::from_secs_f64(frame_index as f64 / LIBRARY_PLAYBACK_FPS as f64);
                 if let Some(wait) =
                     due.checked_sub(started_at.unwrap_or_else(Instant::now).elapsed())
                 {
@@ -503,6 +488,7 @@ pub fn export_trim_async(
     if VIDEO_EDIT_BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
+    VIDEO_EDIT_PROGRESS.store(0, Ordering::Release);
     *VIDEO_EDIT_STATUS.lock() = "Preparing video…".to_owned();
     thread::spawn(move || {
         let result = export_trim(
@@ -514,7 +500,10 @@ pub fn export_trim_async(
             target_size_mb,
         );
         *VIDEO_EDIT_STATUS.lock() = match result {
-            Ok(path) => format!("Saved: {}", path.display()),
+            Ok(path) => {
+                VIDEO_EDIT_PROGRESS.store(1000, Ordering::Release);
+                format!("Saved: {}", path.display())
+            }
             Err(error) => format!("Video export failed: {error}"),
         };
         VIDEO_EDIT_BUSY.store(false, Ordering::Release);
@@ -537,7 +526,10 @@ fn probe_video_duration(ffmpeg_exe: &Path, video_path: &Path) -> Option<f64> {
             .arg(video_path)
             .output()
             .ok()?;
-        return String::from_utf8_lossy(&output.stdout).trim().parse::<f64>().ok();
+        return String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<f64>()
+            .ok();
     }
 
     // ponytail: MacroNest's bundled FFmpeg does not include ffprobe, so reuse the
@@ -574,7 +566,11 @@ fn export_trim(
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("video");
-    let suffix = if target_size_mb.is_some() { "compressed" } else { "trimmed" };
+    let suffix = if target_size_mb.is_some() {
+        "compressed"
+    } else {
+        "trimmed"
+    };
     let output_path = unique_output_path(output_dir, &format!("{stem}_{suffix}"));
     let mut command = Command::new(ffmpeg_exe);
     command
@@ -583,17 +579,17 @@ fn export_trim(
         .arg(format!("{:.3}", start_seconds.max(0.0)))
         .args(["-i"])
         .arg(input_path)
-        .args(["-t", &format!("{duration:.3}"), "-map", "0:v:0", "-map", "0:a?"]);
+        .args([
+            "-t",
+            &format!("{duration:.3}"),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+        ]);
     if let Some(target_size_mb) = target_size_mb {
         command.args([
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "96k",
+            "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-b:a", "96k",
         ]);
         let target_kbps = ((target_size_mb as f64 * 8192.0 / duration) - 96.0)
             .round()
@@ -610,11 +606,26 @@ fn export_trim(
         // ponytail: a normal trim is a stream copy; use Compress when re-encoding is required.
         command.args(["-c", "copy"]);
     }
-    let status = command
-        .args(["-movflags", "+faststart"])
+    let mut child = command
+        .args(["-movflags", "+faststart", "-progress", "pipe:1", "-nostats"])
         .arg(&output_path)
-        .status()
+        .stdout(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("Could not start FFmpeg: {error}"))?;
+    if let Some(stdout) = child.stdout.take() {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(value) = line
+                .strip_prefix("out_time_us=")
+                .and_then(|value| value.parse::<u64>().ok())
+            {
+                let progress = (value as f64 / (duration * 1_000_000.0)).clamp(0.0, 1.0);
+                VIDEO_EDIT_PROGRESS.store((progress * 1000.0).round() as u64, Ordering::Release);
+            }
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("Could not wait for FFmpeg: {error}"))?;
     if !status.success() || fs::metadata(&output_path).map_or(true, |metadata| metadata.len() == 0)
     {
         let _ = fs::remove_file(&output_path);
@@ -765,7 +776,16 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     if source.starts_with("gdigrab:") {
         let args_str = &source["gdigrab:".len()..];
         let parts: Vec<&str> = args_str.split('|').collect();
-        command.args(["-y", "-hide_banner", "-loglevel", "error", "-f", "gdigrab", "-draw_mouse", "1"]);
+        command.args([
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "gdigrab",
+            "-draw_mouse",
+            "1",
+        ]);
         for part in parts {
             if let Some((k, v)) = part.split_once('=') {
                 command.arg(k).arg(v);
@@ -821,7 +841,10 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         thread::spawn(move || {
             let start = Instant::now();
             while start.elapsed() < Duration::from_millis(1500) {
-                if fs::metadata(&output_check).map(|m| m.len() > 0).unwrap_or(false) {
+                if fs::metadata(&output_check)
+                    .map(|m| m.len() > 0)
+                    .unwrap_or(false)
+                {
                     break;
                 }
                 thread::sleep(Duration::from_millis(5));
@@ -1253,8 +1276,16 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>)
     let fps = config.fps.clamp(1, 240);
     match config.mode {
         QuickVideoRecordMode::FullScreen => {
-            let screen_w = unsafe { windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN) };
-            let screen_h = unsafe { windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN) };
+            let screen_w = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
+                    windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN,
+                )
+            };
+            let screen_h = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
+                    windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN,
+                )
+            };
             Ok((
                 format!("gdigrab:-framerate={fps}|-i=desktop"),
                 Some(RECT {
@@ -1293,19 +1324,25 @@ fn window_source(hwnd: HWND, fps: u32) -> Result<(String, Option<RECT>), String>
         return Err("The selected window is no longer available.".to_owned());
     }
     let mut rect = RECT::default();
-    let border_rect = if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) }.is_ok() {
-        let width = rect.right - rect.left;
-        let height = rect.bottom - rect.top;
-        if width > 20 && height > 20 {
-            Some(rect)
+    let border_rect =
+        if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) }
+            .is_ok()
+        {
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            if width > 20 && height > 20 {
+                Some(rect)
+            } else {
+                None
+            }
         } else {
             None
-        }
-    } else {
-        None
-    };
+        };
     Ok((
-        format!("gdigrab:-framerate={fps}|-hwnd=0x{:x}|-i=title=", hwnd.0 as usize),
+        format!(
+            "gdigrab:-framerate={fps}|-hwnd=0x{:x}|-i=title=",
+            hwnd.0 as usize
+        ),
         border_rect,
     ))
 }
@@ -1398,25 +1435,23 @@ fn run_region_border(
     language: crate::model::UiLanguage,
 ) {
     use windows::{
-        core::{PCWSTR, w},
         Win32::{
             Foundation::{COLORREF, HINSTANCE, LPARAM, LRESULT, WPARAM},
             Graphics::Gdi::{
-                CombineRgn, CreateFontW, CreateRectRgn, CreateSolidBrush,
-                DeleteObject, DrawTextW, FillRect, GetDC, HGDIOBJ, RGN_DIFF, RGN_OR,
-                ReleaseDC, DT_CENTER, DT_SINGLELINE, DT_VCENTER, FW_SEMIBOLD,
-                FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY,
-                SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT,
+                CombineRgn, CreateFontW, CreateRectRgn, CreateSolidBrush, DT_CENTER, DT_SINGLELINE,
+                DT_VCENTER, DeleteObject, DrawTextW, FONT_CHARSET, FONT_CLIP_PRECISION,
+                FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_SEMIBOLD, FillRect, GetDC, HGDIOBJ,
+                RGN_DIFF, RGN_OR, ReleaseDC, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT,
             },
             System::LibraryLoader::GetModuleHandleW,
             UI::WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-                MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SW_SHOWNOACTIVATE,
-                SetWindowDisplayAffinity, ShowWindow, TranslateMessage,
-                WDA_EXCLUDEFROMCAPTURE, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
-                WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+                CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE,
+                PeekMessageW, RegisterClassW, SW_SHOWNOACTIVATE, SetWindowDisplayAffinity,
+                ShowWindow, TranslateMessage, WDA_EXCLUDEFROMCAPTURE, WNDCLASSW, WS_EX_NOACTIVATE,
+                WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
             },
         },
+        core::{PCWSTR, w},
     };
 
     let start_instant = Instant::now();
@@ -1554,10 +1589,16 @@ fn run_region_border(
                             right: 3 + prep_badge_w,
                             bottom: 3 + badge_h,
                         };
-                        let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
+                        let old_font =
+                            windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
                         SetBkMode(hdc, TRANSPARENT);
                         SetTextColor(hdc, COLORREF(0x00FF_FF_FF));
-                        DrawTextW(hdc, &mut time_str, &mut text_rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                        DrawTextW(
+                            hdc,
+                            &mut time_str,
+                            &mut text_rect,
+                            DT_SINGLELINE | DT_VCENTER | DT_CENTER,
+                        );
                         windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
                         let _ = ReleaseDC(Some(hwnd), hdc);
                     }
@@ -1586,17 +1627,24 @@ fn run_region_border(
                         } else {
                             format!("Preparing{dots}")
                         };
-                        let mut msg_utf16: Vec<u16> = msg.encode_utf16().chain(std::iter::once(0)).collect();
+                        let mut msg_utf16: Vec<u16> =
+                            msg.encode_utf16().chain(std::iter::once(0)).collect();
                         let mut text_rect = RECT {
                             left: 3,
                             top: 3,
                             right: 3 + prep_badge_w,
                             bottom: 3 + badge_h,
                         };
-                        let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
+                        let old_font =
+                            windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
                         SetBkMode(hdc, TRANSPARENT);
                         SetTextColor(hdc, prep_text_color);
-                        DrawTextW(hdc, &mut msg_utf16, &mut text_rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+                        DrawTextW(
+                            hdc,
+                            &mut msg_utf16,
+                            &mut text_rect,
+                            DT_SINGLELINE | DT_VCENTER | DT_CENTER,
+                        );
                         windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
                         let _ = ReleaseDC(Some(hwnd), hdc);
                     }
@@ -1621,24 +1669,23 @@ fn show_video_copy_toast_async(rect: Option<RECT>, language: crate::model::UiLan
 #[cfg(windows)]
 fn run_video_copy_toast(rect: Option<RECT>, language: crate::model::UiLanguage) {
     use windows::{
-        core::{PCWSTR, w},
         Win32::{
             Foundation::{COLORREF, HINSTANCE, LPARAM, LRESULT, WPARAM},
             Graphics::Gdi::{
-                CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, FillRect, GetDC,
-                HGDIOBJ, ReleaseDC, DT_CENTER, DT_SINGLELINE, DT_VCENTER, FW_BOLD,
-                FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY,
-                SetBkMode, SetTextColor, TRANSPARENT,
+                CreateFontW, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteObject,
+                DrawTextW, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY,
+                FW_BOLD, FillRect, GetDC, HGDIOBJ, ReleaseDC, SetBkMode, SetTextColor, TRANSPARENT,
             },
             System::LibraryLoader::GetModuleHandleW,
             UI::WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetSystemMetrics,
-                LWA_ALPHA, MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SW_SHOWNOACTIVATE,
-                SM_CXSCREEN, SM_CYSCREEN, SetLayeredWindowAttributes, ShowWindow, TranslateMessage,
+                LWA_ALPHA, MSG, PM_REMOVE, PeekMessageW, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN,
+                SW_SHOWNOACTIVATE, SetLayeredWindowAttributes, ShowWindow, TranslateMessage,
                 WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
                 WS_EX_TRANSPARENT, WS_POPUP,
             },
         },
+        core::{PCWSTR, w},
     };
 
     let toast_w = 260;
@@ -1733,10 +1780,30 @@ fn run_video_copy_toast(rect: Option<RECT>, language: crate::model::UiLanguage) 
             };
             FillRect(hdc, &full_rect, bg_brush);
 
-            let top_b = RECT { left: 0, top: 0, right: toast_w, bottom: 2 };
-            let bot_b = RECT { left: 0, top: toast_h - 2, right: toast_w, bottom: toast_h };
-            let left_b = RECT { left: 0, top: 0, right: 2, bottom: toast_h };
-            let right_b = RECT { left: toast_w - 2, top: 0, right: toast_w, bottom: toast_h };
+            let top_b = RECT {
+                left: 0,
+                top: 0,
+                right: toast_w,
+                bottom: 2,
+            };
+            let bot_b = RECT {
+                left: 0,
+                top: toast_h - 2,
+                right: toast_w,
+                bottom: toast_h,
+            };
+            let left_b = RECT {
+                left: 0,
+                top: 0,
+                right: 2,
+                bottom: toast_h,
+            };
+            let right_b = RECT {
+                left: toast_w - 2,
+                top: 0,
+                right: toast_w,
+                bottom: toast_h,
+            };
             FillRect(hdc, &top_b, border_brush);
             FillRect(hdc, &bot_b, border_brush);
             FillRect(hdc, &left_b, border_brush);
@@ -1757,7 +1824,12 @@ fn run_video_copy_toast(rect: Option<RECT>, language: crate::model::UiLanguage) 
             let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(hdc, COLORREF(0x00FF_FF_FF));
-            DrawTextW(hdc, &mut text_utf16, &mut text_rect, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+            DrawTextW(
+                hdc,
+                &mut text_utf16,
+                &mut text_rect,
+                DT_SINGLELINE | DT_VCENTER | DT_CENTER,
+            );
             windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
             let _ = ReleaseDC(Some(hwnd), hdc);
         }
