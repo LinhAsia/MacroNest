@@ -32932,23 +32932,11 @@ mod windows_overlay {
     }
 
     fn send_mouse_event(step: &MacroStep) -> Result<()> {
-        let delay_ms = step.mouse_click_delay_ms;
-        let use_arduino = HOOK_STATE.lock().use_arduino_mouse;
-        if use_arduino {
-            let click_button = match step.action {
-                MacroAction::MouseLeftClick => Some(1),
-                MacroAction::MouseRightClick => Some(2),
-                MacroAction::MouseMiddleClick => Some(3),
-                _ => None,
-            };
-            if let Some(button) = click_button {
-                write_arduino_data(&arduino_packet(2, [button, 1, 0, 0, 0]))?;
-                if delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(delay_ms as u64));
-                }
-                return write_arduino_data(&arduino_packet(2, [button, 0, 0, 0, 0]));
-            }
-        }
+        let delay_ms = if step.mouse_click_delay_ms == 0 {
+            HOOK_STATE.lock().macro_mouse_click_delay_ms
+        } else {
+            step.mouse_click_delay_ms
+        };
         match step.action {
             MacroAction::MouseMoveAbsolute => {
                 return send_mouse_move_absolute(step.get_x(), step.get_y());
@@ -32959,48 +32947,48 @@ mod windows_overlay {
             }
 
             MacroAction::MouseLeftClick => {
-                send_mouse_input(MOUSEEVENTF_LEFTDOWN, 0)?;
-                if delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(delay_ms as u64));
-                }
-
-                return send_mouse_input(MOUSEEVENTF_LEFTUP, 0);
+                return send_mouse_click_pair(
+                    MOUSEEVENTF_LEFTDOWN,
+                    MOUSEEVENTF_LEFTUP,
+                    0,
+                    delay_ms,
+                );
             }
 
             MacroAction::MouseRightClick => {
-                send_mouse_input(MOUSEEVENTF_RIGHTDOWN, 0)?;
-                if delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(delay_ms as u64));
-                }
-
-                return send_mouse_input(MOUSEEVENTF_RIGHTUP, 0);
+                return send_mouse_click_pair(
+                    MOUSEEVENTF_RIGHTDOWN,
+                    MOUSEEVENTF_RIGHTUP,
+                    0,
+                    delay_ms,
+                );
             }
 
             MacroAction::MouseMiddleClick => {
-                send_mouse_input(MOUSEEVENTF_MIDDLEDOWN, 0)?;
-                if delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(delay_ms as u64));
-                }
-
-                return send_mouse_input(MOUSEEVENTF_MIDDLEUP, 0);
+                return send_mouse_click_pair(
+                    MOUSEEVENTF_MIDDLEDOWN,
+                    MOUSEEVENTF_MIDDLEUP,
+                    0,
+                    delay_ms,
+                );
             }
 
             MacroAction::MouseX1Click => {
-                send_mouse_input(MOUSEEVENTF_XDOWN, XBUTTON1_DATA as u32)?;
-                if delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(delay_ms as u64));
-                }
-
-                return send_mouse_input(MOUSEEVENTF_XUP, XBUTTON1_DATA as u32);
+                return send_mouse_click_pair(
+                    MOUSEEVENTF_XDOWN,
+                    MOUSEEVENTF_XUP,
+                    XBUTTON1_DATA as u32,
+                    delay_ms,
+                );
             }
 
             MacroAction::MouseX2Click => {
-                send_mouse_input(MOUSEEVENTF_XDOWN, XBUTTON2_DATA as u32)?;
-                if delay_ms > 0 {
-                    thread::sleep(Duration::from_millis(delay_ms as u64));
-                }
-
-                return send_mouse_input(MOUSEEVENTF_XUP, XBUTTON2_DATA as u32);
+                return send_mouse_click_pair(
+                    MOUSEEVENTF_XDOWN,
+                    MOUSEEVENTF_XUP,
+                    XBUTTON2_DATA as u32,
+                    delay_ms,
+                );
             }
 
             _ => {}
@@ -33022,6 +33010,23 @@ mod windows_overlay {
             _ => bail!("Unsupported mouse action"),
         };
         send_mouse_input(flags, mouse_data)
+    }
+
+    fn send_mouse_click_pair(
+        down: MOUSE_EVENT_FLAGS,
+        up: MOUSE_EVENT_FLAGS,
+        mouse_data: u32,
+        delay_ms: u32,
+    ) -> Result<()> {
+        send_mouse_input(down, mouse_data)?;
+        if delay_ms > 0 {
+            thread::sleep(Duration::from_millis(delay_ms as u64));
+        }
+        if let Err(first_error) = send_mouse_input(up, mouse_data) {
+            // ponytail: one retry is enough to avoid a stuck button after a transient backend error.
+            return send_mouse_input(up, mouse_data).map_err(|_| first_error);
+        }
+        Ok(())
     }
 
     fn send_arduino_relative_move_packet(dx: i32, dy: i32) -> Result<()> {

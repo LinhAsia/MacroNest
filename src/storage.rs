@@ -273,9 +273,6 @@ impl AppPaths {
         if matches!(state.vietnamese_input_mode, VietnameseInputMode::Off) {
             state.vietnamese_input_mode = VietnameseInputMode::Telex;
         }
-        if state.macro_mouse_click_delay_ms == 16 {
-            state.macro_mouse_click_delay_ms = 0;
-        }
         for profile in &mut state.profiles {
             profile.collapsed = true;
         }
