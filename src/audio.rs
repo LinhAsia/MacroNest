@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::File,
     io::BufReader,
     path::{Path, PathBuf},
@@ -12,7 +13,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use once_cell::sync::Lazy;
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use rodio::buffer::SamplesBuffer;
 use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
 use symphonia::core::{
@@ -28,6 +29,7 @@ use symphonia::default::{get_codecs, get_probe};
 
 use crate::model::AudioClipSettings;
 
+#[derive(Clone)]
 struct CachedAudio {
     path: PathBuf,
     channels: u16,
@@ -207,6 +209,14 @@ static PREVIEW_STATE: Lazy<Mutex<Option<PreviewState>>> = Lazy::new(|| Mutex::ne
 static VIDEO_PREVIEW_STATE: Lazy<Mutex<Option<VideoPreviewAudioState>>> =
     Lazy::new(|| Mutex::new(None));
 static VIDEO_PREVIEW_GENERATION: AtomicU64 = AtomicU64::new(0);
+static VIDEO_AUDIO_CACHE: Lazy<(Mutex<VideoAudioCache>, Condvar)> =
+    Lazy::new(|| (Mutex::new(VideoAudioCache::default()), Condvar::new()));
+
+#[derive(Default)]
+struct VideoAudioCache {
+    cached: Option<CachedAudio>,
+    loading: HashSet<PathBuf>,
+}
 
 struct VideoPreviewAudioState {
     _stream: rodio::OutputStream,
@@ -455,7 +465,7 @@ pub fn play_video_audio_preview(path: &str, start_ms: u64, end_ms: u64) -> Resul
 pub fn play_video_audio_preview_async(path: String, start_ms: u64, end_ms: u64) {
     let generation = VIDEO_PREVIEW_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     thread::spawn(move || {
-        let Ok(decoded) = decode_media_audio(&path) else {
+        let Ok(decoded) = load_video_audio_cached(&path) else {
             return;
         };
         if generation != VIDEO_PREVIEW_GENERATION.load(Ordering::Acquire) {
@@ -463,6 +473,43 @@ pub fn play_video_audio_preview_async(path: String, start_ms: u64, end_ms: u64) 
         }
         let _ = install_video_audio_preview(&path, decoded, start_ms, end_ms);
     });
+}
+
+pub fn preload_video_audio_preview_async(path: String) {
+    thread::spawn(move || {
+        let _ = load_video_audio_cached(&path);
+    });
+}
+
+fn load_video_audio_cached(path: &str) -> Result<CachedAudio> {
+    let path_buf = PathBuf::from(path);
+    let (cache, ready) = &*VIDEO_AUDIO_CACHE;
+    {
+        let mut state = cache.lock();
+        loop {
+            if let Some(cached) = state
+                .cached
+                .as_ref()
+                .filter(|cached| cached.path == path_buf)
+            {
+                return Ok(cached.clone());
+            }
+            if !state.loading.contains(&path_buf) {
+                state.loading.insert(path_buf.clone());
+                break;
+            }
+            ready.wait(&mut state);
+        }
+    }
+
+    let decoded = decode_media_audio(path);
+    let mut state = cache.lock();
+    state.loading.remove(&path_buf);
+    if let Ok(decoded) = &decoded {
+        state.cached = Some(decoded.clone());
+    }
+    ready.notify_all();
+    decoded
 }
 
 fn install_video_audio_preview(
@@ -688,8 +735,12 @@ fn decode_media_audio(path: &str) -> Result<CachedAudio> {
         .context("Failed to probe media file")?;
     let mut format = probed.format;
     let track = format
-        .default_track()
-        .context("No default audio track was found")?;
+        .tracks()
+        .iter()
+        .find(|track| {
+            track.codec_params.sample_rate.is_some() || track.codec_params.channels.is_some()
+        })
+        .context("No audio track was found")?;
     let track_id = track.id;
     let mut decoder = get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())

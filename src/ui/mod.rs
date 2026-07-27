@@ -8000,6 +8000,7 @@ impl CrosshairApp {
         if let Some(path) = select_video {
             self.stop_video_library_playback();
             self.video_library_preloaded_playback = None;
+            audio::preload_video_audio_preview_async(path.to_string_lossy().into_owned());
             self.video_library_selected = Some(path.clone());
             self.video_library_preview = None;
             self.video_library_preview_texture = None;
