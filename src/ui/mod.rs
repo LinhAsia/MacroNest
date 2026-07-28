@@ -17246,6 +17246,7 @@ impl eframe::App for CrosshairApp {
             });
 
         self.render_memory_pinned_viewport(ctx);
+        self.render_network_pinned_viewport(ctx);
 
         if self.settings_popup_open {
             if self.capture_target.is_none()

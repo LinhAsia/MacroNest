@@ -14,6 +14,7 @@ use std::{
 
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use eframe::egui::{self, Color32, RichText, Sense, Stroke};
+use flate2::read::{DeflateDecoder, GzDecoder};
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     KeyUsagePurpose,
@@ -42,6 +43,7 @@ const DEFAULT_PROXY_ADDRESS: &str = "127.0.0.1:8888";
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BODY_BYTES: usize = 1024 * 1024;
 const MAX_ENTRIES: usize = 10_000;
+const MAX_STRUCTURED_ROWS: usize = 5_000;
 
 #[derive(Clone)]
 struct NetworkEntry {
@@ -52,6 +54,8 @@ struct NetworkEntry {
     target: String,
     headers: String,
     body: Vec<u8>,
+    response_headers: String,
+    response_body: Vec<u8>,
     notes: String,
     secure_tunnel: bool,
 }
@@ -106,6 +110,13 @@ enum ContentTab {
     Raw,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum MessageSide {
+    #[default]
+    Request,
+    Response,
+}
+
 pub(crate) struct NetworkPanelState {
     bind_address: String,
     filter: String,
@@ -114,8 +125,10 @@ pub(crate) struct NetworkPanelState {
     next_id: u64,
     detail_tab: DetailTab,
     content_tab: ContentTab,
+    message_side: MessageSide,
     status: String,
     expanded_hosts: HashSet<String>,
+    host_activity: BTreeMap<String, Instant>,
     pinned: bool,
     proxy: Option<NetworkProxy>,
     recovery_file: PathBuf,
@@ -161,8 +174,10 @@ impl NetworkPanelState {
             next_id: 1,
             detail_tab: DetailTab::Overview,
             content_tab: ContentTab::Headers,
+            message_side: MessageSide::Request,
             status: recovery_status,
             expanded_hosts: HashSet::new(),
+            host_activity: BTreeMap::new(),
             pinned: false,
             proxy: None,
             recovery_file,
@@ -170,7 +185,7 @@ impl NetworkPanelState {
             ca_dir,
             ca_installed,
             remove_ca_on_exit: false,
-            decrypt_https: false,
+            decrypt_https: true,
             frida_processes: Vec::new(),
             frida_pid: None,
             frida_script: crate::frida_injector::DEFAULT_NETWORK_SCRIPT.to_owned(),
@@ -205,6 +220,8 @@ impl NetworkPanelState {
                 NetworkEvent::Entry(mut entry) => {
                     entry.id = self.next_id;
                     self.next_id += 1;
+                    self.host_activity
+                        .insert(entry.host.clone(), Instant::now());
                     self.entries.push(entry);
                 }
                 NetworkEvent::Error(error) => self.status = format!("Proxy error: {error}"),
@@ -311,6 +328,7 @@ impl NetworkPanelState {
             Err(error) => self.status = format!("Unable to list processes: {error}"),
         }
     }
+
 }
 
 #[derive(Clone)]
@@ -744,6 +762,10 @@ fn proxy_connection(
 
     if method.eq_ignore_ascii_case("CONNECT") {
         let host = target.clone();
+        if let Some(mitm) = mitm {
+            client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
+            return mitm_connection(client, &host, mitm, events);
+        }
         events
             .send(NetworkEvent::Entry(NetworkEntry {
                 id: 0,
@@ -753,14 +775,12 @@ fn proxy_connection(
                 target: target.clone(),
                 headers: text.clone(),
                 body: Vec::new(),
+                response_headers: String::new(),
+                response_body: Vec::new(),
                 notes: String::new(),
                 secure_tunnel: true,
             }))
             .ok();
-        if let Some(mitm) = mitm {
-            client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
-            return mitm_connection(client, &host, mitm, events);
-        }
         let mut server = TcpStream::connect(&host).map_err(|error| {
             std::io::Error::new(error.kind(), format!("connect to {host} failed: {error}"))
         })?;
@@ -784,6 +804,8 @@ fn proxy_connection(
                 target: target.clone(),
                 headers: text.clone(),
                 body,
+                response_headers: String::new(),
+                response_body: Vec::new(),
                 notes: String::new(),
                 secure_tunnel: false,
             }))
@@ -888,20 +910,6 @@ fn mitm_connection(
     let mut parts = text.lines().next().unwrap_or_default().split_whitespace();
     let method = parts.next().unwrap_or_default().to_owned();
     let path = parts.next().unwrap_or("/").to_owned();
-    events
-        .send(NetworkEvent::Entry(NetworkEntry {
-            id: 0,
-            time: SystemTime::now(),
-            method,
-            host: hostname.to_owned(),
-            target: path.clone(),
-            headers: text.clone(),
-            body: request[header_end..].to_vec(),
-            notes: String::new(),
-            secure_tunnel: false,
-        }))
-        .ok();
-
     let server = TcpStream::connect(target)?;
     let connector = native_tls::TlsConnector::new().map_err(io_other)?;
     let mut upstream = connector.connect(hostname, server).map_err(io_other)?;
@@ -916,18 +924,93 @@ fn mitm_connection(
         upstream.write_all(&force_connection_close(&request, header_end))?;
     }
     let response = read_header(&mut upstream)?;
-    let switching_protocols = String::from_utf8_lossy(&response)
+    let response_header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| position + 4)
+        .unwrap_or(response.len());
+    let response_headers =
+        String::from_utf8_lossy(&response[..response_header_end]).into_owned();
+    let switching_protocols = response_headers
         .lines()
         .next()
         .is_some_and(|line| line.split_whitespace().nth(1) == Some("101"));
     downstream.write_all(&response)?;
+    let mut response_body = response[response_header_end..].to_vec();
     if switching_protocols {
+        emit_http_entry(
+            &events,
+            method,
+            hostname,
+            path.clone(),
+            text,
+            request[header_end..].to_vec(),
+            response_headers,
+            response_body,
+        );
         relay_websocket(&mut downstream, &mut upstream, hostname, &path, events)?;
     } else {
-        std::io::copy(&mut upstream, &mut downstream)?;
+        copy_and_capture(&mut upstream, &mut downstream, &mut response_body)?;
+        emit_http_entry(
+            &events,
+            method,
+            hostname,
+            path,
+            text,
+            request[header_end..].to_vec(),
+            response_headers,
+            response_body,
+        );
     }
     downstream.flush()?;
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_http_entry(
+    events: &Sender<NetworkEvent>,
+    method: String,
+    host: &str,
+    target: String,
+    headers: String,
+    body: Vec<u8>,
+    response_headers: String,
+    response_body: Vec<u8>,
+) {
+    events
+        .send(NetworkEvent::Entry(NetworkEntry {
+            id: 0,
+            time: SystemTime::now(),
+            method,
+            host: host.to_owned(),
+            target,
+            headers,
+            body,
+            response_headers,
+            response_body,
+            notes: String::new(),
+            secure_tunnel: false,
+        }))
+        .ok();
+}
+
+fn copy_and_capture(
+    reader: &mut impl Read,
+    writer: &mut impl Write,
+    captured: &mut Vec<u8>,
+) -> std::io::Result<()> {
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            return Ok(());
+        }
+        writer.write_all(&buffer[..count])?;
+        if captured.len() < MAX_CAPTURE_BODY_BYTES {
+            let remaining = MAX_CAPTURE_BODY_BYTES - captured.len();
+            captured.extend_from_slice(&buffer[..count.min(remaining)]);
+        }
+    }
 }
 
 fn relay_websocket(
@@ -1057,6 +1140,8 @@ fn emit_websocket_frames(
                     payload.len()
                 ),
                 body: payload,
+                response_headers: String::new(),
+                response_body: Vec::new(),
                 notes: String::new(),
                 secure_tunnel: false,
             }))
@@ -1121,7 +1206,12 @@ impl CrosshairApp {
     pub(crate) fn render_network_panel(&mut self, ui: &mut egui::Ui) {
         self.network_panel.drain();
         let running = self.network_panel.proxy.is_some();
-        if running {
+        let host_flash_active = self
+            .network_panel
+            .host_activity
+            .values()
+            .any(|updated| updated.elapsed() < Duration::from_millis(700));
+        if running || host_flash_active {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
 
@@ -1131,9 +1221,9 @@ impl CrosshairApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .button(if self.network_panel.pinned {
-                        self.tr("Unpin network", "Unpin network")
+                        self.tr("Unpin hosts", "Unpin hosts")
                     } else {
-                        self.tr("Pin network", "Pin network")
+                        self.tr("Pin hosts", "Pin hosts")
                     })
                     .clicked()
                 {
@@ -1141,6 +1231,7 @@ impl CrosshairApp {
                 }
                 if ui.button(self.tr("Clear", "Clear")).clicked() {
                     self.network_panel.entries.clear();
+                    self.network_panel.host_activity.clear();
                     self.network_panel.selected_id = None;
                 }
                 if ui.button(self.tr("Restore proxy", "Restore proxy")).clicked() {
@@ -1318,7 +1409,6 @@ impl CrosshairApp {
         ui.separator();
 
         self.render_network_capture(ui);
-        self.render_pinned_network(ui.ctx());
     }
 
     fn render_network_capture(&mut self, ui: &mut egui::Ui) {
@@ -1379,11 +1469,23 @@ impl CrosshairApp {
                         .collect::<Vec<_>>();
                     let expanded = self.network_panel.expanded_hosts.contains(&host);
                     let arrow = if expanded { "-" } else { "+" };
+                    let flash = self
+                        .network_panel
+                        .host_activity
+                        .get(&host)
+                        .map(|updated| {
+                            1.0 - (updated.elapsed().as_secs_f32() / 0.7).clamp(0.0, 1.0)
+                        })
+                        .unwrap_or(0.0);
                     if left_row_button(
                         ui,
                         format!("{arrow}  {host}  ({})", matching.len()),
                         24.0,
-                        Color32::from_rgb(126, 82, 24),
+                        blend_color(
+                            Color32::from_rgb(126, 82, 24),
+                            Color32::from_rgb(255, 190, 62),
+                            flash,
+                        ),
                         Stroke::new(1.0, Color32::from_rgb(218, 145, 42)),
                     )
                     .clicked()
@@ -1410,15 +1512,17 @@ impl CrosshairApp {
             });
     }
 
-    fn render_pinned_network(&mut self, ctx: &egui::Context) {
+    pub(crate) fn render_network_pinned_viewport(&mut self, ctx: &egui::Context) {
         if !self.network_panel.pinned {
             return;
         }
+        self.network_panel.drain();
+        ctx.request_repaint_after(Duration::from_millis(100));
         let builder = egui::ViewportBuilder::default()
-            .with_title("MacroNest — Network")
+            .with_title("MacroNest — Network hosts")
             .with_position(egui::pos2(0.0, 0.0))
-            .with_inner_size(egui::vec2(900.0, 620.0))
-            .with_min_inner_size(egui::vec2(560.0, 320.0))
+            .with_inner_size(egui::vec2(480.0, 620.0))
+            .with_min_inner_size(egui::vec2(320.0, 260.0))
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
             .with_resizable(true)
@@ -1436,7 +1540,7 @@ impl CrosshairApp {
                     .show(ctx, |ui| {
                         let response = ui
                             .horizontal(|ui| {
-                                ui.label(RichText::new("▣  MacroNest  Network").strong());
+                                ui.label(RichText::new("▣  MacroNest  Network hosts").strong());
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -1453,7 +1557,7 @@ impl CrosshairApp {
                             ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
                         }
                     });
-                egui::CentralPanel::default().show(ctx, |ui| self.render_network_capture(ui));
+                egui::CentralPanel::default().show(ctx, |ui| self.render_network_list(ui));
             },
         );
         if unpin {
@@ -1495,6 +1599,42 @@ impl CrosshairApp {
         match self.network_panel.detail_tab {
             DetailTab::Overview => render_overview(ui, &entry),
             DetailTab::Contents => {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.tr("Direction", "Direction")).strong());
+                    if ui
+                        .selectable_label(
+                            self.network_panel.message_side == MessageSide::Request,
+                            self.tr("Sent (request)", "Sent (request)"),
+                        )
+                        .clicked()
+                    {
+                        self.network_panel.message_side = MessageSide::Request;
+                    }
+                    let has_response = !entry.response_headers.is_empty();
+                    if ui
+                        .add_enabled(
+                            has_response,
+                            egui::Button::selectable(
+                                self.network_panel.message_side == MessageSide::Response,
+                                self.tr("Received (response)", "Received (response)"),
+                            ),
+                        )
+                        .clicked()
+                    {
+                        self.network_panel.message_side = MessageSide::Response;
+                    }
+                    if !has_response && !entry.secure_tunnel {
+                        ui.label(RichText::new("Response was not captured").small().weak());
+                    }
+                });
+                ui.label(
+                    RichText::new(
+                        "Data shows JSON/form field names, paths, types and values. Application class names are only available when the protocol actually sends them.",
+                    )
+                    .small()
+                    .weak(),
+                );
+                ui.separator();
                 ui.horizontal_wrapped(|ui| {
                     for (tab, label) in [
                         (ContentTab::Headers, self.tr("Headers", "Headers")),
@@ -1503,7 +1643,7 @@ impl CrosshairApp {
                         (ContentTab::Text, self.tr("Text", "Text")),
                         (ContentTab::Hex, self.tr("Hex", "Hex")),
                         (ContentTab::Form, self.tr("Form", "Form")),
-                        (ContentTab::Json, self.tr("Json", "Json")),
+                        (ContentTab::Json, self.tr("Data", "Data")),
                         (ContentTab::Raw, self.tr("Raw", "Raw")),
                     ] {
                         ui.add_enabled_ui(
@@ -1520,13 +1660,18 @@ impl CrosshairApp {
                     }
                 });
                 ui.separator();
-                render_contents(ui, &entry, self.network_panel.content_tab);
+                render_contents(
+                    ui,
+                    &entry,
+                    self.network_panel.content_tab,
+                    self.network_panel.message_side,
+                );
             }
             DetailTab::Ssl => {
                 if entry.secure_tunnel {
                     ui.label(RichText::new("Encrypted TLS tunnel").strong());
                     ui.label(
-                        "The proxy recorded the destination but did not decrypt this connection.",
+                        "Only the destination is visible. Stop capture, install the MacroNest CA, enable Decrypt HTTPS, then start again to inspect sent and received data. Apps with certificate pinning may still reject decryption.",
                     );
                 } else {
                     ui.label("This request used plain HTTP; SSL does not apply.");
@@ -1658,6 +1803,18 @@ fn left_row_button(
     response
 }
 
+fn blend_color(from: Color32, to: Color32, amount: f32) -> Color32 {
+    let amount = amount.clamp(0.0, 1.0);
+    let channel = |from: u8, to: u8| {
+        (f32::from(from) + (f32::from(to) - f32::from(from)) * amount).round() as u8
+    };
+    Color32::from_rgb(
+        channel(from.r(), to.r()),
+        channel(from.g(), to.g()),
+        channel(from.b(), to.b()),
+    )
+}
+
 fn render_overview(ui: &mut egui::Ui, entry: &NetworkEntry) {
     egui::Grid::new("network-request-summary")
         .num_columns(2)
@@ -1685,50 +1842,91 @@ fn render_overview(ui: &mut egui::Ui, entry: &NetworkEntry) {
             ui.label("Body size");
             ui.label(format!("{} byte(s)", entry.body.len()));
             ui.end_row();
+            ui.label("Response");
+            ui.label(
+                entry
+                    .response_headers
+                    .lines()
+                    .next()
+                    .filter(|line| !line.is_empty())
+                    .unwrap_or("Not captured"),
+            );
+            ui.end_row();
+            ui.label("Response body size");
+            ui.label(format!("{} byte(s)", entry.response_body.len()));
+            ui.end_row();
         });
 }
 
-fn render_contents(ui: &mut egui::Ui, entry: &NetworkEntry, tab: ContentTab) {
+fn render_contents(
+    ui: &mut egui::Ui,
+    entry: &NetworkEntry,
+    tab: ContentTab,
+    side: MessageSide,
+) {
     if entry.secure_tunnel && tab != ContentTab::Headers {
-        ui.label("Unavailable: this HTTPS connection is only being tunneled, not decrypted.");
+        ui.label(
+            "No payload is available for this encrypted tunnel. Enable Decrypt HTTPS before capture.",
+        );
         return;
     }
+    let (headers, body) = match side {
+        MessageSide::Request => (&entry.headers, entry.body.as_slice()),
+        MessageSide::Response => (&entry.response_headers, entry.response_body.as_slice()),
+    };
+    let body = decoded_body(headers, body);
     match tab {
-        ContentTab::Headers => readonly_text(ui, entry.headers.clone()),
-        ContentTab::Query => render_pairs(ui, query_pairs(&entry.target)),
-        ContentTab::Cookies => {
-            let cookies = entry
-                .headers
-                .lines()
-                .find_map(|line| {
-                    let (name, value) = line.split_once(':')?;
-                    name.eq_ignore_ascii_case("cookie").then_some(value.trim())
-                })
-                .unwrap_or_default();
-            render_pairs(ui, cookies.split(';').filter_map(split_pair).collect());
+        ContentTab::Headers => readonly_text(ui, headers.clone()),
+        ContentTab::Query => {
+            if side == MessageSide::Request {
+                render_pairs(ui, query_pairs(&entry.target));
+            } else {
+                ui.label("Query parameters belong to the request.");
+            }
         }
-        ContentTab::Text => readonly_text(ui, String::from_utf8_lossy(&entry.body).into_owned()),
-        ContentTab::Hex => readonly_text(ui, hex_dump(&entry.body)),
-        ContentTab::Form => render_form(ui, entry),
-        ContentTab::Json => {
-            let text = match serde_json::from_slice::<serde_json::Value>(&entry.body) {
-                Ok(value) => serde_json::to_string_pretty(&value)
-                    .unwrap_or_else(|_| String::from_utf8_lossy(&entry.body).into_owned()),
-                Err(_) => "This request body is not JSON.".to_owned(),
+        ContentTab::Cookies => {
+            let cookie_name = if side == MessageSide::Request {
+                "cookie"
+            } else {
+                "set-cookie"
             };
-            readonly_text(ui, text);
+            let cookies = headers
+                .lines()
+                .filter_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case(cookie_name)
+                        .then_some(value.trim())
+                })
+                .flat_map(|value| value.split(';'))
+                .filter_map(split_pair)
+                .collect();
+            render_pairs(ui, cookies);
+        }
+        ContentTab::Text => readonly_text(ui, String::from_utf8_lossy(&body).into_owned()),
+        ContentTab::Hex => readonly_text(ui, hex_dump(&body)),
+        ContentTab::Form => render_form(ui, headers, &body),
+        ContentTab::Json => {
+            if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&body) {
+                render_json_data(ui, &value);
+            } else {
+                let pairs = form_pairs(headers, &body);
+                if pairs.is_empty() {
+                    ui.label("No JSON or form fields found in this message.");
+                } else {
+                    render_pairs(ui, pairs);
+                }
+            }
         }
         ContentTab::Raw => {
-            let mut raw = entry.headers.clone();
-            raw.push_str(&String::from_utf8_lossy(&entry.body));
+            let mut raw = headers.clone();
+            raw.push_str(&String::from_utf8_lossy(&body));
             readonly_text(ui, raw);
         }
     }
 }
 
-fn render_form(ui: &mut egui::Ui, entry: &NetworkEntry) {
-    let content_type = entry
-        .headers
+fn render_form(ui: &mut egui::Ui, headers: &str, body: &[u8]) {
+    let content_type = headers
         .lines()
         .find_map(|line| {
             let (name, value) = line.split_once(':')?;
@@ -1737,17 +1935,175 @@ fn render_form(ui: &mut egui::Ui, entry: &NetworkEntry) {
         })
         .unwrap_or_default();
     if content_type.starts_with("application/x-www-form-urlencoded") {
-        render_pairs(
-            ui,
-            String::from_utf8_lossy(&entry.body)
-                .split('&')
-                .filter_map(split_pair)
-                .collect(),
-        );
+        render_pairs(ui, form_pairs(headers, body));
     } else if content_type.starts_with("multipart/form-data") {
         ui.label("Multipart form body captured; field parsing is not implemented yet.");
     } else {
         ui.label("This request is not form data.");
+    }
+}
+
+fn form_pairs(headers: &str, body: &[u8]) -> Vec<(String, String)> {
+    let is_form = headers.lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("content-type")
+                && value
+                    .trim()
+                    .to_ascii_lowercase()
+                    .starts_with("application/x-www-form-urlencoded")
+        })
+    });
+    if !is_form {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(body)
+        .split('&')
+        .filter_map(split_pair)
+        .collect()
+}
+
+fn decoded_body(headers: &str, body: &[u8]) -> Vec<u8> {
+    let mut decoded = if header_contains(headers, "transfer-encoding", "chunked") {
+        decode_chunked(body).unwrap_or_else(|| body.to_vec())
+    } else {
+        body.to_vec()
+    };
+    let content_encoding = header_value(headers, "content-encoding")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mut output = Vec::new();
+    let result = if content_encoding.contains("gzip") {
+        GzDecoder::new(decoded.as_slice()).read_to_end(&mut output)
+    } else if content_encoding.contains("deflate") {
+        DeflateDecoder::new(decoded.as_slice()).read_to_end(&mut output)
+    } else {
+        return decoded;
+    };
+    if result.is_ok() {
+        output
+    } else {
+        std::mem::take(&mut decoded)
+    }
+}
+
+fn header_value<'a>(headers: &'a str, wanted: &str) -> Option<&'a str> {
+    headers.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case(wanted).then_some(value.trim())
+    })
+}
+
+fn header_contains(headers: &str, name: &str, value: &str) -> bool {
+    header_value(headers, name).is_some_and(|current| {
+        current
+            .split(',')
+            .any(|part| part.trim().eq_ignore_ascii_case(value))
+    })
+}
+
+fn decode_chunked(body: &[u8]) -> Option<Vec<u8>> {
+    let mut offset = 0;
+    let mut decoded = Vec::new();
+    loop {
+        let line_end = body[offset..]
+            .windows(2)
+            .position(|window| window == b"\r\n")?
+            + offset;
+        let size_text = std::str::from_utf8(&body[offset..line_end])
+            .ok()?
+            .split(';')
+            .next()?;
+        let size = usize::from_str_radix(size_text.trim(), 16).ok()?;
+        offset = line_end + 2;
+        if size == 0 {
+            return Some(decoded);
+        }
+        let data_end = offset.checked_add(size)?;
+        if data_end + 2 > body.len() || &body[data_end..data_end + 2] != b"\r\n" {
+            return None;
+        }
+        decoded.extend_from_slice(&body[offset..data_end]);
+        offset = data_end + 2;
+    }
+}
+
+fn render_json_data(ui: &mut egui::Ui, value: &serde_json::Value) {
+    let mut rows = Vec::new();
+    collect_json_rows(value, "", &mut rows);
+    if rows.len() == MAX_STRUCTURED_ROWS {
+        ui.label(
+            RichText::new("Showing the first 5,000 structured fields.")
+                .small()
+                .weak(),
+        );
+    }
+    egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+        egui::Grid::new("network-json-data")
+            .num_columns(3)
+            .striped(true)
+            .spacing([18.0, 4.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new("Name / path").strong());
+                ui.label(RichText::new("Type").strong());
+                ui.label(RichText::new("Value").strong());
+                ui.end_row();
+                for (path, kind, value) in rows {
+                    ui.label(path);
+                    ui.label(kind);
+                    ui.label(value);
+                    ui.end_row();
+                }
+            });
+    });
+}
+
+fn collect_json_rows(
+    value: &serde_json::Value,
+    path: &str,
+    rows: &mut Vec<(String, &'static str, String)>,
+) {
+    // ponytail: cap pathological payloads here; virtualize the table before raising this ceiling.
+    if rows.len() >= MAX_STRUCTURED_ROWS {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(fields) => {
+            if !path.is_empty() {
+                rows.push((
+                    path.to_owned(),
+                    "Object",
+                    format!("{} field(s)", fields.len()),
+                ));
+            }
+            for (name, value) in fields {
+                let child = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{path}.{name}")
+                };
+                collect_json_rows(value, &child, rows);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            rows.push((
+                path.to_owned(),
+                "Array",
+                format!("{} item(s)", values.len()),
+            ));
+            for (index, value) in values.iter().enumerate() {
+                collect_json_rows(value, &format!("{path}[{index}]"), rows);
+            }
+        }
+        serde_json::Value::String(value) => {
+            rows.push((path.to_owned(), "String", value.clone()));
+        }
+        serde_json::Value::Number(value) => {
+            rows.push((path.to_owned(), "Number", value.to_string()));
+        }
+        serde_json::Value::Bool(value) => {
+            rows.push((path.to_owned(), "Boolean", value.to_string()));
+        }
+        serde_json::Value::Null => rows.push((path.to_owned(), "Null", String::new())),
     }
 }
 
