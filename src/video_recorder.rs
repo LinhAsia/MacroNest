@@ -1340,7 +1340,7 @@ fn window_source(hwnd: HWND, fps: u32) -> Result<(String, Option<RECT>), String>
         };
     Ok((
         format!(
-            "gdigrab:-framerate={fps}|-hwnd=0x{:x}|-i=title=",
+            "gdigrab:-framerate={fps}|-i=hwnd=0x{:x}",
             hwnd.0 as usize
         ),
         border_rect,
