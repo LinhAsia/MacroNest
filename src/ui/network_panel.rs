@@ -831,6 +831,9 @@ fn proxy_connection(
         if let Some(mitm) = mitm.filter(|_| !bypass_mitm) {
             client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
             if let Err(error) = mitm_connection(client, &host, mitm, events.clone()) {
+                if is_unclean_tls_close(&error) {
+                    return Ok(());
+                }
                 if let Ok(mut hosts) = mitm_bypass_hosts.lock() {
                     hosts.insert(host.clone());
                 }
@@ -1161,6 +1164,12 @@ fn is_retryable_io(error: &std::io::Error) -> bool {
         error.kind(),
         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
     )
+}
+
+fn is_unclean_tls_close(error: &std::io::Error) -> bool {
+    let message = error.to_string();
+    message.contains("peer closed connection without sending TLS close_notify")
+        || message.contains("unexpected-eof")
 }
 
 fn emit_websocket_frames(
@@ -1521,7 +1530,15 @@ impl CrosshairApp {
             ui.allocate_ui_with_layout(
                 egui::vec2((available.x - list_width - 8.0).max(180.0), available.y),
                 egui::Layout::top_down(egui::Align::Min),
-                |ui| self.render_network_detail(ui),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("network-detail-scroll")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            self.render_network_detail(ui);
+                        });
+                },
             );
         });
     }
@@ -1777,8 +1794,11 @@ impl CrosshairApp {
             DetailTab::Ssl => {
                 if entry.secure_tunnel {
                     ui.label(RichText::new("Encrypted TLS tunnel").strong());
-                    ui.label(
-                        "Only the destination is visible. Stop capture, install the MacroNest CA, enable Decrypt HTTPS, then start again to inspect sent and received data. Apps with certificate pinning may still reject decryption.",
+                    ui.add(
+                        egui::Label::new(
+                            "Only the destination is visible. Stop capture, install the MacroNest CA, enable Decrypt HTTPS, then start again to inspect sent and received data. Apps with certificate pinning may still reject decryption.",
+                        )
+                        .wrap(),
                     );
                 } else {
                     ui.label("This request used plain HTTP; SSL does not apply.");
