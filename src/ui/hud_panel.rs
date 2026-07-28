@@ -54,25 +54,27 @@ impl CrosshairApp {
                     );
                     changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let preview_active = preset.preview_enabled;
-                        let preview_response = Self::sound_style_icon_button(
-                            ui,
-                            Self::material_icon_text(
-                                if preview_active { 0xe047 } else { 0xe037 },
-                                18.0,
-                            ),
-                        )
-                        .on_hover_text(if preview_active {
-                            Self::tr_lang(language, "Stop HUD preview", "Stop HUD preview")
-                        } else {
-                            Self::tr_lang(language, "Run HUD preview", "Run HUD preview")
-                        });
-                        if preview_response.clicked() {
-                            preset.preview_enabled = !preset.preview_enabled;
-                            if preset.preview_enabled {
-                                preview_toggled_preset_id = Some(preset.id);
+                        if !preset.collapsed {
+                            let preview_active = preset.preview_enabled;
+                            let preview_response = Self::sound_style_icon_button(
+                                ui,
+                                Self::material_icon_text(
+                                    if preview_active { 0xe047 } else { 0xe037 },
+                                    18.0,
+                                ),
+                            )
+                            .on_hover_text(if preview_active {
+                                Self::tr_lang(language, "Stop HUD preview", "Stop HUD preview")
+                            } else {
+                                Self::tr_lang(language, "Run HUD preview", "Run HUD preview")
+                            });
+                            if preview_response.clicked() {
+                                preset.preview_enabled = !preset.preview_enabled;
+                                if preset.preview_enabled {
+                                    preview_toggled_preset_id = Some(preset.id);
+                                }
+                                changed = true;
                             }
-                            changed = true;
                         }
                         if ui
                             .add_enabled(
