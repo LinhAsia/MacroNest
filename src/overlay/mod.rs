@@ -25976,9 +25976,6 @@ mod windows_overlay {
                 }
                 return;
             }
-            if !release_requested {
-                return;
-            }
             hook_state.active_hold_macros.remove(&preset_id)
         };
         if let Some(active) = active {
@@ -31835,6 +31832,44 @@ mod windows_overlay {
             HOOK_STATE.lock().active_hold_macros.remove(&preset_id);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
             FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+        }
+
+        #[test]
+        fn stopped_hold_run_releases_mouse_lock_without_trigger_release() {
+            let _guard = TEST_MUTEX.lock().unwrap();
+            let preset_id = 93;
+            let run_token = 9;
+            let mask = MouseMoveLockMask {
+                left: true,
+                right: true,
+                up: true,
+                down: true,
+            };
+            {
+                let mut hook_state = HOOK_STATE.lock();
+                hook_state.mouse_move_locks = MouseMoveLockCounts::default();
+                hook_state.mouse_move_locks.add(mask);
+                hook_state.active_hold_macros.insert(
+                    preset_id,
+                    ActiveHoldMacro {
+                        trigger: HotkeyBinding::default(),
+                        release_steps: Vec::new(),
+                        hold_stop_step: None,
+                        image_search_preset_ids: Vec::new(),
+                        locked_keys: Vec::new(),
+                        locked_mouse_masks: vec![mask],
+                        run_token,
+                        completed: false,
+                        release_requested: false,
+                    },
+                );
+            }
+
+            finish_active_hold_run(preset_id, run_token, MacroRunFlow::StopExecution);
+
+            let hook_state = HOOK_STATE.lock();
+            assert!(!hook_state.active_hold_macros.contains_key(&preset_id));
+            assert!(!hook_state.mouse_move_locks.any());
         }
     }
 
