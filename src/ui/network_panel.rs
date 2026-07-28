@@ -21,7 +21,7 @@ use rcgen::{
 };
 use rustls::{
     ServerConfig, ServerConnection, StreamOwned,
-    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer},
+    pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject},
 };
 use serde::{Deserialize, Serialize};
 #[cfg(windows)]
@@ -419,11 +419,20 @@ impl NetworkProxy {
             system_proxy: None,
         };
         if decrypt_https {
-            verify_local_mitm(address).map_err(|error| {
-                format!(
-                    "HTTPS decryption self-check failed; Windows proxy was not changed: {error}"
-                )
-            })?;
+            if let Err(client_error) = verify_local_mitm(address) {
+                thread::sleep(Duration::from_millis(25));
+                let server_error = proxy.events.try_iter().find_map(|event| match event {
+                    NetworkEvent::Error(error) => Some(error),
+                    NetworkEvent::Entry(entry) if !entry.notes.is_empty() => Some(entry.notes),
+                    _ => None,
+                });
+                return Err(format!(
+                    "HTTPS decryption self-check failed; Windows proxy was not changed: {client_error}{}",
+                    server_error
+                        .map(|error| format!(" | proxy: {error}"))
+                        .unwrap_or_default()
+                ));
+            }
         }
         proxy.system_proxy = Some(SystemProxyGuard::enable(address, recovery_file)?);
         Ok(proxy)
@@ -431,7 +440,7 @@ impl NetworkProxy {
 }
 
 fn verify_local_mitm(address: &str) -> Result<(), String> {
-    const CHECK_HOST: &str = "macronest.invalid";
+    const CHECK_HOST: &str = "localhost";
     let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
     let timeout = Some(Duration::from_secs(5));
     stream
@@ -966,10 +975,11 @@ fn mitm_connection(
         .extended_key_usages
         .push(ExtendedKeyUsagePurpose::ServerAuth);
     let leaf = params.signed_by(&leaf_key, &issuer).map_err(io_other)?;
+    let ca = CertificateDer::from_pem_slice(mitm.cert_pem.as_bytes()).map_err(io_other)?;
     let config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(
-            vec![CertificateDer::from(leaf.der().to_vec())],
+            vec![CertificateDer::from(leaf.der().to_vec()), ca],
             PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der())),
         )
         .map_err(io_other)?;
@@ -1600,7 +1610,7 @@ impl CrosshairApp {
         self.network_panel.drain();
         ctx.request_repaint_after(Duration::from_millis(100));
         let builder = egui::ViewportBuilder::default()
-            .with_title("MacroNest — Network hosts")
+            .with_title("MacroNest - Network hosts")
             .with_position(egui::pos2(0.0, 0.0))
             .with_inner_size(egui::vec2(480.0, 620.0))
             .with_min_inner_size(egui::vec2(320.0, 260.0))
@@ -1621,11 +1631,21 @@ impl CrosshairApp {
                     .show(ctx, |ui| {
                         let response = ui
                             .horizontal(|ui| {
-                                ui.label(RichText::new("▣  MacroNest  Network hosts").strong());
+                                ui.label(Self::material_icon_text(0xe30c, 17.0));
+                                ui.label(RichText::new("MacroNest").strong());
+                                ui.label(RichText::new("Network hosts").weak());
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if ui.button("×").clicked() || ui.button("Unpin").clicked()
+                                        if ui
+                                            .add_sized(
+                                                [32.0, 28.0],
+                                                egui::Button::new(Self::material_icon_text(
+                                                    0xe5cd, 17.0,
+                                                )),
+                                            )
+                                            .on_hover_text("Unpin")
+                                            .clicked()
                                         {
                                             unpin = true;
                                         }
@@ -1639,6 +1659,7 @@ impl CrosshairApp {
                         }
                     });
                 egui::CentralPanel::default().show(ctx, |ui| self.render_network_list(ui));
+                render_network_popup_resize_handles(ctx);
             },
         );
         if unpin {
@@ -2273,4 +2294,86 @@ fn hex_dump(bytes: &[u8]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn render_network_popup_resize_handles(ctx: &egui::Context) {
+    let rect = ctx.content_rect();
+    let edge = 6.0;
+    let corner = 20.0;
+    let handles = [
+        (
+            "n",
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.min.y + edge)),
+            egui::viewport::ResizeDirection::North,
+            egui::CursorIcon::ResizeVertical,
+        ),
+        (
+            "s",
+            egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.max.y - edge), rect.max),
+            egui::viewport::ResizeDirection::South,
+            egui::CursorIcon::ResizeVertical,
+        ),
+        (
+            "w",
+            egui::Rect::from_min_max(rect.min, egui::pos2(rect.min.x + edge, rect.max.y)),
+            egui::viewport::ResizeDirection::West,
+            egui::CursorIcon::ResizeHorizontal,
+        ),
+        (
+            "e",
+            egui::Rect::from_min_max(egui::pos2(rect.max.x - edge, rect.min.y), rect.max),
+            egui::viewport::ResizeDirection::East,
+            egui::CursorIcon::ResizeHorizontal,
+        ),
+        (
+            "nw",
+            egui::Rect::from_min_size(rect.min, egui::vec2(corner, corner)),
+            egui::viewport::ResizeDirection::NorthWest,
+            egui::CursorIcon::ResizeNwSe,
+        ),
+        (
+            "ne",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.max.x - corner, rect.min.y),
+                egui::pos2(rect.max.x, rect.min.y + corner),
+            ),
+            egui::viewport::ResizeDirection::NorthEast,
+            egui::CursorIcon::ResizeNeSw,
+        ),
+        (
+            "sw",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.min.x, rect.max.y - corner),
+                egui::pos2(rect.min.x + corner, rect.max.y),
+            ),
+            egui::viewport::ResizeDirection::SouthWest,
+            egui::CursorIcon::ResizeNeSw,
+        ),
+        (
+            "se",
+            egui::Rect::from_min_max(
+                egui::pos2(rect.max.x - corner, rect.max.y - corner),
+                rect.max,
+            ),
+            egui::viewport::ResizeDirection::SouthEast,
+            egui::CursorIcon::ResizeNwSe,
+        ),
+    ];
+
+    for (id, handle_rect, direction, cursor) in handles {
+        egui::Area::new(egui::Id::new(("network-popup-resize", id)))
+            .order(egui::Order::Foreground)
+            .fixed_pos(handle_rect.min)
+            .interactable(true)
+            .show(ctx, |ui| {
+                let (_, response) =
+                    ui.allocate_exact_size(handle_rect.size(), Sense::click_and_drag());
+                if response.hovered() {
+                    ui.ctx().set_cursor_icon(cursor);
+                }
+                if response.drag_started() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+                }
+            });
+    }
 }
