@@ -465,10 +465,11 @@ fn verify_local_mitm(address: &str) -> Result<(), String> {
                 .unwrap_or("empty response")
         ));
     }
-    native_tls::TlsConnector::new()
+    let mut tls = native_tls::TlsConnector::new()
         .map_err(|error| error.to_string())?
         .connect(CHECK_HOST, stream)
         .map_err(|error| error.to_string())?;
+    tls.shutdown().map_err(|error| error.to_string())?;
     Ok(())
 }
 
