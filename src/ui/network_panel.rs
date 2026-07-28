@@ -239,7 +239,9 @@ impl NetworkPanelState {
     }
 
     fn start(&mut self) {
-        if self.decrypt_https && !self.ca_installed {
+        if self.decrypt_https {
+            // The certificate file can outlive its Windows trust-store entry.
+            // Re-adding the same CA is idempotent and repairs that stale state.
             self.install_ca();
             if !self.ca_installed {
                 return;
@@ -374,6 +376,7 @@ impl NetworkProxy {
             .map_err(|error| error.to_string())?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
+        let decrypt_https = mitm.is_some();
         let mitm_bypass_hosts = Arc::new(Mutex::new(HashSet::new()));
         let (tx, events) = unbounded();
         let thread = thread::spawn(move || {
@@ -415,9 +418,49 @@ impl NetworkProxy {
             thread: Some(thread),
             system_proxy: None,
         };
+        if decrypt_https {
+            verify_local_mitm(address).map_err(|error| {
+                format!(
+                    "HTTPS decryption self-check failed; Windows proxy was not changed: {error}"
+                )
+            })?;
+        }
         proxy.system_proxy = Some(SystemProxyGuard::enable(address, recovery_file)?);
         Ok(proxy)
     }
+}
+
+fn verify_local_mitm(address: &str) -> Result<(), String> {
+    const CHECK_HOST: &str = "macronest.invalid";
+    let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
+    let timeout = Some(Duration::from_secs(5));
+    stream
+        .set_read_timeout(timeout)
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(timeout)
+        .map_err(|error| error.to_string())?;
+    stream
+        .write_all(
+            format!("CONNECT {CHECK_HOST}:443 HTTP/1.1\r\nHost: {CHECK_HOST}:443\r\n\r\n")
+                .as_bytes(),
+        )
+        .map_err(|error| error.to_string())?;
+    let response = read_header(&mut stream).map_err(|error| error.to_string())?;
+    if !response.starts_with(b"HTTP/1.1 200") {
+        return Err(format!(
+            "local proxy rejected CONNECT: {}",
+            String::from_utf8_lossy(&response)
+                .lines()
+                .next()
+                .unwrap_or("empty response")
+        ));
+    }
+    native_tls::TlsConnector::new()
+        .map_err(|error| error.to_string())?
+        .connect(CHECK_HOST, stream)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize)]
