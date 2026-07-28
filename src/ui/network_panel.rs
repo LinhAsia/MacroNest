@@ -976,7 +976,11 @@ fn mitm_connection(
         .push(ExtendedKeyUsagePurpose::ServerAuth);
     let leaf = params.signed_by(&leaf_key, &issuer).map_err(io_other)?;
     let ca = CertificateDer::from_pem_slice(mitm.cert_pem.as_bytes()).map_err(io_other)?;
-    let config = ServerConfig::builder()
+    let config = ServerConfig::builder_with_provider(
+        rustls::crypto::ring::default_provider().into(),
+    )
+        .with_safe_default_protocol_versions()
+        .map_err(io_other)?
         .with_no_client_auth()
         .with_single_cert(
             vec![CertificateDer::from(leaf.der().to_vec()), ca],
