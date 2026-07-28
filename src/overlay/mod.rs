@@ -25945,7 +25945,7 @@ mod windows_overlay {
         }
 
         for mask in locked_mouse_masks {
-            apply_unlock_mouse(Some(preset_id), mask);
+            apply_unlock_mouse(Some(preset_id), None, mask);
         }
 
         if !completed {
@@ -26023,7 +26023,7 @@ mod windows_overlay {
         }
 
         for &mask in press_locked_mouse_masks {
-            apply_unlock_mouse(None, mask);
+            apply_unlock_mouse(None, None, mask);
         }
     }
 
@@ -28088,11 +28088,15 @@ mod windows_overlay {
             }
 
             MacroAction::LockMouse => {
-                apply_lock_mouse(step, Some(preset_id), step.unlock_on_exit);
+                apply_lock_mouse(step, Some(preset_id), None, step.unlock_on_exit);
             }
 
             MacroAction::UnlockMouse => {
-                apply_unlock_mouse(Some(preset_id), mouse_move_lock_mask_from_step(step));
+                apply_unlock_mouse(
+                    Some(preset_id),
+                    None,
+                    mouse_move_lock_mask_from_step(step),
+                );
             }
 
             MacroAction::EnableMacroPreset => {
@@ -28919,7 +28923,7 @@ mod windows_overlay {
 
                 MacroAction::LockMouse => {
                     let mask = mouse_move_lock_mask_from_step(step);
-                    apply_lock_mouse(step, None, step.unlock_on_exit);
+                    apply_lock_mouse(step, None, None, step.unlock_on_exit);
                     if step.unlock_on_exit {
                         press_locked_mouse_masks.push(mask);
                     }
@@ -28928,7 +28932,7 @@ mod windows_overlay {
                 MacroAction::UnlockMouse => {
                     let mask = mouse_move_lock_mask_from_step(step);
                     press_locked_mouse_masks.retain(|entry| *entry != mask);
-                    apply_unlock_mouse(None, mask);
+                    apply_unlock_mouse(None, None, mask);
                 }
 
                 MacroAction::EnableMacroPreset => {
@@ -29646,11 +29650,20 @@ mod windows_overlay {
                 }
 
                 MacroAction::LockMouse => {
-                    apply_lock_mouse(step, Some(preset_id), step.unlock_on_exit);
+                    apply_lock_mouse(
+                        step,
+                        Some(preset_id),
+                        Some(run_token),
+                        step.unlock_on_exit,
+                    );
                 }
 
                 MacroAction::UnlockMouse => {
-                    apply_unlock_mouse(Some(preset_id), mouse_move_lock_mask_from_step(step));
+                    apply_unlock_mouse(
+                        Some(preset_id),
+                        Some(run_token),
+                        mouse_move_lock_mask_from_step(step),
+                    );
                 }
 
                 MacroAction::EnableMacroPreset => {
@@ -32255,13 +32268,26 @@ mod windows_overlay {
         }
     }
 
-    fn apply_lock_mouse(step: &MacroStep, preset_id: Option<u32>, unlock_on_exit: bool) {
+    fn apply_lock_mouse(
+        step: &MacroStep,
+        preset_id: Option<u32>,
+        run_token: Option<u64>,
+        unlock_on_exit: bool,
+    ) {
         let mask = mouse_move_lock_mask_from_step(step);
         if !mask.any() {
             return;
         }
 
         let mut hook_state = HOOK_STATE.lock();
+        if let (Some(preset_id), Some(run_token)) = (preset_id, run_token)
+            && !hook_state
+                .active_hold_macros
+                .get(&preset_id)
+                .is_some_and(|active| active.run_token == run_token)
+        {
+            return;
+        }
         hook_state.mouse_move_locks.add(mask);
         if hook_state.mouse_move_lock_anchor.is_none() {
             let mut point = POINT::default();
@@ -32278,12 +32304,24 @@ mod windows_overlay {
         }
     }
 
-    fn apply_unlock_mouse(preset_id: Option<u32>, mask: MouseMoveLockMask) {
+    fn apply_unlock_mouse(
+        preset_id: Option<u32>,
+        run_token: Option<u64>,
+        mask: MouseMoveLockMask,
+    ) {
         if !mask.any() {
             return;
         }
 
         let mut hook_state = HOOK_STATE.lock();
+        if let (Some(preset_id), Some(run_token)) = (preset_id, run_token)
+            && !hook_state
+                .active_hold_macros
+                .get(&preset_id)
+                .is_some_and(|active| active.run_token == run_token)
+        {
+            return;
+        }
         if let Some(preset_id) = preset_id
             && let Some(active) = hook_state.active_hold_macros.get_mut(&preset_id)
             && let Some(index) = active
