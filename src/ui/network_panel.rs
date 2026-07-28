@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
@@ -185,7 +185,7 @@ impl NetworkPanelState {
             ca_dir,
             ca_installed,
             remove_ca_on_exit: false,
-            decrypt_https: true,
+            decrypt_https: false,
             frida_processes: Vec::new(),
             frida_pid: None,
             frida_script: crate::frida_injector::DEFAULT_NETWORK_SCRIPT.to_owned(),
@@ -239,9 +239,11 @@ impl NetworkPanelState {
     }
 
     fn start(&mut self) {
-        if !self.ca_installed || self.decrypt_https {
+        if self.decrypt_https && !self.ca_installed {
             self.install_ca();
-            if !self.ca_installed { return; }
+            if !self.ca_installed {
+                return;
+            }
         }
         let mitm = self
             .decrypt_https
@@ -372,6 +374,7 @@ impl NetworkProxy {
             .map_err(|error| error.to_string())?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
+        let mitm_bypass_hosts = Arc::new(Mutex::new(HashSet::new()));
         let (tx, events) = unbounded();
         let thread = thread::spawn(move || {
             while !worker_stop.load(Ordering::Relaxed) {
@@ -379,6 +382,7 @@ impl NetworkProxy {
                     Ok((stream, _)) => {
                         let tx = tx.clone();
                         let mitm = mitm.clone();
+                        let mitm_bypass_hosts = Arc::clone(&mitm_bypass_hosts);
                         thread::spawn(move || {
                             // Accepted sockets can inherit the listener's non-blocking mode on
                             // Windows; the connection handler intentionally uses blocking I/O.
@@ -388,8 +392,12 @@ impl NetworkProxy {
                                 )));
                                 return;
                             }
-                            if let Err(error) = proxy_connection(stream, tx.clone(), mitm.as_ref())
-                            {
+                            if let Err(error) = proxy_connection(
+                                stream,
+                                tx.clone(),
+                                mitm.as_ref(),
+                                &mitm_bypass_hosts,
+                            ) {
                                 let _ = tx.send(NetworkEvent::Error(error.to_string()));
                             }
                         });
@@ -736,6 +744,7 @@ fn proxy_connection(
     mut client: TcpStream,
     events: Sender<NetworkEvent>,
     mitm: Option<&MitmConfig>,
+    mitm_bypass_hosts: &Mutex<HashSet<String>>,
 ) -> std::io::Result<()> {
     client.set_read_timeout(Some(Duration::from_secs(10)))?;
     let header = read_header(&mut client)?;
@@ -762,9 +771,38 @@ fn proxy_connection(
 
     if method.eq_ignore_ascii_case("CONNECT") {
         let host = target.clone();
-        if let Some(mitm) = mitm {
+        let bypass_mitm = mitm_bypass_hosts
+            .lock()
+            .map(|hosts| hosts.contains(&host))
+            .unwrap_or(true);
+        if let Some(mitm) = mitm.filter(|_| !bypass_mitm) {
             client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
-            return mitm_connection(client, &host, mitm, events);
+            if let Err(error) = mitm_connection(client, &host, mitm, events.clone()) {
+                if let Ok(mut hosts) = mitm_bypass_hosts.lock() {
+                    hosts.insert(host.clone());
+                }
+                events
+                    .send(NetworkEvent::Entry(NetworkEntry {
+                        id: 0,
+                        time: SystemTime::now(),
+                        method: method.clone(),
+                        host: host.clone(),
+                        target: target.clone(),
+                        headers: text.clone(),
+                        body: Vec::new(),
+                        response_headers: String::new(),
+                        response_body: Vec::new(),
+                        notes: format!(
+                            "HTTPS decryption failed; later connections to this host use a safe encrypted tunnel: {error}"
+                        ),
+                        secure_tunnel: true,
+                    }))
+                    .ok();
+                return Err(std::io::Error::other(format!(
+                    "HTTPS decryption failed for {host}; retrying safely on the next connection: {error}"
+                )));
+            }
+            return Ok(());
         }
         events
             .send(NetworkEvent::Entry(NetworkEntry {
