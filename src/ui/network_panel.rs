@@ -854,9 +854,7 @@ fn proxy_connection(
                         secure_tunnel: true,
                     }))
                     .ok();
-                return Err(std::io::Error::other(format!(
-                    "HTTPS decryption failed for {host}; retrying safely on the next connection: {error}"
-                )));
+                return Ok(());
             }
             return Ok(());
         }
