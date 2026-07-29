@@ -970,8 +970,10 @@ impl CrosshairApp {
             &state.memory_scan_hotkeys,
             &state.memory_pointer_list,
         );
-        let network_panel =
-            network_panel::NetworkPanelState::new(paths.root.join("network-proxy-recovery.json"));
+        let network_panel = network_panel::NetworkPanelState::new(
+            paths.root.join("network-proxy-recovery.json"),
+            state.network_decrypt_https,
+        );
         let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
         let (video_library_thumbnail_tx, video_library_thumbnail_rx) =
             crossbeam_channel::unbounded();
@@ -4592,9 +4594,6 @@ impl CrosshairApp {
                     }
                 }
 
-                // Check if this action is the active one
-                let is_active = active_qa == Some(action_kind);
-
                 // Keep open if user is actively dragging or has a combobox/sub-popup open (current or previous frame)
                 let is_dragging = ui.ctx().dragged_id().is_some();
                 let is_any_popup_open = egui::Popup::is_any_open(ui.ctx());
@@ -4613,6 +4612,27 @@ impl CrosshairApp {
                     } else {
                         false
                     };
+                let clicked_outside = active_qa == Some(action_kind)
+                    && ui.ctx().input(|input| input.pointer.press_origin()).is_some_and(
+                        |position| {
+                            let in_child_popup = is_any_popup_open
+                                && ui.ctx().layer_id_at(position).is_some_and(|layer| {
+                                    layer.order == egui::Order::Foreground
+                                });
+                            !button_response.rect.contains(position)
+                                && !prev_card_rect.contains(position)
+                                && !in_child_popup
+                        },
+                    );
+                if clicked_outside {
+                    active_qa = None;
+                    last_active_time = 0.0;
+                    ui.ctx().data_mut(|data| {
+                        data.remove_temp::<TitlebarQuickActionKind>(active_qa_id);
+                        data.remove_temp::<f64>(active_qa_time_id);
+                    });
+                }
+                let is_active = active_qa == Some(action_kind);
 
                 // One-frame buffer: if popup was open last frame, treat this frame as interacting too
                 let is_interacting = is_active

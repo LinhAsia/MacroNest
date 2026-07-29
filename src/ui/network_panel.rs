@@ -145,7 +145,7 @@ pub(crate) struct NetworkPanelState {
 }
 
 impl NetworkPanelState {
-    pub(crate) fn new(recovery_file: PathBuf) -> Self {
+    pub(crate) fn new(recovery_file: PathBuf, decrypt_https: bool) -> Self {
         let ca_dir = recovery_file
             .parent()
             .unwrap_or(Path::new("."))
@@ -185,7 +185,7 @@ impl NetworkPanelState {
             ca_dir,
             ca_installed,
             remove_ca_on_exit: false,
-            decrypt_https: false,
+            decrypt_https,
             frida_processes: Vec::new(),
             frida_pid: None,
             frida_script: crate::frida_injector::DEFAULT_NETWORK_SCRIPT.to_owned(),
@@ -1391,12 +1391,17 @@ impl CrosshairApp {
             }
             if ui.add_enabled(self.network_panel.ca_installed, egui::Button::new(self.tr("Remove CA", "Remove CA"))).clicked() {
                 self.network_panel.remove_ca();
+                self.state.network_decrypt_https = false;
+                self.persist_deferred(ui.ctx());
             }
             let decrypt_label = self.tr("Decrypt HTTPS", "Decrypt HTTPS");
-            ui.add_enabled(
+            if ui.add_enabled(
                 !running && self.network_panel.ca_installed,
                 egui::Checkbox::new(&mut self.network_panel.decrypt_https, decrypt_label),
-            );
+            ).changed() {
+                self.state.network_decrypt_https = self.network_panel.decrypt_https;
+                self.persist_deferred(ui.ctx());
+            }
             let remove_ca_label = self.tr("Remove CA on exit", "Remove CA on exit");
             ui.checkbox(&mut self.network_panel.remove_ca_on_exit, remove_ca_label);
             ui.separator();
@@ -1520,7 +1525,7 @@ impl CrosshairApp {
         let available = ui.available_size();
         ui.horizontal(|ui| {
             ui.set_height(available.y);
-            let list_width = (available.x * 0.48).max(280.0);
+            let list_width = (available.x * 0.32).clamp(220.0, 360.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(list_width, available.y),
                 egui::Layout::top_down(egui::Align::Min),
@@ -2235,10 +2240,11 @@ fn collect_json_rows(
 }
 
 fn readonly_text(ui: &mut egui::Ui, mut text: String) {
+    let available_width = ui.available_width().max(1.0);
     ui.add(
         egui::TextEdit::multiline(&mut text)
             .code_editor()
-            .desired_width(f32::INFINITY)
+            .desired_width(available_width)
             .desired_rows(18)
             .interactive(false),
     );
