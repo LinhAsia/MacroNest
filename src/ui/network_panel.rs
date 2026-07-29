@@ -1925,7 +1925,7 @@ fn left_row_button(
         ui.painter()
             .line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
     }
-    ui.painter().text(
+    ui.painter().with_clip_rect(rect).text(
         egui::pos2(rect.left() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         text,
