@@ -16923,8 +16923,11 @@ impl eframe::App for CrosshairApp {
                             .id(quick_actions_popup_id)
                             .open_bool(&mut quick_actions_open)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                            .align(egui::RectAlign::BOTTOM_END)
-                            .gap(12.0)
+                            .at_position(ui.ctx().content_rect().center())
+                            .align(egui::RectAlign::from_align2(
+                                egui::Align2::CENTER_CENTER,
+                            ))
+                            .gap(0.0)
                             .layout(egui::Layout::top_down(egui::Align::Min))
                             .width(616.0)
                             .show(|ui| {
