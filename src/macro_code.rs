@@ -280,7 +280,10 @@ pub fn encode_shared_step(shared: &SharedMacroStep) -> Result<String> {
     let compact = SparseSharedMacroStep {
         step: step
             .into_iter()
-            .filter(|(key, value)| default_step.get(key) != Some(value))
+            .filter(|(key, value)| {
+                default_step.get(key) != Some(value)
+                    && step_field_is_relevant(shared.step.action, key)
+            })
             .map(|(key, value)| (stable_field_id(&key), value))
             .collect(),
         resources: shared.resources.clone(),
@@ -339,6 +342,61 @@ fn stable_field_id(name: &str) -> u32 {
     name.bytes().fold(0x811c9dc5, |hash, byte| {
         (hash ^ u32::from(byte)).wrapping_mul(0x01000193)
     })
+}
+
+fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> bool {
+    use crate::model::MacroAction;
+
+    if field == "if_variable_name" {
+        return matches!(action, MacroAction::IfStart | MacroAction::SetVariable);
+    }
+    if field.starts_with("if_") || field == "extra_conditions" {
+        return action == MacroAction::IfStart;
+    }
+    if field.starts_with("vision_") {
+        return matches!(
+            action,
+            MacroAction::StartVisionSearch
+                | MacroAction::ScanVisionOnce
+                | MacroAction::StopVision
+                | MacroAction::TriggerVisionTiming
+                | MacroAction::StartVisionTiming
+                | MacroAction::StopVisionTiming
+        );
+    }
+    if field.starts_with("audio_sense_") {
+        return matches!(
+            action,
+            MacroAction::StartAudioSensePreset | MacroAction::StopAudioSense
+        );
+    }
+    if field.starts_with("geometry_") {
+        return matches!(
+            action,
+            MacroAction::DrawGeometry
+                | MacroAction::ShowGeometryPreset
+                | MacroAction::HideGeometryPreset
+        );
+    }
+    if field.starts_with("ocr_") {
+        return action == MacroAction::OcrSearch;
+    }
+    if field.starts_with("memory_") {
+        return matches!(action, MacroAction::ReadMemory | MacroAction::WriteMemory);
+    }
+    if field.starts_with("timer_") {
+        return matches!(
+            action,
+            MacroAction::StartTimerPreset
+                | MacroAction::PauseTimerPreset
+                | MacroAction::StopTimerPreset
+                | MacroAction::ReadTimerPreset
+        );
+    }
+    if field.starts_with("ai_response_") {
+        return action == MacroAction::AiResponse;
+    }
+    true
 }
 
 pub fn encode_shared_preset(shared: &SharedMacroPreset) -> Result<String> {
@@ -437,5 +495,31 @@ mod tests {
 
         let legacy = encode_v2(&shared, PREFIX_STEP_V3, "step").expect("encode v3 step");
         assert_eq!(decode_shared_step(&legacy).expect("decode v3 step"), shared);
+    }
+
+    #[test]
+    fn compact_step_ignores_stale_settings_from_other_action_families() {
+        let shared = SharedMacroStep {
+            step: MacroStep {
+                key: "F".to_owned(),
+                if_condition_type: crate::model::IfConditionType::PixelColor,
+                if_mouse_axis: String::new(),
+                if_mouse_button: String::new(),
+                vision_color_scan_rate_hz: 24,
+                vision_move_cursor_on_match: true,
+                vision_move_delay_ms: 10,
+                vision_move_passes: 3,
+                ..MacroStep::default()
+            },
+            resources: MacroShareResources::default(),
+        };
+
+        let encoded = encode_shared_step(&shared).expect("encode stale key step");
+        assert!(encoded.len() < 160, "stale settings leaked into step code");
+        let decoded = decode_shared_step(&encoded).expect("decode stale key step");
+        assert_eq!(decoded.step.key, "F");
+        assert_eq!(decoded.step.action, crate::model::MacroAction::KeyPress);
+        assert_eq!(decoded.step.if_condition_type, Default::default());
+        assert!(!decoded.step.vision_move_cursor_on_match);
     }
 }
