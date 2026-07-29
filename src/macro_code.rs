@@ -22,6 +22,8 @@ const PREFIX_STEP_V3: &str = "MN3_STEP:";
 const PREFIX_PRESET_V3: &str = "MN3_PRESET:";
 const PREFIX_GROUP_V3: &str = "MN3_GROUP:";
 
+const PREFIX_STEP_V4: &str = "MN4_STEP:";
+
 const Z85_ALPHABET: &[u8; 85] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
 
@@ -199,6 +201,19 @@ pub struct SharedMacroStep {
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
 #[serde(default)]
+struct CompactSharedMacroStep {
+    #[serde(rename = "s")]
+    step: serde_json::Map<String, serde_json::Value>,
+    #[serde(
+        rename = "r",
+        default,
+        skip_serializing_if = "MacroShareResources::is_empty"
+    )]
+    resources: MacroShareResources,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
 pub struct SharedMacroPreset {
     pub preset: MacroPreset,
     #[serde(default, skip_serializing_if = "MacroShareResources::is_empty")]
@@ -238,11 +253,42 @@ pub fn decode_group(code: &str) -> Result<MacroGroup> {
 }
 
 pub fn encode_shared_step(shared: &SharedMacroStep) -> Result<String> {
-    encode_v2(shared, PREFIX_STEP_V3, "step")
+    let serde_json::Value::Object(step) =
+        serde_json::to_value(&shared.step).context("Failed to serialize the step")?
+    else {
+        return Err(anyhow::anyhow!("The step contents are invalid"));
+    };
+    let serde_json::Value::Object(default_step) =
+        serde_json::to_value(MacroStep::default()).context("Failed to serialize step defaults")?
+    else {
+        return Err(anyhow::anyhow!("The step defaults are invalid"));
+    };
+    let compact = CompactSharedMacroStep {
+        step: step
+            .into_iter()
+            .filter(|(key, value)| default_step.get(key) != Some(value))
+            .collect(),
+        resources: shared.resources.clone(),
+    };
+    encode_v2(&compact, PREFIX_STEP_V4, "step")
 }
 
 pub fn decode_shared_step(code: &str) -> Result<SharedMacroStep> {
     let payload = code.trim();
+    if let Some(encoded) = payload.strip_prefix(PREFIX_STEP_V4) {
+        let compact: CompactSharedMacroStep = decode_v2(encoded, "step")?;
+        let serde_json::Value::Object(mut step) =
+            serde_json::to_value(MacroStep::default()).context("Failed to load step defaults")?
+        else {
+            return Err(anyhow::anyhow!("The step defaults are invalid"));
+        };
+        step.extend(compact.step);
+        return Ok(SharedMacroStep {
+            step: serde_json::from_value(serde_json::Value::Object(step))
+                .context("The step code contents are invalid")?,
+            resources: compact.resources,
+        });
+    }
     if payload.starts_with(PREFIX_STEP_V3) {
         return decode_any(code, PREFIX_STEP_V3, PREFIX_STEP_V3, "step");
     }
@@ -326,5 +372,27 @@ mod tests {
         let encoded = encode_shared_preset(&shared).expect("encode shared preset");
         let decoded = decode_shared_preset(&encoded).expect("decode shared preset");
         assert_eq!(decoded, shared);
+    }
+
+    #[test]
+    fn shared_step_uses_compact_v4_and_still_reads_v3() {
+        let shared = SharedMacroStep {
+            step: MacroStep {
+                key: "Space".to_owned(),
+                ..MacroStep::default()
+            },
+            resources: MacroShareResources::default(),
+        };
+
+        let encoded = encode_shared_step(&shared).expect("encode compact step");
+        assert!(encoded.starts_with(PREFIX_STEP_V4));
+        assert!(encoded.len() < 160, "simple step code was too long");
+        assert_eq!(
+            decode_shared_step(&encoded).expect("decode compact step"),
+            shared
+        );
+
+        let legacy = encode_v2(&shared, PREFIX_STEP_V3, "step").expect("encode v3 step");
+        assert_eq!(decode_shared_step(&legacy).expect("decode v3 step"), shared);
     }
 }

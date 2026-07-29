@@ -10578,7 +10578,8 @@ impl CrosshairApp {
 
     fn macro_share_code_kind_from_text(text: &str) -> MacroShareCodeKind {
         let payload = text.trim();
-        if payload.starts_with("MN3_STEP:")
+        if payload.starts_with("MN4_STEP:")
+            || payload.starts_with("MN3_STEP:")
             || payload.starts_with("MN2_STEP:")
             || payload.starts_with("MN_STEP:")
         {

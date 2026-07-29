@@ -15662,6 +15662,18 @@ if supports_move_mouse || show_detection_tuning {
                                                               self.macro_step_export_feedback_until,
                                                           );
                                                   if ui
+                                                      .add_enabled(
+                                                          self.macro_share_clipboard_kind
+                                                              == crate::ui::MacroShareCodeKind::Step,
+                                                          Button::new(Self::tr_lang(language, "Imp", "Imp"))
+                                                              .min_size(vec2(50.0, 18.0)),
+                                                      )
+                                                      .on_hover_text(Self::tr_lang(language, "Import step from clipboard below this step.", "Import step from clipboard below this step."))
+                                                      .clicked()
+                                                  {
+                                                      import_step_to = Some((group.id, preset.id, Some(step_index)));
+                                                  }
+                                                  if ui
                                                       .add(
                                                           Button::new(if step_export_feedback {
                                                               Self::tr_lang(language, "Copied", "Copied")
@@ -15674,18 +15686,6 @@ if supports_move_mouse || show_detection_tuning {
                                                       .clicked()
                                                   {
                                                       export_step = Some((preset.id, step_index));
-                                                  }
-                                                  if ui
-                                                      .add_enabled(
-                                                          self.macro_share_clipboard_kind
-                                                              == crate::ui::MacroShareCodeKind::Step,
-                                                          Button::new(Self::tr_lang(language, "Imp", "Imp"))
-                                                              .min_size(vec2(32.0, 18.0)),
-                                                      )
-                                                      .on_hover_text(Self::tr_lang(language, "Import step from clipboard below this step.", "Import step from clipboard below this step."))
-                                                      .clicked()
-                                                  {
-                                                      import_step_to = Some((group.id, preset.id, Some(step_index)));
                                                   }
                                                 }
                                                 if step.toggle_enabled_on_run {
