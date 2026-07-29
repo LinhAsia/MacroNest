@@ -125,7 +125,7 @@ mod windows_overlay {
                     NOTIFYICONDATAW, Shell_NotifyIconW,
                 },
                 WindowsAndMessaging::{
-                    AppendMenuW, CREATESTRUCTW, CallNextHookEx, CreateIconIndirect,
+                    AppendMenuW, CREATESTRUCTW, CallNextHookEx, ClipCursor, CreateIconIndirect,
                     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyCursor, DestroyIcon,
                     DestroyMenu, DestroyWindow, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
                     GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor, GetClassNameW,
@@ -4559,6 +4559,7 @@ mod windows_overlay {
             }
 
             WM_DESTROY => {
+                let _ = ClipCursor(None);
                 CONTROLLER_HWND.store(0, Ordering::Relaxed);
                 let _ = KillTimer(Some(hwnd), TIMER_ID);
                 unregister_all_hotkeys(hwnd, runtime_mut(hwnd));
@@ -7079,6 +7080,10 @@ mod windows_overlay {
         hook_state.shift = false;
         hook_state.win = false;
         hook_state.keyboard_arrow_mouse_enabled = false;
+        drop(hook_state);
+        unsafe {
+            let _ = ClipCursor(None);
+        }
     }
 
     fn clear_transient_input_state() {
@@ -7163,18 +7168,51 @@ mod windows_overlay {
             }
 
             hook_state.mouse_move_lock_anchor = Some(allowed);
-            Some(allowed)
+            Some((allowed, hook_state.mouse_move_locks))
         };
-        let Some(allowed) = maybe_allowed else {
+        let Some((allowed, locks)) = maybe_allowed else {
             return false;
         };
-        if allowed.x == point.x && allowed.y == point.y {
-            false
-        } else {
-            unsafe {
-                let _ = SetCursorPos(allowed.x, allowed.y);
+        apply_mouse_cursor_clip(locks, Some(allowed));
+        allowed.x != point.x || allowed.y != point.y
+    }
+
+    fn mouse_cursor_clip_rect(locks: MouseMoveLockCounts, anchor: POINT) -> RECT {
+        let virtual_left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+        let virtual_top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
+        let virtual_right =
+            virtual_left + unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) }.max(1);
+        let virtual_bottom =
+            virtual_top + unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) }.max(1);
+        let x = anchor.x.clamp(virtual_left, virtual_right - 1);
+        let y = anchor.y.clamp(virtual_top, virtual_bottom - 1);
+        RECT {
+            left: if locks.left > 0 { x } else { virtual_left },
+            top: if locks.up > 0 { y } else { virtual_top },
+            // ClipCursor uses an exclusive lower-right edge, so x..x+1 is exactly one pixel.
+            right: if locks.right > 0 {
+                x + 1
+            } else {
+                virtual_right
+            },
+            bottom: if locks.down > 0 {
+                y + 1
+            } else {
+                virtual_bottom
+            },
+        }
+    }
+
+    fn apply_mouse_cursor_clip(locks: MouseMoveLockCounts, anchor: Option<POINT>) {
+        unsafe {
+            if locks.any()
+                && let Some(anchor) = anchor
+            {
+                let rect = mouse_cursor_clip_rect(locks, anchor);
+                let _ = ClipCursor(Some(&rect));
+            } else {
+                let _ = ClipCursor(None);
             }
-            true
         }
     }
 
@@ -7185,6 +7223,10 @@ mod windows_overlay {
     fn clear_stuck_mouse_lock() {
         let mut hook_state = HOOK_STATE.lock();
         if !hook_state.mouse_move_locks.any() {
+            drop(hook_state);
+            unsafe {
+                let _ = ClipCursor(None);
+            }
             return;
         }
 
@@ -7192,6 +7234,10 @@ mod windows_overlay {
         hook_state.mouse_move_lock_anchor = None;
         for active in hook_state.active_hold_macros.values_mut() {
             active.locked_mouse_masks.clear();
+        }
+        drop(hook_state);
+        unsafe {
+            let _ = ClipCursor(None);
         }
     }
 
@@ -28313,6 +28359,7 @@ mod windows_overlay {
                     let loop_body_indices = &step_indices[index + 1..loop_end];
                     let loop_end_delay_ms = steps[loop_end].get_delay_ms();
                     if is_infinite_loop_marker(&step.key) {
+                        let mut last_zero_delay_yield = Instant::now();
                         loop {
                             match execute_macro_sequence_with_pending(
                                 preset_id,
@@ -28350,24 +28397,24 @@ mod windows_overlay {
                                 }
                             }
 
-                            // ponytail: an infinite zero-delay loop can otherwise monopolize
-                            // this worker and flood the input queue. One millisecond is only a
-                            // scheduler yield; explicit loop delays still take precedence.
                             if sleep_for_macro_delay(
-                                    preset_id,
-                                    loop_end_delay_ms.max(1),
-                                    stop_immediately_on_retrigger,
-                                    target_window_title,
-                                    extra_target_window_titles,
-                                    match_duplicate_window_titles,
-                                    bypass_enabled,
-                                )
-                            {
+                                preset_id,
+                                loop_end_delay_ms,
+                                stop_immediately_on_retrigger,
+                                target_window_title,
+                                extra_target_window_titles,
+                                match_duplicate_window_titles,
+                                bypass_enabled,
+                            ) {
                                 return finish_macro_run(
                                     MacroRunFlow::StopExecution,
                                     pending_macro_preset_changes,
                                 );
                             }
+                            cooperative_zero_delay_loop_yield(
+                                loop_end_delay_ms,
+                                &mut last_zero_delay_yield,
+                            );
                         }
                     } else {
                         let loop_count_str = interpolate_variables(&step.key);
@@ -29092,6 +29139,7 @@ mod windows_overlay {
                     let defer_stop_for_body =
                         defer_stop_until_loop_end || step.loop_finish_iteration_on_stop;
                     if is_infinite_loop_marker(&step.key) {
+                        let mut last_zero_delay_yield = Instant::now();
                         loop {
                             match execute_hold_macro_sequence_with_pending(
                                 preset_id,
@@ -29138,25 +29186,26 @@ mod windows_overlay {
                                 );
                             }
 
-                            // ponytail: see the press-loop equivalent above. Hold loops need
-                            // the same yield so releasing the trigger can be observed promptly.
                             if sleep_for_hold_delay(
-                                    preset_id,
-                                    loop_end_delay_ms.max(1),
-                                    stop_immediately_on_retrigger,
-                                    run_token,
-                                    target_window_title,
-                                    extra_target_window_titles,
-                                    match_duplicate_window_titles,
-                                    bypass_enabled,
-                                    defer_stop_until_loop_end,
-                                )
-                            {
+                                preset_id,
+                                loop_end_delay_ms,
+                                stop_immediately_on_retrigger,
+                                run_token,
+                                target_window_title,
+                                extra_target_window_titles,
+                                match_duplicate_window_titles,
+                                bypass_enabled,
+                                defer_stop_until_loop_end,
+                            ) {
                                 return finish_macro_run(
                                     MacroRunFlow::StopExecution,
                                     pending_macro_preset_changes,
                                 );
                             }
+                            cooperative_zero_delay_loop_yield(
+                                loop_end_delay_ms,
+                                &mut last_zero_delay_yield,
+                            );
                         }
                     } else {
                         let loop_count_str = interpolate_variables(&step.key);
@@ -29781,6 +29830,15 @@ mod windows_overlay {
             || macro_force_stop_requested(preset_id)
             || (!defer_stop_until_loop_end
                 && current_hold_run_release_requested(preset_id, run_token))
+    }
+
+    fn cooperative_zero_delay_loop_yield(delay_ms: u64, last_yield: &mut Instant) {
+        if delay_ms == 0 && last_yield.elapsed() >= Duration::from_millis(1) {
+            // ponytail: keep 0 ms as "no requested wait". Yield only after a worker has
+            // consumed a time slice; unlike sleep(1 ms), this does not delay every iteration.
+            thread::yield_now();
+            *last_yield = Instant::now();
+        }
     }
 
     fn sleep_for_macro_delay(
@@ -31228,7 +31286,7 @@ mod windows_overlay {
                 previous
             };
 
-            update_mouse_lock_anchor_after_macro_move(POINT { x: 300, y: 400 });
+            move_mouse_lock_anchor_for_macro(POINT { x: 300, y: 400 });
 
             let hook_state = HOOK_STATE.lock();
             assert_eq!(
@@ -31240,6 +31298,8 @@ mod windows_overlay {
             let mut hook_state = HOOK_STATE.lock();
             hook_state.mouse_move_locks = previous.0;
             hook_state.mouse_move_lock_anchor = previous.1;
+            drop(hook_state);
+            apply_mouse_cursor_clip(previous.0, previous.1);
         }
 
         #[test]
@@ -32296,12 +32356,16 @@ mod windows_overlay {
             }
         }
 
+        let locks = hook_state.mouse_move_locks;
+        let anchor = hook_state.mouse_move_lock_anchor;
         if unlock_on_exit
             && let Some(preset_id) = preset_id
             && let Some(active) = hook_state.active_hold_macros.get_mut(&preset_id)
         {
             active.locked_mouse_masks.push(mask);
         }
+        drop(hook_state);
+        apply_mouse_cursor_clip(locks, anchor);
     }
 
     fn apply_unlock_mouse(
@@ -32336,12 +32400,19 @@ mod windows_overlay {
         if !hook_state.mouse_move_locks.any() {
             hook_state.mouse_move_lock_anchor = None;
         }
+        let locks = hook_state.mouse_move_locks;
+        let anchor = hook_state.mouse_move_lock_anchor;
+        drop(hook_state);
+        apply_mouse_cursor_clip(locks, anchor);
     }
 
-    fn update_mouse_lock_anchor_after_macro_move(point: POINT) {
+    fn move_mouse_lock_anchor_for_macro(point: POINT) {
         let mut hook_state = HOOK_STATE.lock();
         if hook_state.mouse_move_locks.any() {
             hook_state.mouse_move_lock_anchor = Some(point);
+            let locks = hook_state.mouse_move_locks;
+            drop(hook_state);
+            apply_mouse_cursor_clip(locks, Some(point));
         }
     }
 
@@ -33153,6 +33224,7 @@ mod windows_overlay {
 
     fn send_mouse_move_absolute(x: i32, y: i32) -> Result<()> {
         let target_point = POINT { x, y };
+        move_mouse_lock_anchor_for_macro(target_point);
         let (use_arduino, com_port) = {
             let state = HOOK_STATE.lock();
             (state.use_arduino_mouse, state.arduino_com_port.clone())
@@ -33177,7 +33249,6 @@ mod windows_overlay {
                     0,
                 ],
             ))?;
-            update_mouse_lock_anchor_after_macro_move(target_point);
             return Ok(());
         }
 
@@ -33240,7 +33311,6 @@ mod windows_overlay {
                             destroy_fn(context);
                             if sent > 0 {
                                 set_interception_runtime_status(InterceptionRuntimeStatus::Active);
-                                update_mouse_lock_anchor_after_macro_move(target_point);
                                 return Ok(());
                             }
                         }
@@ -33276,8 +33346,6 @@ mod windows_overlay {
             let _ = SendInput(&[input], size_of::<INPUT>() as i32);
             let _ = SetCursorPos(x, y);
         }
-        update_mouse_lock_anchor_after_macro_move(target_point);
-
         Ok(())
     }
 
@@ -33356,6 +33424,9 @@ mod windows_overlay {
                 None
             }
         };
+        if let Some(target_point) = target_point {
+            move_mouse_lock_anchor_for_macro(target_point);
+        }
         let (use_arduino, com_port) = {
             let state = HOOK_STATE.lock();
             (state.use_arduino_mouse, state.arduino_com_port.clone())
@@ -33365,9 +33436,6 @@ mod windows_overlay {
                 anyhow::bail!("Arduino COM port is not selected");
             }
             send_arduino_relative_move_sequence(dx, dy)?;
-            if let Some(target_point) = target_point {
-                update_mouse_lock_anchor_after_macro_move(target_point);
-            }
             return Ok(());
         }
 
@@ -33422,9 +33490,6 @@ mod windows_overlay {
                             destroy_fn(context);
                             if sent > 0 {
                                 set_interception_runtime_status(InterceptionRuntimeStatus::Active);
-                                if let Some(target_point) = target_point {
-                                    update_mouse_lock_anchor_after_macro_move(target_point);
-                                }
                                 return Ok(());
                             }
                         }
@@ -33458,10 +33523,6 @@ mod windows_overlay {
                 let _ = SetCursorPos(point.x + dx, point.y + dy);
             }
         }
-        if let Some(target_point) = target_point {
-            update_mouse_lock_anchor_after_macro_move(target_point);
-        }
-
         Ok(())
     }
 
@@ -36014,6 +36075,9 @@ mod windows_overlay {
             hook_state.mouse_move_lock_anchor = None;
             hook_state.active_hold_macros.clear();
             hook_state.held_mouse_buttons.clear();
+        }
+        unsafe {
+            let _ = ClipCursor(None);
         }
 
         std::process::exit(0);
