@@ -16838,13 +16838,19 @@ impl eframe::App for CrosshairApp {
                             self.titlebar_guides_open = !self.titlebar_guides_open;
                         }
                         let taskbar_hidden = crate::platform::is_taskbar_hidden();
+                        let quick_actions_popup_id =
+                            ui.make_persistent_id("titlebar-quick-actions-popup");
+                        let mut quick_actions_open = ui
+                            .ctx()
+                            .data(|data| data.get_temp::<bool>(quick_actions_popup_id))
+                            .unwrap_or(false);
                         let quick_actions_button_response = Self::add_sized_with_show_hover_radius(
                             ui,
                             [38.0, 30.0],
                             8,
                             self.titlebar_button(
                                 Self::material_icon_text(0xf86e, 18.0),
-                                false,
+                                quick_actions_open,
                                 false,
                             ),
                         );
@@ -16909,15 +16915,10 @@ impl eframe::App for CrosshairApp {
                             show_icon_tooltips,
                             Self::tr_lang(self.state.ui_language, "Quick actions", "Quick actions"),
                         );
-                        let quick_actions_popup_id =
-                            ui.make_persistent_id("titlebar-quick-actions-popup");
-                        let mut quick_actions_open = ui
-                            .ctx()
-                            .data(|data| data.get_temp::<bool>(quick_actions_popup_id))
-                            .unwrap_or(false);
                         if quick_actions_response.clicked() {
                             quick_actions_open = !quick_actions_open;
                         }
+                        self.render_modal_backdrop(ui.ctx(), quick_actions_open);
                         let mut keep_quick_actions_open = false;
                         let popup_result = egui::Popup::from_response(&quick_actions_response)
                             .id(quick_actions_popup_id)
