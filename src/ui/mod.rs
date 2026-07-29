@@ -16924,6 +16924,7 @@ impl eframe::App for CrosshairApp {
                             .open_bool(&mut quick_actions_open)
                             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                             .align(egui::RectAlign::BOTTOM_END)
+                            .gap(12.0)
                             .layout(egui::Layout::top_down(egui::Align::Min))
                             .width(616.0)
                             .show(|ui| {

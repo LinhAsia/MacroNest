@@ -1483,11 +1483,13 @@ impl CrosshairApp {
                     "https://github.com/LinhAsia/MacroNest/releases/latest",
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let close_btn = egui::Button::new(
-                        Self::material_icon_text(0xe5cd, 16.0)
-                    )
-                    .frame(false);
-                    if ui.add(close_btn).clicked() {
+                    if ui
+                        .add_sized(
+                            [34.0, 28.0],
+                            egui::Button::new(Self::material_icon_text(0xe5cd, 18.0)),
+                        )
+                        .clicked()
+                    {
                         self.titlebar_guides_open = false;
                     }
                     ui.add_space(16.0);
