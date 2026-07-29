@@ -1701,35 +1701,8 @@ impl CrosshairApp {
             _ => {}
         }
 
-        if let Some(preset_id) = step.if_vision_preset_id
-            && let Some(preset) = self
-                .state
-                .vision_presets
-                .iter()
-                .find(|item| item.id == preset_id)
-            && seen.vision_presets.insert(preset.id)
-        {
-            resources
-                .vision_presets
-                .push(crate::macro_code::SharedVisionPreset {
-                    preset: preset.clone(),
-                    template_png: fs::read(self.vision_template_file_for_preset(preset.id)).ok(),
-                });
-        }
-
-        if let Some(preset_id) = step.if_ocr_preset_id
-            && let Some(preset) = self
-                .state
-                .ocr_presets
-                .iter()
-                .find(|item| item.id == preset_id)
-            && seen.ocr_presets.insert(preset.id)
-        {
-            resources.ocr_presets.push(preset.clone());
-        }
-
-        for extra in &step.extra_conditions {
-            if let Some(preset_id) = extra.vision_preset_id
+        if step.action == MacroAction::IfStart {
+            if let Some(preset_id) = step.if_vision_preset_id
                 && let Some(preset) = self
                     .state
                     .vision_presets
@@ -1741,11 +1714,11 @@ impl CrosshairApp {
                     .vision_presets
                     .push(crate::macro_code::SharedVisionPreset {
                         preset: preset.clone(),
-                        template_png: fs::read(self.vision_template_file_for_preset(preset.id))
-                            .ok(),
+                        template_png: fs::read(self.vision_template_file_for_preset(preset.id)).ok(),
                     });
             }
-            if let Some(preset_id) = extra.ocr_preset_id
+
+            if let Some(preset_id) = step.if_ocr_preset_id
                 && let Some(preset) = self
                     .state
                     .ocr_presets
@@ -1754,6 +1727,35 @@ impl CrosshairApp {
                 && seen.ocr_presets.insert(preset.id)
             {
                 resources.ocr_presets.push(preset.clone());
+            }
+
+            for extra in &step.extra_conditions {
+                if let Some(preset_id) = extra.vision_preset_id
+                    && let Some(preset) = self
+                        .state
+                        .vision_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.vision_presets.insert(preset.id)
+                {
+                    resources
+                        .vision_presets
+                        .push(crate::macro_code::SharedVisionPreset {
+                            preset: preset.clone(),
+                            template_png: fs::read(self.vision_template_file_for_preset(preset.id))
+                                .ok(),
+                        });
+                }
+                if let Some(preset_id) = extra.ocr_preset_id
+                    && let Some(preset) = self
+                        .state
+                        .ocr_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.ocr_presets.insert(preset.id)
+                {
+                    resources.ocr_presets.push(preset.clone());
+                }
             }
         }
     }
@@ -10578,7 +10580,8 @@ impl CrosshairApp {
 
     fn macro_share_code_kind_from_text(text: &str) -> MacroShareCodeKind {
         let payload = text.trim();
-        if payload.starts_with("MN4_STEP:")
+        if payload.starts_with("MN5_STEP:")
+            || payload.starts_with("MN4_STEP:")
             || payload.starts_with("MN3_STEP:")
             || payload.starts_with("MN2_STEP:")
             || payload.starts_with("MN_STEP:")
