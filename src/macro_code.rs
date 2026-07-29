@@ -24,6 +24,8 @@ const PREFIX_GROUP_V3: &str = "MN3_GROUP:";
 
 const PREFIX_STEP_V4: &str = "MN4_STEP:";
 const PREFIX_STEP_V5: &str = "MN5_STEP:";
+const PREFIX_PRESET_V5: &str = "MN5_PRESET:";
+const PREFIX_GROUP_V5: &str = "MN5_GROUP:";
 
 const Z85_ALPHABET: &[u8; 85] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
@@ -226,6 +228,49 @@ struct SparseSharedMacroStep {
     resources: MacroShareResources,
 }
 
+type SparseFields = Vec<(u32, serde_json::Value)>;
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+struct SparseMacroPreset {
+    #[serde(rename = "m", default, skip_serializing_if = "Vec::is_empty")]
+    metadata: SparseFields,
+    #[serde(rename = "s", default, skip_serializing_if = "Vec::is_empty")]
+    steps: Vec<SparseFields>,
+    #[serde(rename = "h", default, skip_serializing_if = "Option::is_none")]
+    hold_stop_step: Option<SparseFields>,
+    #[serde(rename = "p", default, skip_serializing_if = "Option::is_none")]
+    press_stop_step: Option<SparseFields>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+struct SparseSharedMacroPreset {
+    #[serde(rename = "p")]
+    preset: SparseMacroPreset,
+    #[serde(
+        rename = "r",
+        default,
+        skip_serializing_if = "MacroShareResources::is_empty"
+    )]
+    resources: MacroShareResources,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+struct SparseSharedMacroGroup {
+    #[serde(rename = "g", default, skip_serializing_if = "Vec::is_empty")]
+    group: SparseFields,
+    #[serde(rename = "p", default, skip_serializing_if = "Vec::is_empty")]
+    presets: Vec<SparseMacroPreset>,
+    #[serde(
+        rename = "r",
+        default,
+        skip_serializing_if = "MacroShareResources::is_empty"
+    )]
+    resources: MacroShareResources,
+}
+
 #[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
 #[serde(default)]
 pub struct SharedMacroPreset {
@@ -267,25 +312,8 @@ pub fn decode_group(code: &str) -> Result<MacroGroup> {
 }
 
 pub fn encode_shared_step(shared: &SharedMacroStep) -> Result<String> {
-    let serde_json::Value::Object(step) =
-        serde_json::to_value(&shared.step).context("Failed to serialize the step")?
-    else {
-        return Err(anyhow::anyhow!("The step contents are invalid"));
-    };
-    let serde_json::Value::Object(default_step) =
-        serde_json::to_value(MacroStep::default()).context("Failed to serialize step defaults")?
-    else {
-        return Err(anyhow::anyhow!("The step defaults are invalid"));
-    };
     let compact = SparseSharedMacroStep {
-        step: step
-            .into_iter()
-            .filter(|(key, value)| {
-                default_step.get(key) != Some(value)
-                    && step_field_is_relevant(shared.step.action, key)
-            })
-            .map(|(key, value)| (stable_field_id(&key), value))
-            .collect(),
+        step: compact_step(&shared.step)?,
         resources: shared.resources.clone(),
     };
     encode_v2(&compact, PREFIX_STEP_V5, "step")
@@ -295,23 +323,8 @@ pub fn decode_shared_step(code: &str) -> Result<SharedMacroStep> {
     let payload = code.trim();
     if let Some(encoded) = payload.strip_prefix(PREFIX_STEP_V5) {
         let compact: SparseSharedMacroStep = decode_v2(encoded, "step")?;
-        let serde_json::Value::Object(mut step) =
-            serde_json::to_value(MacroStep::default()).context("Failed to load step defaults")?
-        else {
-            return Err(anyhow::anyhow!("The step defaults are invalid"));
-        };
-        let field_names: std::collections::HashMap<_, _> = step
-            .keys()
-            .map(|name| (stable_field_id(name), name.clone()))
-            .collect();
-        for (field_id, value) in compact.step {
-            if let Some(name) = field_names.get(&field_id) {
-                step.insert(name.clone(), value);
-            }
-        }
         return Ok(SharedMacroStep {
-            step: serde_json::from_value(serde_json::Value::Object(step))
-                .context("The step code contents are invalid")?,
+            step: expand_step(compact.step)?,
             resources: compact.resources,
         });
     }
@@ -342,6 +355,130 @@ fn stable_field_id(name: &str) -> u32 {
     name.bytes().fold(0x811c9dc5, |hash, byte| {
         (hash ^ u32::from(byte)).wrapping_mul(0x01000193)
     })
+}
+
+fn object_fields<T: Serialize>(
+    value: T,
+    kind: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>> {
+    let serde_json::Value::Object(fields) =
+        serde_json::to_value(value).with_context(|| format!("Failed to serialize {kind}"))?
+    else {
+        return Err(anyhow::anyhow!("The {kind} contents are invalid"));
+    };
+    Ok(fields)
+}
+
+fn compact_fields(
+    fields: serde_json::Map<String, serde_json::Value>,
+    defaults: &serde_json::Map<String, serde_json::Value>,
+) -> SparseFields {
+    fields
+        .into_iter()
+        .filter(|(name, value)| defaults.get(name) != Some(value))
+        .map(|(name, value)| (stable_field_id(&name), value))
+        .collect()
+}
+
+fn expand_fields(
+    sparse: SparseFields,
+    mut defaults: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let names: std::collections::HashMap<_, _> = defaults
+        .keys()
+        .map(|name| (stable_field_id(name), name.clone()))
+        .collect();
+    for (field_id, value) in sparse {
+        if let Some(name) = names.get(&field_id) {
+            defaults.insert(name.clone(), value);
+        }
+    }
+    defaults
+}
+
+fn compact_step(step: &MacroStep) -> Result<SparseFields> {
+    let fields = object_fields(step, "step")?;
+    let defaults = object_fields(MacroStep::default(), "step defaults")?;
+    Ok(fields
+        .into_iter()
+        .filter(|(name, value)| {
+            defaults.get(name) != Some(value) && step_field_is_relevant(step.action, name)
+        })
+        .map(|(name, value)| (stable_field_id(&name), value))
+        .collect())
+}
+
+fn expand_step(sparse: SparseFields) -> Result<MacroStep> {
+    serde_json::from_value(serde_json::Value::Object(expand_fields(
+        sparse,
+        object_fields(MacroStep::default(), "step defaults")?,
+    )))
+    .context("The step code contents are invalid")
+}
+
+fn compact_preset(preset: &MacroPreset) -> Result<SparseMacroPreset> {
+    let mut metadata = object_fields(preset, "preset")?;
+    let mut defaults = object_fields(MacroPreset::default(), "preset defaults")?;
+    metadata.remove("steps");
+    defaults.remove("steps");
+    let hold_stop_step = metadata
+        .remove("hold_stop_step")
+        .map(serde_json::from_value::<MacroStep>)
+        .transpose()
+        .context("The preset hold-stop step is invalid")?
+        .map(|step| compact_step(&step))
+        .transpose()?;
+    let press_stop_step = metadata
+        .remove("press_stop_step")
+        .map(serde_json::from_value::<MacroStep>)
+        .transpose()
+        .context("The preset press-stop step is invalid")?
+        .map(|step| compact_step(&step))
+        .transpose()?;
+    defaults.remove("hold_stop_step");
+    defaults.remove("press_stop_step");
+    Ok(SparseMacroPreset {
+        metadata: compact_fields(metadata, &defaults),
+        steps: preset
+            .steps
+            .iter()
+            .map(compact_step)
+            .collect::<Result<_>>()?,
+        hold_stop_step,
+        press_stop_step,
+    })
+}
+
+fn expand_preset(compact: SparseMacroPreset) -> Result<MacroPreset> {
+    let mut preset = object_fields(MacroPreset::default(), "preset defaults")?;
+    preset.remove("steps");
+    preset.remove("hold_stop_step");
+    preset.remove("press_stop_step");
+    let mut preset = expand_fields(compact.metadata, preset);
+    preset.insert(
+        "steps".to_owned(),
+        serde_json::to_value(
+            compact
+                .steps
+                .into_iter()
+                .map(expand_step)
+                .collect::<Result<Vec<_>>>()?,
+        )?,
+    );
+    if let Some(step) = compact.hold_stop_step {
+        preset.insert(
+            "hold_stop_step".to_owned(),
+            serde_json::to_value(expand_step(step)?)?,
+        );
+    }
+    if let Some(step) = compact.press_stop_step {
+        preset.insert(
+            "press_stop_step".to_owned(),
+            serde_json::to_value(expand_step(step)?)?,
+        );
+    }
+    serde_json::from_value(serde_json::Value::Object(preset))
+        .context("The preset code contents are invalid")
 }
 
 fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> bool {
@@ -400,11 +537,25 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
 }
 
 pub fn encode_shared_preset(shared: &SharedMacroPreset) -> Result<String> {
-    encode_v2(shared, PREFIX_PRESET_V3, "preset")
+    encode_v2(
+        &SparseSharedMacroPreset {
+            preset: compact_preset(&shared.preset)?,
+            resources: shared.resources.clone(),
+        },
+        PREFIX_PRESET_V5,
+        "preset",
+    )
 }
 
 pub fn decode_shared_preset(code: &str) -> Result<SharedMacroPreset> {
     let payload = code.trim();
+    if let Some(encoded) = payload.strip_prefix(PREFIX_PRESET_V5) {
+        let compact: SparseSharedMacroPreset = decode_v2(encoded, "preset")?;
+        return Ok(SharedMacroPreset {
+            preset: expand_preset(compact.preset)?,
+            resources: compact.resources,
+        });
+    }
     if payload.starts_with(PREFIX_PRESET_V3) {
         return decode_any(code, PREFIX_PRESET_V3, PREFIX_PRESET_V3, "preset");
     }
@@ -415,11 +566,49 @@ pub fn decode_shared_preset(code: &str) -> Result<SharedMacroPreset> {
 }
 
 pub fn encode_shared_group(shared: &SharedMacroGroup) -> Result<String> {
-    encode_v2(shared, PREFIX_GROUP_V3, "group")
+    let mut group = object_fields(&shared.group, "group")?;
+    let mut defaults = object_fields(MacroGroup::default(), "group defaults")?;
+    group.remove("presets");
+    defaults.remove("presets");
+    encode_v2(
+        &SparseSharedMacroGroup {
+            group: compact_fields(group, &defaults),
+            presets: shared
+                .group
+                .presets
+                .iter()
+                .map(compact_preset)
+                .collect::<Result<_>>()?,
+            resources: shared.resources.clone(),
+        },
+        PREFIX_GROUP_V5,
+        "group",
+    )
 }
 
 pub fn decode_shared_group(code: &str) -> Result<SharedMacroGroup> {
     let payload = code.trim();
+    if let Some(encoded) = payload.strip_prefix(PREFIX_GROUP_V5) {
+        let compact: SparseSharedMacroGroup = decode_v2(encoded, "group")?;
+        let mut group = object_fields(MacroGroup::default(), "group defaults")?;
+        group.remove("presets");
+        let mut group = expand_fields(compact.group, group);
+        group.insert(
+            "presets".to_owned(),
+            serde_json::to_value(
+                compact
+                    .presets
+                    .into_iter()
+                    .map(expand_preset)
+                    .collect::<Result<Vec<_>>>()?,
+            )?,
+        );
+        return Ok(SharedMacroGroup {
+            group: serde_json::from_value(serde_json::Value::Object(group))
+                .context("The group code contents are invalid")?,
+            resources: compact.resources,
+        });
+    }
     if payload.starts_with(PREFIX_GROUP_V3) {
         return decode_any(code, PREFIX_GROUP_V3, PREFIX_GROUP_V3, "group");
     }

@@ -10587,12 +10587,14 @@ impl CrosshairApp {
             || payload.starts_with("MN_STEP:")
         {
             MacroShareCodeKind::Step
-        } else if payload.starts_with("MN3_PRESET:")
+        } else if payload.starts_with("MN5_PRESET:")
+            || payload.starts_with("MN3_PRESET:")
             || payload.starts_with("MN2_PRESET:")
             || payload.starts_with("MN_PRESET:")
         {
             MacroShareCodeKind::Preset
-        } else if payload.starts_with("MN3_GROUP:")
+        } else if payload.starts_with("MN5_GROUP:")
+            || payload.starts_with("MN3_GROUP:")
             || payload.starts_with("MN2_GROUP:")
             || payload.starts_with("MN_GROUP:")
         {
