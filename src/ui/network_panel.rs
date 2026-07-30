@@ -44,6 +44,10 @@ const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_CAPTURE_BODY_BYTES: usize = 1024 * 1024;
 const MAX_ENTRIES: usize = 10_000;
 const MAX_STRUCTURED_ROWS: usize = 5_000;
+const NETWORK_HOST_MIN_WIDTH: f32 = 220.0;
+const NETWORK_HOST_DEFAULT_WIDTH: f32 = 360.0;
+const NETWORK_DETAIL_MIN_WIDTH: f32 = 260.0;
+const NETWORK_SPLITTER_WIDTH: f32 = 6.0;
 
 #[derive(Clone)]
 struct NetworkEntry {
@@ -129,6 +133,7 @@ pub(crate) struct NetworkPanelState {
     status: String,
     expanded_hosts: HashSet<String>,
     host_activity: BTreeMap<String, Instant>,
+    host_pane_width: f32,
     pinned: bool,
     proxy: Option<NetworkProxy>,
     recovery_file: PathBuf,
@@ -178,6 +183,7 @@ impl NetworkPanelState {
             status: recovery_status,
             expanded_hosts: HashSet::new(),
             host_activity: BTreeMap::new(),
+            host_pane_width: NETWORK_HOST_DEFAULT_WIDTH,
             pinned: false,
             proxy: None,
             recovery_file,
@@ -1522,24 +1528,65 @@ impl CrosshairApp {
     fn render_network_capture(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size();
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
             ui.set_height(available.y);
-            let list_width = (available.x * 0.32).clamp(220.0, 360.0);
+            let max_list_width =
+                (available.x - NETWORK_SPLITTER_WIDTH - NETWORK_DETAIL_MIN_WIDTH)
+                    .max(NETWORK_HOST_MIN_WIDTH);
+            self.network_panel.host_pane_width = self
+                .network_panel
+                .host_pane_width
+                .clamp(NETWORK_HOST_MIN_WIDTH, max_list_width);
+            let list_width = self.network_panel.host_pane_width;
             ui.allocate_ui_with_layout(
                 egui::vec2(list_width, available.y),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| self.render_network_list(ui),
             );
-            ui.separator();
+
+            let (splitter_rect, splitter_response) = ui.allocate_exact_size(
+                egui::vec2(NETWORK_SPLITTER_WIDTH, available.y),
+                Sense::click_and_drag(),
+            );
+            if splitter_response.hovered() || splitter_response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            if splitter_response.dragged() {
+                let delta = ui.input(|input| input.pointer.delta().x);
+                self.network_panel.host_pane_width = (self.network_panel.host_pane_width + delta)
+                    .clamp(NETWORK_HOST_MIN_WIDTH, max_list_width);
+            }
+            let line_x = splitter_rect.center().x;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(line_x, splitter_rect.top()),
+                    egui::pos2(line_x, splitter_rect.bottom()),
+                ],
+                Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+            );
+
+            let detail_width =
+                (available.x - self.network_panel.host_pane_width - NETWORK_SPLITTER_WIDTH)
+                    .max(NETWORK_DETAIL_MIN_WIDTH);
             ui.allocate_ui_with_layout(
-                egui::vec2((available.x - list_width - 8.0).max(180.0), available.y),
+                egui::vec2(detail_width, available.y),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("network-detail-scroll")
-                        .auto_shrink([false, false])
+                    egui::Frame::new()
+                        .inner_margin(egui::Margin {
+                            left: 10,
+                            right: 16,
+                            top: 0,
+                            bottom: 0,
+                        })
                         .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            self.render_network_detail(ui);
+                            egui::ScrollArea::vertical()
+                                .id_salt("network-detail-scroll")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    self.render_network_detail(ui);
+                                });
                         });
                 },
             );
