@@ -5195,26 +5195,6 @@ mod windows_overlay {
                 }
             }
 
-            if is_mouse_locked() {
-                match message {
-                    WM_MOUSEMOVE
-                    | WM_MOUSEWHEEL
-                    | WM_LBUTTONDOWN
-                    | WM_LBUTTONUP
-                    | WM_RBUTTONDOWN
-                    | WM_RBUTTONUP
-                    | WM_MBUTTONDOWN
-                    | windows::Win32::UI::WindowsAndMessaging::WM_MBUTTONUP
-                    | WM_XBUTTONDOWN
-                    | WM_XBUTTONUP => {
-                        update_held_mouse_button(message, ((info.mouseData >> 16) & 0xFFFF) as u16);
-                        return LRESULT(1);
-                    }
-
-                    _ => {}
-                }
-            }
-
             if is_vision_capture_mouse_blocked() {
                 if let Some(key_name) = mouse_binding_name_from_message(
                     message,
@@ -7136,10 +7116,6 @@ mod windows_overlay {
 
     fn is_repeat_key(key_name: &str) -> bool {
         HOOK_STATE.lock().held_inputs.contains(key_name)
-    }
-
-    fn is_mouse_locked() -> bool {
-        HOOK_STATE.lock().mouse_move_locks.any()
     }
 
     fn handle_locked_mouse_move(point: POINT) -> bool {
