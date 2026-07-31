@@ -363,6 +363,7 @@ pub(crate) struct VisionPreviewCache {
 const OPEN_WINDOWS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const AUDIO_SENSE_DEVICES_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(180);
+const MAX_UI_COMMANDS_PER_FRAME: usize = 256;
 
 #[derive(Clone)]
 pub(crate) struct PersistSnapshot {
@@ -14503,7 +14504,12 @@ impl eframe::App for CrosshairApp {
             self.check_for_update_with_origin(ctx, true);
         }
 
-        while let Ok(command) = self.ui_rx.try_recv() {
+        // ponytail: bound background work per frame so a noisy producer cannot starve painting.
+        // If 256 becomes measurable backlog, coalesce high-frequency command variants at source.
+        for _ in 0..MAX_UI_COMMANDS_PER_FRAME {
+            let Ok(command) = self.ui_rx.try_recv() else {
+                break;
+            };
             match command {
                 UiCommand::ShowWindow => {
                     if self.state.show_window {
@@ -15580,6 +15586,9 @@ impl eframe::App for CrosshairApp {
                     self.persist();
                 }
             }
+        }
+        if !self.ui_rx.is_empty() {
+            ctx.request_repaint();
         }
 
         if let Some(job) = &self.opencv_download_job {
