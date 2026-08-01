@@ -1706,21 +1706,32 @@ impl CrosshairApp {
             .memory_panel
             .marked_result_addresses
             .contains(&address_value);
-        let full_row_rect = egui::Rect::from_min_size(
-            ui.next_widget_position(),
+        let (full_row_rect, response) = ui.allocate_exact_size(
             vec2(pane_width, 22.0),
+            Sense::click(),
         );
-        let response = ui
-            .interact(
+        let response = response.on_hover_cursor(egui::CursorIcon::Default);
+        if marked {
+            ui.painter().rect_filled(
                 full_row_rect,
-                ui.id().with(("memory-result-row", pinned, address_value)),
-                Sense::click(),
-            )
-            .on_hover_cursor(egui::CursorIcon::Default);
-        ui.allocate_ui_with_layout(
-            vec2(pane_width, 22.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
+                3.0,
+                Color32::from_rgba_premultiplied(196, 82, 82, 72),
+            );
+        }
+        if response.hovered() || selected {
+            ui.painter().rect_filled(
+                full_row_rect,
+                3.0,
+                Color32::from_rgba_premultiplied(
+                    84,
+                    178,
+                    222,
+                    if selected { 58 } else { 42 },
+                ),
+            );
+        }
+        ui.allocate_ui_at_rect(full_row_rect, |ui| {
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 Self::memory_table_cell(
                     ui,
@@ -1739,27 +1750,8 @@ impl CrosshairApp {
                         RichText::new(&previous_value).monospace(),
                     );
                 }
-            },
-        );
-        if marked {
-            ui.painter().rect_filled(
-                response.rect,
-                3.0,
-                Color32::from_rgba_premultiplied(196, 82, 82, 72),
-            );
-        }
-        if response.hovered() || selected {
-            ui.painter().rect_filled(
-                response.rect,
-                3.0,
-                Color32::from_rgba_premultiplied(
-                    84,
-                    178,
-                    222,
-                    if selected { 58 } else { 42 },
-                ),
-            );
-        }
+            });
+        });
         response.context_menu(|ui| {
             let label = if marked {
                 "Remove not-relevant mark"
@@ -1889,20 +1881,14 @@ impl CrosshairApp {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
                             for index in start..(start + pane_count).min(visible_count) {
-                                ui.allocate_ui_with_layout(
-                                    vec2(pane_width, 22.0),
-                                    egui::Layout::left_to_right(egui::Align::Center),
-                                    |ui| {
-                                        self.render_memory_scan_result_item(
-                                            ui,
-                                            pinned,
-                                            index,
-                                            pane_width,
-                                            address_ratio,
-                                            value_ratio,
-                                            show_previous,
-                                        );
-                                    },
+                                self.render_memory_scan_result_item(
+                                    ui,
+                                    pinned,
+                                    index,
+                                    pane_width,
+                                    address_ratio,
+                                    value_ratio,
+                                    show_previous,
                                 );
                             }
                             if start + pane_count > visible_count {
