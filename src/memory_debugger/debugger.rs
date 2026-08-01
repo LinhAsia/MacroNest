@@ -737,6 +737,7 @@ fn decode_previous_access(
     architecture: TargetArchitecture,
 ) -> Option<(usize, Instruction, String)> {
     let next_ip = context.Rip as usize;
+    let mut best = None;
     for length in 1..=15usize {
         let start = next_ip.checked_sub(length)?;
         let mut bytes = [0u8; 15];
@@ -766,10 +767,26 @@ fn decode_previous_access(
             let mut formatter = IntelFormatter::new();
             let mut text = String::new();
             formatter.format(&instruction, &mut text);
-            return Some((start, instruction, text));
+            best = prefer_longer_access_candidate(best, (start, instruction, text));
         }
     }
-    None
+    best
+}
+
+fn prefer_longer_access_candidate(
+    current: Option<(usize, Instruction, String)>,
+    candidate: (usize, Instruction, String),
+) -> Option<(usize, Instruction, String)> {
+    // ponytail: x86 has no backwards instruction boundary marker. A shorter suffix can decode as
+    // valid code, but the longest matching instruction is the least lossy boundary available here.
+    if current
+        .as_ref()
+        .is_none_or(|(_, instruction, _)| candidate.1.len() > instruction.len())
+    {
+        Some(candidate)
+    } else {
+        current
+    }
 }
 
 fn writes_memory(instruction: &Instruction) -> bool {
@@ -1111,6 +1128,20 @@ mod tests {
         let mut read_decoder = Decoder::new(64, &[0x8B, 0x44, 0x24, 0x20], DecoderOptions::NONE);
         assert!(writes_memory(&write_decoder.decode()));
         assert!(!writes_memory(&read_decoder.decode()));
+    }
+
+    #[test]
+    fn previous_access_prefers_the_complete_prefixed_instruction() {
+        let short = Decoder::new(64, &[0x11, 0x52, 0x10], DecoderOptions::NONE).decode();
+        let complete =
+            Decoder::new(64, &[0xF0, 0x11, 0x52, 0x10], DecoderOptions::NONE).decode();
+        let selected = prefer_longer_access_candidate(
+            Some((1, short, "adc [rdx+10h],edx".to_owned())),
+            (0, complete, "lock adc [rdx+10h],edx".to_owned()),
+        )
+        .expect("a candidate");
+        assert_eq!(selected.0, 0);
+        assert_eq!(selected.1.len(), 4);
     }
 
     #[test]
