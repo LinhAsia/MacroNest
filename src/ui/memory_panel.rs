@@ -1828,16 +1828,19 @@ impl CrosshairApp {
                 });
                 return;
             }
-            // Widening the pinned window creates parallel result panes, each with full values.
+            // Widening the pinned window creates compact parallel result panes.
+            let show_previous = self.memory_panel.show_scan_previous;
+            let minimum_pane_width = if show_previous { 360.0 } else { 250.0 };
             let pane_count = if pinned {
-                (ui.available_width() / 520.0).floor().max(1.0) as usize
+                (ui.available_width() / minimum_pane_width)
+                    .floor()
+                    .max(1.0) as usize
             } else {
                 1
             };
             let pane_width = ui.available_width() / pane_count as f32;
-            let show_previous = self.memory_panel.show_scan_previous;
-            let address_ratio = if show_previous { 0.46 } else { 0.58 };
-            let value_ratio = if show_previous { 0.27 } else { 0.42 };
+            let address_ratio = if show_previous { 0.40 } else { 0.56 };
+            let value_ratio = if show_previous { 0.30 } else { 0.44 };
             let grid_row_count = visible_count.div_ceil(pane_count);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
