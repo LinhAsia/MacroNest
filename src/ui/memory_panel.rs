@@ -5287,12 +5287,19 @@ impl CrosshairApp {
     }
 
     fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) -> egui::Response {
-        Self::memory_label_cell(
-            ui,
-            width,
-            18.0,
-            egui::Label::new(RichText::new(text).monospace()).selectable(true),
+        let (rect, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
+        let mut cell = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        cell.add_sized(
+            rect.size(),
+            egui::Label::new(RichText::new(text).monospace())
+                .selectable(true)
+                .sense(Sense::click_and_drag()),
         )
+        .on_hover_cursor(egui::CursorIcon::Default)
     }
 
     fn render_memory_address_dialog(&mut self, ctx: &egui::Context) {
