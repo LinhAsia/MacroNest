@@ -490,6 +490,7 @@ pub(crate) struct MemoryPanelState {
     has_scan_session: bool,
     pinned: bool,
     address_list_pinned: bool,
+    show_scan_previous: bool,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     capturing_hotkey: Option<MemoryScanAction>,
     edit_value_index: Option<usize>,
@@ -568,6 +569,7 @@ impl Default for MemoryPanelState {
             has_scan_session: false,
             pinned: false,
             address_list_pinned: false,
+            show_scan_previous: true,
             hotkeys: HashMap::new(),
             capturing_hotkey: None,
             edit_value_index: None,
@@ -1672,7 +1674,258 @@ impl CrosshairApp {
         }
     }
 
+    fn render_memory_scan_result_item(
+        &mut self,
+        ui: &mut egui::Ui,
+        pinned: bool,
+        index: usize,
+        pane_width: f32,
+        address_ratio: f32,
+        value_ratio: f32,
+        show_previous: bool,
+    ) {
+        let (address_value, current_value, previous_value) =
+            if let Some(candidate) = self.memory_panel.text_candidates.get(index) {
+                (candidate.address, candidate.current.clone(), candidate.previous.clone())
+            } else {
+                let candidate = self.memory_panel.candidates[index];
+                let current = self
+                    .memory_panel
+                    .live_candidate_values
+                    .get(&index)
+                    .copied()
+                    .unwrap_or_else(|| candidate.current(self.memory_panel.value_type));
+                (
+                    candidate.address,
+                    format_scan_value(current, self.memory_panel.hex),
+                    "-".to_owned(),
+                )
+            };
+        let selected = self.memory_panel.selected_results.contains(&index);
+        let marked = self
+            .memory_panel
+            .marked_result_addresses
+            .contains(&address_value);
+        let full_row_rect = egui::Rect::from_min_size(
+            ui.next_widget_position(),
+            vec2(pane_width, 22.0),
+        );
+        let response = ui
+            .interact(
+                full_row_rect,
+                ui.id().with(("memory-result-row", pinned, address_value)),
+                Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::Default);
+        ui.allocate_ui_with_layout(
+            vec2(pane_width, 22.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                Self::memory_table_cell(
+                    ui,
+                    pane_width * address_ratio,
+                    RichText::new(format_memory_address(address_value)).monospace(),
+                );
+                Self::memory_table_cell(
+                    ui,
+                    pane_width * value_ratio,
+                    RichText::new(&current_value).monospace(),
+                );
+                if show_previous {
+                    Self::memory_table_cell(
+                        ui,
+                        pane_width * value_ratio,
+                        RichText::new(&previous_value).monospace(),
+                    );
+                }
+            },
+        );
+        if marked {
+            ui.painter().rect_filled(
+                response.rect,
+                3.0,
+                Color32::from_rgba_premultiplied(196, 82, 82, 72),
+            );
+        }
+        if response.hovered() || selected {
+            ui.painter().rect_filled(
+                response.rect,
+                3.0,
+                Color32::from_rgba_premultiplied(
+                    84,
+                    178,
+                    222,
+                    if selected { 58 } else { 42 },
+                ),
+            );
+        }
+        response.context_menu(|ui| {
+            let label = if marked {
+                "Remove not-relevant mark"
+            } else {
+                "Mark as not relevant"
+            };
+            if ui.button(label).clicked() {
+                if marked {
+                    self.memory_panel.marked_result_addresses.remove(&address_value);
+                } else {
+                    self.memory_panel.marked_result_addresses.insert(address_value);
+                }
+                ui.close();
+            }
+        });
+        if !pinned && response.clicked() && !response.double_clicked() {
+            let toggle = ui.input(|input| input.modifiers.ctrl || input.modifiers.command);
+            self.select_memory_result(index, if toggle { !selected } else { true }, ui);
+        }
+        if ui.input(|input| input.pointer.button_double_clicked(egui::PointerButton::Primary))
+            && ui
+                .ctx()
+                .pointer_latest_pos()
+                .is_some_and(|pointer| full_row_rect.contains(pointer))
+        {
+            self.memory_panel.selected_results.clear();
+            self.memory_panel.selected_results.insert(index);
+            self.add_selected_memory_results();
+        }
+    }
+
     fn render_memory_scan_results(&mut self, ui: &mut egui::Ui, pinned: bool) {
+        let size = ui.available_size();
+        let frame = Frame::group(ui.style()).inner_margin(egui::Margin::same(5));
+        frame.show(ui, |ui| {
+            ui.set_min_size(size - vec2(12.0, 12.0));
+            let result_count = self
+                .memory_panel
+                .candidates
+                .len()
+                .max(self.memory_panel.text_candidates.len());
+            let visible_count = result_count.min(MAX_VISIBLE_RESULTS);
+            if !pinned {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.tr("Scan results", "Scan results")).strong());
+                    ui.label(result_count.to_string());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button(self.tr("Add â†“", "Add â†“")).clicked() {
+                            self.add_selected_memory_results();
+                        }
+                    });
+                });
+            }
+            let previous_label = self.tr("Previous", "Previous");
+            ui.checkbox(&mut self.memory_panel.show_scan_previous, previous_label);
+            if !pinned
+                && !self.memory_panel.saved_list_active
+                && ui.ctx().memory(|memory| memory.focused().is_none())
+                && ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::A))
+            {
+                self.memory_panel.selected_results = (0..visible_count).collect();
+            }
+            if result_count == 0 && !self.memory_panel.scanning {
+                ui.centered_and_justified(|ui| {
+                    ui.label(RichText::new(self.tr("No scan results", "No scan results")).weak());
+                });
+                return;
+            }
+            // Widening the pinned window creates parallel result panes, each with full values.
+            let pane_count = if pinned {
+                (ui.available_width() / 520.0).floor().max(1.0) as usize
+            } else {
+                1
+            };
+            let pane_width = ui.available_width() / pane_count as f32;
+            let show_previous = self.memory_panel.show_scan_previous;
+            let address_ratio = if show_previous { 0.46 } else { 0.58 };
+            let value_ratio = if show_previous { 0.27 } else { 0.42 };
+            let grid_row_count = visible_count.div_ceil(pane_count);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for _ in 0..pane_count {
+                    ui.allocate_ui_with_layout(
+                        vec2(pane_width, 20.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            Self::memory_table_cell(
+                                ui,
+                                pane_width * address_ratio,
+                                RichText::new(self.tr("Address", "Address")).strong(),
+                            );
+                            Self::memory_table_cell(
+                                ui,
+                                pane_width * value_ratio,
+                                RichText::new(self.tr("Current", "Current")).strong(),
+                            );
+                            if show_previous {
+                                Self::memory_table_cell(
+                                    ui,
+                                    pane_width * value_ratio,
+                                    RichText::new(previous_label).strong(),
+                                );
+                            }
+                        },
+                    );
+                }
+            });
+            ui.separator();
+            egui::ScrollArea::vertical()
+                .id_salt(if pinned { "pinned-memory-results" } else { "memory-results" })
+                .auto_shrink([false, false])
+                .max_height(ui.available_height())
+                .show_rows(ui, 22.0, grid_row_count, |ui, rows| {
+                    self.memory_panel.visible_scan_ranges[usize::from(pinned)] =
+                        Some((
+                            rows.start * pane_count,
+                            (rows.end * pane_count).min(visible_count),
+                            Instant::now(),
+                        ));
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for row in rows {
+                        let start = row * pane_count;
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 0.0;
+                            for index in start..(start + pane_count).min(visible_count) {
+                                ui.allocate_ui_with_layout(
+                                    vec2(pane_width, 22.0),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        self.render_memory_scan_result_item(
+                                            ui,
+                                            pinned,
+                                            index,
+                                            pane_width,
+                                            address_ratio,
+                                            value_ratio,
+                                            show_previous,
+                                        );
+                                    },
+                                );
+                            }
+                            if start + pane_count > visible_count {
+                                ui.allocate_space(vec2(
+                                    pane_width * (start + pane_count - visible_count) as f32,
+                                    22.0,
+                                ));
+                            }
+                        });
+                    }
+                });
+            if result_count > MAX_VISIBLE_RESULTS {
+                ui.label(
+                    RichText::new(format!(
+                        "Showing first {MAX_VISIBLE_RESULTS} of {}",
+                        result_count
+                    ))
+                    .small()
+                    .weak(),
+                );
+            }
+        });
+    }
+
+    #[cfg(any())]
+    fn render_memory_scan_results_legacy(&mut self, ui: &mut egui::Ui, pinned: bool) {
         let size = ui.available_size();
         let frame = Frame::group(ui.style()).inner_margin(egui::Margin::same(5));
         frame.show(ui, |ui| {
