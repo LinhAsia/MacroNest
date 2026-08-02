@@ -30516,6 +30516,9 @@ mod windows_overlay {
                 .iter()
                 .find(|entry| entry.name.eq_ignore_ascii_case(alias.trim()))
                 .cloned()?;
+            if !entry.code_module.is_empty() {
+                return entry.runtime_address;
+            }
             if let Some(address) = entry.absolute_address {
                 return Some(address);
             }

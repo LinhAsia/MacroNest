@@ -483,6 +483,14 @@ pub struct MemoryPointerEntry {
     pub value_type: String,
     #[serde(default)]
     pub absolute_address: Option<usize>,
+    #[serde(default)]
+    pub code_module: String,
+    #[serde(default)]
+    pub code_offset: usize,
+    #[serde(default)]
+    pub code_address_offset: isize,
+    #[serde(skip)]
+    pub runtime_address: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

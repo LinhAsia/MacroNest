@@ -398,6 +398,9 @@ struct CodeAccessDialog {
     selected: Option<usize>,
     value_type: ScanValueType,
     values: HashMap<usize, String>,
+    tracked_name: String,
+    tracked_offset: String,
+    save_tracked: bool,
 }
 
 struct ScanJobResult {
@@ -659,6 +662,10 @@ impl CrosshairApp {
     fn select_memory_process(&mut self, selector: String, pid: Option<u32>, ctx: &egui::Context) {
         self.memory_panel.process_selector = selector;
         if self.memory_panel.process_pid != pid {
+            for entry in &mut self.state.memory_pointer_list {
+                entry.runtime_address = None;
+            }
+            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
             self.reset_memory_scan("Process changed");
             self.memory_panel.saved.retain_mut(|saved| {
                 if saved.saved_to_library {
@@ -1289,6 +1296,12 @@ impl CrosshairApp {
                                             let pid =
                                                 window_list::process_id_for_window(Some(&selector));
                                             if self.memory_panel.process_pid != pid {
+                                                for entry in &mut self.state.memory_pointer_list {
+                                                    entry.runtime_address = None;
+                                                }
+                                                crate::overlay::set_memory_pointer_entries(
+                                                    &self.state.memory_pointer_list,
+                                                );
                                                 self.reset_memory_scan("Process changed");
                                                 self.memory_panel.saved.retain_mut(|saved| {
                                                     let portable =
@@ -3221,10 +3234,19 @@ impl CrosshairApp {
                                     }
                                     ui.horizontal(|ui| {
                                         let address = if entry.module.is_empty() {
-                                            entry.absolute_address.map_or_else(
-                                                || "Invalid address".to_owned(),
-                                                format_prefixed_memory_address,
-                                            )
+                                            if entry.code_module.is_empty() {
+                                                entry.absolute_address.map_or_else(
+                                                    || "Invalid address".to_owned(),
+                                                    format_prefixed_memory_address,
+                                                )
+                                            } else {
+                                                format!(
+                                                    "{}+{:X} @ {:+X}",
+                                                    entry.code_module,
+                                                    entry.code_offset,
+                                                    entry.code_address_offset
+                                                )
+                                            }
                                         } else {
                                             format!(
                                                 "{}+{:X} [{}]",
@@ -3265,12 +3287,22 @@ impl CrosshairApp {
             && let Some(entry) = self.state.memory_pointer_list.get(index).cloned()
             && let Some(value_type) = memory_type_from_config(&entry.value_type)
         {
+            if !entry.code_module.is_empty() && entry.runtime_address.is_none() {
+                self.memory_panel.status = format!(
+                    "{} is unresolved â€” run Find written for {}+{:X}",
+                    entry.name, entry.code_module, entry.code_offset
+                );
+                return;
+            }
             let mut pointer = (!entry.module.is_empty()).then(|| PointerSpec {
                 base: 0,
                 module: Some((entry.module.clone(), entry.module_offset)),
                 offsets: entry.offsets.clone(),
             });
-            let mut address = entry.absolute_address.unwrap_or_default();
+            let mut address = entry
+                .runtime_address
+                .or(entry.absolute_address)
+                .unwrap_or_default();
             if let (Some(pid), Some(pointer)) = (self.memory_panel.process_pid, pointer.as_mut())
                 && let Ok(base) = resolve_module_offset(pid, &entry.module, entry.module_offset)
             {
@@ -3693,6 +3725,9 @@ impl CrosshairApp {
             selected: None,
             value_type: self.memory_panel.value_type,
             values: HashMap::new(),
+            tracked_name: String::new(),
+            tracked_offset: "0".to_owned(),
+            save_tracked: false,
         });
     }
 
@@ -5808,6 +5843,7 @@ impl CrosshairApp {
                     )
                 }
                 WatchEvent::AccessHit { data_address } => {
+                    self.resolve_tracked_code_addresses(dialog.code_index, data_address);
                     let selected_address = dialog
                         .selected
                         .and_then(|index| dialog.addresses.get(index))
@@ -5929,6 +5965,10 @@ impl CrosshairApp {
         if refresh_values {
             self.refresh_code_access_values(&mut dialog);
         }
+        if dialog.save_tracked {
+            dialog.save_tracked = false;
+            self.save_tracked_code_address(&mut dialog);
+        }
         if let Some(address) = add {
             if let Some(mut active) = dialog.active.take() {
                 active.stop();
@@ -6000,6 +6040,32 @@ impl CrosshairApp {
         if dialog.value_type != previous_type {
             refresh_values = true;
         }
+        ui.horizontal(|ui| {
+            ui.label("Tracked address");
+            ui.add(
+                egui::TextEdit::singleline(&mut dialog.tracked_name)
+                    .desired_width(170.0)
+                    .hint_text("name, e.g. camera_pitch"),
+            );
+            ui.label("Captured +");
+            ui.add(
+                egui::TextEdit::singleline(&mut dialog.tracked_offset)
+                    .desired_width(70.0)
+                    .hint_text("hex"),
+            );
+            if ui
+                .add_enabled(
+                    dialog.selected.is_some() && !dialog.tracked_name.trim().is_empty(),
+                    Button::new("Save tracked"),
+                )
+                .on_hover_text(
+                    "Save this as a stable code-derived address; run Find written after restarting the game to resolve it again",
+                )
+                .clicked()
+            {
+                dialog.save_tracked = true;
+            }
+        });
         ui.separator();
         let value_width = (ui.available_width() - 360.0).max(160.0);
         ui.horizontal(|ui| {
@@ -6127,6 +6193,85 @@ impl CrosshairApp {
         });
         self.memory_panel.status =
             format!("Address {} added", format_prefixed_memory_address(address));
+    }
+
+    #[cfg(windows)]
+    fn resolve_tracked_code_addresses(&mut self, code_index: usize, captured: usize) {
+        let Some(code) = self.state.memory_code_list.get(code_index) else {
+            return;
+        };
+        let mut changed = false;
+        for entry in &mut self.state.memory_pointer_list {
+            if entry.code_module.eq_ignore_ascii_case(&code.module)
+                && entry.code_offset == code.offset
+            {
+                entry.runtime_address = captured.checked_add_signed(entry.code_address_offset);
+                changed = true;
+            }
+        }
+        if changed {
+            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+        }
+    }
+
+    #[cfg(windows)]
+    fn save_tracked_code_address(&mut self, dialog: &mut CodeAccessDialog) {
+        let Some(captured) = dialog
+            .selected
+            .and_then(|index| dialog.addresses.get(index))
+            .map(|(address, _)| *address)
+        else {
+            return;
+        };
+        let Some(offset) = parse_signed_hex_offset(&dialog.tracked_offset) else {
+            dialog.status = "Invalid tracked offset; use hex such as 4, C, or -4".to_owned();
+            return;
+        };
+        let Some(address) = captured.checked_add_signed(offset) else {
+            dialog.status = "Tracked address overflow".to_owned();
+            return;
+        };
+        let Some(code) = self.state.memory_code_list.get(dialog.code_index) else {
+            return;
+        };
+        let code_module = code.module.clone();
+        let code_offset = code.offset;
+        let name = dialog.tracked_name.trim().to_owned();
+        let app_name = self
+            .memory_panel
+            .process_pid
+            .and_then(|pid| process_modules(pid).ok()?.first().map(|module| module.0.clone()))
+            .unwrap_or_else(|| code_module.clone());
+        let entry = MemoryPointerEntry {
+            name: name.clone(),
+            app_name,
+            module: String::new(),
+            module_offset: 0,
+            offsets: Vec::new(),
+            value_type: memory_type_config(dialog.value_type).to_owned(),
+            absolute_address: None,
+            code_module: code_module.clone(),
+            code_offset,
+            code_address_offset: offset,
+            runtime_address: Some(address),
+        };
+        if let Some(existing) = self
+            .state
+            .memory_pointer_list
+            .iter_mut()
+            .find(|entry| entry.name.eq_ignore_ascii_case(&name))
+        {
+            *existing = entry;
+        } else {
+            self.state.memory_pointer_list.push(entry);
+        }
+        crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+        self.persist();
+        self.add_code_access_address(address, dialog.value_type);
+        dialog.status = format!(
+            "Tracked address @{name} saved â€” {}+{:X} @ {offset:+X}",
+            code_module, code_offset
+        );
     }
 
     #[cfg(windows)]
@@ -7592,6 +7737,10 @@ impl CrosshairApp {
                     .map_or_else(Vec::new, |(pointer, _)| pointer.offsets.clone()),
                 value_type: memory_type_config(saved.value_type).to_owned(),
                 absolute_address: module_pointer.is_none().then_some(saved.address),
+                code_module: String::new(),
+                code_offset: 0,
+                code_address_offset: 0,
+                runtime_address: None,
             };
             if let Some(existing) = self.state.memory_pointer_list.iter_mut().find(|existing| {
                 existing.module.eq_ignore_ascii_case(&entry.module)
@@ -8194,6 +8343,19 @@ fn parse_hex_offset(text: &str) -> Option<usize> {
     usize::from_str_radix(digits, 16).ok()
 }
 
+fn parse_signed_hex_offset(text: &str) -> Option<isize> {
+    let text = text.trim();
+    let (negative, digits) = text
+        .strip_prefix('-')
+        .map_or((false, text), |digits| (true, digits));
+    let digits = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+        .unwrap_or(digits);
+    let value = isize::from_str_radix(digits, 16).ok()?;
+    Some(if negative { -value } else { value })
+}
+
 fn resolve_memory_address(
     pid: u32,
     base: usize,
@@ -8261,6 +8423,8 @@ mod tests {
         assert_eq!(parse_memory_address("0x1000"), Some(4096));
         assert_eq!(parse_memory_address("7FF6_ABCD"), Some(0x7FF6_ABCD));
         assert_eq!(parse_memory_address("0x1000+10-8"), Some(0x1008));
+        assert_eq!(parse_signed_hex_offset("C"), Some(12));
+        assert_eq!(parse_signed_hex_offset("-0x10"), Some(-16));
     }
 
     #[test]
