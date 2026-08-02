@@ -5274,7 +5274,7 @@ impl CrosshairApp {
                 WatchEvent::AccessHit { .. } => {}
                 WatchEvent::CaptureLimitReached(limit) => {
                     dialog.status = if limit == 1 {
-                        "First address captured — debugger detached safely".to_owned()
+                        "First hit captured — debugger detached safely".to_owned()
                     } else {
                         format!("Debugger safely stopped after {limit} accesses")
                     };

@@ -177,8 +177,6 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
 const ERROR_SEM_TIMEOUT: i32 = 121;
 const ERROR_BAD_LENGTH: i32 = 24;
 const ERROR_MORE_DATA: i32 = 234;
-// ponytail: bound runaway debugger traffic; switch to sampled/VEH capture before raising this again.
-const MAX_ACCESS_HITS: usize = 10_000;
 const MAX_INSTRUCTION_HITS: usize = 2_000;
 const RESUME_FLAG: u32 = 1 << 16;
 
@@ -514,11 +512,11 @@ fn watch_loop<F>(
                                             < 8 * 1024 * 1024,
                                     });
                                     access_hits += 1;
-                                    let limit = if read_write {
-                                        MAX_ACCESS_HITS
-                                    } else {
-                                        MAX_INSTRUCTION_HITS
-                                    };
+                                    // ponytail: a read/write watchpoint on render data can fire
+                                    // thousands of times per frame. One decoded instruction is
+                                    // enough to continue the investigation without stalling the
+                                    // target; VEH/sampling is the upgrade path for multi-hit reads.
+                                    let limit = if read_write { 1 } else { MAX_INSTRUCTION_HITS };
                                     if access_hits >= limit {
                                         capture_limit_reached = true;
                                         notify(WatchEvent::CaptureLimitReached(limit));
