@@ -215,6 +215,8 @@ struct CameraMatrixDialog {
     progress: Arc<AtomicUsize>,
     baseline: HashMap<usize, [f32; 16]>,
     world: Option<[f32; 3]>,
+    projection_variant: usize,
+    last_preview_refresh: Instant,
 }
 
 struct AddressDialog {
@@ -3912,6 +3914,8 @@ impl CrosshairApp {
             progress: Arc::new(AtomicUsize::new(0)),
             baseline: HashMap::new(),
             world: None,
+            projection_variant: 0,
+            last_preview_refresh: Instant::now() - Duration::from_secs(1),
         });
     }
 
@@ -4009,24 +4013,18 @@ impl CrosshairApp {
             dialog.status = "Select the restarted/current process first.".to_owned();
             return;
         };
-        let width = dialog
-            .viewport_width
-            .parse::<f32>()
-            .unwrap_or(1920.0)
-            .max(1.0);
-        let height = dialog
-            .viewport_height
-            .parse::<f32>()
-            .unwrap_or(1080.0)
-            .max(1.0);
-        let world = dialog.world.unwrap_or([0.0; 3]);
         let before = dialog.candidates.len();
-        dialog.candidates.retain_mut(|candidate| {
+        let selected_address = dialog
+            .selected
+            .and_then(|index| dialog.candidates.get(index))
+            .map(|candidate| candidate.address);
+        let mut filtered = Vec::with_capacity(before);
+        for candidate in &dialog.candidates {
             let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64) else {
-                return false;
+                continue;
             };
             let Some(matrix) = decode_f32_matrix(&bytes) else {
-                return false;
+                continue;
             };
             let baseline = dialog
                 .baseline
@@ -4036,25 +4034,32 @@ impl CrosshairApp {
                 .iter()
                 .zip(matrix)
                 .any(|(old, new)| (old - new).abs() > 1.0e-4);
-            let visible = project_world_both_layouts(&matrix, world, width, height)
-                .into_iter()
-                .flatten()
-                .any(|point| {
-                    point[0] >= 0.0 && point[0] <= width && point[1] >= 0.0 && point[1] <= height
-                });
-            candidate.matrix = matrix;
-            changed && visible
-        });
+            if changed {
+                let mut candidate = candidate.clone();
+                candidate.matrix = matrix;
+                filtered.push(candidate);
+            }
+        }
+        if filtered.is_empty() {
+            dialog.status = format!(
+                "No matrices changed since the previous snapshot; kept all {before} candidate(s). Rotate farther, then filter again."
+            );
+            return;
+        }
+        dialog.candidates = filtered;
         dialog.baseline = dialog
             .candidates
             .iter()
             .map(|candidate| (candidate.address, candidate.matrix))
             .collect();
-        dialog.selected = dialog
-            .selected
-            .filter(|index| *index < dialog.candidates.len());
+        dialog.selected = selected_address.and_then(|address| {
+            dialog
+                .candidates
+                .iter()
+                .position(|candidate| candidate.address == address)
+        });
         dialog.status = format!(
-            "Kept {} of {before} matrices that changed and still project the target on-screen.",
+            "Kept {} of {before} matrices whose 16 float values changed with the camera.",
             dialog.candidates.len()
         );
     }
@@ -4096,6 +4101,24 @@ impl CrosshairApp {
                     dialog.status = "Camera scan worker stopped unexpectedly.".to_owned();
                 }
             }
+        }
+        if dialog.selected.is_some()
+            && dialog.last_preview_refresh.elapsed() >= Duration::from_millis(33)
+        {
+            if let (Some(pid), Some(candidate)) = (
+                self.memory_panel.process_pid,
+                dialog
+                    .selected
+                    .and_then(|index| dialog.candidates.get_mut(index)),
+            ) && let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64)
+                && let Some(matrix) = decode_f32_matrix(&bytes)
+            {
+                candidate.matrix = matrix;
+            }
+            dialog.last_preview_refresh = Instant::now();
+        }
+        if dialog.selected.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(16));
         }
         egui::CentralPanel::default()
             .frame(Self::memory_popup_frame(ctx))
@@ -4180,6 +4203,17 @@ impl CrosshairApp {
                     .unwrap_or(1080.0)
                     .max(1.0);
                 let world = dialog.world.unwrap_or([0.0; 3]);
+                ui.horizontal(|ui| {
+                    ui.label("Preview convention");
+                    egui::ComboBox::from_id_salt("camera-matrix-projection-convention")
+                        .selected_text(PROJECTION_CONVENTIONS[dialog.projection_variant].0)
+                        .show_ui(ui, |ui| {
+                            for (index, (label, ..)) in PROJECTION_CONVENTIONS.iter().enumerate() {
+                                ui.selectable_value(&mut dialog.projection_variant, index, *label);
+                            }
+                        });
+                    ui.label(RichText::new("The selected matrix is read live; try conventions until the dot tracks the target.").small().weak());
+                });
                 ui.columns(2, |columns| {
                     egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
                         egui::Grid::new("camera-matrix-candidates")
@@ -4192,15 +4226,18 @@ impl CrosshairApp {
                                 ui.label("Screen Y");
                                 ui.end_row();
                                 for (index, candidate) in dialog.candidates.iter().enumerate() {
-                                    let projections = project_world_both_layouts(
+                                    let projections = project_world_variants(
                                         &candidate.matrix,
                                         world,
                                         width,
                                         height,
                                     );
-                                    let (layout, point) = projections[0]
-                                        .map(|point| ("Row", point))
-                                        .or_else(|| projections[1].map(|point| ("Column", point)))
+                                    let (layout, point) = projections
+                                        .iter()
+                                        .enumerate()
+                                        .filter_map(|(index, point)| point.map(|point| (PROJECTION_CONVENTIONS[index].0, point)))
+                                        .find(|(_, point)| point[0] >= 0.0 && point[0] <= width && point[1] >= 0.0 && point[1] <= height)
+                                        .or_else(|| projections.iter().enumerate().find_map(|(index, point)| point.map(|point| (PROJECTION_CONVENTIONS[index].0, point))))
                                         .unwrap_or(("—", [f32::NAN; 2]));
                                     let selected = dialog.selected == Some(index);
                                     if ui
@@ -4239,11 +4276,12 @@ impl CrosshairApp {
                         .selected
                         .and_then(|index| dialog.candidates.get(index))
                     {
-                        if let Some(point) =
-                            project_world_both_layouts(&candidate.matrix, world, width, height)
-                                .into_iter()
-                                .flatten()
-                                .next()
+                        if let Some(point) = project_world_variants(
+                            &candidate.matrix,
+                            world,
+                            width,
+                            height,
+                        )[dialog.projection_variant]
                         {
                             let position = egui::pos2(
                                 rect.left() + rect.width() * point[0] / width,
@@ -7714,33 +7752,71 @@ fn decode_f32_matrix(bytes: &[u8]) -> Option<[f32; 16]> {
     Some(matrix)
 }
 
-fn project_world_both_layouts(
+const PROJECTION_CONVENTIONS: [(&str, [usize; 3], bool, bool); 24] = [
+    ("Row XYZ", [0, 1, 2], false, false),
+    ("Row XYZ / flip Y", [0, 1, 2], false, true),
+    ("Column XYZ", [0, 1, 2], true, false),
+    ("Column XYZ / flip Y", [0, 1, 2], true, true),
+    ("Row XZY", [0, 2, 1], false, false),
+    ("Row XZY / flip Y", [0, 2, 1], false, true),
+    ("Column XZY", [0, 2, 1], true, false),
+    ("Column XZY / flip Y", [0, 2, 1], true, true),
+    ("Row YXZ", [1, 0, 2], false, false),
+    ("Row YXZ / flip Y", [1, 0, 2], false, true),
+    ("Column YXZ", [1, 0, 2], true, false),
+    ("Column YXZ / flip Y", [1, 0, 2], true, true),
+    ("Row YZX", [1, 2, 0], false, false),
+    ("Row YZX / flip Y", [1, 2, 0], false, true),
+    ("Column YZX", [1, 2, 0], true, false),
+    ("Column YZX / flip Y", [1, 2, 0], true, true),
+    ("Row ZXY", [2, 0, 1], false, false),
+    ("Row ZXY / flip Y", [2, 0, 1], false, true),
+    ("Column ZXY", [2, 0, 1], true, false),
+    ("Column ZXY / flip Y", [2, 0, 1], true, true),
+    ("Row ZYX", [2, 1, 0], false, false),
+    ("Row ZYX / flip Y", [2, 1, 0], false, true),
+    ("Column ZYX", [2, 1, 0], true, false),
+    ("Column ZYX / flip Y", [2, 1, 0], true, true),
+];
+
+fn project_world_variants(
     matrix: &[f32; 16],
     world: [f32; 3],
     width: f32,
     height: f32,
-) -> [Option<[f32; 2]>; 2] {
-    let [x, y, z] = world;
-    let project = |clip_x: f32, clip_y: f32, clip_w: f32| {
-        if !clip_w.is_finite() || clip_w <= 1.0e-4 {
-            return None;
+) -> [Option<[f32; 2]>; 24] {
+    let mut results = [None; 24];
+    for (index, (_, order, column, flip_y)) in PROJECTION_CONVENTIONS.iter().enumerate() {
+        let [x, y, z] = [world[order[0]], world[order[1]], world[order[2]]];
+        let (clip_x, clip_y, clip_w) = if *column {
+            (
+                x * matrix[0] + y * matrix[1] + z * matrix[2] + matrix[3],
+                x * matrix[4] + y * matrix[5] + z * matrix[6] + matrix[7],
+                x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
+            )
+        } else {
+            (
+                x * matrix[0] + y * matrix[4] + z * matrix[8] + matrix[12],
+                x * matrix[1] + y * matrix[5] + z * matrix[9] + matrix[13],
+                x * matrix[3] + y * matrix[7] + z * matrix[11] + matrix[15],
+            )
+        };
+        if !clip_w.is_finite() || clip_w.abs() <= 1.0e-4 {
+            continue;
         }
-        let screen_x = (clip_x / clip_w + 1.0) * 0.5 * width;
-        let screen_y = (1.0 - clip_y / clip_w) * 0.5 * height;
-        (screen_x.is_finite() && screen_y.is_finite()).then_some([screen_x, screen_y])
-    };
-    [
-        project(
-            x * matrix[0] + y * matrix[4] + z * matrix[8] + matrix[12],
-            x * matrix[1] + y * matrix[5] + z * matrix[9] + matrix[13],
-            x * matrix[3] + y * matrix[7] + z * matrix[11] + matrix[15],
-        ),
-        project(
-            x * matrix[0] + y * matrix[1] + z * matrix[2] + matrix[3],
-            x * matrix[4] + y * matrix[5] + z * matrix[6] + matrix[7],
-            x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
-        ),
-    ]
+        let ndc_x = clip_x / clip_w;
+        let ndc_y = clip_y / clip_w;
+        let screen_x = (ndc_x + 1.0) * 0.5 * width;
+        let screen_y = if *flip_y {
+            (ndc_y + 1.0) * 0.5 * height
+        } else {
+            (1.0 - ndc_y) * 0.5 * height
+        };
+        if screen_x.is_finite() && screen_y.is_finite() {
+            results[index] = Some([screen_x, screen_y]);
+        }
+    }
+    results
 }
 
 fn parse_memory_address(text: &str) -> Option<usize> {
