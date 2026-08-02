@@ -401,6 +401,7 @@ struct CodeAccessDialog {
     tracked_name: String,
     tracked_offset: String,
     save_tracked: bool,
+    apply_tracked: bool,
 }
 
 struct ScanJobResult {
@@ -3690,7 +3691,7 @@ impl CrosshairApp {
                 "VEH debugger requires the injected helper and is not available yet".to_owned();
             return;
         }
-        let Some(entry) = self.state.memory_code_list.get(code_index) else {
+        let Some(entry) = self.state.memory_code_list.get(code_index).cloned() else {
             return;
         };
         let instruction_address = match resolve_module_offset(pid, &entry.module, entry.offset) {
@@ -3700,6 +3701,41 @@ impl CrosshairApp {
                 return;
             }
         };
+        let current_instruction = disassemble_from(
+            pid,
+            instruction_address,
+            self.state.memory_debugger_architecture,
+            1,
+        )
+        .ok()
+        .and_then(|mut lines| lines.pop())
+        .map(|(_, _, instruction)| instruction);
+        if current_instruction.as_ref().is_none_or(|current| {
+            normalize_instruction(current) != normalize_instruction(&entry.instruction)
+        }) {
+            let (_tx, rx) = mpsc::channel();
+            self.memory_panel.code_access_dialog = Some(CodeAccessDialog {
+                code_index,
+                instruction_address,
+                status: format!(
+                    "Stale code anchor - expected '{}', found '{}'",
+                    entry.instruction,
+                    current_instruction.as_deref().unwrap_or("unreadable code")
+                ),
+                addresses: Vec::new(),
+                rx,
+                active: None,
+                pinned: true,
+                selected: None,
+                value_type: self.memory_panel.value_type,
+                values: HashMap::new(),
+                tracked_name: String::new(),
+                tracked_offset: "0".to_owned(),
+                save_tracked: false,
+                apply_tracked: false,
+            });
+            return;
+        }
         self.close_memory_debuggers();
         let (tx, rx) = mpsc::channel();
         let started = AccessWatch::start(
@@ -3728,6 +3764,7 @@ impl CrosshairApp {
             tracked_name: String::new(),
             tracked_offset: "0".to_owned(),
             save_tracked: false,
+            apply_tracked: false,
         });
     }
 
@@ -5843,7 +5880,6 @@ impl CrosshairApp {
                     )
                 }
                 WatchEvent::AccessHit { data_address } => {
-                    self.resolve_tracked_code_addresses(dialog.code_index, data_address);
                     let selected_address = dialog
                         .selected
                         .and_then(|index| dialog.addresses.get(index))
@@ -5969,6 +6005,17 @@ impl CrosshairApp {
             dialog.save_tracked = false;
             self.save_tracked_code_address(&mut dialog);
         }
+        if dialog.apply_tracked {
+            dialog.apply_tracked = false;
+            if let Some(address) = dialog
+                .selected
+                .and_then(|index| dialog.addresses.get(index))
+                .map(|(address, _)| *address)
+            {
+                let count = self.resolve_tracked_code_addresses(dialog.code_index, address);
+                dialog.status = format!("Resolved {count} tracked address(es) from selected hit");
+            }
+        }
         if let Some(address) = add {
             if let Some(mut active) = dialog.active.take() {
                 active.stop();
@@ -6064,6 +6111,15 @@ impl CrosshairApp {
                 .clicked()
             {
                 dialog.save_tracked = true;
+            }
+            if ui
+                .add_enabled(dialog.selected.is_some(), Button::new("Resolve tracked"))
+                .on_hover_text(
+                    "Update saved tracked addresses from this selected hit; no address is changed automatically",
+                )
+                .clicked()
+            {
+                dialog.apply_tracked = true;
             }
         });
         ui.separator();
@@ -6196,22 +6252,23 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn resolve_tracked_code_addresses(&mut self, code_index: usize, captured: usize) {
+    fn resolve_tracked_code_addresses(&mut self, code_index: usize, captured: usize) -> usize {
         let Some(code) = self.state.memory_code_list.get(code_index) else {
-            return;
+            return 0;
         };
-        let mut changed = false;
+        let mut changed = 0;
         for entry in &mut self.state.memory_pointer_list {
             if entry.code_module.eq_ignore_ascii_case(&code.module)
                 && entry.code_offset == code.offset
             {
                 entry.runtime_address = captured.checked_add_signed(entry.code_address_offset);
-                changed = true;
+                changed += usize::from(entry.runtime_address.is_some());
             }
         }
-        if changed {
+        if changed != 0 {
             crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
         }
+        changed
     }
 
     #[cfg(windows)]
@@ -8356,6 +8413,14 @@ fn parse_signed_hex_offset(text: &str) -> Option<isize> {
     Some(if negative { -value } else { value })
 }
 
+fn normalize_instruction(instruction: &str) -> String {
+    instruction
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 fn resolve_memory_address(
     pid: u32,
     base: usize,
@@ -8425,6 +8490,10 @@ mod tests {
         assert_eq!(parse_memory_address("0x1000+10-8"), Some(0x1008));
         assert_eq!(parse_signed_hex_offset("C"), Some(12));
         assert_eq!(parse_signed_hex_offset("-0x10"), Some(-16));
+        assert_eq!(
+            normalize_instruction("MOVUPS [RDI+288h], XMM0"),
+            normalize_instruction("movups [rdi+288h],xmm0")
+        );
     }
 
     #[test]

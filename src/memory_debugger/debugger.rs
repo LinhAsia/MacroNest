@@ -354,6 +354,8 @@ enum WatchKind {
     },
 }
 
+const EXECUTE_CAPTURE_LIMIT: usize = 64;
+
 impl WatchKind {
     fn address(&self) -> usize {
         match self {
@@ -537,12 +539,14 @@ fn watch_loop<F>(
                                     && let Some(data_address) =
                                         effective_address(instruction, &context)
                                 {
-                                    disarm_paused_threads(&threads, architecture);
                                     notify(WatchEvent::AccessHit { data_address });
                                     access_hits += 1;
-                                    capture_limit_reached = true;
-                                    notify(WatchEvent::CaptureLimitReached(access_hits));
-                                    stop.store(true, Ordering::Release);
+                                    if access_hits >= EXECUTE_CAPTURE_LIMIT {
+                                        disarm_paused_threads(&threads, architecture);
+                                        capture_limit_reached = true;
+                                        notify(WatchEvent::CaptureLimitReached(access_hits));
+                                        stop.store(true, Ordering::Release);
+                                    }
                                 }
                             }
                         }
