@@ -4271,7 +4271,14 @@ impl CrosshairApp {
         };
         while let Ok(event) = dialog.rx.try_recv() {
             match event {
-                WatchEvent::Started => dialog.status = "Debugger running".to_owned(),
+                WatchEvent::Started {
+                    armed_threads,
+                    total_threads,
+                } => {
+                    dialog.status = format!(
+                        "Debugger running — {armed_threads}/{total_threads} thread(s) armed"
+                    )
+                }
                 WatchEvent::AddressHit {
                     instruction_address,
                     instruction,
@@ -4307,16 +4314,16 @@ impl CrosshairApp {
                 }
                 WatchEvent::AccessHit { .. } => {}
                 WatchEvent::CaptureLimitReached(limit) => {
-                    dialog.status = format!(
-                        "Capture limit reached ({limit} accesses). Press Stop to detach safely."
-                    );
+                    dialog.status = format!("Debugger safely stopped after {limit} accesses");
                 }
                 WatchEvent::Error(error) => {
                     dialog.status = format!("Debugger stopped: {error}");
                     dialog.active = None;
                 }
                 WatchEvent::Stopped => {
-                    if !dialog.status.starts_with("Debugger stopped:") {
+                    if !dialog.status.starts_with("Debugger stopped:")
+                        && !dialog.status.starts_with("Debugger safely stopped")
+                    {
                         dialog.status = "Debugger stopped".to_owned();
                     }
                     dialog.active = None;
@@ -4445,7 +4452,9 @@ impl CrosshairApp {
                         active.stop();
                     }
                     dialog.active = None;
-                    dialog.status = "Debugger stopped".to_owned();
+                    if !dialog.status.starts_with("Debugger safely stopped") {
+                        dialog.status = "Debugger stopped".to_owned();
+                    }
                 }
                 if ui.button("Clear captured").clicked() {
                     clear_captured = true;
@@ -4713,7 +4722,14 @@ impl CrosshairApp {
         };
         while let Ok(event) = dialog.rx.try_recv() {
             match event {
-                WatchEvent::Started => dialog.status = "Debugger running".to_owned(),
+                WatchEvent::Started {
+                    armed_threads,
+                    total_threads,
+                } => {
+                    dialog.status = format!(
+                        "Debugger running — {armed_threads}/{total_threads} thread(s) armed"
+                    )
+                }
                 WatchEvent::AccessHit { data_address } => {
                     let selected_address = dialog
                         .selected
@@ -4754,9 +4770,7 @@ impl CrosshairApp {
                     dialog.active = None;
                 }
                 WatchEvent::CaptureLimitReached(limit) => {
-                    dialog.status = format!(
-                        "Capture limit reached ({limit} accesses). Press Stop to detach safely."
-                    );
+                    dialog.status = format!("Debugger safely stopped after {limit} accesses");
                 }
                 WatchEvent::Stopped => {
                     dialog.status = "Debugger stopped".to_owned();

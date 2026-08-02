@@ -34,11 +34,13 @@ use windows_sys::Win32::{
         Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW,
             PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPMODULE,
-            TH32CS_SNAPMODULE32, TH32CS_SNAPPROCESS,
+            TH32CS_SNAPMODULE32, TH32CS_SNAPPROCESS, TH32CS_SNAPTHREAD, THREADENTRY32,
+            Thread32First, Thread32Next,
         },
         Threading::{
-            IsWow64Process, OpenProcess, QueryFullProcessImageNameW,
-            PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread, SuspendThread,
+            IsWow64Process, OpenProcess, OpenThread, QueryFullProcessImageNameW,
+            PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread, SuspendThread, THREAD_GET_CONTEXT,
+            THREAD_SET_CONTEXT, THREAD_SUSPEND_RESUME,
         },
     },
 };
@@ -177,6 +179,7 @@ const ERROR_BAD_LENGTH: i32 = 24;
 const ERROR_MORE_DATA: i32 = 234;
 // ponytail: bound runaway debugger traffic; switch to sampled/VEH capture before raising this again.
 const MAX_ACCESS_HITS: usize = 10_000;
+const MAX_INSTRUCTION_HITS: usize = 2_000;
 const RESUME_FLAG: u32 = 1 << 16;
 
 #[repr(C, align(16))]
@@ -196,7 +199,10 @@ enum TargetArchitecture {
 
 #[derive(Debug)]
 pub enum WatchEvent {
-    Started,
+    Started {
+        armed_threads: usize,
+        total_threads: usize,
+    },
     AddressHit {
         instruction_address: usize,
         instruction: String,
@@ -507,14 +513,16 @@ fn watch_loop<F>(
                                         likely_stack_copy: address.abs_diff(context.Rsp as usize)
                                             < 8 * 1024 * 1024,
                                     });
-                                    if read_write {
-                                        access_hits += 1;
-                                        if access_hits >= MAX_ACCESS_HITS {
-                                            capture_limit_reached = true;
-                                            notify(WatchEvent::CaptureLimitReached(
-                                                MAX_ACCESS_HITS,
-                                            ));
-                                        }
+                                    access_hits += 1;
+                                    let limit = if read_write {
+                                        MAX_ACCESS_HITS
+                                    } else {
+                                        MAX_INSTRUCTION_HITS
+                                    };
+                                    if access_hits >= limit {
+                                        capture_limit_reached = true;
+                                        notify(WatchEvent::CaptureLimitReached(limit));
+                                        stop.store(true, Ordering::Release);
                                     }
                                 }
                             }
@@ -528,6 +536,7 @@ fn watch_loop<F>(
                                     if access_hits >= MAX_ACCESS_HITS {
                                         capture_limit_reached = true;
                                         notify(WatchEvent::CaptureLimitReached(MAX_ACCESS_HITS));
+                                        stop.store(true, Ordering::Release);
                                     }
                                 }
                             }
@@ -544,14 +553,8 @@ fn watch_loop<F>(
                     first_breakpoint = false;
                     // Windows sends synthetic thread events before the attach breakpoint. Arm only
                     // after that breakpoint so WOW64 context calls operate on initialized threads.
-                    let mut armed = 0usize;
-                    let mut last_error = None;
-                    for &thread in threads.values() {
-                        match arm_thread(thread, &kind, architecture) {
-                            Ok(()) => armed += 1,
-                            Err(error) => last_error = Some(error),
-                        }
-                    }
+                    let (armed, total, last_error) =
+                        arm_process_threads(pid, &mut threads, &kind, architecture);
                     if armed == 0 {
                         notify(WatchEvent::Error(format!(
                             "unable to arm a hardware breakpoint on any game thread{}",
@@ -562,7 +565,10 @@ fn watch_loop<F>(
                         stop.store(true, Ordering::Release);
                     } else {
                         debugger_started = true;
-                        notify(WatchEvent::Started);
+                        notify(WatchEvent::Started {
+                            armed_threads: armed,
+                            total_threads: total,
+                        });
                     }
                 } else {
                     status = DBG_EXCEPTION_NOT_HANDLED;
@@ -595,6 +601,49 @@ unsafe fn close_if_valid(handle: HANDLE) {
     if !handle.is_null() {
         unsafe { CloseHandle(handle) };
     }
+}
+
+fn arm_process_threads(
+    pid: u32,
+    threads: &mut HashMap<u32, HANDLE>,
+    kind: &WatchKind,
+    architecture: TargetArchitecture,
+) -> (usize, usize, Option<io::Error>) {
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot != INVALID_HANDLE_VALUE {
+        let mut entry = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..THREADENTRY32::default()
+        };
+        let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid && !threads.contains_key(&entry.th32ThreadID) {
+                let thread = unsafe {
+                    OpenThread(
+                        THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                        0,
+                        entry.th32ThreadID,
+                    )
+                };
+                if !thread.is_null() {
+                    threads.insert(entry.th32ThreadID, thread);
+                }
+            }
+            more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+        }
+        unsafe { CloseHandle(snapshot) };
+    }
+
+    let total = threads.len();
+    let mut armed = 0;
+    let mut last_error = None;
+    for &thread in threads.values() {
+        match unsafe { arm_thread(thread, kind, architecture) } {
+            Ok(()) => armed += 1,
+            Err(error) => last_error = Some(error),
+        }
+    }
+    (armed, total, last_error)
 }
 
 unsafe fn arm_thread(
@@ -1198,7 +1247,7 @@ mod tests {
                 WatchEvent::AccessHit { .. } => {}
                 WatchEvent::Error(error) => panic!("watch failed: {error}"),
                 WatchEvent::Stopped => panic!("watch stopped before a write"),
-                WatchEvent::Started => {}
+                WatchEvent::Started { .. } => {}
             }
         };
         assert_ne!(ip, 0);
