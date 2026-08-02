@@ -498,31 +498,37 @@ fn watch_loop<F>(
                                             architecture,
                                         )
                                 {
+                                    let details = format_hit_details(
+                                        &process,
+                                        &decoded,
+                                        &context,
+                                        *address,
+                                        if read_write { "truy cáº­p" } else { "ghi" },
+                                        architecture,
+                                    );
+                                    let likely_stack_copy =
+                                        address.abs_diff(context.Rsp as usize) < 8 * 1024 * 1024;
+                                    access_hits += 1;
+                                    let limit = if read_write { 1 } else { MAX_INSTRUCTION_HITS };
+                                    let should_stop = access_hits >= limit;
+                                    if should_stop {
+                                        // Every target thread is paused while this debug event is
+                                        // being handled. Clear DR0 now, before ContinueDebugEvent,
+                                        // so a hot write cannot queue another single-step while the
+                                        // worker is detaching.
+                                        disarm_paused_threads(&threads, architecture);
+                                        capture_limit_reached = true;
+                                        stop.store(true, Ordering::Release);
+                                    }
                                     notify(WatchEvent::AddressHit {
                                         instruction_address,
                                         instruction,
                                         data_address: *address,
-                                        details: format_hit_details(
-                                            &process,
-                                            &decoded,
-                                            &context,
-                                            *address,
-                                            if read_write { "truy cáº­p" } else { "ghi" },
-                                            architecture,
-                                        ),
-                                        likely_stack_copy: address.abs_diff(context.Rsp as usize)
-                                            < 8 * 1024 * 1024,
+                                        details,
+                                        likely_stack_copy,
                                     });
-                                    access_hits += 1;
-                                    // ponytail: a read/write watchpoint on render data can fire
-                                    // thousands of times per frame. One decoded instruction is
-                                    // enough to continue the investigation without stalling the
-                                    // target; VEH/sampling is the upgrade path for multi-hit reads.
-                                    let limit = if read_write { 1 } else { MAX_INSTRUCTION_HITS };
-                                    if access_hits >= limit {
-                                        capture_limit_reached = true;
+                                    if should_stop {
                                         notify(WatchEvent::CaptureLimitReached(limit));
-                                        stop.store(true, Ordering::Release);
                                     }
                                 }
                             }
@@ -531,6 +537,7 @@ fn watch_loop<F>(
                                     && let Some(data_address) =
                                         effective_address(instruction, &context)
                                 {
+                                    disarm_paused_threads(&threads, architecture);
                                     notify(WatchEvent::AccessHit { data_address });
                                     access_hits += 1;
                                     capture_limit_reached = true;
@@ -593,6 +600,15 @@ fn watch_loop<F>(
     }
     unsafe { DebugActiveProcessStop(pid) };
     notify(WatchEvent::Stopped);
+}
+
+unsafe fn disarm_paused_threads(
+    threads: &HashMap<u32, HANDLE>,
+    architecture: TargetArchitecture,
+) {
+    for &thread in threads.values() {
+        unsafe { disarm_thread(thread, architecture) };
+    }
 }
 
 unsafe fn close_if_valid(handle: HANDLE) {
