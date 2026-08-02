@@ -328,6 +328,7 @@ struct MemoryViewDialog {
     pinned: bool,
     elements: Vec<StructureElement>,
     pending_add: Option<(usize, ScanValueType)>,
+    pending_track: Option<usize>,
     pointer_width: usize,
     previous_bytes: Vec<u8>,
     classes: Vec<StructureClass>,
@@ -2871,6 +2872,7 @@ impl CrosshairApp {
                                         pinned: true,
                                         elements: default_structure_elements(),
                                         pending_add: None,
+                                        pending_track: None,
                                         pointer_width: self
                                             .memory_panel
                                             .process_pid
@@ -2904,6 +2906,7 @@ impl CrosshairApp {
                                         pinned: true,
                                         elements: default_structure_elements(),
                                         pending_add: None,
+                                        pending_track: None,
                                         pointer_width: self
                                             .memory_panel
                                             .process_pid
@@ -6035,6 +6038,7 @@ impl CrosshairApp {
                 pinned: true,
                 elements: default_structure_elements(),
                 pending_add: None,
+                pending_track: None,
                 pointer_width: self
                     .memory_panel
                     .process_pid
@@ -6522,6 +6526,7 @@ impl CrosshairApp {
                 dialog.pinned = false;
             }
             self.add_pending_structure_address(&mut dialog);
+            self.apply_pending_tracked_field(&mut dialog);
             if open {
                 self.memory_panel.memory_view_dialog = Some(dialog);
                 ctx.request_repaint_after(Duration::from_millis(50));
@@ -6549,6 +6554,7 @@ impl CrosshairApp {
             self.memory_panel.memory_view_dialog = None;
         } else {
             self.add_pending_structure_address(&mut dialog);
+            self.apply_pending_tracked_field(&mut dialog);
             self.memory_panel.memory_view_dialog = Some(dialog);
             ctx.request_repaint_after(Duration::from_millis(50));
         }
@@ -6721,6 +6727,10 @@ impl CrosshairApp {
                                     cell_address,
                                     memory_display_scan_type(dialog.display_type),
                                 ));
+                                ui.close();
+                            }
+                            if ui.button("Use as tracked field").clicked() {
+                                dialog.pending_track = Some(cell_address);
                                 ui.close();
                             }
                             ui.separator();
@@ -6945,6 +6955,42 @@ impl CrosshairApp {
         });
         self.memory_panel.status =
             format!("Address {} added", format_prefixed_memory_address(address));
+    }
+
+    #[cfg(windows)]
+    fn apply_pending_tracked_field(&mut self, dialog: &mut MemoryViewDialog) {
+        let Some(field_address) = dialog.pending_track.take() else {
+            return;
+        };
+        let Some(code_dialog) = self.memory_panel.code_access_dialog.as_mut() else {
+            self.memory_panel.status = "Open Find written before tracking a field".to_owned();
+            return;
+        };
+        let Some(captured) = code_dialog
+            .selected
+            .and_then(|index| code_dialog.addresses.get(index))
+            .map(|(address, _)| *address)
+        else {
+            code_dialog.status = "Select a captured address before tracking a field".to_owned();
+            return;
+        };
+        let offset = if field_address >= captured {
+            format!("{:X}", field_address - captured)
+        } else {
+            format!("-{:X}", captured - field_address)
+        };
+        code_dialog.tracked_offset = offset.clone();
+        code_dialog.status = format!(
+            "Tracked field {} = captured {} {:+#X}",
+            format_prefixed_memory_address(field_address),
+            format_prefixed_memory_address(captured),
+            field_address as i128 - captured as i128,
+        );
+        if code_dialog.tracked_name.trim().is_empty() {
+            code_dialog.status.push_str("; enter a name, then Save tracked");
+        } else {
+            code_dialog.save_tracked = true;
+        }
     }
 
     fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) -> egui::Response {
@@ -7446,6 +7492,7 @@ impl CrosshairApp {
             pinned: true,
             elements: elements.clone(),
             pending_add: None,
+            pending_track: None,
             pointer_width: process_pointer_width(pid).unwrap_or(8),
             previous_bytes: Vec::new(),
             classes: vec![StructureClass {
