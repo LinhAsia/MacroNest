@@ -125,7 +125,7 @@ impl CrosshairApp {
                         .selectable_value(&mut step.memory_value_type, MemoryValueType::F64, "Double (8 Bytes)")
                         .changed();
                 });
-            changed |= Self::render_expandable_text_edit(
+            let address_response = Self::render_expandable_text_edit(
                     ui,
                     &mut step.key,
                     ui.make_persistent_id("memory-address"),
@@ -140,8 +140,28 @@ impl CrosshairApp {
                     language,
                     "Memory address, module pointer (game.exe+1234 [20, 8]), saved alias (@Health), expression, or variable.",
                     "Địa chỉ RAM, pointer module (game.exe+1234 [20, 8]), tên đã lưu (@Máu), biểu thức hoặc biến.",
-                ))
-                .changed();
+                ));
+            changed |= address_response.changed();
+            let alias_suggestions = ui
+                .memory(|mem| {
+                    mem.data.get_temp::<Vec<String>>(egui::Id::new(
+                        "macro_memory_alias_suggestion_names",
+                    ))
+                })
+                .unwrap_or_default();
+            ui.memory_mut(|mem| {
+                mem.data.insert_temp(
+                    address_response.id.with("raw_suggestions"),
+                    alias_suggestions,
+                );
+            });
+            Self::render_variable_suggestions_raw(
+                ui,
+                &address_response,
+                &mut step.key,
+                &[],
+                language,
+            );
             if step.action == MacroAction::WriteMemory {
                 ui.label("=");
                 let response = ui
@@ -4058,6 +4078,16 @@ impl CrosshairApp {
             }
         }
         all_vars.sort();
+        let mut memory_alias_suggestions = self
+            .state
+            .memory_pointer_list
+            .iter()
+            .map(|entry| entry.name.trim())
+            .filter(|name| !name.is_empty())
+            .map(|name| format!("@{name}"))
+            .collect::<Vec<_>>();
+        memory_alias_suggestions.sort_by_key(|name| name.to_ascii_lowercase());
+        memory_alias_suggestions.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         ui.memory_mut(|mem| {
             mem.data.insert_temp(
                 egui::Id::new("macro_variable_suggestion_names"),
@@ -4066,6 +4096,10 @@ impl CrosshairApp {
             mem.data.insert_temp(
                 egui::Id::new("macro_variable_writable_suggestion_names"),
                 writable_suggestion_names,
+            );
+            mem.data.insert_temp(
+                egui::Id::new("macro_memory_alias_suggestion_names"),
+                memory_alias_suggestions,
             );
             mem.data
                 .insert_temp(egui::Id::new("macro_variable_suggestion_committed"), false);
@@ -20166,6 +20200,10 @@ if supports_move_mouse || show_detection_tuning {
                 .set_char_range(Some(egui::text::CCursorRange::two(cursor_pos, cursor_pos)));
             state.store(ui.ctx(), response.id);
         }
+        ui.memory_mut(|mem| {
+            mem.data
+                .insert_temp(egui::Id::new("macro_variable_suggestion_committed"), true);
+        });
     }
 
     pub(crate) fn render_variable_suggestions(
@@ -20471,9 +20509,13 @@ if supports_move_mouse || show_detection_tuning {
     ) {
         let suggestion_names = ui
             .memory(|mem| {
-                mem.data.get_temp::<Vec<String>>(egui::Id::new(
-                    "macro_variable_writable_suggestion_names",
-                ))
+                mem.data
+                    .get_temp::<Vec<String>>(response.id.with("raw_suggestions"))
+                    .or_else(|| {
+                        mem.data.get_temp::<Vec<String>>(egui::Id::new(
+                            "macro_variable_writable_suggestion_names",
+                        ))
+                    })
             })
             .unwrap_or_default();
         let cursor_index =
