@@ -5945,6 +5945,7 @@ impl CrosshairApp {
         let mut open = true;
         let mut unpin = false;
         let mut add = None;
+        let mut browse = None;
         let mut refresh_values = false;
         if dialog.pinned {
             let builder = egui::ViewportBuilder::default()
@@ -5976,7 +5977,8 @@ impl CrosshairApp {
                         .show(ctx, |ui| {
                             let result = Self::render_code_access_body(ui, &mut dialog);
                             add = result.0;
-                            refresh_values |= result.1;
+                            browse = result.1;
+                            refresh_values |= result.2;
                         });
                     Self::render_memory_popup_resize_handles(ctx);
                 },
@@ -5995,7 +5997,8 @@ impl CrosshairApp {
                     }
                     let result = Self::render_code_access_body(ui, &mut dialog);
                     add = result.0;
-                    refresh_values |= result.1;
+                    browse = result.1;
+                    refresh_values |= result.2;
                 });
         }
         if refresh_values {
@@ -6023,6 +6026,29 @@ impl CrosshairApp {
             }
             self.add_code_access_address(address, dialog.value_type);
         }
+        if let Some(address) = browse {
+            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                address,
+                kind: MemoryViewKind::Bytes,
+                display_type: MemoryDisplayType::ByteHex,
+                relative_addresses: false,
+                pinned: true,
+                elements: default_structure_elements(),
+                pending_add: None,
+                pointer_width: self
+                    .memory_panel
+                    .process_pid
+                    .and_then(|pid| process_pointer_width(pid).ok())
+                    .unwrap_or(8),
+                previous_bytes: Vec::new(),
+                classes: vec![StructureClass {
+                    name: "Class_0".to_owned(),
+                    address,
+                    elements: default_structure_elements(),
+                }],
+                selected_class: 0,
+            });
+        }
         if open {
             self.memory_panel.code_access_dialog = Some(dialog);
             ctx.request_repaint_after(Duration::from_millis(35));
@@ -6035,32 +6061,40 @@ impl CrosshairApp {
     fn render_code_access_body(
         ui: &mut egui::Ui,
         dialog: &mut CodeAccessDialog,
-    ) -> (Option<usize>, bool) {
+    ) -> (Option<usize>, Option<usize>, bool) {
         let mut add = None;
+        let mut browse = None;
         let mut refresh_values = false;
-        ui.horizontal(|ui| {
-            ui.add(egui::Label::new(&dialog.status).selectable(true));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add_enabled(dialog.selected.is_some(), Button::new("Add selected"))
-                    .clicked()
-                {
-                    add = dialog
-                        .selected
-                        .and_then(|index| dialog.addresses.get(index))
-                        .map(|(address, _)| *address);
+        ui.add(egui::Label::new(&dialog.status).selectable(true));
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Refresh values").clicked() {
+                refresh_values = true;
+            }
+            if dialog.active.is_some() && ui.button("Stop").clicked() {
+                if let Some(active) = dialog.active.as_mut() {
+                    active.stop();
                 }
-                if dialog.active.is_some() && ui.button("Stop").clicked() {
-                    if let Some(active) = dialog.active.as_mut() {
-                        active.stop();
-                    }
-                    dialog.active = None;
-                    dialog.status = "Debugger stopped".to_owned();
-                }
-                if ui.button("Refresh values").clicked() {
-                    refresh_values = true;
-                }
-            });
+                dialog.active = None;
+                dialog.status = "Debugger stopped".to_owned();
+            }
+            if ui
+                .add_enabled(dialog.selected.is_some(), Button::new("Add selected"))
+                .clicked()
+            {
+                add = dialog
+                    .selected
+                    .and_then(|index| dialog.addresses.get(index))
+                    .map(|(address, _)| *address);
+            }
+            if ui
+                .add_enabled(dialog.selected.is_some(), Button::new("Browse selected"))
+                .clicked()
+            {
+                browse = dialog
+                    .selected
+                    .and_then(|index| dialog.addresses.get(index))
+                    .map(|(address, _)| *address);
+            }
         });
         let previous_type = dialog.value_type;
         ui.horizontal(|ui| {
@@ -6087,7 +6121,7 @@ impl CrosshairApp {
         if dialog.value_type != previous_type {
             refresh_values = true;
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Tracked address");
             ui.add(
                 egui::TextEdit::singleline(&mut dialog.tracked_name)
@@ -6100,6 +6134,8 @@ impl CrosshairApp {
                     .desired_width(70.0)
                     .hint_text("hex"),
             );
+        });
+        ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(
                     dialog.selected.is_some() && !dialog.tracked_name.trim().is_empty(),
@@ -6191,6 +6227,10 @@ impl CrosshairApp {
                         context_add = Some(*address);
                         ui.close();
                     }
+                    if ui.button("Browse this memory region").clicked() {
+                        browse = Some(*address);
+                        ui.close();
+                    }
                 });
             }
         });
@@ -6202,7 +6242,7 @@ impl CrosshairApp {
                 ui.label("Interact with the game to capture addresses");
             });
         }
-        (add, refresh_values)
+        (add, browse, refresh_values)
     }
 
     #[cfg(windows)]
