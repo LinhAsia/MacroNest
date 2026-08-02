@@ -217,6 +217,7 @@ struct CameraMatrixDialog {
     world: Option<[f32; 3]>,
     projection_variant: usize,
     last_preview_refresh: Instant,
+    stability_sample: Option<(Instant, HashMap<usize, [f32; 16]>)>,
 }
 
 struct AddressDialog {
@@ -3901,12 +3902,19 @@ impl CrosshairApp {
             .take(3)
             .collect::<Vec<_>>();
         expressions.resize(3, String::new());
+        if expressions.iter().all(String::is_empty) {
+            expressions = vec![
+                self.state.memory_camera_x.clone(),
+                self.state.memory_camera_y.clone(),
+                self.state.memory_camera_z.clone(),
+            ];
+        }
         self.memory_panel.camera_matrix_dialog = Some(CameraMatrixDialog {
             x: expressions[0].clone(),
             y: expressions[1].clone(),
             z: expressions[2].clone(),
-            viewport_width: "1920".to_owned(),
-            viewport_height: "1080".to_owned(),
+            viewport_width: self.state.memory_camera_viewport_width.clone(),
+            viewport_height: self.state.memory_camera_viewport_height.clone(),
             status: "Enter X, Y and Z pointer expressions, then start the scan.".to_owned(),
             candidates: Vec::new(),
             selected: None,
@@ -3916,6 +3924,7 @@ impl CrosshairApp {
             world: None,
             projection_variant: 0,
             last_preview_refresh: Instant::now() - Duration::from_secs(1),
+            stability_sample: None,
         });
     }
 
@@ -3995,6 +4004,7 @@ impl CrosshairApp {
         dialog.candidates.clear();
         dialog.selected = None;
         dialog.baseline.clear();
+        dialog.stability_sample = None;
         dialog.progress = progress;
         dialog.rx = Some(rx);
         dialog.status = format!(
@@ -4064,6 +4074,87 @@ impl CrosshairApp {
         );
     }
 
+    fn start_camera_stability_filter(&mut self, dialog: &mut CameraMatrixDialog) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select a process first.".to_owned();
+            return;
+        };
+        let baseline = dialog
+            .candidates
+            .iter()
+            .filter_map(|candidate| {
+                let bytes = read_memory_bytes(pid, candidate.address, 64).ok()?;
+                decode_f32_matrix(&bytes).map(|matrix| (candidate.address, matrix))
+            })
+            .collect::<HashMap<_, _>>();
+        if baseline.is_empty() {
+            dialog.status = "None of the candidate matrices can currently be read.".to_owned();
+            return;
+        }
+        dialog.stability_sample = Some((Instant::now(), baseline));
+        dialog.status = "Keep the target and camera completely still for 1 second…".to_owned();
+    }
+
+    fn finish_camera_stability_filter(&mut self, dialog: &mut CameraMatrixDialog) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.stability_sample = None;
+            dialog.status = "Process changed during the stability check.".to_owned();
+            return;
+        };
+        let Some((_, baseline)) = dialog.stability_sample.take() else {
+            return;
+        };
+        let before = dialog.candidates.len();
+        let selected_address = dialog
+            .selected
+            .and_then(|index| dialog.candidates.get(index))
+            .map(|candidate| candidate.address);
+        let mut stable = Vec::with_capacity(before);
+        for candidate in &dialog.candidates {
+            let Some(old) = baseline.get(&candidate.address) else {
+                continue;
+            };
+            let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64) else {
+                continue;
+            };
+            let Some(matrix) = decode_f32_matrix(&bytes) else {
+                continue;
+            };
+            let max_delta = old
+                .iter()
+                .zip(matrix)
+                .map(|(old, new)| (old - new).abs())
+                .fold(0.0f32, f32::max);
+            if max_delta <= 5.0e-4 {
+                let mut candidate = candidate.clone();
+                candidate.matrix = matrix;
+                stable.push(candidate);
+            }
+        }
+        if stable.is_empty() {
+            dialog.status = format!(
+                "All {before} candidates changed while the camera was still; kept the old list. Keep both the camera and target still, then try again."
+            );
+            return;
+        }
+        dialog.candidates = stable;
+        dialog.baseline = dialog
+            .candidates
+            .iter()
+            .map(|candidate| (candidate.address, candidate.matrix))
+            .collect();
+        dialog.selected = selected_address.and_then(|address| {
+            dialog
+                .candidates
+                .iter()
+                .position(|candidate| candidate.address == address)
+        });
+        dialog.status = format!(
+            "Removed continuously changing animation data; kept {} of {before} stable candidate(s). Now rotate the camera, then filter after rotation.",
+            dialog.candidates.len()
+        );
+    }
+
     fn render_camera_matrix_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.memory_panel.camera_matrix_dialog.take() else {
             return;
@@ -4082,7 +4173,7 @@ impl CrosshairApp {
                                     .map(|candidate| (candidate.address, candidate.matrix))
                                     .collect();
                                 dialog.status = format!(
-                                    "Found {} matrix-shaped candidate(s). Rotate the camera, then click Filter after rotation.",
+                                    "Found {} matrix-shaped candidate(s). Keep the camera and target still, then click Remove motion while still.",
                                     candidates.len()
                                 );
                                 dialog.candidates = candidates;
@@ -4102,6 +4193,15 @@ impl CrosshairApp {
                 }
             }
         }
+        if dialog
+            .stability_sample
+            .as_ref()
+            .is_some_and(|(started, _)| started.elapsed() >= Duration::from_secs(1))
+        {
+            self.finish_camera_stability_filter(&mut dialog);
+        } else if dialog.stability_sample.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
         if dialog.selected.is_some()
             && dialog.last_preview_refresh.elapsed() >= Duration::from_millis(33)
         {
@@ -4120,38 +4220,58 @@ impl CrosshairApp {
         if dialog.selected.is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
+        let mut persist_camera_inputs = false;
         egui::CentralPanel::default()
             .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("X");
-                    ui.add(
+                    persist_camera_inputs |= ui.add(
                         egui::TextEdit::singleline(&mut dialog.x)
                             .desired_width(190.0)
                             .hint_text("module+offset [offsets]"),
-                    );
+                    ).changed();
                     ui.label("Y");
-                    ui.add(
+                    persist_camera_inputs |= ui.add(
                         egui::TextEdit::singleline(&mut dialog.y)
                             .desired_width(190.0)
                             .hint_text("module+offset [offsets]"),
-                    );
+                    ).changed();
                     ui.label("Z");
-                    ui.add(
+                    persist_camera_inputs |= ui.add(
                         egui::TextEdit::singleline(&mut dialog.z)
                             .desired_width(190.0)
                             .hint_text("module+offset [offsets]"),
-                    );
+                    ).changed();
+                });
+                let readings = self.memory_panel.process_pid.map(|pid| [
+                    Self::read_camera_world_component(pid, &dialog.x),
+                    Self::read_camera_world_component(pid, &dialog.y),
+                    Self::read_camera_world_component(pid, &dialog.z),
+                ]);
+                if let Some([Ok(x), Ok(y), Ok(z)]) = readings.as_ref() {
+                    dialog.world = Some([*x, *y, *z]);
+                }
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Live target values").strong());
+                    for (index, axis) in ['X', 'Y', 'Z'].into_iter().enumerate() {
+                        let (text, color) = match readings.as_ref().map(|values| &values[index]) {
+                            Some(Ok(value)) => (format!("{axis}: {value:.6}"), Color32::LIGHT_GREEN),
+                            Some(Err(error)) => (format!("{axis}: {error}"), Color32::LIGHT_RED),
+                            None => (format!("{axis}: select a process"), ui.visuals().weak_text_color()),
+                        };
+                        ui.label(RichText::new(text).color(color).monospace());
+                    }
                 });
                 ui.horizontal(|ui| {
                     ui.label("Game viewport");
-                    ui.add(
+                    persist_camera_inputs |= ui.add(
                         egui::TextEdit::singleline(&mut dialog.viewport_width).desired_width(70.0),
-                    );
+                    ).changed();
                     ui.label("×");
-                    ui.add(
+                    persist_camera_inputs |= ui.add(
                         egui::TextEdit::singleline(&mut dialog.viewport_height).desired_width(70.0),
-                    );
+                    ).changed();
                     if ui
                         .add_enabled(dialog.rx.is_none(), Button::new("Start scan"))
                         .clicked()
@@ -4160,7 +4280,20 @@ impl CrosshairApp {
                     }
                     if ui
                         .add_enabled(
-                            !dialog.candidates.is_empty() && dialog.rx.is_none(),
+                            !dialog.candidates.is_empty()
+                                && dialog.rx.is_none()
+                                && dialog.stability_sample.is_none(),
+                            Button::new("Remove motion while still"),
+                        )
+                        .clicked()
+                    {
+                        self.start_camera_stability_filter(&mut dialog);
+                    }
+                    if ui
+                        .add_enabled(
+                            !dialog.candidates.is_empty()
+                                && dialog.rx.is_none()
+                                && dialog.stability_sample.is_none(),
                             Button::new("Filter after rotation"),
                         )
                         .clicked()
@@ -4303,6 +4436,19 @@ impl CrosshairApp {
                     }
                 });
             });
+        if persist_camera_inputs {
+            self.state.memory_camera_x.clone_from(&dialog.x);
+            self.state.memory_camera_y.clone_from(&dialog.y);
+            self.state.memory_camera_z.clone_from(&dialog.z);
+            self.state
+                .memory_camera_viewport_width
+                .clone_from(&dialog.viewport_width);
+            self.state
+                .memory_camera_viewport_height
+                .clone_from(&dialog.viewport_height);
+            self.persist();
+        }
+        ctx.request_repaint_after(Duration::from_millis(100));
         self.memory_panel.camera_matrix_dialog = Some(dialog);
     }
 
