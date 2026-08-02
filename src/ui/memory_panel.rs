@@ -39,6 +39,9 @@ use crate::memory_debugger::debugger::{
 
 use super::CrosshairApp;
 
+#[cfg(windows)]
+use super::{GetCursorPos, POINT};
+
 const DEFAULT_SCAN_LIMIT: usize = usize::MAX;
 // ponytail: keep live polling bounded; add paged candidate refresh before raising this ceiling.
 const MAX_VISIBLE_RESULTS: usize = 1_000;
@@ -218,6 +221,7 @@ struct CameraMatrixDialog {
     projection_variant: usize,
     last_preview_refresh: Instant,
     stability_sample: Option<(Instant, HashMap<usize, [f32; 16]>)>,
+    auto_pick_started: Option<Instant>,
 }
 
 struct AddressDialog {
@@ -3925,6 +3929,7 @@ impl CrosshairApp {
             projection_variant: 0,
             last_preview_refresh: Instant::now() - Duration::from_secs(1),
             stability_sample: None,
+            auto_pick_started: None,
         });
     }
 
@@ -4005,6 +4010,7 @@ impl CrosshairApp {
         dialog.selected = None;
         dialog.baseline.clear();
         dialog.stability_sample = None;
+        dialog.auto_pick_started = None;
         dialog.progress = progress;
         dialog.rx = Some(rx);
         dialog.status = format!(
@@ -4155,6 +4161,87 @@ impl CrosshairApp {
         );
     }
 
+    #[cfg(windows)]
+    fn finish_camera_auto_pick(&mut self, dialog: &mut CameraMatrixDialog) {
+        dialog.auto_pick_started = None;
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select a process first.".to_owned();
+            return;
+        };
+        let mut cursor = POINT::default();
+        if unsafe { GetCursorPos(&mut cursor) }.is_err() {
+            dialog.status = "Unable to read the cursor position.".to_owned();
+            return;
+        }
+        let mut width = dialog
+            .viewport_width
+            .parse::<f32>()
+            .unwrap_or(1920.0)
+            .max(1.0);
+        let mut height = dialog
+            .viewport_height
+            .parse::<f32>()
+            .unwrap_or(1080.0)
+            .max(1.0);
+        let mut target = [cursor.x as f32, cursor.y as f32];
+        if let Some(window) = window_list::list_open_windows()
+            .into_iter()
+            .find(|window| window.process_id == pid)
+            && let Some(frame) = window_list::capture_window_client_preview_with_candidates(
+                Some(&window.selector),
+                &[],
+                false,
+                64,
+            )
+        {
+            target[0] -= frame.screen_x as f32;
+            target[1] -= frame.screen_y as f32;
+            width = frame.logical_width.max(1) as f32;
+            height = frame.logical_height.max(1) as f32;
+            dialog.viewport_width = frame.logical_width.max(1).to_string();
+            dialog.viewport_height = frame.logical_height.max(1).to_string();
+            self.state
+                .memory_camera_viewport_width
+                .clone_from(&dialog.viewport_width);
+            self.state
+                .memory_camera_viewport_height
+                .clone_from(&dialog.viewport_height);
+            self.persist();
+        }
+        for candidate in &mut dialog.candidates {
+            if let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64)
+                && let Some(matrix) = decode_f32_matrix(&bytes)
+            {
+                candidate.matrix = matrix;
+            }
+        }
+        let world = dialog.world.unwrap_or([0.0; 3]);
+        let Some((candidate, variant, _, error)) = best_camera_projection(
+            &dialog.candidates,
+            world,
+            width,
+            height,
+            target,
+        ) else {
+            dialog.status = "No candidate can project the target onto the game viewport.".to_owned();
+            return;
+        };
+        dialog.selected = Some(candidate);
+        dialog.projection_variant = variant;
+        let tolerance = width.hypot(height) * 0.08;
+        dialog.status = if error <= tolerance {
+            format!(
+                "Auto-matched {} with {} ({error:.0}px from the target).",
+                format_prefixed_memory_address(dialog.candidates[candidate].address),
+                PROJECTION_CONVENTIONS[variant].0,
+            )
+        } else {
+            format!(
+                "No reliable match; the nearest projection is {error:.0}px away. Filter again or verify X/Y/Z."
+            )
+        };
+    }
+
     fn render_camera_matrix_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.memory_panel.camera_matrix_dialog.take() else {
             return;
@@ -4200,6 +4287,20 @@ impl CrosshairApp {
         {
             self.finish_camera_stability_filter(&mut dialog);
         } else if dialog.stability_sample.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+        #[cfg(windows)]
+        if dialog
+            .auto_pick_started
+            .is_some_and(|started| started.elapsed() >= Duration::from_secs(3))
+        {
+            self.finish_camera_auto_pick(&mut dialog);
+        } else if let Some(started) = dialog.auto_pick_started {
+            let remaining = 3.0f32 - started.elapsed().as_secs_f32();
+            dialog.status = format!(
+                "Move the cursor onto the target in the game… capturing in {:.1}s",
+                remaining.max(0.0)
+            );
             ctx.request_repaint_after(Duration::from_millis(50));
         }
         if dialog.selected.is_some()
@@ -4301,6 +4402,21 @@ impl CrosshairApp {
                         self.filter_rotated_camera_matrices(&mut dialog);
                     }
                     if ui
+                        .add_enabled(
+                            !dialog.candidates.is_empty()
+                                && dialog.rx.is_none()
+                                && dialog.stability_sample.is_none()
+                                && dialog.auto_pick_started.is_none(),
+                            Button::new("Auto-match target (3s)"),
+                        )
+                        .on_hover_text(
+                            "Click, then move the cursor onto the target in the game. MacroNest selects the matrix and projection convention automatically.",
+                        )
+                        .clicked()
+                    {
+                        dialog.auto_pick_started = Some(Instant::now());
+                    }
+                    if ui
                         .add_enabled(dialog.selected.is_some(), Button::new("Add matrix address"))
                         .clicked()
                         && let (Some(pid), Some(index)) =
@@ -4337,7 +4453,7 @@ impl CrosshairApp {
                     .max(1.0);
                 let world = dialog.world.unwrap_or([0.0; 3]);
                 ui.horizontal(|ui| {
-                    ui.label("Preview convention");
+                    ui.label("Detected convention");
                     egui::ComboBox::from_id_salt("camera-matrix-projection-convention")
                         .selected_text(PROJECTION_CONVENTIONS[dialog.projection_variant].0)
                         .show_ui(ui, |ui| {
@@ -4345,7 +4461,7 @@ impl CrosshairApp {
                                 ui.selectable_value(&mut dialog.projection_variant, index, *label);
                             }
                         });
-                    ui.label(RichText::new("The selected matrix is read live; try conventions until the dot tracks the target.").small().weak());
+                    ui.label(RichText::new("Use Auto-match target; this menu is only a manual fallback.").small().weak());
                 });
                 ui.columns(2, |columns| {
                     egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
@@ -7963,6 +8079,35 @@ fn project_world_variants(
         }
     }
     results
+}
+
+fn best_camera_projection(
+    candidates: &[ViewProjectionCandidate],
+    world: [f32; 3],
+    width: f32,
+    height: f32,
+    target: [f32; 2],
+) -> Option<(usize, usize, [f32; 2], f32)> {
+    candidates
+        .iter()
+        .enumerate()
+        .flat_map(|(candidate_index, candidate)| {
+            project_world_variants(&candidate.matrix, world, width, height)
+                .into_iter()
+                .enumerate()
+                .filter_map(move |(variant, point)| {
+                    let point = point?;
+                    let margin_x = width * 0.25;
+                    let margin_y = height * 0.25;
+                    ((-margin_x..=width + margin_x).contains(&point[0])
+                        && (-margin_y..=height + margin_y).contains(&point[1]))
+                    .then(|| {
+                        let error = (point[0] - target[0]).hypot(point[1] - target[1]);
+                        (candidate_index, variant, point, error)
+                    })
+                })
+        })
+        .min_by(|left, right| left.3.total_cmp(&right.3))
 }
 
 fn parse_memory_address(text: &str) -> Option<usize> {
