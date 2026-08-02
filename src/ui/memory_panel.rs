@@ -4314,7 +4314,11 @@ impl CrosshairApp {
                 }
                 WatchEvent::AccessHit { .. } => {}
                 WatchEvent::CaptureLimitReached(limit) => {
-                    dialog.status = format!("Debugger safely stopped after {limit} accesses");
+                    dialog.status = if limit == 1 {
+                        "First address captured — debugger detached safely".to_owned()
+                    } else {
+                        format!("Debugger safely stopped after {limit} accesses")
+                    };
                 }
                 WatchEvent::Error(error) => {
                     dialog.status = format!("Debugger stopped: {error}");
@@ -4770,7 +4774,11 @@ impl CrosshairApp {
                     dialog.active = None;
                 }
                 WatchEvent::CaptureLimitReached(limit) => {
-                    dialog.status = format!("Debugger safely stopped after {limit} accesses");
+                    dialog.status = if limit == 1 {
+                        "First address captured — debugger detached safely".to_owned()
+                    } else {
+                        format!("Debugger safely stopped after {limit} accesses")
+                    };
                 }
                 WatchEvent::Stopped => {
                     dialog.status = "Debugger stopped".to_owned();
@@ -4838,6 +4846,10 @@ impl CrosshairApp {
             self.refresh_code_access_values(&mut dialog);
         }
         if let Some(address) = add {
+            if let Some(mut active) = dialog.active.take() {
+                active.stop();
+                dialog.status = "Debugger detached — address added safely".to_owned();
+            }
             self.add_code_access_address(address, dialog.value_type);
         }
         if open {

@@ -533,11 +533,9 @@ fn watch_loop<F>(
                                 {
                                     notify(WatchEvent::AccessHit { data_address });
                                     access_hits += 1;
-                                    if access_hits >= MAX_ACCESS_HITS {
-                                        capture_limit_reached = true;
-                                        notify(WatchEvent::CaptureLimitReached(MAX_ACCESS_HITS));
-                                        stop.store(true, Ordering::Release);
-                                    }
+                                    capture_limit_reached = true;
+                                    notify(WatchEvent::CaptureLimitReached(access_hits));
+                                    stop.store(true, Ordering::Release);
                                 }
                             }
                         }
