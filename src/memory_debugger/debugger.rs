@@ -177,7 +177,9 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
 const ERROR_SEM_TIMEOUT: i32 = 121;
 const ERROR_BAD_LENGTH: i32 = 24;
 const ERROR_MORE_DATA: i32 = 234;
-const MAX_INSTRUCTION_HITS: usize = 2_000;
+// ponytail: one decoded instruction is enough for the next code-list step. Keeping the
+// debugger attached for repeated writes can stall a hot render/gameplay value.
+const MAX_INSTRUCTION_HITS: usize = 1;
 const RESUME_FLAG: u32 = 1 << 16;
 
 #[repr(C, align(16))]
@@ -783,6 +785,7 @@ fn decode_previous_access(
 ) -> Option<(usize, Instruction, String)> {
     let next_ip = context.Rip as usize;
     let mut best = None;
+    let mut write_fallback = None;
     for length in 1..=15usize {
         let start = next_ip.checked_sub(length)?;
         let mut bytes = [0u8; 15];
@@ -807,15 +810,22 @@ fn decode_previous_access(
             && instruction.len() == length
             && instruction.next_ip() as usize == next_ip
             && (!writes_only || writes_memory(&instruction))
-            && effective_address(&instruction, context) == Some(data_address)
         {
             let mut formatter = IntelFormatter::new();
             let mut text = String::new();
             formatter.format(&instruction, &mut text);
-            best = prefer_longer_access_candidate(best, (start, instruction, text));
+            let candidate = (start, instruction, text);
+            if memory_access_overlaps(&candidate.1, context, data_address, 4) {
+                best = prefer_longer_access_candidate(best, candidate);
+            } else if writes_only {
+                // The hardware watchpoint already proves the previous instruction overlapped the
+                // watched bytes. Keep a write fallback for implicit/string writes and instructions
+                // whose post-execution register state no longer reconstructs the original address.
+                write_fallback = prefer_longer_access_candidate(write_fallback, candidate);
+            }
         }
     }
-    best
+    best.or(write_fallback)
 }
 
 fn prefer_longer_access_candidate(
@@ -849,6 +859,20 @@ fn writes_memory(instruction: &Instruction) -> bool {
                     | OpAccess::ReadCondWrite
             )
         })
+}
+
+fn memory_access_overlaps(
+    instruction: &Instruction,
+    context: &CONTEXT,
+    watched_address: usize,
+    watched_size: usize,
+) -> bool {
+    let Some(access_address) = effective_address(instruction, context) else {
+        return false;
+    };
+    let access_size = instruction.memory_size().size().max(1);
+    access_address < watched_address.saturating_add(watched_size)
+        && watched_address < access_address.saturating_add(access_size)
 }
 
 pub fn instruction_writes_memory(pid: u32, address: usize) -> io::Result<bool> {
@@ -1173,6 +1197,17 @@ mod tests {
         let mut read_decoder = Decoder::new(64, &[0x8B, 0x44, 0x24, 0x20], DecoderOptions::NONE);
         assert!(writes_memory(&write_decoder.decode()));
         assert!(!writes_memory(&read_decoder.decode()));
+    }
+
+    #[test]
+    fn wide_write_matches_a_watched_float_inside_the_written_block() {
+        let instruction = Decoder::new(64, &[0x0F, 0x11, 0x00], DecoderOptions::NONE).decode();
+        let context = CONTEXT {
+            Rax: 0x1000,
+            ..CONTEXT::default()
+        };
+        assert!(memory_access_overlaps(&instruction, &context, 0x100C, 4));
+        assert!(!memory_access_overlaps(&instruction, &context, 0x1010, 4));
     }
 
     #[test]
