@@ -205,10 +205,142 @@ pub struct PointerMap {
     modules: Vec<(String, usize, usize)>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ViewProjectionCandidate {
+    pub address: usize,
+    pub matrix: [f32; 16],
+    pub score: f32,
+}
+
+pub fn scan_view_projection_candidates(
+    pid: u32,
+    max_bytes: usize,
+    result_limit: usize,
+    progress: Arc<AtomicUsize>,
+) -> io::Result<Vec<ViewProjectionCandidate>> {
+    let process = ScanProcess::open(pid, false)?;
+    let options = MemoryScanOptions {
+        writable: true,
+        executable: false,
+        copy_on_write: false,
+        active_memory_only: true,
+        mem_private: true,
+        mem_image: false,
+        mem_mapped: true,
+        alignment: Some(16),
+    };
+    let mut candidates = Vec::new();
+    let mut remaining = max_bytes;
+    let mut buffer = vec![0u8; SCAN_CHUNK_BYTES + 64];
+    'regions: for region in scan_regions_for(&process, options) {
+        let region_size = region.size.min(remaining);
+        for offset in (0..region_size).step_by(SCAN_CHUNK_BYTES) {
+            let address = region.base + offset;
+            let wanted = (region_size - offset).min(SCAN_CHUNK_BYTES);
+            remaining = remaining.saturating_sub(wanted);
+            let Ok(read) = process.read(address, &mut buffer[..wanted]) else {
+                if remaining == 0 {
+                    break 'regions;
+                }
+                continue;
+            };
+            if read >= 64 {
+                for byte_offset in (0..=read - 64).step_by(16) {
+                    let mut matrix = [0.0f32; 16];
+                    for (index, value) in matrix.iter_mut().enumerate() {
+                        let start = byte_offset + index * 4;
+                        *value = f32::from_le_bytes(buffer[start..start + 4].try_into().unwrap());
+                    }
+                    let Some(score) = view_projection_likelihood(&matrix) else {
+                        continue;
+                    };
+                    candidates.push(ViewProjectionCandidate {
+                        address: address + byte_offset,
+                        matrix,
+                        score,
+                    });
+                    if candidates.len() >= result_limit.max(1).saturating_mul(8) {
+                        candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
+                        candidates.truncate(result_limit.max(1).saturating_mul(4));
+                    }
+                }
+            }
+            progress.fetch_add(read, Ordering::Relaxed);
+            if remaining == 0 {
+                break 'regions;
+            }
+        }
+    }
+    candidates.sort_by(|left, right| right.score.total_cmp(&left.score));
+    candidates.truncate(result_limit.max(1));
+    Ok(candidates)
+}
+
+fn view_projection_likelihood(matrix: &[f32; 16]) -> Option<f32> {
+    if matrix
+        .iter()
+        .any(|value| !value.is_finite() || value.abs() > 1.0e7)
+    {
+        return None;
+    }
+    let non_zero = matrix.iter().filter(|value| value.abs() > 1.0e-6).count();
+    if !(8..=16).contains(&non_zero) {
+        return None;
+    }
+    let determinant = matrix[0] * (matrix[5] * matrix[10] - matrix[6] * matrix[9])
+        - matrix[1] * (matrix[4] * matrix[10] - matrix[6] * matrix[8])
+        + matrix[2] * (matrix[4] * matrix[9] - matrix[5] * matrix[8]);
+    if !determinant.is_finite() || determinant.abs() < 1.0e-8 {
+        return None;
+    }
+    let moderate = matrix
+        .iter()
+        .filter(|value| value.abs() >= 1.0e-5 && value.abs() <= 10_000.0)
+        .count() as f32;
+    let zeros = (16 - non_zero) as f32;
+    Some(moderate + zeros * 0.35 + determinant.abs().log10().abs().recip())
+}
+
+/// Bounds for pointer scans. Keeping these explicit prevents a deep scan from
+/// consuming unbounded memory when a target process has a very large address space.
+#[derive(Clone, Copy, Debug)]
+pub struct PointerScanLimits {
+    pub max_offset: usize,
+    pub max_depth: usize,
+    pub result_limit: usize,
+    pub max_bytes: usize,
+}
+
+impl PointerScanLimits {
+    pub const SAFE: Self = Self {
+        max_offset: 0x1000,
+        max_depth: 5,
+        result_limit: 256,
+        max_bytes: 1024 * 1024 * 1024,
+    };
+
+    pub const DEEP: Self = Self {
+        max_offset: 0x4000,
+        max_depth: 7,
+        result_limit: 1024,
+        max_bytes: 2048 * 1024 * 1024,
+    };
+}
+
 pub fn capture_pointer_map(
     pid: u32,
     modules: &[(String, usize, usize)],
     pointer_width: usize,
+    progress: Arc<AtomicUsize>,
+) -> io::Result<PointerMap> {
+    capture_pointer_map_with_budget(pid, modules, pointer_width, usize::MAX, progress)
+}
+
+pub fn capture_pointer_map_with_budget(
+    pid: u32,
+    modules: &[(String, usize, usize)],
+    pointer_width: usize,
+    max_bytes: usize,
     progress: Arc<AtomicUsize>,
 ) -> io::Result<PointerMap> {
     if !matches!(pointer_width, 4 | 8) {
@@ -218,21 +350,35 @@ pub fn capture_pointer_map(
         ));
     }
     let process = ScanProcess::open(pid, false)?;
-    let regions = pointer_scan_regions_for(&process);
-    let readable_ranges = regions
+    let mut regions = pointer_scan_regions_for(&process);
+    // Module-backed regions are the most likely roots; scan them first when a
+    // caller has selected a finite byte budget.
+    regions.sort_by_key(|region| {
+        !modules
+            .iter()
+            .any(|(_, base, size)| (*base..base.saturating_add(*size)).contains(&region.base))
+    });
+    let mut readable_ranges = regions
         .iter()
         .map(|region| (region.base, region.base.saturating_add(region.size)))
         .collect::<Vec<_>>();
+    readable_ranges.sort_unstable_by_key(|(base, _)| *base);
     let mut pointers = Vec::new();
     pointers
         .try_reserve_exact(1_000_000)
         .map_err(|_| io::Error::other("not enough memory to start pointer map"))?;
     let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
-    for region in regions {
-        for offset in (0..region.size).step_by(SCAN_CHUNK_BYTES) {
+    let mut remaining = max_bytes;
+    'regions: for region in regions {
+        let region_size = region.size.min(remaining);
+        for offset in (0..region_size).step_by(SCAN_CHUNK_BYTES) {
             let address = region.base + offset;
-            let wanted = (region.size - offset).min(SCAN_CHUNK_BYTES);
+            let wanted = (region_size - offset).min(SCAN_CHUNK_BYTES);
+            remaining = remaining.saturating_sub(wanted);
             let Ok(read) = process.read(address, &mut buffer[..wanted]) else {
+                if remaining == 0 {
+                    break 'regions;
+                }
                 continue;
             };
             if read < pointer_width {
@@ -240,13 +386,11 @@ pub fn capture_pointer_map(
             }
             for byte_offset in (0..=read - pointer_width).step_by(pointer_width) {
                 let value = if pointer_width == 4 {
-                    u32::from_le_bytes(
-                        buffer[byte_offset..byte_offset + 4].try_into().unwrap(),
-                    ) as usize
+                    u32::from_le_bytes(buffer[byte_offset..byte_offset + 4].try_into().unwrap())
+                        as usize
                 } else {
-                    u64::from_le_bytes(
-                        buffer[byte_offset..byte_offset + 8].try_into().unwrap(),
-                    ) as usize
+                    u64::from_le_bytes(buffer[byte_offset..byte_offset + 8].try_into().unwrap())
+                        as usize
                 };
                 let range = readable_ranges.partition_point(|(base, _)| *base <= value);
                 if range > 0 && value < readable_ranges[range - 1].1 {
@@ -262,6 +406,9 @@ pub fn capture_pointer_map(
                 }
             }
             progress.fetch_add(read, Ordering::Relaxed);
+            if remaining == 0 {
+                break 'regions;
+            }
         }
     }
     pointers.sort_unstable();
@@ -300,9 +447,31 @@ pub fn scan_pointer_paths(
     result_limit: usize,
     progress: Arc<AtomicUsize>,
 ) -> io::Result<Vec<PointerPath>> {
-    // ponytail: these caps keep a pathological process from exhausting app memory; a disk-backed
-    // pointer map is the upgrade path for larger scans.
-    let map = capture_pointer_map(pid, modules, pointer_width, progress)?;
+    scan_pointer_paths_with_budget(
+        pid,
+        target,
+        modules,
+        pointer_width,
+        max_offset,
+        max_depth,
+        result_limit,
+        usize::MAX,
+        progress,
+    )
+}
+
+pub fn scan_pointer_paths_with_budget(
+    pid: u32,
+    target: usize,
+    modules: &[(String, usize, usize)],
+    pointer_width: usize,
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+    max_bytes: usize,
+    progress: Arc<AtomicUsize>,
+) -> io::Result<Vec<PointerPath>> {
+    let map = capture_pointer_map_with_budget(pid, modules, pointer_width, max_bytes, progress)?;
     Ok(find_pointer_paths(
         &map.pointers,
         target,
@@ -446,10 +615,7 @@ impl Drop for PausedProcess {
     fn drop(&mut self) {
         #[cfg(windows)]
         {
-            use windows_sys::Win32::{
-                Foundation::CloseHandle,
-                System::Threading::ResumeThread,
-            };
+            use windows_sys::Win32::{Foundation::CloseHandle, System::Threading::ResumeThread};
             for thread in self.threads.drain(..) {
                 unsafe {
                     ResumeThread(thread);
@@ -771,7 +937,16 @@ pub fn scan_memory_range_with_progress(
         .map(|regions| {
             let total = Arc::clone(&total);
             thread::spawn(move || {
-                scan_region_bucket(pid, regions, exact, range, value_type, alignment, result_limit, total)
+                scan_region_bucket(
+                    pid,
+                    regions,
+                    exact,
+                    range,
+                    value_type,
+                    alignment,
+                    result_limit,
+                    total,
+                )
             })
         })
         .collect::<Vec<_>>();
@@ -961,7 +1136,11 @@ pub fn filter_scan_candidates(
     let kept = thread::scope(|scope| {
         candidates
             .chunks_mut(chunk_len)
-            .map(|chunk| scope.spawn(move || filter_candidate_slice(pid, chunk, value_type, comparison, exact, range)))
+            .map(|chunk| {
+                scope.spawn(move || {
+                    filter_candidate_slice(pid, chunk, value_type, comparison, exact, range)
+                })
+            })
             .collect::<Vec<_>>()
             .into_iter()
             .map(|worker| {
@@ -1332,7 +1511,9 @@ fn scan_region_bucket(
                         let value = value_type.decode(&buffer[offset..]).expect("value width");
                         if exact.is_none_or(|expected| scan_exact_matches(value, expected))
                             && range.is_none_or(|(min, max)| scan_value_between(value, min, max))
-                            && (exact.is_some() || range.is_some() || is_valid_unknown_scan_value(value))
+                            && (exact.is_some()
+                                || range.is_some()
+                                || is_valid_unknown_scan_value(value))
                         {
                             found.push(ScanCandidate::new(chunk_base + offset, value));
                         }
@@ -1548,11 +1729,7 @@ unsafe extern "system" {
         new_protect: u32,
         old_protect: *mut u32,
     ) -> i32;
-    fn FlushInstructionCache(
-        process: *mut c_void,
-        address: *const c_void,
-        size: usize,
-    ) -> i32;
+    fn FlushInstructionCache(process: *mut c_void, address: *const c_void, size: usize) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
 }
 
@@ -1569,9 +1746,21 @@ mod tests {
 
     #[test]
     fn between_includes_both_bounds() {
-        assert!(scan_value_between(ScanValue::I32(10), ScanValue::I32(10), ScanValue::I32(20)));
-        assert!(scan_value_between(ScanValue::F32(20.0), ScanValue::F32(10.0), ScanValue::F32(20.0)));
-        assert!(!scan_value_between(ScanValue::I32(21), ScanValue::I32(10), ScanValue::I32(20)));
+        assert!(scan_value_between(
+            ScanValue::I32(10),
+            ScanValue::I32(10),
+            ScanValue::I32(20)
+        ));
+        assert!(scan_value_between(
+            ScanValue::F32(20.0),
+            ScanValue::F32(10.0),
+            ScanValue::F32(20.0)
+        ));
+        assert!(!scan_value_between(
+            ScanValue::I32(21),
+            ScanValue::I32(10),
+            ScanValue::I32(20)
+        ));
     }
 
     use super::*;
