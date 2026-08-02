@@ -6484,7 +6484,7 @@ impl CrosshairApp {
             self.add_pending_structure_address(&mut dialog);
             if open {
                 self.memory_panel.memory_view_dialog = Some(dialog);
-                ctx.request_repaint_after(Duration::from_millis(250));
+                ctx.request_repaint_after(Duration::from_millis(50));
             }
             return;
         }
@@ -6510,7 +6510,7 @@ impl CrosshairApp {
         } else {
             self.add_pending_structure_address(&mut dialog);
             self.memory_panel.memory_view_dialog = Some(dialog);
-            ctx.request_repaint_after(Duration::from_millis(250));
+            ctx.request_repaint_after(Duration::from_millis(50));
         }
     }
 
