@@ -38,8 +38,8 @@ use windows_sys::Win32::{
             Thread32First, Thread32Next,
         },
         Threading::{
-            IsWow64Process, OpenProcess, OpenThread, QueryFullProcessImageNameW,
-            PROCESS_QUERY_LIMITED_INFORMATION, ResumeThread, SuspendThread, THREAD_GET_CONTEXT,
+            IsWow64Process, OpenProcess, OpenThread, PROCESS_QUERY_LIMITED_INFORMATION,
+            QueryFullProcessImageNameW, ResumeThread, SuspendThread, THREAD_GET_CONTEXT,
             THREAD_SET_CONTEXT, THREAD_SUSPEND_RESUME,
         },
     },
@@ -71,7 +71,11 @@ pub fn process_path(pid: u32) -> String {
 pub fn list_process_details() -> io::Result<Vec<ProcessInfo>> {
     Ok(list_processes()?
         .into_iter()
-        .map(|(pid, name)| ProcessInfo { pid, name, path: String::new() })
+        .map(|(pid, name)| ProcessInfo {
+            pid,
+            name,
+            path: String::new(),
+        })
         .collect())
 }
 
@@ -132,11 +136,12 @@ pub fn resolve_module_offset(pid: u32, module: &str, offset: usize) -> io::Resul
 }
 
 pub fn normalize_instruction(instruction: &str) -> String {
-    instruction
+    let lower = instruction.to_lowercase();
+    let filtered: String = lower
         .chars()
         .filter(|character| !character.is_ascii_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect()
+        .collect();
+    filtered.replace("0x", "").replace('h', "")
 }
 
 pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
@@ -497,10 +502,12 @@ fn target_architecture(
 }
 
 pub fn process_pointer_width(pid: u32) -> io::Result<usize> {
-    Ok(match target_architecture(pid, MemoryDebuggerArchitecture::Auto)? {
-        TargetArchitecture::X86 => 4,
-        TargetArchitecture::X64 => 8,
-    })
+    Ok(
+        match target_architecture(pid, MemoryDebuggerArchitecture::Auto)? {
+            TargetArchitecture::X86 => 4,
+            TargetArchitecture::X64 => 8,
+        },
+    )
 }
 
 fn watch_loop<F>(
@@ -569,12 +576,10 @@ fn watch_loop<F>(
             EXCEPTION_DEBUG_EVENT => unsafe {
                 let exception = event.u.Exception.ExceptionRecord.ExceptionCode;
                 if exception == EXCEPTION_SINGLE_STEP || exception == STATUS_WX86_SINGLE_STEP {
-                    if let Some(context) = threads.get(&event.dwThreadId).and_then(|&thread| {
-                        read_hit(
-                            thread,
-                            architecture,
-                        )
-                    }) {
+                    if let Some(context) = threads
+                        .get(&event.dwThreadId)
+                        .and_then(|&thread| read_hit(thread, architecture))
+                    {
                         let context = context.as_amd64();
                         match &kind {
                             WatchKind::Write { address } | WatchKind::ReadWrite { address } => {
@@ -718,10 +723,7 @@ fn watch_loop<F>(
     notify(WatchEvent::Stopped);
 }
 
-unsafe fn disarm_paused_threads(
-    threads: &HashMap<u32, HANDLE>,
-    architecture: TargetArchitecture,
-) {
+unsafe fn disarm_paused_threads(threads: &HashMap<u32, HANDLE>, architecture: TargetArchitecture) {
     for &thread in threads.values() {
         unsafe { disarm_thread(thread, architecture) };
     }
@@ -845,10 +847,7 @@ impl CapturedContext {
     }
 }
 
-fn read_hit(
-    thread: HANDLE,
-    architecture: TargetArchitecture,
-) -> Option<CapturedContext> {
+fn read_hit(thread: HANDLE, architecture: TargetArchitecture) -> Option<CapturedContext> {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
             ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS
@@ -1345,8 +1344,7 @@ mod tests {
     #[test]
     fn previous_access_prefers_the_complete_prefixed_instruction() {
         let short = Decoder::new(64, &[0x11, 0x52, 0x10], DecoderOptions::NONE).decode();
-        let complete =
-            Decoder::new(64, &[0xF0, 0x11, 0x52, 0x10], DecoderOptions::NONE).decode();
+        let complete = Decoder::new(64, &[0xF0, 0x11, 0x52, 0x10], DecoderOptions::NONE).decode();
         let selected = prefer_longer_access_candidate(
             Some((1, short, "adc [rdx+10h],edx".to_owned())),
             (0, complete, "lock adc [rdx+10h],edx".to_owned()),

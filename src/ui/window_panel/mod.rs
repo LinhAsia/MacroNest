@@ -570,10 +570,7 @@ impl CrosshairApp {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .add_enabled(
-                                can_paste,
-                                Button::new("Paste").min_size(vec2(84.0, 24.0)),
-                            )
+                            .add_enabled(can_paste, Button::new("Paste").min_size(vec2(84.0, 24.0)))
                             .clicked()
                         {
                             paste_after = Some(index);

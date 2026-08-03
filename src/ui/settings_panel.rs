@@ -546,6 +546,7 @@ impl CrosshairApp {
         let language = self.state.ui_language;
         let opencv_path = self.paths.opencv_dll.clone();
         let ffmpeg_path = self.paths.ffmpeg_exe.clone();
+        let frida_path = self.paths.frida_helper_exe.clone();
         let arduino_path = self.paths.avrdude_exe.clone();
         let opencv_progress = self
             .opencv_download_job
@@ -559,6 +560,10 @@ impl CrosshairApp {
             .ffmpeg_download_job
             .as_ref()
             .map(|_| self.ffmpeg_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
+        let frida_progress = self
+            .frida_download_job
+            .as_ref()
+            .map(|_| self.frida_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
         let arduino_progress = self
             .arduino_download_job
             .as_ref()
@@ -607,6 +612,19 @@ impl CrosshairApp {
                         ),
                         Self::start_ffmpeg_download,
                         Self::delete_ffmpeg_tool,
+                    );
+                    ui.add_space(10.0);
+                    self.render_downloaded_tool_entry(
+                        ui,
+                        language,
+                        "Network Injection (Frida)",
+                        &frida_path,
+                        self.frida_installed,
+                        frida_progress,
+                        66 * 1024 * 1024,
+                        Self::tr_lang(language, "Frida tool deleted.", "Đã xóa công cụ Frida."),
+                        Self::start_frida_download,
+                        Self::delete_frida_tool,
                     );
                     ui.add_space(10.0);
                     self.render_ocr_tool_entry(ui, language);
@@ -1688,6 +1706,53 @@ impl CrosshairApp {
         }));
     }
 
+    pub(crate) fn start_frida_download(&mut self) {
+        if self.frida_download_job.is_some() || self.frida_installed {
+            return;
+        }
+
+        let paths = self.paths.clone();
+        let progress = self.frida_download_progress.clone();
+        progress.store(0, Ordering::SeqCst);
+        self.status = Self::tr_lang(
+            self.state.ui_language,
+            "Downloading the Frida tool...",
+            "Đang tải công cụ Frida...",
+        )
+        .to_owned();
+
+        self.frida_download_job = Some(std::thread::spawn(move || -> Result<()> {
+            let url = "https://github.com/LinhAsia/MacroNest/releases/download/tools/frida-helper.exe.zip";
+            let mut response = reqwest::blocking::get(url)?.error_for_status()?;
+            let total_size = response.content_length().unwrap_or(50 * 1024 * 1024);
+            let mut file = fs::File::create(&paths.frida_helper_zip)?;
+            let mut downloaded = 0_u64;
+            let mut buffer = [0_u8; 64 * 1024];
+
+            use std::io::{Read, Write};
+            loop {
+                let count = response.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                file.write_all(&buffer[..count])?;
+                downloaded += count as u64;
+                progress.store(
+                    ((downloaded as f64 / total_size.max(1) as f64) * 980.0) as u32,
+                    Ordering::SeqCst,
+                );
+            }
+            drop(file);
+            Self::extract_zip_archive(&paths.frida_helper_zip, &paths.bin_dir)?;
+            if !paths.frida_helper_exe.exists() {
+                bail!("The downloaded package did not contain frida-helper.exe");
+            }
+            let _ = fs::remove_file(&paths.frida_helper_zip);
+            progress.store(1000, Ordering::SeqCst);
+            Ok(())
+        }));
+    }
+
     pub(crate) fn start_ocr_download_for(&mut self, _language_code: &str) {
         if self.ocr_download_job.is_some() {
             return;
@@ -1783,6 +1848,13 @@ impl CrosshairApp {
         let _ = fs::remove_file(&self.paths.ffmpeg_exe);
         let _ = fs::remove_file(&self.paths.ffmpeg_zip);
         self.ffmpeg_installed = false;
+    }
+
+    fn delete_frida_tool(&mut self) {
+        self.network_panel.detach_frida();
+        let _ = fs::remove_file(&self.paths.frida_helper_exe);
+        let _ = fs::remove_file(&self.paths.frida_helper_zip);
+        self.frida_installed = false;
     }
 
     fn delete_all_ocr_assets(&mut self) {

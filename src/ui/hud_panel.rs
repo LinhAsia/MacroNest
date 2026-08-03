@@ -222,7 +222,6 @@ impl CrosshairApp {
                         begin_hud_picker_preset_id = Some(preset.id);
                     }
                 });
-
             });
         }
         if let Some(pid) = begin_hud_picker_preset_id {
@@ -236,8 +235,7 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Hud(preset));
         }
         if let Some(index) = paste_hud_after
-            && let Some(crate::ui::PresetClipboard::Hud(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Hud(mut preset)) = self.preset_clipboard.clone()
         {
             preset.id = Self::allocate_next_id(
                 &self.state.hud_presets,

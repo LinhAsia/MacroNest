@@ -410,16 +410,16 @@ impl CrosshairApp {
                                 ui.end_row();
                             }
 
-                            ui.label(Self::tr_lang(language, "Area", "Area"));
+                            ui.label(Self::tr_lang(language, "Area", "Vùng"));
                             ui.horizontal_wrapped(|ui| {
-                                ui.monospace(Self::image_search_search_area_text(preset));
+                                ui.monospace(Self::image_search_search_area_text(preset, language));
 
                                 let mut is_single = preset.search_region_is_single_pixel;
                                 if preset.use_color_matching && !preset.is_pixel_counter {
                                     if ui
                                         .checkbox(
                                             &mut is_single,
-                                            Self::tr_lang(language, "1 pixel", "1 pixel"),
+                                            Self::tr_lang(language, "1 pixel", "Một pixel"),
                                         )
                                         .changed()
                                     {
@@ -437,14 +437,14 @@ impl CrosshairApp {
 
                                 if preset.search_region_is_single_pixel {
                                     if ui
-                                        .button(Self::tr_lang(language, "Pick pixel", "Pick pixel"))
+                                        .button(Self::tr_lang(language, "Pick pixel", "Chọn pixel"))
                                         .clicked()
                                     {
                                         start_single_pixel_capture = Some(preset.id);
                                     }
                                 } else {
                                     if ui
-                                        .button(Self::tr_lang(language, "Pick area", "Pick area"))
+                                        .button(Self::tr_lang(language, "Pick area", "Chọn vùng"))
                                         .clicked()
                                     {
                                         start_search_region_capture = Some(preset.id);
@@ -454,11 +454,11 @@ impl CrosshairApp {
                                         && preset.search_region_width.is_some();
                                     if has_region {
                                         if ui
-                                            .button(Self::tr_lang(language, "Adjust", "Adjust"))
+                                            .button(Self::tr_lang(language, "Adjust", "Điều chỉnh"))
                                             .on_hover_text(Self::tr_lang(
                                                 language,
                                                 "Move/resize the region directly on screen",
-                                                "Move/resize the region directly on screen",
+                                                "Di chuyển/thay đổi kích thước vùng trực tiếp trên màn hình",
                                             ))
                                             .clicked()
                                         {
@@ -468,7 +468,7 @@ impl CrosshairApp {
                                 }
 
                                 if ui
-                                    .button(Self::tr_lang(language, "Clear area", "Clear area"))
+                                    .button(Self::tr_lang(language, "Clear area", "Xóa vùng"))
                                     .clicked()
                                 {
                                     Self::clear_vision_preset_search_region(preset);
@@ -1059,11 +1059,14 @@ impl CrosshairApp {
         Some(view)
     }
 
-    pub(crate) fn image_search_search_area_text(preset: &VisionPreset) -> String {
+    pub(crate) fn image_search_search_area_text(
+        preset: &VisionPreset,
+        language: UiLanguage,
+    ) -> String {
         if preset.search_region_is_single_pixel {
             match (preset.search_region_screen_x, preset.search_region_screen_y) {
                 (Some(x), Some(y)) => format!("Pixel {x}, {y}"),
-                _ => "Not selected".to_owned(),
+                _ => Self::tr_lang(language, "Not selected", "Chưa chọn").to_owned(),
             }
         } else {
             match (
@@ -1074,13 +1077,13 @@ impl CrosshairApp {
             ) {
                 (Some(x), Some(y), Some(width), Some(height)) if width > 0 && height > 0 => {
                     let shape = if preset.search_region_is_circle {
-                        "Circle"
+                        Self::tr_lang(language, "Circle", "Tròn")
                     } else {
-                        "Rect"
+                        Self::tr_lang(language, "Rect", "Chữ nhật")
                     };
                     format!("{shape} {x}, {y}  {width}x{height}")
                 }
-                _ => "Any screen".to_owned(),
+                _ => Self::tr_lang(language, "Any screen", "Mọi màn hình").to_owned(),
             }
         }
     }

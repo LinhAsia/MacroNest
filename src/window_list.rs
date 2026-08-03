@@ -10,18 +10,18 @@ mod windows_impl {
                 CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetWindowDC,
                 HALFTONE, HGDIOBJ, ReleaseDC, SRCCOPY, SelectObject, SetStretchBltMode, StretchBlt,
             },
-            Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
-            UI::WindowsAndMessaging::{
-                BringWindowToTop, EnumWindows, GWL_EXSTYLE, GetClientRect, GetForegroundWindow,
-                GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
-                GetWindowTextW, GetWindowThreadProcessId, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic,
-                IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN,
-                SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOMOVE,
-                SWP_NOSIZE, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowPos, ShowWindow,
-                WS_EX_TOPMOST, DestroyIcon, DrawIconEx, DI_NORMAL,
-            },
-            UI::Shell::{SHFILEINFOW, SHGetFileInfoW, SHGFI_ICON, SHGFI_SMALLICON},
             Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
+            Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
+            UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGetFileInfoW},
+            UI::WindowsAndMessaging::{
+                BringWindowToTop, DI_NORMAL, DestroyIcon, DrawIconEx, EnumWindows, GWL_EXSTYLE,
+                GetClientRect, GetForegroundWindow, GetSystemMetrics, GetWindowLongW,
+                GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+                HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindow, IsWindowVisible,
+                PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
+                SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+                SetForegroundWindow, SetWindowPos, ShowWindow, WS_EX_TOPMOST,
+            },
         },
         core::{BOOL, PCWSTR},
     };
@@ -112,8 +112,13 @@ mod windows_impl {
     }
 
     pub fn process_icon_rgba(path: &str) -> Option<Vec<u8>> {
-        if path.is_empty() { return None; }
-        let wide = path.encode_utf16().chain(std::iter::once(0)).collect::<Vec<_>>();
+        if path.is_empty() {
+            return None;
+        }
+        let wide = path
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
         let mut info = SHFILEINFOW::default();
         let found = unsafe {
             SHGetFileInfoW(
@@ -124,15 +129,21 @@ mod windows_impl {
                 SHGFI_ICON | SHGFI_SMALLICON,
             )
         };
-        if found == 0 || info.hIcon.0.is_null() { return None; }
+        if found == 0 || info.hIcon.0.is_null() {
+            return None;
+        }
         let result = unsafe { hicon_rgba(info.hIcon) };
-        unsafe { let _ = DestroyIcon(info.hIcon); }
+        unsafe {
+            let _ = DestroyIcon(info.hIcon);
+        }
         result
     }
 
     unsafe fn hicon_rgba(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Vec<u8>> {
         let screen = GetDC(None);
-        if screen.0.is_null() { return None; }
+        if screen.0.is_null() {
+            return None;
+        }
         let dc = CreateCompatibleDC(Some(screen));
         let mut bitmap_info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -147,7 +158,8 @@ mod windows_impl {
             ..BITMAPINFO::default()
         };
         let mut bits = std::ptr::null_mut();
-        let bitmap = CreateDIBSection(Some(dc), &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        let bitmap =
+            CreateDIBSection(Some(dc), &bitmap_info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
         let old = SelectObject(dc, HGDIOBJ(bitmap.0));
         std::ptr::write_bytes(bits, 0, 16 * 16 * 4);
         let drawn = DrawIconEx(dc, 0, 0, icon, 16, 16, 0, None, DI_NORMAL).is_ok();

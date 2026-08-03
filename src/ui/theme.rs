@@ -146,20 +146,20 @@ pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
         let text_styles = &mut style.text_styles;
         text_styles.insert(
             TextStyle::Small,
-            FontId::new(13.5, FontFamily::Proportional),
+            FontId::new(11.5, FontFamily::Proportional),
         );
-        text_styles.insert(TextStyle::Body, FontId::new(16.0, FontFamily::Proportional));
+        text_styles.insert(TextStyle::Body, FontId::new(13.0, FontFamily::Proportional));
         text_styles.insert(
             TextStyle::Button,
-            FontId::new(15.5, FontFamily::Proportional),
+            FontId::new(13.0, FontFamily::Proportional),
         );
         text_styles.insert(
             TextStyle::Heading,
-            FontId::new(21.0, FontFamily::Proportional),
+            FontId::new(16.5, FontFamily::Proportional),
         );
         text_styles.insert(
             TextStyle::Monospace,
-            FontId::new(15.5, FontFamily::Monospace),
+            FontId::new(12.5, FontFamily::Monospace),
         );
     });
 }

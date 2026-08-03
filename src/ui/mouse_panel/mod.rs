@@ -847,7 +847,8 @@ impl CrosshairApp {
                                         paste_sensitivity_after = Some(index);
                                     }
                                     if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                                        copy_sensitivity_preset = Some(sensitivity_snapshot.clone());
+                                        copy_sensitivity_preset =
+                                            Some(sensitivity_snapshot.clone());
                                     }
 
                                     if Self::sound_style_remove_button(ui).clicked() {
@@ -1121,7 +1122,9 @@ impl CrosshairApp {
                 |item| item.id,
             );
             preset.name = format!("{} (Copy)", preset.name);
-            self.state.mouse_sensitivity_presets.insert(index + 1, preset);
+            self.state
+                .mouse_sensitivity_presets
+                .insert(index + 1, preset);
             mouse_sensitivity_live_sync = true;
         }
 

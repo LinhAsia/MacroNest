@@ -158,8 +158,8 @@ Variable names support computed `{}` parts. Setting `item[{i}]` while `i = 3` wr
 | `mouse.y` | Current Y coordinate of the mouse | `mouse.y` |
 | `mouse.sensitivity` | Current system mouse sensitivity speed | `mouse.sensitivity` |
 | `volume.level` | Current system volume level (0 to 100) | `volume.level` |
-| `window.x` | X coordinate of target window's left edge | `window.x` |
-| `window.y` | Y coordinate of target window's top edge | `window.y` |
+| `window.x` / `window.left` | X coordinate of target window's left edge | `window.x` |
+| `window.y` / `window.top` | Y coordinate of target window's top edge | `window.y` |
 | `window.right` | X coordinate of target window's right edge | `window.right` |
 | `window.bottom` | Y coordinate of target window's bottom edge | `window.bottom` |
 | `window.width` | Width of the target window | `window.width` |

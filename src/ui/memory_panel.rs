@@ -4285,14 +4285,11 @@ impl CrosshairApp {
             }
         }
         let world = dialog.world.unwrap_or([0.0; 3]);
-        let Some((candidate, variant, _, error)) = best_camera_projection(
-            &dialog.candidates,
-            world,
-            width,
-            height,
-            target,
-        ) else {
-            dialog.status = "No candidate can project the target onto the game viewport.".to_owned();
+        let Some((candidate, variant, _, error)) =
+            best_camera_projection(&dialog.candidates, world, width, height, target)
+        else {
+            dialog.status =
+                "No candidate can project the target onto the game viewport.".to_owned();
             return;
         };
         dialog.selected = Some(candidate);
@@ -6300,7 +6297,12 @@ impl CrosshairApp {
         let app_name = self
             .memory_panel
             .process_pid
-            .and_then(|pid| process_modules(pid).ok()?.first().map(|module| module.0.clone()))
+            .and_then(|pid| {
+                process_modules(pid)
+                    .ok()?
+                    .first()
+                    .map(|module| module.0.clone())
+            })
             .unwrap_or_else(|| code_module.clone());
         let tracked_value = self
             .memory_panel
@@ -6950,8 +6952,7 @@ impl CrosshairApp {
                 .selected
                 .and_then(|index| code_dialog.addresses.get(index))
                 .map(|(address, _)| *address)
-        })
-        else {
+        }) else {
             code_dialog.status = "Select a captured address before tracking a field".to_owned();
             return;
         };
@@ -6968,7 +6969,9 @@ impl CrosshairApp {
             field_address as i128 - captured as i128,
         );
         if code_dialog.tracked_name.trim().is_empty() {
-            code_dialog.status.push_str("; enter a name, then Save tracked");
+            code_dialog
+                .status
+                .push_str("; enter a name, then Save tracked");
         } else {
             code_dialog.save_tracked = true;
         }
@@ -8506,11 +8509,17 @@ fn instruction_memory_displacement(instruction: &str) -> isize {
         return 0;
     };
     let mut digits = expression[index + 1..].trim();
-    if let Some(stripped) = digits.strip_suffix('h').or_else(|| digits.strip_suffix('H')) {
+    if let Some(stripped) = digits
+        .strip_suffix('h')
+        .or_else(|| digits.strip_suffix('H'))
+    {
         digits = stripped;
     }
     let Ok(value) = isize::from_str_radix(
-        digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X")).unwrap_or(digits),
+        digits
+            .strip_prefix("0x")
+            .or_else(|| digits.strip_prefix("0X"))
+            .unwrap_or(digits),
         16,
     ) else {
         return 0;
@@ -8519,7 +8528,11 @@ fn instruction_memory_displacement(instruction: &str) -> isize {
 }
 
 #[cfg(windows)]
-fn tracked_object_signature(pid: u32, captured_address: usize, instruction: &str) -> Option<String> {
+fn tracked_object_signature(
+    pid: u32,
+    captured_address: usize,
+    instruction: &str,
+) -> Option<String> {
     let displacement = instruction_memory_displacement(instruction);
     let object_base = captured_address.checked_add_signed(-displacement)?;
     let pointer_width = process_pointer_width(pid).ok()?;
@@ -8589,6 +8602,9 @@ fn tracked_object_signature(pid: u32, captured_address: usize, instruction: &str
                 }
             }
         }
+    }
+    if !nested.is_empty() {
+        return Some(nested.join(";"));
     }
     None
 }

@@ -450,8 +450,7 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Ocr(preset));
         }
         if let Some(index) = paste_ocr_after
-            && let Some(crate::ui::PresetClipboard::Ocr(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Ocr(mut preset)) = self.preset_clipboard.clone()
         {
             preset.id = Self::allocate_next_id(
                 &self.state.ocr_presets,

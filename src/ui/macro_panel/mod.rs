@@ -1182,16 +1182,19 @@ impl CrosshairApp {
         }
         egui::ComboBox::from_id_salt(combo_id)
             .width(width)
-            .selected_text(RichText::new(match mode {
-                1 => Self::tr_lang(language, "Ethernet", "Ethernet"),
-                2 if custom_name.trim().is_empty() => Self::tr_lang(
-                    language,
-                    "Loading adapters...",
-                    "\u{0110}ang t\u{1ea3}i adapter...",
-                ),
-                2 => custom_name.as_str(),
-                _ => Self::tr_lang(language, "Wi-Fi", "Wi-Fi"),
-            }).size(13.0))
+            .selected_text(
+                RichText::new(match mode {
+                    1 => Self::tr_lang(language, "Ethernet", "Ethernet"),
+                    2 if custom_name.trim().is_empty() => Self::tr_lang(
+                        language,
+                        "Loading adapters...",
+                        "\u{0110}ang t\u{1ea3}i adapter...",
+                    ),
+                    2 => custom_name.as_str(),
+                    _ => Self::tr_lang(language, "Wi-Fi", "Wi-Fi"),
+                })
+                .size(13.0),
+            )
             .show_ui(ui, |ui| {
                 for (mode_value, label, value) in [
                     (0_u8, Self::tr_lang(language, "Wi-Fi", "Wi-Fi"), "wifi"),
@@ -1201,7 +1204,10 @@ impl CrosshairApp {
                         "ethernet",
                     ),
                 ] {
-                    if ui.selectable_label(mode == mode_value, RichText::new(label).size(12.0)).clicked() {
+                    if ui
+                        .selectable_label(mode == mode_value, RichText::new(label).size(12.0))
+                        .clicked()
+                    {
                         mode = mode_value;
                         *step_key = value.to_owned();
                         *live_sync = true;
@@ -1211,11 +1217,14 @@ impl CrosshairApp {
                 if adapter_names.is_empty() {
                     ui.add_enabled(
                         false,
-                        egui::Label::new(RichText::new(Self::tr_lang(
-                            language,
-                            "Loading adapters...",
-                            "\u{0110}ang t\u{1ea3}i adapter...",
-                        )).size(12.0)),
+                        egui::Label::new(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Loading adapters...",
+                                "\u{0110}ang t\u{1ea3}i adapter...",
+                            ))
+                            .size(12.0),
+                        ),
                     );
                 } else {
                     for adapter_name in &adapter_names {
@@ -1225,7 +1234,8 @@ impl CrosshairApp {
                                 RichText::new(format!(
                                     "{}: {adapter_name}",
                                     Self::tr_lang(language, "Adapter", "Adapter")
-                                )).size(12.0),
+                                ))
+                                .size(12.0),
                             )
                             .clicked()
                         {
@@ -1287,13 +1297,18 @@ impl CrosshairApp {
             // 2. CHỌN TỐC ĐỘ (Method/Speed dropdown)
             egui::ComboBox::from_id_salt((id_salt, "network_method"))
                 .width(170.0)
-                .selected_text(RichText::new(match method {
-                    1 => {
-                        Self::tr_lang(language, "Internet route (Instant)", "Tuyến mạng (Tức thì)")
-                    }
-                    2 => Self::tr_lang(language, "Radio (Fast)", "Radio (Nhanh)"),
-                    _ => Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
-                }).size(13.0))
+                .selected_text(
+                    RichText::new(match method {
+                        1 => Self::tr_lang(
+                            language,
+                            "Internet route (Instant)",
+                            "Tuyến mạng (Tức thì)",
+                        ),
+                        2 => Self::tr_lang(language, "Radio (Fast)", "Radio (Nhanh)"),
+                        _ => Self::tr_lang(language, "Adapter (Slow)", "Card mạng (Chậm)"),
+                    })
+                    .size(13.0),
+                )
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut method,
@@ -1318,11 +1333,14 @@ impl CrosshairApp {
             // 3. CHỌN TRẠNG THÁI (State On/Off dropdown)
             egui::ComboBox::from_id_salt((id_salt, "network_state"))
                 .width(72.0)
-                .selected_text(RichText::new(if is_enable {
-                    Self::tr_lang(language, "On", "Bật")
-                } else {
-                    Self::tr_lang(language, "Off", "Tắt")
-                }).size(13.0))
+                .selected_text(
+                    RichText::new(if is_enable {
+                        Self::tr_lang(language, "On", "Bật")
+                    } else {
+                        Self::tr_lang(language, "Off", "Tắt")
+                    })
+                    .size(13.0),
+                )
                 .show_ui(ui, |ui| {
                     ui.selectable_value(
                         &mut is_enable,
@@ -1665,8 +1683,8 @@ impl CrosshairApp {
                                                     ui.label(egui::RichText::new("- system.year / month / day").monospace());
                                                     ui.label(egui::RichText::new("- system.hour / minute / second").monospace());
                                                     ui.label(egui::RichText::new("- system.millisecond").monospace());
-                                                    ui.label(egui::RichText::new("- window.x").monospace());
-                                                    ui.label(egui::RichText::new("- window.y").monospace());
+                                                    ui.label(egui::RichText::new("- window.x / left").monospace());
+                                                    ui.label(egui::RichText::new("- window.y / top").monospace());
                                                     ui.label(egui::RichText::new("- window.right / bottom").monospace());
                                                     ui.label(egui::RichText::new("- window.width").monospace());
                                                     ui.label(egui::RichText::new("- window.height").monospace());
@@ -1870,18 +1888,21 @@ impl CrosshairApp {
                 egui::FontId::proportional(MACRO_STEP_TEXT_SIZE),
             );
             ui.horizontal(|ui| {
-            ui.label(RichText::new(Self::tr_lang(
-                language,
-                "Mouse Click Delay:",
-                "Mouse Click Delay:",
-            )).size(MACRO_STEP_TEXT_SIZE));
-            *live_sync |= ui
-                .add(
-                    egui::DragValue::new(&mut step.mouse_click_delay_ms)
-                        .range(0..=10_000)
-                        .suffix(" ms"),
-                )
-                .changed();
+                ui.label(
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Mouse Click Delay:",
+                        "Mouse Click Delay:",
+                    ))
+                    .size(MACRO_STEP_TEXT_SIZE),
+                );
+                *live_sync |= ui
+                    .add(
+                        egui::DragValue::new(&mut step.mouse_click_delay_ms)
+                            .range(0..=10_000)
+                            .suffix(" ms"),
+                    )
+                    .changed();
             });
         });
     }
@@ -16917,10 +16938,10 @@ if supports_move_mouse || show_detection_tuning {
     fn extract_vars_from_expression(expr: &str, vars: &mut std::collections::HashSet<String>) {
         let mut current_var = String::new();
         for c in expr.chars() {
-            if c.is_alphanumeric() || c == '_' {
+            if c.is_alphanumeric() || c == '_' || c == '.' {
                 current_var.push(c);
             } else {
-                let trimmed = current_var.trim();
+                let trimmed = current_var.trim().trim_matches('.');
                 if !trimmed.is_empty()
                     && !trimmed.chars().next().unwrap().is_ascii_digit()
                     && !Self::is_builtin_expression_identifier(trimmed)
@@ -16930,7 +16951,7 @@ if supports_move_mouse || show_detection_tuning {
                 current_var.clear();
             }
         }
-        let trimmed = current_var.trim();
+        let trimmed = current_var.trim().trim_matches('.');
         if !trimmed.is_empty()
             && !trimmed.chars().next().unwrap().is_ascii_digit()
             && !Self::is_builtin_expression_identifier(trimmed)
@@ -17404,7 +17425,8 @@ if supports_move_mouse || show_detection_tuning {
             "mouse" => Some(&["x", "y", "sensitivity"]),
             "volume" => Some(&["level"]),
             "window" => Some(&[
-                "title", "x", "y", "right", "bottom", "width", "height", "centerX", "centerY",
+                "title", "x", "y", "left", "top", "right", "bottom", "width", "height", "centerX",
+                "centerY",
             ]),
             "clipboard" => Some(&["text"]),
             _ => Some(&["toNumber", "toString"]),
@@ -21238,13 +21260,34 @@ if supports_move_mouse || show_detection_tuning {
         width: f32,
         height: f32,
     ) -> (egui::Response, egui::Response) {
+        let x_focus_key = x_id.with("expand-focus");
+        let x_has_focus = ui
+            .memory(|mem| mem.data.get_temp::<bool>(x_focus_key))
+            .unwrap_or(false);
+        let y_focus_key = y_id.with("expand-focus");
+        let y_has_focus = ui
+            .memory(|mem| mem.data.get_temp::<bool>(y_focus_key))
+            .unwrap_or(false);
+
+        let expanded_width = (width * 3.2).max(180.0);
+        let target_x_width = if x_has_focus { expanded_width } else { width };
+        let target_y_width = if y_has_focus { expanded_width } else { width };
+
+        let x_width = ui
+            .ctx()
+            .animate_value_with_time(x_id.with("w"), target_x_width, 0.20);
+        let y_width = ui
+            .ctx()
+            .animate_value_with_time(y_id.with("w"), target_y_width, 0.20);
+
         let label_width = 12.0;
         let inner_gap = 4.0;
         let pair_gap = 4.0;
-        let pair_width = (label_width + inner_gap + width) * 2.0 + pair_gap;
+        let pair_width = (label_width + inner_gap) * 2.0 + x_width + y_width + pair_gap;
         let (pair_rect, _) = ui.allocate_exact_size(vec2(pair_width, height), egui::Sense::hover());
         let target_height = 21.0;
         let y_offset = (height - target_height) / 2.0;
+
         let x_label_rect = Rect::from_min_size(
             pos2(pair_rect.min.x, pair_rect.min.y + y_offset),
             vec2(label_width, target_height),
@@ -21254,9 +21297,9 @@ if supports_move_mouse || show_detection_tuning {
                 pair_rect.min.x + label_width + inner_gap,
                 pair_rect.min.y + y_offset,
             ),
-            vec2(width, target_height),
+            vec2(x_width, target_height),
         );
-        let y_label_x = pair_rect.min.x + label_width + inner_gap + width + pair_gap;
+        let y_label_x = pair_rect.min.x + label_width + inner_gap + x_width + pair_gap;
         let y_label_rect = Rect::from_min_size(
             pos2(y_label_x, pair_rect.min.y + y_offset),
             vec2(label_width, target_height),
@@ -21266,8 +21309,9 @@ if supports_move_mouse || show_detection_tuning {
                 y_label_x + label_width + inner_gap,
                 pair_rect.min.y + y_offset,
             ),
-            vec2(width, target_height),
+            vec2(y_width, target_height),
         );
+
         ui.put(
             x_label_rect,
             egui::Label::new(
@@ -21284,6 +21328,11 @@ if supports_move_mouse || show_detection_tuning {
             x_hint,
             TextHighlightMode::Interpolations,
         );
+        let x_now_focused = x_response.has_focus();
+        if x_now_focused != x_has_focus {
+            ui.memory_mut(|mem| mem.data.insert_temp(x_focus_key, x_now_focused));
+        }
+
         ui.put(
             y_label_rect,
             egui::Label::new(
@@ -21300,6 +21349,11 @@ if supports_move_mouse || show_detection_tuning {
             y_hint,
             TextHighlightMode::Interpolations,
         );
+        let y_now_focused = y_response.has_focus();
+        if y_now_focused != y_has_focus {
+            ui.memory_mut(|mem| mem.data.insert_temp(y_focus_key, y_now_focused));
+        }
+
         (x_response, y_response)
     }
 

@@ -826,6 +826,9 @@ pub struct CrosshairApp {
     ffmpeg_download_job: Option<JoinHandle<Result<()>>>,
     ffmpeg_download_progress: Arc<AtomicU32>,
     ffmpeg_installed: bool,
+    frida_download_job: Option<JoinHandle<Result<()>>>,
+    frida_download_progress: Arc<AtomicU32>,
+    frida_installed: bool,
     video_library_open: bool,
     video_library_selected: Option<PathBuf>,
     video_library_preview: Option<crate::video_recorder::VideoLibraryPreview>,
@@ -860,8 +863,7 @@ pub struct CrosshairApp {
     video_library_trim_end_seconds: f64,
     video_library_target_size_mb: u32,
     video_library_copy_feedback: Option<(PathBuf, Instant)>,
-    video_library_delete_rx:
-        Option<Receiver<(PathBuf, std::result::Result<(), String>)>>,
+    video_library_delete_rx: Option<Receiver<(PathBuf, std::result::Result<(), String>)>>,
     ocr_download_job: Option<JoinHandle<Result<()>>>,
     ocr_download_progress: Arc<AtomicU32>,
     interception_download_job: Option<JoinHandle<Result<()>>>,
@@ -982,6 +984,7 @@ impl CrosshairApp {
 
         let opencv_installed = paths.opencv_dll.exists();
         let ffmpeg_installed = paths.ffmpeg_exe.exists();
+        let frida_installed = paths.frida_helper_exe.exists();
         let interception_pending_marker = paths.bin_dir.join("interception.install.pending");
         if interception_pending_marker.exists() {
             if let Ok(metadata) = std::fs::metadata(&interception_pending_marker) {
@@ -1182,6 +1185,9 @@ impl CrosshairApp {
             ffmpeg_download_job: None,
             ffmpeg_download_progress: Arc::new(AtomicU32::new(0)),
             ffmpeg_installed,
+            frida_download_job: None,
+            frida_download_progress: Arc::new(AtomicU32::new(0)),
+            frida_installed,
             video_library_open: false,
             video_library_selected: None,
             video_library_preview: None,
@@ -1716,7 +1722,8 @@ impl CrosshairApp {
                     .vision_presets
                     .push(crate::macro_code::SharedVisionPreset {
                         preset: preset.clone(),
-                        template_png: fs::read(self.vision_template_file_for_preset(preset.id)).ok(),
+                        template_png: fs::read(self.vision_template_file_for_preset(preset.id))
+                            .ok(),
                     });
             }
 
@@ -4617,17 +4624,19 @@ impl CrosshairApp {
                         false
                     };
                 let clicked_outside = active_qa == Some(action_kind)
-                    && ui.ctx().input(|input| input.pointer.press_origin()).is_some_and(
-                        |position| {
+                    && ui
+                        .ctx()
+                        .input(|input| input.pointer.press_origin())
+                        .is_some_and(|position| {
                             let in_child_popup = is_any_popup_open
-                                && ui.ctx().layer_id_at(position).is_some_and(|layer| {
-                                    layer.order == egui::Order::Foreground
-                                });
+                                && ui
+                                    .ctx()
+                                    .layer_id_at(position)
+                                    .is_some_and(|layer| layer.order == egui::Order::Foreground);
                             !button_response.rect.contains(position)
                                 && !prev_card_rect.contains(position)
                                 && !in_child_popup
-                        },
-                    );
+                        });
                 if clicked_outside {
                     active_qa = None;
                     last_active_time = 0.0;
@@ -8408,8 +8417,8 @@ impl CrosshairApp {
             self.video_library_preloaded_playback = None;
             let (sender, receiver) = crossbeam_channel::unbounded();
             self.video_library_delete_rx = Some(receiver);
-            self.status = Self::tr_lang(language, "Deleting video...", "Đang xóa video...")
-                .to_owned();
+            self.status =
+                Self::tr_lang(language, "Deleting video...", "Đang xóa video...").to_owned();
             std::thread::spawn(move || {
                 let mut last_error = None;
                 for _ in 0..40 {
@@ -8482,9 +8491,10 @@ impl CrosshairApp {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if self.video_library_preview_rx.is_some()
             || self.video_library_delete_rx.is_some()
-            || self.video_library_copy_feedback.as_ref().is_some_and(|(_, at)| {
-                at.elapsed() < Duration::from_secs(2)
-            })
+            || self
+                .video_library_copy_feedback
+                .as_ref()
+                .is_some_and(|(_, at)| at.elapsed() < Duration::from_secs(2))
             || !self.video_library_thumbnail_jobs.is_empty()
             || crate::video_recorder::is_editing()
         {
@@ -14626,16 +14636,14 @@ impl eframe::App for CrosshairApp {
                         if entry.code_module.eq_ignore_ascii_case(&code_module)
                             && entry.code_offset == code_offset
                         {
-                            entry.runtime_address = captured_address
-                                .checked_add_signed(entry.code_address_offset);
+                            entry.runtime_address =
+                                captured_address.checked_add_signed(entry.code_address_offset);
                             entry.runtime_process_id = Some(pid);
                             resolved += usize::from(entry.runtime_address.is_some());
                         }
                     }
                     if resolved != 0 {
-                        crate::overlay::set_memory_pointer_entries(
-                            &self.state.memory_pointer_list,
-                        );
+                        crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
                         self.persist();
                         self.status = format!("Rebound {resolved} tracked memory address(es)");
                     }
@@ -15667,6 +15675,31 @@ impl eframe::App for CrosshairApp {
             }
         }
 
+        if let Some(job) = &self.frida_download_job
+            && job.is_finished()
+        {
+            let job = self.frida_download_job.take().unwrap();
+            match job.join() {
+                Ok(Ok(())) => {
+                    self.frida_installed = true;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Frida tool installed successfully.",
+                        "Đã cài đặt công cụ Frida.",
+                    )
+                    .to_owned();
+                }
+                Ok(Err(error)) => {
+                    self.status = format!("Frida download failed: {error}");
+                    let _ = fs::remove_file(&self.paths.frida_helper_exe);
+                    let _ = fs::remove_file(&self.paths.frida_helper_zip);
+                }
+                Err(_) => {
+                    self.status = "Frida download thread panicked.".to_owned();
+                }
+            }
+        }
+
         if let Some(job) = &self.ocr_download_job {
             if job.is_finished() {
                 let job = self.ocr_download_job.take().unwrap();
@@ -15687,6 +15720,7 @@ impl eframe::App for CrosshairApp {
         self.poll_mouse_tool_jobs();
 
         if self.ffmpeg_download_job.is_some()
+            || self.frida_download_job.is_some()
             || self.arduino_download_job.is_some()
             || self.interception_download_job.is_some()
             || self.interception_install_job.is_some()

@@ -339,6 +339,9 @@ impl NetworkPanelState {
         }
     }
 
+    pub(crate) fn detach_frida(&mut self) {
+        self.frida_session.take();
+    }
 }
 
 #[derive(Clone)]
@@ -984,17 +987,16 @@ fn mitm_connection(
         .push(ExtendedKeyUsagePurpose::ServerAuth);
     let leaf = params.signed_by(&leaf_key, &issuer).map_err(io_other)?;
     let ca = CertificateDer::from_pem_slice(mitm.cert_pem.as_bytes()).map_err(io_other)?;
-    let config = ServerConfig::builder_with_provider(
-        rustls::crypto::ring::default_provider().into(),
-    )
-        .with_safe_default_protocol_versions()
-        .map_err(io_other)?
-        .with_no_client_auth()
-        .with_single_cert(
-            vec![CertificateDer::from(leaf.der().to_vec()), ca],
-            PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der())),
-        )
-        .map_err(io_other)?;
+    let config =
+        ServerConfig::builder_with_provider(rustls::crypto::ring::default_provider().into())
+            .with_safe_default_protocol_versions()
+            .map_err(io_other)?
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![CertificateDer::from(leaf.der().to_vec()), ca],
+                PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(leaf_key.serialize_der())),
+            )
+            .map_err(io_other)?;
     let mut downstream = StreamOwned::new(
         ServerConnection::new(Arc::new(config)).map_err(io_other)?,
         client,
@@ -1032,8 +1034,7 @@ fn mitm_connection(
         .position(|window| window == b"\r\n\r\n")
         .map(|position| position + 4)
         .unwrap_or(response.len());
-    let response_headers =
-        String::from_utf8_lossy(&response[..response_header_end]).into_owned();
+    let response_headers = String::from_utf8_lossy(&response[..response_header_end]).into_owned();
     let switching_protocols = response_headers
         .lines()
         .next()
@@ -1325,7 +1326,11 @@ impl CrosshairApp {
         }
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new(self.tr("Network", "Network")).strong().size(17.0));
+            ui.label(
+                RichText::new(self.tr("Network", "Network"))
+                    .strong()
+                    .size(17.0),
+            );
             ui.separator();
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -1343,7 +1348,10 @@ impl CrosshairApp {
                     self.network_panel.host_activity.clear();
                     self.network_panel.selected_id = None;
                 }
-                if ui.button(self.tr("Restore proxy", "Restore proxy")).clicked() {
+                if ui
+                    .button(self.tr("Restore proxy", "Restore proxy"))
+                    .clicked()
+                {
                     self.network_panel.restore_proxy();
                 }
                 if running {
@@ -1367,7 +1375,10 @@ impl CrosshairApp {
             if self.network_panel.status.contains("failed")
                 || self.network_panel.status.contains("error")
             {
-                if ui.small_button(self.tr("Copy error", "Copy error")).clicked() {
+                if ui
+                    .small_button(self.tr("Copy error", "Copy error"))
+                    .clicked()
+                {
                     ui.ctx().copy_text(self.network_panel.status.clone());
                 }
             }
@@ -1390,19 +1401,34 @@ impl CrosshairApp {
                 ui.ctx().copy_text(self.network_panel.bind_address.clone());
             }
             ui.separator();
-            if ui.add_enabled(!self.network_panel.ca_installed, egui::Button::new(self.tr("Install CA", "Install CA"))).clicked() {
+            if ui
+                .add_enabled(
+                    !self.network_panel.ca_installed,
+                    egui::Button::new(self.tr("Install CA", "Install CA")),
+                )
+                .clicked()
+            {
                 self.network_panel.install_ca();
             }
-            if ui.add_enabled(self.network_panel.ca_installed, egui::Button::new(self.tr("Remove CA", "Remove CA"))).clicked() {
+            if ui
+                .add_enabled(
+                    self.network_panel.ca_installed,
+                    egui::Button::new(self.tr("Remove CA", "Remove CA")),
+                )
+                .clicked()
+            {
                 self.network_panel.remove_ca();
                 self.state.network_decrypt_https = false;
                 self.persist_deferred(ui.ctx());
             }
             let decrypt_label = self.tr("Decrypt HTTPS", "Decrypt HTTPS");
-            if ui.add_enabled(
-                !running && self.network_panel.ca_installed,
-                egui::Checkbox::new(&mut self.network_panel.decrypt_https, decrypt_label),
-            ).changed() {
+            if ui
+                .add_enabled(
+                    !running && self.network_panel.ca_installed,
+                    egui::Checkbox::new(&mut self.network_panel.decrypt_https, decrypt_label),
+                )
+                .changed()
+            {
                 self.state.network_decrypt_https = self.network_panel.decrypt_https;
                 self.persist_deferred(ui.ctx());
             }
@@ -1426,6 +1452,15 @@ impl CrosshairApp {
         ui.group(|ui| {
             ui.label(RichText::new(self.tr("Frida injection (certificate pinning only)", "Frida injection (certificate pinning only)")).strong());
             ui.label(RichText::new(self.tr("Attaching Frida alone does not bypass TLS. Use this only with a hook script for the target app's TLS stack.", "Attaching Frida alone does not bypass TLS. Use this only with a hook script for the target app's TLS stack.")).small().weak());
+            if !self.frida_installed {
+                ui.label(
+                    RichText::new(self.tr(
+                        "Frida is not installed. Install Network Injection (Frida) in Settings > Downloaded Tools.",
+                        "Frida chưa được cài đặt. Hãy cài Network Injection (Frida) trong Cài đặt > Công cụ đã tải.",
+                    ))
+                    .color(Color32::from_rgb(248, 214, 102)),
+                );
+            }
             let selected = self
                 .network_panel
                 .frida_pid
@@ -1487,7 +1522,7 @@ impl CrosshairApp {
                     }
                 } else if ui
                     .add_enabled(
-                        self.network_panel.frida_pid.is_some(),
+                        self.frida_installed && self.network_panel.frida_pid.is_some(),
                         egui::Button::new(self.tr("Attach Frida agent", "Attach Frida agent")),
                     )
                     .clicked()
@@ -1497,6 +1532,7 @@ impl CrosshairApp {
                     self.network_panel.status = format!("Attaching Frida to PID {pid}...");
                     self.network_panel.frida_session =
                         Some(crate::frida_injector::Session::attach(
+                            self.paths.frida_helper_exe.clone(),
                             pid,
                             self.network_panel.frida_script.clone(),
                         ));
@@ -1530,9 +1566,8 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.set_height(available.y);
-            let max_list_width =
-                (available.x - NETWORK_SPLITTER_WIDTH - NETWORK_DETAIL_MIN_WIDTH)
-                    .max(NETWORK_HOST_MIN_WIDTH);
+            let max_list_width = (available.x - NETWORK_SPLITTER_WIDTH - NETWORK_DETAIL_MIN_WIDTH)
+                .max(NETWORK_HOST_MIN_WIDTH);
             self.network_panel.host_pane_width = self
                 .network_panel
                 .host_pane_width
@@ -2035,12 +2070,7 @@ fn render_overview(ui: &mut egui::Ui, entry: &NetworkEntry) {
         });
 }
 
-fn render_contents(
-    ui: &mut egui::Ui,
-    entry: &NetworkEntry,
-    tab: ContentTab,
-    side: MessageSide,
-) {
+fn render_contents(ui: &mut egui::Ui, entry: &NetworkEntry, tab: ContentTab, side: MessageSide) {
     if entry.secure_tunnel && tab != ContentTab::Headers {
         ui.label(
             "No payload is available for this encrypted tunnel. Enable Decrypt HTTPS before capture.",
@@ -2207,6 +2237,22 @@ fn decode_chunked(body: &[u8]) -> Option<Vec<u8>> {
 fn render_json_data(ui: &mut egui::Ui, value: &serde_json::Value) {
     let mut rows = Vec::new();
     collect_json_rows(value, "", &mut rows);
+    ui.horizontal(|ui| {
+        if ui.button("📋 Sao chép JSON (Pretty)").clicked() {
+            if let Ok(pretty) = serde_json::to_string_pretty(value) {
+                ui.ctx().copy_text(pretty);
+            }
+        }
+        if ui.button("📋 Sao chép Bảng (TSV)").clicked() {
+            let text = rows
+                .iter()
+                .map(|(p, k, v)| format!("{p}\t{k}\t{v}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            ui.ctx().copy_text(text);
+        }
+    });
+    ui.add_space(4.0);
     if rows.len() == MAX_STRUCTURED_ROWS {
         ui.label(
             RichText::new("Showing the first 5,000 structured fields.")
@@ -2214,24 +2260,46 @@ fn render_json_data(ui: &mut egui::Ui, value: &serde_json::Value) {
                 .weak(),
         );
     }
-    egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-        egui::Grid::new("network-json-data")
-            .num_columns(3)
-            .striped(true)
-            .spacing([18.0, 4.0])
-            .show(ui, |ui| {
-                ui.label(RichText::new("Name / path").strong());
-                ui.label(RichText::new("Type").strong());
-                ui.label(RichText::new("Value").strong());
-                ui.end_row();
-                for (path, kind, value) in rows {
-                    ui.label(path);
-                    ui.label(kind);
-                    ui.label(value);
+    egui::ScrollArea::both()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            egui::Grid::new("network-json-data")
+                .num_columns(3)
+                .striped(true)
+                .spacing([18.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label(RichText::new("Name / path").strong());
+                    ui.label(RichText::new("Type").strong());
+                    ui.label(RichText::new("Value").strong());
                     ui.end_row();
-                }
-            });
-    });
+                    for (path, kind, value) in rows {
+                        let path_res = ui.label(&path);
+                        ui.label(kind);
+                        let val_res = ui.label(&value);
+                        path_res.context_menu(|ui| {
+                            if ui.button("Sao chép Đường dẫn (Path)").clicked() {
+                                ui.ctx().copy_text(path.clone());
+                                ui.close();
+                            }
+                            if ui.button("Sao chép Giá trị").clicked() {
+                                ui.ctx().copy_text(value.clone());
+                                ui.close();
+                            }
+                        });
+                        val_res.context_menu(|ui| {
+                            if ui.button("Sao chép Giá trị").clicked() {
+                                ui.ctx().copy_text(value.clone());
+                                ui.close();
+                            }
+                            if ui.button("Sao chép Đường dẫn (Path)").clicked() {
+                                ui.ctx().copy_text(path.clone());
+                                ui.close();
+                            }
+                        });
+                        ui.end_row();
+                    }
+                });
+        });
 }
 
 fn collect_json_rows(
@@ -2285,21 +2353,45 @@ fn collect_json_rows(
 }
 
 fn readonly_text(ui: &mut egui::Ui, mut text: String) {
+    ui.horizontal(|ui| {
+        if ui
+            .button("📋 Sao chép toàn bộ nội dung (Copy All)")
+            .clicked()
+        {
+            ui.ctx().copy_text(text.clone());
+        }
+        ui.label(
+            RichText::new("(Có thể bôi đen văn bản bên dưới và bấm Ctrl+C để sao chép từng phần)")
+                .small()
+                .weak(),
+        );
+    });
+    ui.add_space(4.0);
     let available_width = ui.available_width().max(1.0);
     ui.add(
         egui::TextEdit::multiline(&mut text)
             .code_editor()
             .desired_width(available_width)
-            .desired_rows(18)
-            .interactive(false),
+            .desired_rows(18),
     );
 }
 
 fn render_pairs(ui: &mut egui::Ui, pairs: Vec<(String, String)>) {
     if pairs.is_empty() {
-        ui.label("No values");
+        ui.label("Không có dữ liệu");
         return;
     }
+    ui.horizontal(|ui| {
+        if ui.button("📋 Sao chép danh sách").clicked() {
+            let joined = pairs
+                .iter()
+                .map(|(k, v)| format!("{k}: {v}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            ui.ctx().copy_text(joined);
+        }
+    });
+    ui.add_space(4.0);
     egui::Grid::new("network-content-pairs")
         .num_columns(2)
         .striped(true)
@@ -2308,8 +2400,36 @@ fn render_pairs(ui: &mut egui::Ui, pairs: Vec<(String, String)>) {
             ui.label(RichText::new("Value").strong());
             ui.end_row();
             for (name, value) in pairs {
-                ui.label(name);
-                ui.label(value);
+                let name_label = ui.label(&name);
+                let val_label = ui.label(&value);
+                name_label.context_menu(|ui| {
+                    if ui.button("Sao chép Tên").clicked() {
+                        ui.ctx().copy_text(name.clone());
+                        ui.close();
+                    }
+                    if ui.button("Sao chép Giá trị").clicked() {
+                        ui.ctx().copy_text(value.clone());
+                        ui.close();
+                    }
+                    if ui.button("Sao chép cặp Tên: Giá trị").clicked() {
+                        ui.ctx().copy_text(format!("{name}: {value}"));
+                        ui.close();
+                    }
+                });
+                val_label.context_menu(|ui| {
+                    if ui.button("Sao chép Giá trị").clicked() {
+                        ui.ctx().copy_text(value.clone());
+                        ui.close();
+                    }
+                    if ui.button("Sao chép Tên").clicked() {
+                        ui.ctx().copy_text(name.clone());
+                        ui.close();
+                    }
+                    if ui.button("Sao chép cặp Tên: Giá trị").clicked() {
+                        ui.ctx().copy_text(format!("{name}: {value}"));
+                        ui.close();
+                    }
+                });
                 ui.end_row();
             }
         });

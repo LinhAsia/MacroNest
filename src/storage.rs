@@ -36,6 +36,8 @@ pub struct AppPaths {
     pub opencv_videoio_ffmpeg_dll: PathBuf,
     pub ffmpeg_exe: PathBuf,
     pub ffmpeg_zip: PathBuf,
+    pub frida_helper_exe: PathBuf,
+    pub frida_helper_zip: PathBuf,
     pub interception_dll: PathBuf,
     pub arduino_tools_zip: PathBuf,
     pub avrdude_exe: PathBuf,
@@ -75,6 +77,8 @@ impl AppPaths {
         let opencv_videoio_ffmpeg_dll = bin_dir.join("opencv_videoio_ffmpeg4100_64.dll");
         let ffmpeg_exe = bin_dir.join("ffmpeg.exe");
         let ffmpeg_zip = bin_dir.join("ffmpeg.exe.zip");
+        let frida_helper_exe = bin_dir.join("frida-helper.exe");
+        let frida_helper_zip = bin_dir.join("frida-helper.exe.zip");
         let interception_dll = bin_dir.join("interception.dll");
         let arduino_tools_zip = bin_dir.join("arduino_tools.zip");
         let avrdude_exe = bin_dir.join("avrdude.exe");
@@ -102,6 +106,8 @@ impl AppPaths {
             opencv_videoio_ffmpeg_dll,
             ffmpeg_exe,
             ffmpeg_zip,
+            frida_helper_exe,
+            frida_helper_zip,
             interception_dll,
             arduino_tools_zip,
             avrdude_exe,

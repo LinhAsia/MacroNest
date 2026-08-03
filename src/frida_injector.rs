@@ -1,6 +1,16 @@
 use crossbeam_channel::{Receiver, Sender, unbounded};
-use frida::{DeviceManager, Frida, Message, ScriptHandler, ScriptOption};
-use std::thread::{self, JoinHandle};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+use std::{
+    io::{BufRead, BufReader, Write},
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::{self, JoinHandle},
+};
 
 pub(crate) const DEFAULT_NETWORK_SCRIPT: &str = r#"
 'use strict';
@@ -48,7 +58,6 @@ function attach(moduleName, name, callbacks) {
     return true;
 }
 
-// WinHTTP: used by many native Windows applications.
 attach('winhttp.dll', 'WinHttpConnect', {
     onEnter(args) { this.host = wide(args[1]); this.port = args[2].toUInt32(); },
     onLeave(retval) { if (!retval.isNull()) requests.set(retval.toString(), { host: this.host + ':' + this.port }); }
@@ -72,7 +81,6 @@ attach('winhttp.dll', 'WinHttpSendRequest', {
     }
 });
 
-// WinINet: used by older/native desktop applications.
 attach('wininet.dll', 'HttpOpenRequestW', {
     onEnter(args) { this.method = wide(args[1]) || 'GET'; this.path = wide(args[2]) || '/'; },
     onLeave(retval) {
@@ -89,7 +97,6 @@ attach('wininet.dll', 'HttpSendRequestW', {
     }
 });
 
-// OpenSSL/BoringSSL when the process exports its SSL API. Data here is plaintext.
 for (const module of Process.enumerateModules()) {
     for (const name of ['SSL_write', 'SSL_write_ex']) {
         const address = module.findExportByName(name);
@@ -118,104 +125,106 @@ pub(crate) enum Event {
     Log(String),
 }
 
-struct Handler(Sender<Event>);
-
-impl ScriptHandler for Handler {
-    fn on_message(&mut self, message: Message, _data: Option<Vec<u8>>) {
-        let text = match message {
-            Message::Log(value) => value.payload,
-            Message::Error(value) => format!("{}\n{}", value.description, value.stack),
-            other => format!("{other:?}"),
-        };
-        let _ = self.0.send(Event::Log(text));
-    }
-}
-
 pub(crate) struct Session {
-    stop: Sender<()>,
     pub(crate) events: Receiver<Event>,
+    child: Arc<Mutex<Option<Child>>>,
+    stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
 }
 
 impl Session {
-    pub(crate) fn attach(pid: u32, source: String) -> Self {
+    pub(crate) fn attach(helper: PathBuf, pid: u32, source: String) -> Self {
         let (events_tx, events) = unbounded();
-        let (stop, stop_rx) = unbounded();
+        let child = Arc::new(Mutex::new(None));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_child = Arc::clone(&child);
+        let worker_stop = Arc::clone(&stop);
         let worker = thread::spawn(move || {
-            if let Err(error) = run(pid, &source, &events_tx, &stop_rx) {
+            if let Err(error) = run(helper, pid, source, &events_tx, &worker_child, &worker_stop) {
                 let _ = events_tx.send(Event::Status(format!("Frida error: {error}")));
             }
         });
         Self {
-            stop,
             events,
+            child,
+            stop,
             worker: Some(worker),
         }
     }
 }
 
-fn run(pid: u32, source: &str, events: &Sender<Event>, stop: &Receiver<()>) -> Result<(), String> {
-    verify_attach_access(pid)?;
-    let frida = unsafe { Frida::obtain() };
-    let manager = DeviceManager::obtain(&frida);
-    let device = manager
-        .get_local_device()
-        .map_err(|error| format!("local device: {error}"))?;
-    let session = device
-        .attach(pid)
-        .map_err(|error| format!("attach PID {pid}: {error}. The process may block injection; try its grouped window entry or run MacroNest as administrator"))?;
-    let mut script = session
-        .create_script(source, &mut ScriptOption::default())
-        .map_err(|error| format!("create script: {error}"))?;
-    script
-        .handle_message(Handler(events.clone()))
-        .map_err(|error| format!("message handler: {error}"))?;
-    script
-        .load()
-        .map_err(|error| format!("load script: {error}"))?;
-    let _ = events.send(Event::Status(format!("Frida attached to PID {pid}")));
-    let _ = stop.recv();
-    let _ = script.unload();
-    let _ = session.detach();
-    Ok(())
-}
-
-#[cfg(windows)]
-fn verify_attach_access(pid: u32) -> Result<(), String> {
-    use windows_sys::Win32::{
-        Foundation::CloseHandle,
-        System::Threading::{
-            OpenProcess, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION,
-            PROCESS_VM_READ, PROCESS_VM_WRITE,
-        },
-    };
-    if pid == std::process::id() {
-        return Err("cannot inject Frida into MacroNest itself".to_owned());
+fn run(
+    helper: PathBuf,
+    pid: u32,
+    source: String,
+    events: &Sender<Event>,
+    child_slot: &Arc<Mutex<Option<Child>>>,
+    stop: &AtomicBool,
+) -> Result<(), String> {
+    if !helper.exists() {
+        return Err(
+            "Frida tool is not installed. Install it in Settings > Downloaded Tools.".into(),
+        );
     }
-    let handle = unsafe {
-        OpenProcess(
-            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE,
-            0,
-            pid,
+    let mut child = Command::new(&helper)
+        .arg(pid.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(0x0800_0000)
+        .spawn()
+        .map_err(|error| format!("start {}: {error}", helper.display()))?;
+    child
+        .stdin
+        .take()
+        .ok_or("Frida helper stdin unavailable")?
+        .write_all(source.as_bytes())
+        .map_err(|error| format!("send hook script: {error}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Frida helper stdout unavailable")?;
+    *child_slot
+        .lock()
+        .map_err(|_| "Frida helper lock poisoned")? = Some(child);
+    if stop.load(Ordering::SeqCst) {
+        if let Ok(mut slot) = child_slot.lock()
+            && let Some(child) = slot.as_mut()
+        {
+            let _ = child.kill();
+        }
+        return Ok(());
+    }
+    for line in BufReader::new(stdout).lines() {
+        let line = line.map_err(|error| format!("read helper output: {error}"))?;
+        let Some((kind, value)) = line.split_once('\t') else {
+            continue;
+        };
+        let value = String::from_utf8(
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, value)
+                .map_err(|error| format!("decode helper output: {error}"))?,
         )
-    };
-    if handle.is_null() {
-        return Err(format!(
-            "Windows denied injection access to PID {pid}: {}. Run MacroNest at the same or higher privilege level",
-            std::io::Error::last_os_error()
-        ));
+        .map_err(|error| format!("helper returned invalid text: {error}"))?;
+        let event = if kind == "STATUS" {
+            Event::Status(value)
+        } else {
+            Event::Log(value)
+        };
+        let _ = events.send(event);
     }
-    unsafe { CloseHandle(handle) };
     Ok(())
 }
-
-#[cfg(not(windows))]
-fn verify_attach_access(_pid: u32) -> Result<(), String> { Ok(()) }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.stop.send(());
-        // ponytail: never join an injector from the UI thread; a target can stall Frida indefinitely.
+        self.stop.store(true, Ordering::SeqCst);
+        if let Ok(mut slot) = self.child.lock()
+            && let Some(child) = slot.as_mut()
+        {
+            let _ = child.kill();
+        }
+        // ponytail: never join a helper from the UI thread; a target can stall Frida indefinitely.
         self.worker.take();
     }
 }

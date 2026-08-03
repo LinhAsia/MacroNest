@@ -30790,6 +30790,11 @@ mod windows_overlay {
                         if !candidates.contains(&data_address) {
                             candidates.push(data_address);
                         }
+                match event {
+                    WatchEvent::AccessHit { data_address } => {
+                        if !candidates.contains(&data_address) {
+                            candidates.push(data_address);
+                        }
                     }
                     WatchEvent::Error(_) | WatchEvent::Stopped => break,
                     _ => {}
@@ -30797,7 +30802,8 @@ mod windows_overlay {
             }
             drop(watch);
             let mut best_candidate = None;
-            for data_address in candidates {
+            for data_address in &candidates {
+                let data_address = *data_address;
                 for pointer in &tracked_entries {
                     let score = if pointer.tracked_signature.trim().is_empty() {
                         usize::from(tracked_field_matches(pid, data_address, pointer))
@@ -30817,28 +30823,61 @@ mod windows_overlay {
                     }
                 }
             }
+            if best_candidate.is_none() || best_candidate.map_or(0, |(_, s)| s) == 0 {
+                if candidates.len() == 1 {
+                    best_candidate = Some((candidates[0], 1));
+                } else if !candidates.is_empty() {
+                    for data_address in &candidates {
+                        let data_address = *data_address;
+                        for pointer in &tracked_entries {
+                            if let Some(target_addr) = data_address.checked_add_signed(pointer.code_address_offset) {
+                                let value_type = match pointer.value_type.to_ascii_lowercase().as_str() {
+                                    "i8" => crate::process_memory::ScanValueType::I8,
+                                    "i16" => crate::process_memory::ScanValueType::I16,
+                                    "i32" => crate::process_memory::ScanValueType::I32,
+                                    "f32" => crate::process_memory::ScanValueType::F32,
+                                    "i64" => crate::process_memory::ScanValueType::I64,
+                                    "f64" => crate::process_memory::ScanValueType::F64,
+                                    _ => crate::process_memory::ScanValueType::F32,
+                                };
+                                if crate::process_memory::read_scan_value(pid, target_addr, value_type).is_ok() {
+                                    best_candidate = Some((data_address, 1));
+                                    break;
+                                }
+                            }
+                        }
+                        if best_candidate.is_some() {
+                            break;
+                        }
+                    }
+                }
+            }
             if let Some((data_address, score)) = best_candidate
                 && score > 0
             {
-                        for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
-                            if pointer.code_module.eq_ignore_ascii_case(&code.module)
-                                && pointer.code_offset == code.offset
-                            {
-                                pointer.runtime_address = data_address
-                                    .checked_add_signed(pointer.code_address_offset);
-                                pointer.runtime_process_id = Some(pid);
-                            }
-                        }
-                        send_ui_command(UiCommand::MemoryTrackedCodeResolved {
-                            pid,
-                            code_module: code.module.clone(),
-                            code_offset: code.offset,
-                            captured_address: data_address,
-                        });
-                        MEMORY_TRACKED_REBINDS.lock().remove(&key);
-                        return;
+                for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
+                    if pointer.code_module.eq_ignore_ascii_case(&code.module)
+                        && pointer.code_offset == code.offset
+                    {
+                        pointer.runtime_address = data_address
+                            .checked_add_signed(pointer.code_address_offset);
+                        pointer.runtime_process_id = Some(pid);
+                    }
+                }
+                send_ui_command(UiCommand::MemoryTrackedCodeResolved {
+                    pid,
+                    code_module: code.module.clone(),
+                    code_offset: code.offset,
+                    captured_address: data_address,
+                });
+                MEMORY_TRACKED_REBINDS.lock().remove(&key);
+                return;
             }
-            MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+            if candidates.is_empty() {
+                MEMORY_TRACKED_REBINDS.lock().remove(&key);
+            } else {
+                MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+            }
         });
     }
 
@@ -30853,8 +30892,21 @@ mod windows_overlay {
                 .cloned()?;
             if !entry.code_module.is_empty() {
                 let pid = pid?;
-                if entry.runtime_process_id == Some(pid) {
-                    return Some((pid, entry.runtime_address?));
+                if entry.runtime_process_id == Some(pid)
+                    && let Some(address) = entry.runtime_address
+                {
+                    let value_type = match entry.value_type.to_ascii_lowercase().as_str() {
+                        "i8" => crate::process_memory::ScanValueType::I8,
+                        "i16" => crate::process_memory::ScanValueType::I16,
+                        "i32" => crate::process_memory::ScanValueType::I32,
+                        "f32" => crate::process_memory::ScanValueType::F32,
+                        "i64" => crate::process_memory::ScanValueType::I64,
+                        "f64" => crate::process_memory::ScanValueType::F64,
+                        _ => crate::process_memory::ScanValueType::F32,
+                    };
+                    if crate::process_memory::read_scan_value(pid, address, value_type).is_ok() {
+                        return Some((pid, address));
+                    }
                 }
                 schedule_memory_tracked_rebind(pid, &entry);
                 return None;
