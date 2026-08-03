@@ -8515,19 +8515,31 @@ fn instruction_memory_displacement(instruction: &str) -> isize {
 fn tracked_object_signature(pid: u32, captured_address: usize, instruction: &str) -> Option<String> {
     let displacement = instruction_memory_displacement(instruction);
     let object_base = captured_address.checked_add_signed(-displacement)?;
-    let object_pointer = match process_pointer_width(pid).ok()? {
-        4 => match read_scan_value(pid, object_base, ScanValueType::I32).ok()? {
-            ScanValue::I32(value) => value as u32 as usize,
+    let pointer_width = process_pointer_width(pid).ok()?;
+    let modules = process_modules(pid).ok()?;
+    let mut parts = Vec::new();
+    for slot in (0..0x200usize).step_by(pointer_width) {
+        let pointer = match pointer_width {
+            4 => match read_scan_value(pid, object_base.checked_add(slot)?, ScanValueType::I32) {
+                Ok(ScanValue::I32(value)) => value as u32 as usize,
+                _ => continue,
+            },
+            8 => match read_scan_value(pid, object_base.checked_add(slot)?, ScanValueType::I64) {
+                Ok(ScanValue::I64(value)) => value as usize,
+                _ => continue,
+            },
             _ => return None,
-        },
-        8 => match read_scan_value(pid, object_base, ScanValueType::I64).ok()? {
-            ScanValue::I64(value) => value as usize,
-            _ => return None,
-        },
-        _ => return None,
-    };
-    let (module, offset) = module_offset_for_address(pid, object_pointer).ok()?;
-    Some(format!("{module}+{offset:X}"))
+        };
+        if let Some((module, base, _size)) = modules.iter().find(|(_, base, size)| {
+            (*base..base.saturating_add(*size)).contains(&pointer)
+        }) {
+            parts.push(format!("{slot:X}={module}+{:X}", pointer - *base));
+            if parts.len() == 3 {
+                break;
+            }
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(";"))
 }
 
 fn resolve_memory_address(

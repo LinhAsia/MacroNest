@@ -30603,32 +30603,59 @@ mod windows_overlay {
         let Some(object_base) = data_address.checked_add_signed(-displacement) else {
             return false;
         };
-        let object_pointer = match crate::memory_debugger::debugger::process_pointer_width(pid).ok() {
-            Some(4) => match crate::process_memory::read_scan_value(
-                pid,
-                object_base,
-                crate::process_memory::ScanValueType::I32,
-            ) {
-                Ok(crate::process_memory::ScanValue::I32(value)) => value as u32 as usize,
-                _ => return false,
-            },
-            Some(8) => match crate::process_memory::read_scan_value(
-                pid,
-                object_base,
-                crate::process_memory::ScanValueType::I64,
-            ) {
-                Ok(crate::process_memory::ScanValue::I64(value)) => value as usize,
-                _ => return false,
-            },
-            _ => return false,
-        };
-        let Ok((module, offset)) = crate::memory_debugger::debugger::module_offset_for_address(
-            pid,
-            object_pointer,
-        ) else {
+        let Some(pointer_width) = crate::memory_debugger::debugger::process_pointer_width(pid).ok()
+        else {
             return false;
         };
-        format!("{module}+{offset:X}").eq_ignore_ascii_case(entry.tracked_signature.trim())
+        let Ok(modules) = crate::memory_debugger::debugger::process_modules(pid) else {
+            return false;
+        };
+        entry.tracked_signature.split(';').all(|part| {
+            let Some((slot_text, root)) = part.split_once('=') else {
+                return false;
+            };
+            let Ok(slot) = usize::from_str_radix(slot_text, 16) else {
+                return false;
+            };
+            let Some((module_name, offset_text)) = root.rsplit_once('+') else {
+                return false;
+            };
+            let offset_text = offset_text
+                .strip_prefix("0x")
+                .or_else(|| offset_text.strip_prefix("0X"))
+                .unwrap_or(offset_text);
+            let Ok(module_offset) = usize::from_str_radix(offset_text, 16) else {
+                return false;
+            };
+            let Ok(pointer) = (match pointer_width {
+                4 => crate::process_memory::read_scan_value(
+                    pid,
+                    object_base.saturating_add(slot),
+                    crate::process_memory::ScanValueType::I32,
+                )
+                .map(|value| match value {
+                    crate::process_memory::ScanValue::I32(value) => value as u32 as usize,
+                    _ => 0,
+                }),
+                8 => crate::process_memory::read_scan_value(
+                    pid,
+                    object_base.saturating_add(slot),
+                    crate::process_memory::ScanValueType::I64,
+                )
+                .map(|value| match value {
+                    crate::process_memory::ScanValue::I64(value) => value as usize,
+                    _ => 0,
+                }),
+                _ => return false,
+            }) else {
+                return false;
+            };
+            modules.iter().any(|(name, base, size)| {
+                name.eq_ignore_ascii_case(module_name)
+                    && (*base..base.saturating_add(*size)).contains(&pointer)
+                    && pointer - *base == module_offset
+            })
+        })
     }
 
     fn schedule_memory_tracked_rebind(
