@@ -2568,6 +2568,7 @@ mod windows_overlay {
         active_geometry_preset_activation_order: Vec<(u32, usize)>,
         active_geometry_steps: HashMap<(u32, usize), crate::model::GeometrySpec>,
         rendered_geometry_steps: HashMap<(u32, usize), GeometryRenderShape>,
+        geometry_overlay_dirty: bool,
         active_geometry_steps_expires: HashMap<(u32, usize), Instant>,
         last_geometry_overlay_refresh_at: Option<Instant>,
         active_crosshair_expires: Option<Instant>,
@@ -2677,6 +2678,7 @@ mod windows_overlay {
                 active_geometry_preset_activation_order: Vec::new(),
                 active_geometry_steps: HashMap::new(),
                 rendered_geometry_steps: HashMap::new(),
+                geometry_overlay_dirty: false,
                 active_geometry_steps_expires: HashMap::new(),
                 last_geometry_overlay_refresh_at: None,
                 active_crosshair_expires: None,
@@ -18029,7 +18031,12 @@ mod windows_overlay {
             return 16;
         }
 
-        if !HOOK_STATE.lock().active_geometry_steps.is_empty() {
+        let timed_geometry_active = {
+            let hook_state = HOOK_STATE.lock();
+            !hook_state.active_geometry_steps_expires.is_empty()
+                || !hook_state.active_geometry_preset_owner_expires.is_empty()
+        };
+        if timed_geometry_active {
             return 16;
         }
 
@@ -31057,7 +31064,6 @@ mod windows_overlay {
             set_variable_value(target_var, 0.0);
             TEXT_VARIABLES.lock().remove(target_var);
         }
-        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
     fn execute_write_memory_action_step(step: &MacroStep) {
@@ -34636,12 +34642,12 @@ mod windows_overlay {
     }
 
     fn geometry_overlay_dynamic_shapes(hook_state: &mut HookState) -> Vec<GeometryRenderShape> {
-        let mut shapes = Vec::new();
-        for spec in hook_state.active_geometry_steps.values() {
-            if let Some(shape) = geometry_render_shape_from_spec(spec) {
-                shapes.push(shape);
-            }
-        }
+        let mut shapes = hook_state
+            .rendered_geometry_steps
+            .iter()
+            .filter(|(key, _)| hook_state.active_geometry_steps.contains_key(key))
+            .map(|(_, shape)| shape.clone())
+            .collect::<Vec<_>>();
         if let Some(spec) = &hook_state.preview_geometry_spec
             && let Some(shape) = geometry_render_shape_from_spec(spec)
         {
@@ -34663,90 +34669,6 @@ mod windows_overlay {
             Duration::from_millis(33)
         } else {
             Duration::from_millis(16)
-        }
-    }
-
-    fn geometry_shape_motion_threshold(shape: &GeometryRenderShape) -> i32 {
-        match &shape.draw {
-            GeometryRenderDraw::Line { x1, y1, x2, y2, .. }
-            | GeometryRenderDraw::Arrow { x1, y1, x2, y2, .. } => {
-                let dx = (*x2 - *x1) as f32;
-                let dy = (*y2 - *y1) as f32;
-                let length = (dx * dx + dy * dy).sqrt();
-                if length > 900.0 {
-                    10
-                } else if length > 600.0 {
-                    8
-                } else if length > 350.0 {
-                    6
-                } else if length > 180.0 {
-                    4
-                } else {
-                    2
-                }
-            }
-            _ => 2,
-        }
-    }
-
-    fn geometry_shape_motion_delta(
-        previous: &GeometryRenderShape,
-        current: &GeometryRenderShape,
-    ) -> i32 {
-        match (&previous.draw, &current.draw) {
-            (
-                GeometryRenderDraw::Line {
-                    x1: px1,
-                    y1: py1,
-                    x2: px2,
-                    y2: py2,
-                    ..
-                },
-                GeometryRenderDraw::Line {
-                    x1: cx1,
-                    y1: cy1,
-                    x2: cx2,
-                    y2: cy2,
-                    ..
-                },
-            )
-            | (
-                GeometryRenderDraw::Arrow {
-                    x1: px1,
-                    y1: py1,
-                    x2: px2,
-                    y2: py2,
-                    ..
-                },
-                GeometryRenderDraw::Arrow {
-                    x1: cx1,
-                    y1: cy1,
-                    x2: cx2,
-                    y2: cy2,
-                    ..
-                },
-            ) => [
-                (cx1 - px1).abs(),
-                (cy1 - py1).abs(),
-                (cx2 - px2).abs(),
-                (cy2 - py2).abs(),
-            ]
-            .into_iter()
-            .max()
-            .unwrap_or(0),
-            _ => {
-                let (pl, pt, pr, pb) = previous.bounds;
-                let (cl, ct, cr, cb) = current.bounds;
-                [
-                    (cl - pl).abs(),
-                    (ct - pt).abs(),
-                    (cr - pr).abs(),
-                    (cb - pb).abs(),
-                ]
-                .into_iter()
-                .max()
-                .unwrap_or(0)
-            }
         }
     }
 
@@ -36088,31 +36010,35 @@ mod windows_overlay {
 
             if spec_changed {
                 hook_state.active_geometry_steps.insert(key, spec.clone());
-                let current_shape = geometry_render_shape_from_spec(spec);
-                let now = Instant::now();
-                if let Some(shape) = current_shape {
-                    let refresh_interval = geometry_shape_refresh_interval(&shape);
-                    let movement_threshold = geometry_shape_motion_threshold(&shape);
-                    let motion_delta = hook_state
-                        .rendered_geometry_steps
-                        .get(&key)
-                        .map(|previous| geometry_shape_motion_delta(previous, &shape))
-                        .unwrap_or(i32::MAX);
-                    let interval_elapsed = hook_state
-                        .last_geometry_overlay_refresh_at
-                        .is_none_or(|last| now.duration_since(last) >= refresh_interval);
-                    should_refresh = interval_elapsed || motion_delta >= movement_threshold;
-                    if should_refresh {
-                        hook_state.last_geometry_overlay_refresh_at = Some(now);
-                        hook_state.rendered_geometry_steps.insert(key, shape);
-                    }
+            }
+
+            let current_shape = geometry_render_shape_from_spec(spec);
+            let shape_changed = match (&current_shape, hook_state.rendered_geometry_steps.get(&key)) {
+                (Some(current), Some(rendered)) => current != rendered,
+                (Some(_), None) | (None, Some(_)) => true,
+                (None, None) => false,
+            };
+            if shape_changed {
+                if let Some(shape) = current_shape.clone() {
+                    hook_state.rendered_geometry_steps.insert(key, shape);
                 } else {
-                    should_refresh = hook_state
-                        .last_geometry_overlay_refresh_at
-                        .is_none_or(|last| now.duration_since(last) >= Duration::from_millis(16));
-                    if should_refresh {
-                        hook_state.last_geometry_overlay_refresh_at = Some(now);
-                    }
+                    hook_state.rendered_geometry_steps.remove(&key);
+                }
+                hook_state.geometry_overlay_dirty = true;
+            }
+
+            if hook_state.geometry_overlay_dirty {
+                let now = Instant::now();
+                let refresh_interval = current_shape
+                    .as_ref()
+                    .map(geometry_shape_refresh_interval)
+                    .unwrap_or(Duration::from_millis(16));
+                should_refresh = hook_state
+                    .last_geometry_overlay_refresh_at
+                    .is_none_or(|last| now.duration_since(last) >= refresh_interval);
+                if should_refresh {
+                    hook_state.last_geometry_overlay_refresh_at = Some(now);
+                    hook_state.geometry_overlay_dirty = false;
                 }
             }
         }
@@ -36131,6 +36057,7 @@ mod windows_overlay {
             hook_state.active_geometry_preset_activation_order.clear();
             hook_state.active_geometry_steps.clear();
             hook_state.rendered_geometry_steps.clear();
+            hook_state.geometry_overlay_dirty = false;
             hook_state.active_geometry_steps_expires.clear();
             hook_state.last_geometry_overlay_refresh_at = None;
         }
