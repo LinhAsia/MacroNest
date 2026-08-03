@@ -30577,7 +30577,7 @@ mod windows_overlay {
             }
 
             let (tx, rx) = std::sync::mpsc::channel();
-            let Ok(mut watch) = AccessWatch::start(
+            let Ok(mut watch) = AccessWatch::start_once(
                 pid,
                 instruction_address,
                 MemoryDebuggerArchitecture::Auto,
@@ -30633,9 +30633,7 @@ mod windows_overlay {
                 if entry.runtime_process_id == Some(pid) {
                     return Some((pid, entry.runtime_address?));
                 }
-                // ponytail: attaching a debugger from a real-time macro action can terminate
-                // protected or timing-sensitive games. Rebinding stays an explicit Memory action
-                // until a non-debugger resolver is available.
+                schedule_memory_tracked_rebind(pid, &entry);
                 return None;
             }
             let pid = pid?;

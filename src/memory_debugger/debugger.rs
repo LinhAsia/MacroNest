@@ -330,6 +330,37 @@ impl AccessWatch {
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
+        Self::start_with_limit(
+            pid,
+            instruction_address,
+            architecture,
+            EXECUTE_CAPTURE_LIMIT,
+            notify,
+        )
+    }
+
+    pub fn start_once<F>(
+        pid: u32,
+        instruction_address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        Self::start_with_limit(pid, instruction_address, architecture, 1, notify)
+    }
+
+    fn start_with_limit<F>(
+        pid: u32,
+        instruction_address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        capture_limit: usize,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
         let target = target_architecture(pid, architecture)?;
         let instruction = decode_at(&Process::open(pid)?, instruction_address, target)?;
         WatchSession::start(
@@ -337,6 +368,7 @@ impl AccessWatch {
             WatchKind::Execute {
                 address: instruction_address,
                 instruction,
+                capture_limit,
             },
             architecture,
             notify,
@@ -359,6 +391,7 @@ enum WatchKind {
     Execute {
         address: usize,
         instruction: Instruction,
+        capture_limit: usize,
     },
 }
 
@@ -542,18 +575,25 @@ fn watch_loop<F>(
                                     }
                                 }
                             }
-                            WatchKind::Execute { instruction, .. } => {
+                            WatchKind::Execute {
+                                instruction,
+                                capture_limit,
+                                ..
+                            } => {
                                 if !capture_limit_reached
                                     && let Some(data_address) =
                                         effective_address(instruction, &context)
                                 {
-                                    notify(WatchEvent::AccessHit { data_address });
                                     access_hits += 1;
-                                    if access_hits >= EXECUTE_CAPTURE_LIMIT {
+                                    let should_stop = access_hits >= *capture_limit;
+                                    if should_stop {
                                         disarm_paused_threads(&threads, architecture);
                                         capture_limit_reached = true;
-                                        notify(WatchEvent::CaptureLimitReached(access_hits));
                                         stop.store(true, Ordering::Release);
+                                    }
+                                    notify(WatchEvent::AccessHit { data_address });
+                                    if should_stop {
+                                        notify(WatchEvent::CaptureLimitReached(access_hits));
                                     }
                                 }
                             }
