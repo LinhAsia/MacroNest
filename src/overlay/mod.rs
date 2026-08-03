@@ -290,7 +290,10 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(Vec::new()));
     static MEMORY_CODE_ENTRIES: Lazy<Mutex<Vec<crate::model::MemoryCodeEntry>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
-    static MEMORY_TRACKED_REBINDS: Lazy<Mutex<HashMap<(u32, String, usize), Instant>>> =
+    // One debugger attachment per process. Concurrent rebinds can stall or crash the target.
+    static MEMORY_TRACKED_REBINDS: Lazy<Mutex<HashMap<u32, Instant>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
+    static MEMORY_TRACKED_VALIDATIONS: Lazy<Mutex<HashMap<(u32, String), (Instant, usize, bool)>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
     static MEMORY_TRIGGER_EVENTS: Lazy<Mutex<Vec<HotkeyBinding>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
@@ -2297,6 +2300,7 @@ mod windows_overlay {
         SyncCrosshairProfiles(Vec<ProfileRecord>, String),
         MemoryTrackedCodeResolved {
             pid: u32,
+            alias_name: String,
             code_module: String,
             code_offset: usize,
             captured_address: usize,
@@ -7170,10 +7174,8 @@ mod windows_overlay {
     fn mouse_cursor_clip_rect(locks: MouseMoveLockCounts, anchor: POINT) -> RECT {
         let virtual_left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
         let virtual_top = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
-        let virtual_right =
-            virtual_left + unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) }.max(1);
-        let virtual_bottom =
-            virtual_top + unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) }.max(1);
+        let virtual_right = virtual_left + unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) }.max(1);
+        let virtual_bottom = virtual_top + unsafe { GetSystemMetrics(SM_CYVIRTUALSCREEN) }.max(1);
         let x = anchor.x.clamp(virtual_left, virtual_right - 1);
         let y = anchor.y.clamp(virtual_top, virtual_bottom - 1);
         RECT {
@@ -28128,11 +28130,7 @@ mod windows_overlay {
             }
 
             MacroAction::UnlockMouse => {
-                apply_unlock_mouse(
-                    Some(preset_id),
-                    None,
-                    mouse_move_lock_mask_from_step(step),
-                );
+                apply_unlock_mouse(Some(preset_id), None, mouse_move_lock_mask_from_step(step));
             }
 
             MacroAction::EnableMacroPreset => {
@@ -29689,12 +29687,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::LockMouse => {
-                    apply_lock_mouse(
-                        step,
-                        Some(preset_id),
-                        Some(run_token),
-                        step.unlock_on_exit,
-                    );
+                    apply_lock_mouse(step, Some(preset_id), Some(run_token), step.unlock_on_exit);
                 }
 
                 MacroAction::UnlockMouse => {
@@ -30550,14 +30543,20 @@ mod windows_overlay {
             crate::process_memory::ScanValue::I16(value) => expected.parse::<i16>() == Ok(value),
             crate::process_memory::ScanValue::I32(value) => expected.parse::<i32>() == Ok(value),
             crate::process_memory::ScanValue::I64(value) => expected.parse::<i64>() == Ok(value),
-            crate::process_memory::ScanValue::F32(value) => expected.parse::<f32>().is_ok_and(|expected| {
-                value.is_finite() && expected.is_finite()
-                    && (value - expected).abs() <= expected.abs().max(1.0) * 0.01
-            }),
-            crate::process_memory::ScanValue::F64(value) => expected.parse::<f64>().is_ok_and(|expected| {
-                value.is_finite() && expected.is_finite()
-                    && (value - expected).abs() <= expected.abs().max(1.0) * 0.01
-            }),
+            crate::process_memory::ScanValue::F32(value) => {
+                expected.parse::<f32>().is_ok_and(|expected| {
+                    value.is_finite()
+                        && expected.is_finite()
+                        && (value - expected).abs() <= expected.abs().max(1.0) * 0.01
+                })
+            }
+            crate::process_memory::ScanValue::F64(value) => {
+                expected.parse::<f64>().is_ok_and(|expected| {
+                    value.is_finite()
+                        && expected.is_finite()
+                        && (value - expected).abs() <= expected.abs().max(1.0) * 0.01
+                })
+            }
         }
     }
 
@@ -30569,23 +30568,30 @@ mod windows_overlay {
             return 0;
         };
         let expression = &instruction[open + 1..open + 1 + close];
-        let Some((index, negative)) = expression
-            .char_indices()
-            .rev()
-            .find_map(|(index, character)| match character {
-                '+' => Some((index, false)),
-                '-' => Some((index, true)),
-                _ => None,
-            })
+        let Some((index, negative)) =
+            expression
+                .char_indices()
+                .rev()
+                .find_map(|(index, character)| match character {
+                    '+' => Some((index, false)),
+                    '-' => Some((index, true)),
+                    _ => None,
+                })
         else {
             return 0;
         };
         let mut digits = expression[index + 1..].trim();
-        if let Some(stripped) = digits.strip_suffix('h').or_else(|| digits.strip_suffix('H')) {
+        if let Some(stripped) = digits
+            .strip_suffix('h')
+            .or_else(|| digits.strip_suffix('H'))
+        {
             digits = stripped;
         }
         let Ok(value) = isize::from_str_radix(
-            digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X")).unwrap_or(digits),
+            digits
+                .strip_prefix("0x")
+                .or_else(|| digits.strip_prefix("0X"))
+                .unwrap_or(digits),
             16,
         ) else {
             return 0;
@@ -30646,9 +30652,7 @@ mod windows_overlay {
                     )
                     .ok()
                     .and_then(|value| match value {
-                        crate::process_memory::ScanValue::I32(value) => {
-                            Some(value as u32 as usize)
-                        }
+                        crate::process_memory::ScanValue::I32(value) => Some(value as u32 as usize),
                         _ => None,
                     }),
                     8 => crate::process_memory::read_scan_value(
@@ -30691,31 +30695,122 @@ mod windows_overlay {
         total > 0 && matched == total
     }
 
-    fn schedule_memory_tracked_rebind(
+    fn only_candidate(candidates: &[usize]) -> Option<usize> {
+        match candidates {
+            [candidate] => Some(*candidate),
+            _ => None,
+        }
+    }
+
+    fn tracked_runtime_address_matches(
         pid: u32,
+        address: usize,
         entry: &crate::model::MemoryPointerEntry,
-    ) {
+    ) -> bool {
+        if entry.runtime_process_id != Some(pid) {
+            return false;
+        }
+        let key = (pid, entry.name.to_ascii_lowercase());
+        if let Some((checked, checked_address, valid)) =
+            MEMORY_TRACKED_VALIDATIONS.lock().get(&key).copied()
+            && checked_address == address
+            && checked.elapsed() < Duration::from_millis(250)
+        {
+            return valid;
+        }
+        let readable = match entry.value_type.to_ascii_lowercase().as_str() {
+            "i8" => crate::process_memory::read_scan_value(
+                pid,
+                address,
+                crate::process_memory::ScanValueType::I8,
+            ),
+            "i16" => crate::process_memory::read_scan_value(
+                pid,
+                address,
+                crate::process_memory::ScanValueType::I16,
+            ),
+            "i32" => crate::process_memory::read_scan_value(
+                pid,
+                address,
+                crate::process_memory::ScanValueType::I32,
+            ),
+            "f32" => crate::process_memory::read_scan_value(
+                pid,
+                address,
+                crate::process_memory::ScanValueType::F32,
+            ),
+            "i64" => crate::process_memory::read_scan_value(
+                pid,
+                address,
+                crate::process_memory::ScanValueType::I64,
+            ),
+            "f64" => crate::process_memory::read_scan_value(
+                pid,
+                address,
+                crate::process_memory::ScanValueType::F64,
+            ),
+            _ => return false,
+        }
+        .is_ok();
+        let valid = readable
+            && if entry.tracked_signature.trim().is_empty() {
+                true
+            } else {
+                let instruction = MEMORY_CODE_ENTRIES
+                    .lock()
+                    .iter()
+                    .find(|code| {
+                        code.module.eq_ignore_ascii_case(&entry.code_module)
+                            && code.offset == entry.code_offset
+                    })
+                    .map(|code| code.instruction.clone());
+                address
+                    .checked_add_signed(-entry.code_address_offset)
+                    .zip(instruction)
+                    .is_some_and(|(data_address, instruction)| {
+                        tracked_signature_matches(pid, data_address, &instruction, entry)
+                    })
+            };
+        MEMORY_TRACKED_VALIDATIONS
+            .lock()
+            .insert(key, (Instant::now(), address, valid));
+        valid
+    }
+
+    fn schedule_memory_tracked_rebind(pid: u32, entry: &crate::model::MemoryPointerEntry) {
+        let alias_name = entry.name.clone();
         let code_module = entry.code_module.clone();
         let code_offset = entry.code_offset;
-        let key = (pid, code_module.to_ascii_lowercase(), code_offset);
+        let code = MEMORY_CODE_ENTRIES
+            .lock()
+            .iter()
+            .find(|code| {
+                code.module.eq_ignore_ascii_case(&code_module) && code.offset == code_offset
+            })
+            .cloned();
+        let Some(code) = code else {
+            return;
+        };
         {
             let mut attempts = MEMORY_TRACKED_REBINDS.lock();
             if attempts
-                .get(&key)
+                .get(&pid)
                 .is_some_and(|started| started.elapsed() < Duration::from_secs(5))
             {
                 return;
             }
-            attempts.insert(key.clone(), Instant::now());
+            attempts.insert(pid, Instant::now());
         }
+        let tracked_entry = entry.clone();
         thread::spawn(move || {
-            use crate::memory_debugger::debugger::{AccessWatch, WatchEvent, resolve_module_offset};
+            use crate::memory_debugger::debugger::{
+                AccessWatch, WatchEvent, resolve_module_offset,
+            };
             use crate::model::MemoryDebuggerArchitecture;
 
-            let Ok(instruction_address) =
-                resolve_module_offset(pid, &code_module, code_offset)
+            let Ok(instruction_address) = resolve_module_offset(pid, &code_module, code_offset)
             else {
-                MEMORY_TRACKED_REBINDS.lock().remove(&key);
+                MEMORY_TRACKED_REBINDS.lock().insert(pid, Instant::now());
                 return;
             };
 
@@ -30727,41 +30822,73 @@ mod windows_overlay {
                 pid,
                 instruction_address,
                 MemoryDebuggerArchitecture::Auto,
-                1,
+                64,
                 |_| true,
                 notify,
             ) else {
-                MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+                MEMORY_TRACKED_REBINDS.lock().insert(pid, Instant::now());
                 return;
             };
+            let deadline = Instant::now() + Duration::from_secs(2);
             let mut candidates = Vec::new();
-            if let Ok(event) = rx.recv_timeout(Duration::from_secs(10)) {
-                if let WatchEvent::AccessHit { data_address } = event {
-                    candidates.push(data_address);
+            while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+                match rx.recv_timeout(remaining) {
+                    Ok(WatchEvent::AccessHit { data_address }) => {
+                        if !candidates.contains(&data_address) {
+                            candidates.push(data_address);
+                        }
+                    }
+                    Ok(
+                        WatchEvent::Error(_)
+                        | WatchEvent::Stopped
+                        | WatchEvent::CaptureLimitReached(_),
+                    )
+                    | Err(_) => break,
+                    Ok(_) => {}
                 }
             }
             drop(watch);
 
-            if let Some(data_address) = candidates.first().copied() {
+            let matching = candidates
+                .into_iter()
+                .filter(|data_address| {
+                    if tracked_entry.tracked_signature.trim().is_empty() {
+                        tracked_field_matches(pid, *data_address, &tracked_entry)
+                    } else {
+                        tracked_signature_matches(
+                            pid,
+                            *data_address,
+                            &code.instruction,
+                            &tracked_entry,
+                        )
+                    }
+                })
+                .collect::<Vec<_>>();
+            let candidate = only_candidate(&matching);
+
+            if let Some(data_address) = candidate {
                 for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
-                    if pointer.code_module.eq_ignore_ascii_case(&code_module)
-                        && pointer.code_offset == code_offset
-                    {
-                        pointer.runtime_address = data_address
-                            .checked_add_signed(pointer.code_address_offset);
+                    if pointer.name.eq_ignore_ascii_case(&alias_name) {
+                        pointer.runtime_address =
+                            data_address.checked_add_signed(pointer.code_address_offset);
                         pointer.runtime_process_id = Some(pid);
                     }
                 }
                 send_ui_command(UiCommand::MemoryTrackedCodeResolved {
                     pid,
+                    alias_name: alias_name.clone(),
                     code_module: code_module.clone(),
                     code_offset,
                     captured_address: data_address,
                 });
-                MEMORY_TRACKED_REBINDS.lock().remove(&key);
+                MEMORY_TRACKED_VALIDATIONS
+                    .lock()
+                    .remove(&(pid, alias_name.to_ascii_lowercase()));
+                MEMORY_TRACKED_REBINDS.lock().remove(&pid);
                 return;
             }
-            MEMORY_TRACKED_REBINDS.lock().remove(&key);
+            // Keep a real cooldown after a miss; the macro hot path must not attach again.
+            MEMORY_TRACKED_REBINDS.lock().insert(pid, Instant::now());
         });
     }
 
@@ -30791,46 +30918,31 @@ mod windows_overlay {
                 });
             if !entry.code_module.is_empty() {
                 let pid = pid?;
-                if let Some(address) = entry.runtime_address {
-                    let value_type = match entry.value_type.to_ascii_lowercase().as_str() {
-                        "i8" => crate::process_memory::ScanValueType::I8,
-                        "i16" => crate::process_memory::ScanValueType::I16,
-                        "i32" => crate::process_memory::ScanValueType::I32,
-                        "f32" => crate::process_memory::ScanValueType::F32,
-                        "i64" => crate::process_memory::ScanValueType::I64,
-                        "f64" => crate::process_memory::ScanValueType::F64,
-                        _ => crate::process_memory::ScanValueType::F32,
-                    };
-                    if let Ok(val) = crate::process_memory::read_scan_value(pid, address, value_type) {
-                        let is_non_zero = match val {
-                            crate::process_memory::ScanValue::I8(v) => v != 0,
-                            crate::process_memory::ScanValue::I16(v) => v != 0,
-                            crate::process_memory::ScanValue::I32(v) => v != 0,
-                            crate::process_memory::ScanValue::I64(v) => v != 0,
-                            crate::process_memory::ScanValue::F32(v) => v.is_finite() && v != 0.0,
-                            crate::process_memory::ScanValue::F64(v) => v.is_finite() && v != 0.0,
-                        };
-                        if is_non_zero {
-                            if entry.runtime_process_id != Some(pid) {
-                                for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
-                                    if pointer.name.eq_ignore_ascii_case(&entry.name) {
-                                        pointer.runtime_process_id = Some(pid);
-                                    }
-                                }
-                            }
-                            return Some((pid, address));
-                        }
+                if let Some(address) = entry.runtime_address
+                    && tracked_runtime_address_matches(pid, address, &entry)
+                {
+                    return Some((pid, address));
+                }
+                for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
+                    if pointer.name.eq_ignore_ascii_case(&entry.name) {
+                        pointer.runtime_address = None;
+                        pointer.runtime_process_id = None;
                     }
                 }
                 schedule_memory_tracked_rebind(pid, &entry);
-                return entry.runtime_address.map(|addr| (pid, addr));
+                return None;
             }
             let pid = pid?;
             if let Some(address) = entry.absolute_address {
                 return Some((pid, address));
             }
-            return resolve_memory_pointer_entry(pid, &entry.module, entry.module_offset, &entry.offsets)
-                .map(|address| (pid, address));
+            return resolve_memory_pointer_entry(
+                pid,
+                &entry.module,
+                entry.module_offset,
+                &entry.offsets,
+            )
+            .map(|address| (pid, address));
         }
         let pid = pid?;
         if let Some(open) = text.rfind('[')
@@ -30861,11 +30973,8 @@ mod windows_overlay {
         }
         let is_tracked_alias = step.key.trim().starts_with('@');
         let target_pid = window_list::process_id_for_window(step.memory_target_window.as_deref());
-        let value = resolve_memory_action_target(
-            target_pid,
-            &step.key,
-        )
-            .and_then(|(pid, address)| {
+        let value =
+            resolve_memory_action_target(target_pid, &step.key).and_then(|(pid, address)| {
                 crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
             });
         if let Some(value) = value {
@@ -31096,6 +31205,13 @@ mod windows_overlay {
                 Some(vec![0x494, 0x140])
             );
             assert_eq!(parse_pointer_offsets("0x20, 8"), Some(vec![0x20, 0x8]));
+        }
+
+        #[test]
+        fn tracked_rebind_requires_one_unambiguous_candidate() {
+            assert_eq!(only_candidate(&[]), None);
+            assert_eq!(only_candidate(&[0x1234]), Some(0x1234));
+            assert_eq!(only_candidate(&[0x1234, 0x5678]), None);
         }
 
         #[test]
@@ -32653,11 +32769,7 @@ mod windows_overlay {
         apply_mouse_cursor_clip(locks, anchor);
     }
 
-    fn apply_unlock_mouse(
-        preset_id: Option<u32>,
-        run_token: Option<u64>,
-        mask: MouseMoveLockMask,
-    ) {
+    fn apply_unlock_mouse(preset_id: Option<u32>, run_token: Option<u64>, mask: MouseMoveLockMask) {
         if !mask.any() {
             return;
         }

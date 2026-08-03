@@ -14627,15 +14627,13 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::MemoryTrackedCodeResolved {
                     pid,
-                    code_module,
-                    code_offset,
+                    alias_name,
                     captured_address,
+                    ..
                 } => {
                     let mut resolved = 0;
                     for entry in &mut self.state.memory_pointer_list {
-                        if entry.code_module.eq_ignore_ascii_case(&code_module)
-                            && entry.code_offset == code_offset
-                        {
+                        if entry.name.eq_ignore_ascii_case(&alias_name) {
                             entry.runtime_address =
                                 captured_address.checked_add_signed(entry.code_address_offset);
                             entry.runtime_process_id = Some(pid);
