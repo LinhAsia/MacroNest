@@ -30805,34 +30805,8 @@ mod windows_overlay {
                     }
                 }
             }
-            if best_candidate.is_none() || best_candidate.map_or(0, |(_, s)| s) == 0 {
-                if candidates.len() == 1 {
-                    best_candidate = Some((candidates[0], 1));
-                } else if !candidates.is_empty() {
-                    for data_address in &candidates {
-                        let data_address = *data_address;
-                        for pointer in &tracked_entries {
-                            if let Some(target_addr) = data_address.checked_add_signed(pointer.code_address_offset) {
-                                let value_type = match pointer.value_type.to_ascii_lowercase().as_str() {
-                                    "i8" => crate::process_memory::ScanValueType::I8,
-                                    "i16" => crate::process_memory::ScanValueType::I16,
-                                    "i32" => crate::process_memory::ScanValueType::I32,
-                                    "f32" => crate::process_memory::ScanValueType::F32,
-                                    "i64" => crate::process_memory::ScanValueType::I64,
-                                    "f64" => crate::process_memory::ScanValueType::F64,
-                                    _ => crate::process_memory::ScanValueType::F32,
-                                };
-                                if crate::process_memory::read_scan_value(pid, target_addr, value_type).is_ok() {
-                                    best_candidate = Some((data_address, 1));
-                                    break;
-                                }
-                            }
-                        }
-                        if best_candidate.is_some() {
-                            break;
-                        }
-                    }
-                }
+            if (best_candidate.is_none() || best_candidate.map_or(0, |(_, s)| s) == 0) && !candidates.is_empty() {
+                best_candidate = Some((candidates[0], 1));
             }
             if let Some((data_address, score)) = best_candidate
                 && score > 0
