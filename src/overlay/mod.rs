@@ -30855,11 +30855,7 @@ mod windows_overlay {
                 MEMORY_TRACKED_REBINDS.lock().remove(&key);
                 return;
             }
-            if candidates.is_empty() {
-                MEMORY_TRACKED_REBINDS.lock().remove(&key);
-            } else {
-                MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
-            }
+            MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
         });
     }
 
@@ -30934,18 +30930,6 @@ mod windows_overlay {
             .and_then(|(pid, address)| {
                 crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
             });
-        if is_tracked_alias
-            && value.is_none()
-            && let Some(pid) = target_pid
-            && let Some(alias) = step.key.trim().strip_prefix('@')
-            && let Some(entry) = MEMORY_POINTER_ENTRIES
-                .lock()
-                .iter()
-                .find(|entry| entry.name.eq_ignore_ascii_case(alias.trim()))
-                .cloned()
-        {
-            schedule_memory_tracked_rebind(pid, &entry);
-        }
         if let Some(value) = value {
             smart_set_variable_from_expression(target_var, &value);
         } else if !is_tracked_alias {
