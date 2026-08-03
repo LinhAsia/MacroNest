@@ -30611,10 +30611,7 @@ mod windows_overlay {
             return false;
         };
         entry.tracked_signature.split(';').all(|part| {
-            let Some((slot_text, root)) = part.split_once('=') else {
-                return false;
-            };
-            let Ok(slot) = usize::from_str_radix(slot_text, 16) else {
+            let Some((path_text, root)) = part.split_once('=') else {
                 return false;
             };
             let Some((module_name, offset_text)) = root.rsplit_once('+') else {
@@ -30627,27 +30624,46 @@ mod windows_overlay {
             let Ok(module_offset) = usize::from_str_radix(offset_text, 16) else {
                 return false;
             };
-            let Ok(pointer) = (match pointer_width {
-                4 => crate::process_memory::read_scan_value(
-                    pid,
-                    object_base.saturating_add(slot),
-                    crate::process_memory::ScanValueType::I32,
-                )
-                .map(|value| match value {
-                    crate::process_memory::ScanValue::I32(value) => value as u32 as usize,
-                    _ => 0,
-                }),
-                8 => crate::process_memory::read_scan_value(
-                    pid,
-                    object_base.saturating_add(slot),
-                    crate::process_memory::ScanValueType::I64,
-                )
-                .map(|value| match value {
-                    crate::process_memory::ScanValue::I64(value) => value as usize,
-                    _ => 0,
-                }),
-                _ => return false,
-            }) else {
+            let mut address = object_base;
+            let mut pointer = None;
+            for slot_text in path_text.split('>') {
+                let Ok(slot) = usize::from_str_radix(slot_text, 16) else {
+                    return false;
+                };
+                let Some(slot_address) = address.checked_add(slot) else {
+                    return false;
+                };
+                pointer = match pointer_width {
+                    4 => crate::process_memory::read_scan_value(
+                        pid,
+                        slot_address,
+                        crate::process_memory::ScanValueType::I32,
+                    )
+                    .ok()
+                    .and_then(|value| match value {
+                        crate::process_memory::ScanValue::I32(value) => {
+                            Some(value as u32 as usize)
+                        }
+                        _ => None,
+                    }),
+                    8 => crate::process_memory::read_scan_value(
+                        pid,
+                        slot_address,
+                        crate::process_memory::ScanValueType::I64,
+                    )
+                    .ok()
+                    .and_then(|value| match value {
+                        crate::process_memory::ScanValue::I64(value) => Some(value as usize),
+                        _ => None,
+                    }),
+                    _ => return false,
+                };
+                let Some(next) = pointer else {
+                    return false;
+                };
+                address = next;
+            }
+            let Some(pointer) = pointer else {
                 return false;
             };
             modules.iter().any(|(name, base, size)| {

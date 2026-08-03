@@ -6312,6 +6312,7 @@ impl CrosshairApp {
             .memory_panel
             .process_pid
             .and_then(|pid| tracked_object_signature(pid, captured, &code.instruction));
+        let signature_saved = tracked_signature.is_some();
         let entry = MemoryPointerEntry {
             name: name.clone(),
             app_name,
@@ -6342,8 +6343,14 @@ impl CrosshairApp {
         self.persist();
         self.add_code_access_address(address, dialog.value_type);
         dialog.status = format!(
-            "Tracked address @{name} saved - {}+{:X} @ {offset:+X}",
-            code_module, code_offset
+            "Tracked address @{name} saved - {}+{:X} @ {offset:+X}{}",
+            code_module,
+            code_offset,
+            if signature_saved {
+                " (object signature captured)"
+            } else {
+                " (object signature unavailable)"
+            }
         );
     }
 
@@ -8517,29 +8524,73 @@ fn tracked_object_signature(pid: u32, captured_address: usize, instruction: &str
     let object_base = captured_address.checked_add_signed(-displacement)?;
     let pointer_width = process_pointer_width(pid).ok()?;
     let modules = process_modules(pid).ok()?;
-    let mut parts = Vec::new();
-    for slot in (0..0x200usize).step_by(pointer_width) {
-        let pointer = match pointer_width {
-            4 => match read_scan_value(pid, object_base.checked_add(slot)?, ScanValueType::I32) {
-                Ok(ScanValue::I32(value)) => value as u32 as usize,
-                _ => continue,
+    let read_pointer = |address: usize| -> Option<usize> {
+        match pointer_width {
+            4 => match read_scan_value(pid, address, ScanValueType::I32).ok()? {
+                ScanValue::I32(value) => Some(value as u32 as usize),
+                _ => None,
             },
-            8 => match read_scan_value(pid, object_base.checked_add(slot)?, ScanValueType::I64) {
-                Ok(ScanValue::I64(value)) => value as usize,
-                _ => continue,
+            8 => match read_scan_value(pid, address, ScanValueType::I64).ok()? {
+                ScanValue::I64(value) => Some(value as usize),
+                _ => None,
             },
-            _ => return None,
+            _ => None,
+        }
+    };
+    let module_signature = |pointer: usize| {
+        modules.iter().find_map(|(module, base, size)| {
+            (*base..base.saturating_add(*size))
+                .contains(&pointer)
+                .then(|| format!("{module}+{:X}", pointer - *base))
+        })
+    };
+    let mut direct = Vec::new();
+    for slot in (0..0x400usize).step_by(pointer_width) {
+        let Some(address) = object_base.checked_add(slot) else {
+            continue;
         };
-        if let Some((module, base, _size)) = modules.iter().find(|(_, base, size)| {
-            (*base..base.saturating_add(*size)).contains(&pointer)
-        }) {
-            parts.push(format!("{slot:X}={module}+{:X}", pointer - *base));
-            if parts.len() == 3 {
+        let Some(pointer) = read_pointer(address) else {
+            continue;
+        };
+        if let Some(signature) = module_signature(pointer) {
+            direct.push(format!("{slot:X}={signature}"));
+            if direct.len() == 3 {
                 break;
             }
         }
     }
-    (!parts.is_empty()).then(|| parts.join(";"))
+    if !direct.is_empty() {
+        return Some(direct.join(";"));
+    }
+    // Some Unity/IL2CPP objects keep their module pointer one object deeper.
+    // Store the short slot path so the same nested object can be found after ASLR.
+    let mut nested = Vec::new();
+    for root_slot in (0..0x400usize).step_by(pointer_width) {
+        let Some(root_address) = object_base.checked_add(root_slot) else {
+            continue;
+        };
+        let Some(nested_base) = read_pointer(root_address) else {
+            continue;
+        };
+        if nested_base == 0 {
+            continue;
+        }
+        for nested_slot in (0..0x100usize).step_by(pointer_width) {
+            let Some(nested_address) = nested_base.checked_add(nested_slot) else {
+                continue;
+            };
+            let Some(pointer) = read_pointer(nested_address) else {
+                continue;
+            };
+            if let Some(signature) = module_signature(pointer) {
+                nested.push(format!("{root_slot:X}>{nested_slot:X}={signature}"));
+                if nested.len() == 3 {
+                    return Some(nested.join(";"));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn resolve_memory_address(
