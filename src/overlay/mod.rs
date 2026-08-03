@@ -18029,6 +18029,10 @@ mod windows_overlay {
             return 16;
         }
 
+        if !HOOK_STATE.lock().active_geometry_steps.is_empty() {
+            return 16;
+        }
+
         if runtime.quick_key_display_enabled
             && runtime.quick_key_display_mode == QuickKeyDisplayMode::Mascot
         {
