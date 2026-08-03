@@ -3281,10 +3281,7 @@ impl CrosshairApp {
             && let Some(entry) = self.state.memory_pointer_list.get(index).cloned()
             && let Some(value_type) = memory_type_from_config(&entry.value_type)
         {
-            if !entry.code_module.is_empty()
-                && (entry.runtime_address.is_none()
-                    || entry.runtime_process_id != self.memory_panel.process_pid)
-            {
+            if !entry.code_module.is_empty() && entry.runtime_address.is_none() {
                 self.memory_panel.status = format!(
                     "{} is unresolved â€” run Find written for {}+{:X}",
                     entry.name, entry.code_module, entry.code_offset

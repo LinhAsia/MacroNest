@@ -30507,7 +30507,7 @@ mod windows_overlay {
             .collect()
     }
 
-    fn resolve_memory_action_address(pid: u32, text: &str) -> Option<usize> {
+    fn resolve_memory_action_target(pid: Option<u32>, text: &str) -> Option<(u32, usize)> {
         let text = interpolate_variables(text);
         let text = text.trim();
         if let Some(alias) = text.strip_prefix('@') {
@@ -30517,20 +30517,16 @@ mod windows_overlay {
                 .find(|entry| entry.name.eq_ignore_ascii_case(alias.trim()))
                 .cloned()?;
             if !entry.code_module.is_empty() {
-                return entry
-                    .runtime_address
-                    .filter(|_| entry.runtime_process_id == Some(pid));
+                return Some((entry.runtime_process_id?, entry.runtime_address?));
             }
+            let pid = pid?;
             if let Some(address) = entry.absolute_address {
-                return Some(address);
+                return Some((pid, address));
             }
-            return resolve_memory_pointer_entry(
-                pid,
-                &entry.module,
-                entry.module_offset,
-                &entry.offsets,
-            );
+            return resolve_memory_pointer_entry(pid, &entry.module, entry.module_offset, &entry.offsets)
+                .map(|address| (pid, address));
         }
+        let pid = pid?;
         if let Some(open) = text.rfind('[')
             && text.ends_with(']')
         {
@@ -30546,9 +30542,10 @@ mod windows_overlay {
             )
             .ok()?;
             let offsets = parse_pointer_offsets(&text[open + 1..text.len() - 1])?;
-            return resolve_memory_pointer_entry(pid, module.trim(), module_offset, &offsets);
+            return resolve_memory_pointer_entry(pid, module.trim(), module_offset, &offsets)
+                .map(|address| (pid, address));
         }
-        parse_memory_address(text)
+        parse_memory_address(text).map(|address| (pid, address))
     }
 
     fn execute_read_memory_action_step(step: &MacroStep) {
@@ -30556,10 +30553,10 @@ mod windows_overlay {
         if target_var.is_empty() {
             return;
         }
-        let value = window_list::process_id_for_window(step.memory_target_window.as_deref())
-            .and_then(|pid| {
-                resolve_memory_action_address(pid, &step.key).map(|address| (pid, address))
-            })
+        let value = resolve_memory_action_target(
+            window_list::process_id_for_window(step.memory_target_window.as_deref()),
+            &step.key,
+        )
             .and_then(|(pid, address)| {
                 crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
             });
@@ -30573,11 +30570,10 @@ mod windows_overlay {
     }
 
     fn execute_write_memory_action_step(step: &MacroStep) {
-        let Some(pid) = window_list::process_id_for_window(step.memory_target_window.as_deref())
-        else {
-            return;
-        };
-        let Some(address) = resolve_memory_action_address(pid, &step.key) else {
+        let Some((pid, address)) = resolve_memory_action_target(
+            window_list::process_id_for_window(step.memory_target_window.as_deref()),
+            &step.key,
+        ) else {
             return;
         };
         let raw_value = interpolate_variables(&step.memory_write_value);
