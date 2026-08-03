@@ -489,8 +489,10 @@ pub struct MemoryPointerEntry {
     pub code_offset: usize,
     #[serde(default)]
     pub code_address_offset: isize,
-    #[serde(skip)]
+    #[serde(default)]
     pub runtime_address: Option<usize>,
+    #[serde(default)]
+    pub runtime_process_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

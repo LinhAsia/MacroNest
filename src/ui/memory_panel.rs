@@ -664,10 +664,6 @@ impl CrosshairApp {
     fn select_memory_process(&mut self, selector: String, pid: Option<u32>, ctx: &egui::Context) {
         self.memory_panel.process_selector = selector;
         if self.memory_panel.process_pid != pid {
-            for entry in &mut self.state.memory_pointer_list {
-                entry.runtime_address = None;
-            }
-            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
             self.reset_memory_scan("Process changed");
             self.memory_panel.saved.retain_mut(|saved| {
                 if saved.saved_to_library {
@@ -1298,12 +1294,6 @@ impl CrosshairApp {
                                             let pid =
                                                 window_list::process_id_for_window(Some(&selector));
                                             if self.memory_panel.process_pid != pid {
-                                                for entry in &mut self.state.memory_pointer_list {
-                                                    entry.runtime_address = None;
-                                                }
-                                                crate::overlay::set_memory_pointer_entries(
-                                                    &self.state.memory_pointer_list,
-                                                );
                                                 self.reset_memory_scan("Process changed");
                                                 self.memory_panel.saved.retain_mut(|saved| {
                                                     let portable =
@@ -3291,7 +3281,10 @@ impl CrosshairApp {
             && let Some(entry) = self.state.memory_pointer_list.get(index).cloned()
             && let Some(value_type) = memory_type_from_config(&entry.value_type)
         {
-            if !entry.code_module.is_empty() && entry.runtime_address.is_none() {
+            if !entry.code_module.is_empty()
+                && (entry.runtime_address.is_none()
+                    || entry.runtime_process_id != self.memory_panel.process_pid)
+            {
                 self.memory_panel.status = format!(
                     "{} is unresolved â€” run Find written for {}+{:X}",
                     entry.name, entry.code_module, entry.code_offset
@@ -3305,6 +3298,7 @@ impl CrosshairApp {
             });
             let mut address = entry
                 .runtime_address
+                .filter(|_| entry.runtime_process_id == self.memory_panel.process_pid)
                 .or(entry.absolute_address)
                 .unwrap_or_default();
             if let (Some(pid), Some(pointer)) = (self.memory_panel.process_pid, pointer.as_mut())
@@ -6306,11 +6300,13 @@ impl CrosshairApp {
                 && entry.code_offset == code.offset
             {
                 entry.runtime_address = captured.checked_add_signed(entry.code_address_offset);
+                entry.runtime_process_id = self.memory_panel.process_pid;
                 changed += usize::from(entry.runtime_address.is_some());
             }
         }
         if changed != 0 {
             crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+            self.persist();
         }
         changed
     }
@@ -6355,6 +6351,7 @@ impl CrosshairApp {
             code_offset,
             code_address_offset: offset,
             runtime_address: Some(address),
+            runtime_process_id: self.memory_panel.process_pid,
         };
         if let Some(existing) = self
             .state
@@ -7885,6 +7882,7 @@ impl CrosshairApp {
                 code_offset: 0,
                 code_address_offset: 0,
                 runtime_address: None,
+                runtime_process_id: None,
             };
             if let Some(existing) = self.state.memory_pointer_list.iter_mut().find(|existing| {
                 existing.module.eq_ignore_ascii_case(&entry.module)
