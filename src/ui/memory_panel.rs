@@ -1895,7 +1895,7 @@ impl CrosshairApp {
                     ui.label(RichText::new(self.tr("Scan results", "Scan results")).strong());
                     ui.label(result_count.to_string());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button(self.tr("Add â†“", "Add â†“")).clicked() {
+                        if ui.small_button(self.tr("Add ↓", "Thêm ↓")).clicked() {
                             self.add_selected_memory_results();
                         }
                     });
@@ -6330,7 +6330,7 @@ impl CrosshairApp {
         self.persist();
         self.add_code_access_address(address, dialog.value_type);
         dialog.status = format!(
-            "Tracked address @{name} saved â€” {}+{:X} @ {offset:+X}",
+            "Tracked address @{name} saved - {}+{:X} @ {offset:+X}",
             code_module, code_offset
         );
     }
