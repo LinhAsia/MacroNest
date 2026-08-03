@@ -30603,18 +30603,28 @@ mod windows_overlay {
         let Some(object_base) = data_address.checked_add_signed(-displacement) else {
             return false;
         };
-        let Ok(crate::process_memory::ScanValue::I64(object_pointer)) =
-            crate::process_memory::read_scan_value(
+        let object_pointer = match crate::memory_debugger::debugger::process_pointer_width(pid).ok() {
+            Some(4) => match crate::process_memory::read_scan_value(
+                pid,
+                object_base,
+                crate::process_memory::ScanValueType::I32,
+            ) {
+                Ok(crate::process_memory::ScanValue::I32(value)) => value as u32 as usize,
+                _ => return false,
+            },
+            Some(8) => match crate::process_memory::read_scan_value(
                 pid,
                 object_base,
                 crate::process_memory::ScanValueType::I64,
-            )
-        else {
-            return false;
+            ) {
+                Ok(crate::process_memory::ScanValue::I64(value)) => value as usize,
+                _ => return false,
+            },
+            _ => return false,
         };
         let Ok((module, offset)) = crate::memory_debugger::debugger::module_offset_for_address(
             pid,
-            object_pointer as usize,
+            object_pointer,
         ) else {
             return false;
         };

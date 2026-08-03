@@ -8515,8 +8515,15 @@ fn instruction_memory_displacement(instruction: &str) -> isize {
 fn tracked_object_signature(pid: u32, captured_address: usize, instruction: &str) -> Option<String> {
     let displacement = instruction_memory_displacement(instruction);
     let object_base = captured_address.checked_add_signed(-displacement)?;
-    let object_pointer = match read_scan_value(pid, object_base, ScanValueType::I64).ok()? {
-        ScanValue::I64(value) => value as usize,
+    let object_pointer = match process_pointer_width(pid).ok()? {
+        4 => match read_scan_value(pid, object_base, ScanValueType::I32).ok()? {
+            ScanValue::I32(value) => value as u32 as usize,
+            _ => return None,
+        },
+        8 => match read_scan_value(pid, object_base, ScanValueType::I64).ok()? {
+            ScanValue::I64(value) => value as usize,
+            _ => return None,
+        },
         _ => return None,
     };
     let (module, offset) = module_offset_for_address(pid, object_pointer).ok()?;
