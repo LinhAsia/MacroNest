@@ -323,6 +323,7 @@ struct StructureClass {
 
 struct MemoryViewDialog {
     address: usize,
+    tracked_base: Option<usize>,
     kind: MemoryViewKind,
     display_type: MemoryDisplayType,
     relative_addresses: bool,
@@ -403,7 +404,6 @@ struct CodeAccessDialog {
     tracked_name: String,
     tracked_offset: String,
     save_tracked: bool,
-    apply_tracked: bool,
 }
 
 struct ScanJobResult {
@@ -2857,6 +2857,7 @@ impl CrosshairApp {
                                 {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
+                                        tracked_base: None,
                                         kind: MemoryViewKind::Bytes,
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
@@ -2891,6 +2892,7 @@ impl CrosshairApp {
                                 {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
+                                        tracked_base: None,
                                         kind: MemoryViewKind::Structure,
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
@@ -3729,7 +3731,6 @@ impl CrosshairApp {
                 tracked_name: String::new(),
                 tracked_offset: "0".to_owned(),
                 save_tracked: false,
-                apply_tracked: false,
             });
             return;
         }
@@ -3761,7 +3762,6 @@ impl CrosshairApp {
             tracked_name: String::new(),
             tracked_offset: "0".to_owned(),
             save_tracked: false,
-            apply_tracked: false,
         });
     }
 
@@ -6005,17 +6005,6 @@ impl CrosshairApp {
             dialog.save_tracked = false;
             self.save_tracked_code_address(&mut dialog);
         }
-        if dialog.apply_tracked {
-            dialog.apply_tracked = false;
-            if let Some(address) = dialog
-                .selected
-                .and_then(|index| dialog.addresses.get(index))
-                .map(|(address, _)| *address)
-            {
-                let count = self.resolve_tracked_code_addresses(dialog.code_index, address);
-                dialog.status = format!("Resolved {count} tracked address(es) from selected hit");
-            }
-        }
         if let Some(address) = add {
             if let Some(mut active) = dialog.active.take() {
                 active.stop();
@@ -6024,8 +6013,13 @@ impl CrosshairApp {
             self.add_code_access_address(address, dialog.value_type);
         }
         if let Some(address) = browse {
+            if let Some(mut active) = dialog.active.take() {
+                active.stop();
+                dialog.status = "Debugger detached — selected hit locked for tracking".to_owned();
+            }
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                 address,
+                tracked_base: Some(address),
                 kind: MemoryViewKind::Bytes,
                 display_type: MemoryDisplayType::ByteHex,
                 relative_addresses: false,
@@ -6145,15 +6139,6 @@ impl CrosshairApp {
                 .clicked()
             {
                 dialog.save_tracked = true;
-            }
-            if ui
-                .add_enabled(dialog.selected.is_some(), Button::new("Resolve tracked"))
-                .on_hover_text(
-                    "Update saved tracked addresses from this selected hit; no address is changed automatically",
-                )
-                .clicked()
-            {
-                dialog.apply_tracked = true;
             }
         });
         ui.separator();
@@ -6287,28 +6272,6 @@ impl CrosshairApp {
         });
         self.memory_panel.status =
             format!("Address {} added", format_prefixed_memory_address(address));
-    }
-
-    #[cfg(windows)]
-    fn resolve_tracked_code_addresses(&mut self, code_index: usize, captured: usize) -> usize {
-        let Some(code) = self.state.memory_code_list.get(code_index) else {
-            return 0;
-        };
-        let mut changed = 0;
-        for entry in &mut self.state.memory_pointer_list {
-            if entry.code_module.eq_ignore_ascii_case(&code.module)
-                && entry.code_offset == code.offset
-            {
-                entry.runtime_address = captured.checked_add_signed(entry.code_address_offset);
-                entry.runtime_process_id = self.memory_panel.process_pid;
-                changed += usize::from(entry.runtime_address.is_some());
-            }
-        }
-        if changed != 0 {
-            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
-            self.persist();
-        }
-        changed
     }
 
     #[cfg(windows)]
@@ -6963,10 +6926,12 @@ impl CrosshairApp {
             self.memory_panel.status = "Open Find written before tracking a field".to_owned();
             return;
         };
-        let Some(captured) = code_dialog
-            .selected
-            .and_then(|index| code_dialog.addresses.get(index))
-            .map(|(address, _)| *address)
+        let Some(captured) = dialog.tracked_base.or_else(|| {
+            code_dialog
+                .selected
+                .and_then(|index| code_dialog.addresses.get(index))
+                .map(|(address, _)| *address)
+        })
         else {
             code_dialog.status = "Select a captured address before tracking a field".to_owned();
             return;
@@ -7483,6 +7448,7 @@ impl CrosshairApp {
         let elements = default_structure_elements();
         self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
             address,
+            tracked_base: None,
             kind: MemoryViewKind::Structure,
             display_type: MemoryDisplayType::ByteHex,
             relative_addresses: true,
