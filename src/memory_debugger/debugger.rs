@@ -320,6 +320,8 @@ impl AddressAccessWatch {
 
 pub struct AccessWatch(WatchSession);
 
+type ExecuteMatcher = Box<dyn Fn(usize) -> bool + Send + Sync + 'static>;
+
 impl AccessWatch {
     pub fn start<F>(
         pid: u32,
@@ -351,11 +353,54 @@ impl AccessWatch {
         Self::start_with_limit(pid, instruction_address, architecture, 1, notify)
     }
 
+    pub fn start_matching<F, M>(
+        pid: u32,
+        instruction_address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        capture_limit: usize,
+        matcher: M,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+        M: Fn(usize) -> bool + Send + Sync + 'static,
+    {
+        Self::start_with_limit_and_matcher(
+            pid,
+            instruction_address,
+            architecture,
+            capture_limit,
+            Some(Box::new(matcher)),
+            notify,
+        )
+    }
+
     fn start_with_limit<F>(
         pid: u32,
         instruction_address: usize,
         architecture: MemoryDebuggerArchitecture,
         capture_limit: usize,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        Self::start_with_limit_and_matcher(
+            pid,
+            instruction_address,
+            architecture,
+            capture_limit,
+            None,
+            notify,
+        )
+    }
+
+    fn start_with_limit_and_matcher<F>(
+        pid: u32,
+        instruction_address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        capture_limit: usize,
+        matcher: Option<ExecuteMatcher>,
         notify: F,
     ) -> io::Result<Self>
     where
@@ -369,6 +414,7 @@ impl AccessWatch {
                 address: instruction_address,
                 instruction,
                 capture_limit,
+                matcher,
             },
             architecture,
             notify,
@@ -392,6 +438,7 @@ enum WatchKind {
         address: usize,
         instruction: Instruction,
         capture_limit: usize,
+        matcher: Option<ExecuteMatcher>,
     },
 }
 
@@ -578,11 +625,15 @@ fn watch_loop<F>(
                             WatchKind::Execute {
                                 instruction,
                                 capture_limit,
+                                matcher,
                                 ..
                             } => {
                                 if !capture_limit_reached
                                     && let Some(data_address) =
                                         effective_address(instruction, &context)
+                                    && matcher
+                                        .as_ref()
+                                        .map_or(true, |matcher| matcher(data_address))
                                 {
                                     access_hits += 1;
                                     let should_stop = access_hits >= *capture_limit;

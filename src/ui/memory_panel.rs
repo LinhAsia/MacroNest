@@ -6302,6 +6302,12 @@ impl CrosshairApp {
             .process_pid
             .and_then(|pid| process_modules(pid).ok()?.first().map(|module| module.0.clone()))
             .unwrap_or_else(|| code_module.clone());
+        let tracked_value = self
+            .memory_panel
+            .process_pid
+            .and_then(|pid| read_scan_value(pid, address, dialog.value_type).ok())
+            .map(|value| format_scan_value(value, false))
+            .unwrap_or_default();
         let entry = MemoryPointerEntry {
             name: name.clone(),
             app_name,
@@ -6315,6 +6321,7 @@ impl CrosshairApp {
             code_address_offset: offset,
             runtime_address: Some(address),
             runtime_process_id: self.memory_panel.process_pid,
+            tracked_value,
         };
         if let Some(existing) = self
             .state
@@ -7849,6 +7856,7 @@ impl CrosshairApp {
                 code_address_offset: 0,
                 runtime_address: None,
                 runtime_process_id: None,
+                tracked_value: String::new(),
             };
             if let Some(existing) = self.state.memory_pointer_list.iter_mut().find(|existing| {
                 existing.module.eq_ignore_ascii_case(&entry.module)

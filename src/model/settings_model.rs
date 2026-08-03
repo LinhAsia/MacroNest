@@ -493,6 +493,11 @@ pub struct MemoryPointerEntry {
     pub runtime_address: Option<usize>,
     #[serde(default)]
     pub runtime_process_id: Option<u32>,
+    /// Value observed at the tracked field when the alias was saved.  It is
+    /// used to choose the right object when the code instruction touches many
+    /// objects after a process restart.
+    #[serde(default)]
+    pub tracked_value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
