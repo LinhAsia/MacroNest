@@ -30633,7 +30633,9 @@ mod windows_overlay {
                 if entry.runtime_process_id == Some(pid) {
                     return Some((pid, entry.runtime_address?));
                 }
-                schedule_memory_tracked_rebind(pid, &entry);
+                // ponytail: attaching a debugger from a real-time macro action can terminate
+                // protected or timing-sensitive games. Rebinding stays an explicit Memory action
+                // until a non-debugger resolver is available.
                 return None;
             }
             let pid = pid?;
