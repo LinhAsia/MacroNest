@@ -30874,9 +30874,7 @@ mod windows_overlay {
                 .cloned()?;
             if !entry.code_module.is_empty() {
                 let pid = pid?;
-                if entry.runtime_process_id == Some(pid)
-                    && let Some(address) = entry.runtime_address
-                {
+                if let Some(address) = entry.runtime_address {
                     let value_type = match entry.value_type.to_ascii_lowercase().as_str() {
                         "i8" => crate::process_memory::ScanValueType::I8,
                         "i16" => crate::process_memory::ScanValueType::I16,
@@ -30891,7 +30889,7 @@ mod windows_overlay {
                     }
                 }
                 schedule_memory_tracked_rebind(pid, &entry);
-                return None;
+                return entry.runtime_address.map(|addr| (pid, addr));
             }
             let pid = pid?;
             if let Some(address) = entry.absolute_address {
