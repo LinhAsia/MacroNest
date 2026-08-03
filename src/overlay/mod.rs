@@ -30776,9 +30776,7 @@ mod windows_overlay {
                 .cloned()?;
             if !entry.code_module.is_empty() {
                 let pid = pid?;
-                if entry.runtime_process_id == Some(pid)
-                    && let Some(address) = entry.runtime_address
-                {
+                if let Some(address) = entry.runtime_address {
                     let value_type = match entry.value_type.to_ascii_lowercase().as_str() {
                         "i8" => crate::process_memory::ScanValueType::I8,
                         "i16" => crate::process_memory::ScanValueType::I16,
@@ -30788,12 +30786,29 @@ mod windows_overlay {
                         "f64" => crate::process_memory::ScanValueType::F64,
                         _ => crate::process_memory::ScanValueType::F32,
                     };
-                    if crate::process_memory::read_scan_value(pid, address, value_type).is_ok() {
-                        return Some((pid, address));
+                    if let Ok(val) = crate::process_memory::read_scan_value(pid, address, value_type) {
+                        let is_non_zero = match val {
+                            crate::process_memory::ScanValue::I8(v) => v != 0,
+                            crate::process_memory::ScanValue::I16(v) => v != 0,
+                            crate::process_memory::ScanValue::I32(v) => v != 0,
+                            crate::process_memory::ScanValue::I64(v) => v != 0,
+                            crate::process_memory::ScanValue::F32(v) => v.is_finite() && v != 0.0,
+                            crate::process_memory::ScanValue::F64(v) => v.is_finite() && v != 0.0,
+                        };
+                        if is_non_zero {
+                            if entry.runtime_process_id != Some(pid) {
+                                for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
+                                    if pointer.name.eq_ignore_ascii_case(&entry.name) {
+                                        pointer.runtime_process_id = Some(pid);
+                                    }
+                                }
+                            }
+                            return Some((pid, address));
+                        }
                     }
                 }
                 schedule_memory_tracked_rebind(pid, &entry);
-                return None;
+                return entry.runtime_address.map(|addr| (pid, addr));
             }
             let pid = pid?;
             if let Some(address) = entry.absolute_address {
