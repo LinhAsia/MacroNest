@@ -293,6 +293,7 @@ mod windows_overlay {
     // One debugger attachment per process. Concurrent rebinds can stall or crash the target.
     static MEMORY_TRACKED_REBINDS: Lazy<Mutex<HashMap<u32, Instant>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
+    // Validation is intentionally off the macro thread; this map only throttles workers.
     static MEMORY_TRACKED_VALIDATIONS: Lazy<Mutex<HashMap<(u32, String), (Instant, usize, bool)>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
     static MEMORY_TRIGGER_EVENTS: Lazy<Mutex<Vec<HotkeyBinding>>> =
@@ -2304,6 +2305,11 @@ mod windows_overlay {
             code_module: String,
             code_offset: usize,
             captured_address: usize,
+        },
+        MemoryTrackedCodeInvalidated {
+            pid: u32,
+            alias_name: String,
+            runtime_address: usize,
         },
         SetMacrosMasterEnabled(bool, String),
         SetVietnameseInputEnabled(bool, String),
@@ -30718,21 +30724,13 @@ mod windows_overlay {
         only_candidate(&candidates)
     }
 
-    fn tracked_runtime_address_matches(
+    fn tracked_runtime_address_is_valid(
         pid: u32,
         address: usize,
         entry: &crate::model::MemoryPointerEntry,
     ) -> bool {
         if entry.runtime_process_id != Some(pid) {
             return false;
-        }
-        let key = (pid, entry.name.to_ascii_lowercase());
-        if let Some((checked, checked_address, valid)) =
-            MEMORY_TRACKED_VALIDATIONS.lock().get(&key).copied()
-            && checked_address == address
-            && checked.elapsed() < Duration::from_millis(250)
-        {
-            return valid;
         }
         let readable = match entry.value_type.to_ascii_lowercase().as_str() {
             "i8" => crate::process_memory::read_scan_value(
@@ -30787,10 +30785,60 @@ mod windows_overlay {
                         tracked_signature_matches(pid, data_address, &instruction, entry)
                     })
             };
-        MEMORY_TRACKED_VALIDATIONS
-            .lock()
-            .insert(key, (Instant::now(), address, valid));
         valid
+    }
+
+    fn schedule_memory_tracked_validation(
+        pid: u32,
+        address: usize,
+        entry: &crate::model::MemoryPointerEntry,
+    ) {
+        let key = (pid, entry.name.to_ascii_lowercase());
+        {
+            let mut validations = MEMORY_TRACKED_VALIDATIONS.lock();
+            if validations
+                .get(&key)
+                .is_some_and(|(checked, checked_address, in_progress)| {
+                    *checked_address == address
+                        && (*in_progress || checked.elapsed() < Duration::from_millis(250))
+                })
+            {
+                return;
+            }
+            validations.insert(key.clone(), (Instant::now(), address, true));
+        }
+
+        let tracked_entry = entry.clone();
+        thread::spawn(move || {
+            if tracked_runtime_address_is_valid(pid, address, &tracked_entry) {
+                MEMORY_TRACKED_VALIDATIONS.lock().insert(
+                    key,
+                    (Instant::now(), address, false),
+                );
+                return;
+            }
+
+            let mut invalidated = false;
+            for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
+                if pointer.name.eq_ignore_ascii_case(&tracked_entry.name)
+                    && pointer.runtime_process_id == Some(pid)
+                    && pointer.runtime_address == Some(address)
+                {
+                    pointer.runtime_address = None;
+                    pointer.runtime_process_id = None;
+                    invalidated = true;
+                }
+            }
+            MEMORY_TRACKED_VALIDATIONS.lock().remove(&key);
+            if invalidated {
+                send_ui_command(UiCommand::MemoryTrackedCodeInvalidated {
+                    pid,
+                    alias_name: tracked_entry.name.clone(),
+                    runtime_address: address,
+                });
+                schedule_memory_tracked_rebind(pid, &tracked_entry);
+            }
+        });
     }
 
     fn schedule_memory_tracked_rebind(pid: u32, entry: &crate::model::MemoryPointerEntry) {
@@ -30940,8 +30988,9 @@ mod windows_overlay {
             if !entry.code_module.is_empty() {
                 let pid = pid?;
                 if let Some(address) = entry.runtime_address
-                    && tracked_runtime_address_matches(pid, address, &entry)
+                    && entry.runtime_process_id == Some(pid)
                 {
+                    schedule_memory_tracked_validation(pid, address, &entry);
                     return Some((pid, address));
                 }
                 for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {

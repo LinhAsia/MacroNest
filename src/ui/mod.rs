@@ -14646,6 +14646,27 @@ impl eframe::App for CrosshairApp {
                         self.status = format!("Rebound {resolved} tracked memory address(es)");
                     }
                 }
+                UiCommand::MemoryTrackedCodeInvalidated {
+                    pid,
+                    alias_name,
+                    runtime_address,
+                } => {
+                    let mut invalidated = false;
+                    for entry in &mut self.state.memory_pointer_list {
+                        if entry.name.eq_ignore_ascii_case(&alias_name)
+                            && entry.runtime_process_id == Some(pid)
+                            && entry.runtime_address == Some(runtime_address)
+                        {
+                            entry.runtime_address = None;
+                            entry.runtime_process_id = None;
+                            invalidated = true;
+                        }
+                    }
+                    if invalidated {
+                        crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+                        self.persist();
+                    }
+                }
                 UiCommand::SetMacrosMasterEnabled(enabled, status) => {
                     self.state.macros_master_enabled = enabled;
                     self.persist();
