@@ -30695,28 +30695,34 @@ mod windows_overlay {
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            const MAX_CANDIDATES: usize = 128;
-            for _ in 0..MAX_CANDIDATES {
-                let (tx, rx) = std::sync::mpsc::channel();
-                let Ok(_watch) = AccessWatch::start_once(
-                    pid,
-                    instruction_address,
-                    MemoryDebuggerArchitecture::Auto,
-                    move |event| {
-                        let _ = tx.send(event);
-                    },
-                ) else {
-                    break;
-                };
-                let mut candidate = None;
-                while let Ok(event) = rx.recv() {
-                    match event {
-                        WatchEvent::AccessHit { data_address } => candidate = Some(data_address),
-                        WatchEvent::Error(_) | WatchEvent::Stopped => break,
-                        _ => {}
+            // Keep one debugger attachment instead of repeatedly attaching/detaching for every
+            // hit. Repeated attaches were the source of visible frame stalls in hot games.
+            let (tx, rx) = std::sync::mpsc::channel();
+            let Ok(watch) = AccessWatch::start(
+                pid,
+                instruction_address,
+                MemoryDebuggerArchitecture::Auto,
+                move |event| {
+                    let _ = tx.send(event);
+                },
+            ) else {
+                MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+                return;
+            };
+            let mut candidates = Vec::new();
+            while let Ok(event) = rx.recv() {
+                match event {
+                    WatchEvent::AccessHit { data_address } => {
+                        if !candidates.contains(&data_address) {
+                            candidates.push(data_address);
+                        }
                     }
+                    WatchEvent::Error(_) | WatchEvent::Stopped => break,
+                    _ => {}
                 }
-                let Some(data_address) = candidate else { continue };
+            }
+            drop(watch);
+            for data_address in candidates {
                 if tracked_entries.iter().any(|pointer| {
                     if pointer.tracked_signature.trim().is_empty() {
                         tracked_field_matches(pid, data_address, pointer)
