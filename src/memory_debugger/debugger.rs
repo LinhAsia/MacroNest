@@ -535,6 +535,7 @@ fn watch_loop<F>(
     let mut debugger_started = false;
     let mut threads = HashMap::new();
     let mut access_hits = 0usize;
+    let mut execute_candidates_seen = 0usize;
     let mut capture_limit_reached = false;
     while !stop.load(Ordering::Acquire) {
         let mut event = DEBUG_EVENT::default();
@@ -631,20 +632,32 @@ fn watch_loop<F>(
                                 if !capture_limit_reached
                                     && let Some(data_address) =
                                         effective_address(instruction, &context)
-                                    && matcher
-                                        .as_ref()
-                                        .map_or(true, |matcher| matcher(data_address))
                                 {
-                                    access_hits += 1;
-                                    let should_stop = access_hits >= *capture_limit;
-                                    if should_stop {
+                                    let matches = matcher
+                                        .as_ref()
+                                        .map_or(true, |matcher| matcher(data_address));
+                                    if matcher.is_some() {
+                                        execute_candidates_seen += 1;
+                                    }
+                                    if matches {
+                                        access_hits += 1;
+                                        let should_stop = access_hits >= *capture_limit;
+                                        if should_stop {
+                                            disarm_paused_threads(&threads, architecture);
+                                            capture_limit_reached = true;
+                                            stop.store(true, Ordering::Release);
+                                        }
+                                        notify(WatchEvent::AccessHit { data_address });
+                                        if should_stop {
+                                            notify(WatchEvent::CaptureLimitReached(access_hits));
+                                        }
+                                    } else if execute_candidates_seen >= *capture_limit {
                                         disarm_paused_threads(&threads, architecture);
                                         capture_limit_reached = true;
                                         stop.store(true, Ordering::Release);
-                                    }
-                                    notify(WatchEvent::AccessHit { data_address });
-                                    if should_stop {
-                                        notify(WatchEvent::CaptureLimitReached(access_hits));
+                                        notify(WatchEvent::CaptureLimitReached(
+                                            execute_candidates_seen,
+                                        ));
                                     }
                                 }
                             }
