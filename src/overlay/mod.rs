@@ -30692,7 +30692,7 @@ mod windows_overlay {
         entry: &crate::model::MemoryPointerEntry,
     ) -> bool {
         let (matched, total) = tracked_signature_score(pid, data_address, instruction, entry);
-        total > 0 && matched == total
+        total > 0 && matched * 2 > total
     }
 
     fn only_candidate(candidates: &[usize]) -> Option<usize> {
@@ -30700,6 +30700,22 @@ mod windows_overlay {
             [candidate] => Some(*candidate),
             _ => None,
         }
+    }
+
+    fn unique_best_signature_candidate(scores: &[(usize, usize, usize)]) -> Option<usize> {
+        let best_score = scores
+            .iter()
+            .filter(|(_, matched, total)| *total > 0 && *matched * 2 > *total)
+            .map(|(_, matched, _)| *matched)
+            .max()?;
+        let candidates = scores
+            .iter()
+            .filter(|(_, matched, total)| {
+                *matched == best_score && *total > 0 && *matched * 2 > *total
+            })
+            .map(|(address, _, _)| *address)
+            .collect::<Vec<_>>();
+        only_candidate(&candidates)
     }
 
     fn tracked_runtime_address_matches(
@@ -30849,22 +30865,27 @@ mod windows_overlay {
             }
             drop(watch);
 
-            let matching = candidates
-                .into_iter()
-                .filter(|data_address| {
-                    if tracked_entry.tracked_signature.trim().is_empty() {
-                        tracked_field_matches(pid, *data_address, &tracked_entry)
-                    } else {
-                        tracked_signature_matches(
+            let candidate = if tracked_entry.tracked_signature.trim().is_empty() {
+                let matching = candidates
+                    .into_iter()
+                    .filter(|data_address| tracked_field_matches(pid, *data_address, &tracked_entry))
+                    .collect::<Vec<_>>();
+                only_candidate(&matching)
+            } else {
+                let scores = candidates
+                    .into_iter()
+                    .map(|data_address| {
+                        let (matched, total) = tracked_signature_score(
                             pid,
-                            *data_address,
+                            data_address,
                             &code.instruction,
                             &tracked_entry,
-                        )
-                    }
-                })
-                .collect::<Vec<_>>();
-            let candidate = only_candidate(&matching);
+                        );
+                        (data_address, matched, total)
+                    })
+                    .collect::<Vec<_>>();
+                unique_best_signature_candidate(&scores)
+            };
 
             if let Some(data_address) = candidate {
                 for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
@@ -31212,6 +31233,15 @@ mod windows_overlay {
             assert_eq!(only_candidate(&[]), None);
             assert_eq!(only_candidate(&[0x1234]), Some(0x1234));
             assert_eq!(only_candidate(&[0x1234, 0x5678]), None);
+            assert_eq!(
+                unique_best_signature_candidate(&[(0x1234, 2, 3), (0x5678, 1, 3)]),
+                Some(0x1234)
+            );
+            assert_eq!(
+                unique_best_signature_candidate(&[(0x1234, 2, 3), (0x5678, 2, 3)]),
+                None
+            );
+            assert_eq!(unique_best_signature_candidate(&[(0x1234, 1, 3)]), None);
         }
 
         #[test]
