@@ -30521,62 +30521,6 @@ mod windows_overlay {
             .collect()
     }
 
-    fn tracked_field_matches(
-        pid: u32,
-        data_address: usize,
-        entry: &crate::model::MemoryPointerEntry,
-    ) -> bool {
-        if entry.tracked_value.trim().is_empty() {
-            return true;
-        }
-        let Some(address) = data_address.checked_add_signed(entry.code_address_offset) else {
-            return false;
-        };
-        let Some(value_type) = (match entry.value_type.to_ascii_lowercase().as_str() {
-            "i8" => Some(crate::process_memory::ScanValueType::I8),
-            "i16" => Some(crate::process_memory::ScanValueType::I16),
-            "i32" => Some(crate::process_memory::ScanValueType::I32),
-            "f32" => Some(crate::process_memory::ScanValueType::F32),
-            "i64" => Some(crate::process_memory::ScanValueType::I64),
-            "f64" => Some(crate::process_memory::ScanValueType::F64),
-            _ => None,
-        }) else {
-            return false;
-        };
-        let Ok(value) = crate::process_memory::read_scan_value(pid, address, value_type) else {
-            return false;
-        };
-        let expected = entry.tracked_value.trim();
-        match value {
-            crate::process_memory::ScanValue::I8(value) => expected
-                .parse::<i8>()
-                .is_ok_and(|expected| value == expected),
-            crate::process_memory::ScanValue::I16(value) => expected
-                .parse::<i16>()
-                .is_ok_and(|expected| value == expected),
-            crate::process_memory::ScanValue::I32(value) => expected
-                .parse::<i32>()
-                .is_ok_and(|expected| value == expected),
-            crate::process_memory::ScanValue::I64(value) => expected
-                .parse::<i64>()
-                .is_ok_and(|expected| value == expected),
-            crate::process_memory::ScanValue::F32(value) => expected
-                .parse::<f32>()
-                .is_ok_and(|expected| {
-                    value.is_finite()
-                        && expected.is_finite()
-                        && (value - expected).abs() <= expected.abs().max(1.0) * 0.01
-                }),
-            crate::process_memory::ScanValue::F64(value) => expected
-                .parse::<f64>()
-                .is_ok_and(|expected| {
-                    value.is_finite()
-                        && expected.is_finite()
-                        && (value - expected).abs() <= expected.abs().max(1.0) * 0.01
-                }),
-        }
-    }
-
     fn schedule_memory_tracked_rebind(
         pid: u32,
         entry: &crate::model::MemoryPointerEntry,
@@ -30632,28 +30576,11 @@ mod windows_overlay {
                 return;
             }
 
-            let tracked_entries = MEMORY_POINTER_ENTRIES
-                .lock()
-                .iter()
-                .filter(|pointer| {
-                    pointer.code_module.eq_ignore_ascii_case(&code.module)
-                        && pointer.code_offset == code.offset
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            let matcher_entries = tracked_entries.clone();
-
             let (tx, rx) = std::sync::mpsc::channel();
-            let Ok(mut watch) = AccessWatch::start_matching(
+            let Ok(mut watch) = AccessWatch::start_once(
                 pid,
                 instruction_address,
                 MemoryDebuggerArchitecture::Auto,
-                128,
-                move |data_address| {
-                    matcher_entries.iter().any(|pointer| {
-                        tracked_field_matches(pid, data_address, pointer)
-                    })
-                },
                 move |event| {
                     let _ = tx.send(event);
                 },
