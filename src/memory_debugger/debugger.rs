@@ -833,39 +833,44 @@ unsafe fn arm_thread(
     kind: &WatchKind,
     architecture: TargetArchitecture,
 ) -> io::Result<()> {
-    if architecture == TargetArchitecture::X86 {
-        let mut context = WOW64_CONTEXT {
-            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
-            ..WOW64_CONTEXT::default()
-        };
-        if unsafe { Wow64GetThreadContext(thread, &mut context) } == 0 {
+    let _ = unsafe { SuspendThread(thread) };
+    let result = (|| {
+        if architecture == TargetArchitecture::X86 {
+            let mut context = WOW64_CONTEXT {
+                ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
+                ..WOW64_CONTEXT::default()
+            };
+            if unsafe { Wow64GetThreadContext(thread, &mut context) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            context.Dr0 = kind.address() as u32;
+            context.Dr6 = 0;
+            context.Dr7 &= !0xF0003;
+            context.Dr7 |= kind.dr7() as u32;
+            return if unsafe { Wow64SetThreadContext(thread, &context) } == 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            };
+        }
+        let mut aligned = AlignedContext::default();
+        let context = &mut aligned.0;
+        context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
+        if unsafe { GetThreadContext(thread, context) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        context.Dr0 = kind.address() as u32;
+        context.Dr0 = kind.address() as u64;
         context.Dr6 = 0;
         context.Dr7 &= !0xF0003;
-        context.Dr7 |= kind.dr7() as u32;
-        return if unsafe { Wow64SetThreadContext(thread, &context) } == 0 {
+        context.Dr7 |= kind.dr7();
+        if unsafe { SetThreadContext(thread, context) } == 0 {
             Err(io::Error::last_os_error())
         } else {
             Ok(())
-        };
-    }
-    let mut aligned = AlignedContext::default();
-    let context = &mut aligned.0;
-    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
-    if unsafe { GetThreadContext(thread, context) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    context.Dr0 = kind.address() as u64;
-    context.Dr6 = 0;
-    context.Dr7 &= !0xF0003;
-    context.Dr7 |= kind.dr7();
-    if unsafe { SetThreadContext(thread, context) } == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+        }
+    })();
+    let _ = unsafe { ResumeThread(thread) };
+    result
 }
 
 enum CapturedContext {
