@@ -33,8 +33,8 @@ use crate::{
 #[cfg(windows)]
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, ProcessInfo, WatchEvent, WriteWatch, disassemble_from,
-    get_instruction_bytes, instruction_writes_memory, list_process_details,
-    module_offset_for_address, normalize_instruction, process_modules, process_pointer_width,
+    get_instruction_bytes, instruction_writes_memory, is_instruction_compatible,
+    list_process_details, module_offset_for_address, normalize_instruction, process_modules, process_pointer_width,
     resolve_module_offset,
 };
 
@@ -3710,7 +3710,7 @@ impl CrosshairApp {
         .and_then(|mut lines| lines.pop())
         .map(|(_, _, instruction)| instruction);
         if current_instruction.as_ref().is_none_or(|current| {
-            normalize_instruction(current) != normalize_instruction(&entry.instruction)
+            !is_instruction_compatible(&entry.instruction, current)
         }) {
             let (_tx, rx) = mpsc::channel();
             self.memory_panel.code_access_dialog = Some(CodeAccessDialog {

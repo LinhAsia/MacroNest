@@ -30719,7 +30719,7 @@ mod windows_overlay {
         }
         thread::spawn(move || {
             use crate::memory_debugger::debugger::{
-                AccessWatch, WatchEvent, disassemble_from, normalize_instruction,
+                AccessWatch, WatchEvent, disassemble_from, is_instruction_compatible,
                 resolve_module_offset,
             };
             use crate::model::MemoryDebuggerArchitecture;
@@ -30739,8 +30739,9 @@ mod windows_overlay {
             .ok()
             .and_then(|mut rows| rows.pop())
             .map(|(_, _, instruction)| instruction);
-            if current_instruction.as_deref().map(normalize_instruction)
-                != Some(normalize_instruction(&code.instruction))
+            if !current_instruction
+                .as_deref()
+                .map_or(false, |current| is_instruction_compatible(&code.instruction, current))
             {
                 MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
                 return;

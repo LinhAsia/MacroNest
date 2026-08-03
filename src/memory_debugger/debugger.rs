@@ -144,6 +144,56 @@ pub fn normalize_instruction(instruction: &str) -> String {
     filtered.replace("0x", "").replace('h', "")
 }
 
+pub fn instruction_memory_displacement(instruction: &str) -> isize {
+    let Some(open) = instruction.find('[') else {
+        return 0;
+    };
+    let Some(close) = instruction[open + 1..].find(']') else {
+        return 0;
+    };
+    let expression = &instruction[open + 1..open + 1 + close];
+    let Some((index, negative)) = expression
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| match character {
+            '+' => Some((index, false)),
+            '-' => Some((index, true)),
+            _ => None,
+        })
+    else {
+        return 0;
+    };
+    let mut digits = expression[index + 1..].trim();
+    if let Some(stripped) = digits
+        .strip_suffix('h')
+        .or_else(|| digits.strip_suffix('H'))
+    {
+        digits = stripped;
+    }
+    let Ok(value) = isize::from_str_radix(
+        digits
+            .strip_prefix("0x")
+            .or_else(|| digits.strip_prefix("0X"))
+            .unwrap_or(digits),
+        16,
+    ) else {
+        return 0;
+    };
+    if negative { -value } else { value }
+}
+
+pub fn is_instruction_compatible(expected: &str, found: &str) -> bool {
+    if normalize_instruction(expected) == normalize_instruction(found) {
+        return true;
+    }
+    let expected_disp = instruction_memory_displacement(expected);
+    let found_disp = instruction_memory_displacement(found);
+    if expected_disp != 0 && expected_disp == found_disp {
+        return true;
+    }
+    found.contains('[') && found.contains(']')
+}
+
 pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
     let mut attempts = 0;
     let snapshot = loop {
