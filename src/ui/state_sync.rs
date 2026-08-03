@@ -457,6 +457,8 @@ impl CrosshairApp {
         startup_state_needs_cjk_fallback: bool,
     ) {
         self.state = state;
+        crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+        crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
         self.state.show_window = !self.startup_hide_to_tray_pending;
         self.startup_state_needs_cjk_fallback = startup_state_needs_cjk_fallback;
         self.save_name = self.state.selected_profile.clone().unwrap_or_default();

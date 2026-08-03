@@ -967,6 +967,7 @@ impl CrosshairApp {
         let save_name = state.selected_profile.clone().unwrap_or_default();
         let initial_active_panel = state.active_panel;
         crate::overlay::set_memory_pointer_entries(&state.memory_pointer_list);
+        crate::overlay::set_memory_code_entries(&state.memory_code_list);
         let memory_panel = memory_panel::MemoryPanelState::with_hotkeys(
             &state.memory_scan_hotkeys,
             &state.memory_pointer_list,
@@ -14613,6 +14614,31 @@ impl eframe::App for CrosshairApp {
                     }
                     self.persist();
                     self.status = status;
+                }
+                UiCommand::MemoryTrackedCodeResolved {
+                    pid,
+                    code_module,
+                    code_offset,
+                    captured_address,
+                } => {
+                    let mut resolved = 0;
+                    for entry in &mut self.state.memory_pointer_list {
+                        if entry.code_module.eq_ignore_ascii_case(&code_module)
+                            && entry.code_offset == code_offset
+                        {
+                            entry.runtime_address = captured_address
+                                .checked_add_signed(entry.code_address_offset);
+                            entry.runtime_process_id = Some(pid);
+                            resolved += usize::from(entry.runtime_address.is_some());
+                        }
+                    }
+                    if resolved != 0 {
+                        crate::overlay::set_memory_pointer_entries(
+                            &self.state.memory_pointer_list,
+                        );
+                        self.persist();
+                        self.status = format!("Rebound {resolved} tracked memory address(es)");
+                    }
                 }
                 UiCommand::SetMacrosMasterEnabled(enabled, status) => {
                     self.state.macros_master_enabled = enabled;

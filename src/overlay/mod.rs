@@ -288,11 +288,19 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(HashSet::new()));
     static MEMORY_POINTER_ENTRIES: Lazy<Mutex<Vec<crate::model::MemoryPointerEntry>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
+    static MEMORY_CODE_ENTRIES: Lazy<Mutex<Vec<crate::model::MemoryCodeEntry>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
+    static MEMORY_TRACKED_REBINDS: Lazy<Mutex<HashMap<(u32, String, usize), Instant>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
     static MEMORY_TRIGGER_EVENTS: Lazy<Mutex<Vec<HotkeyBinding>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
 
     pub(crate) fn set_memory_pointer_entries(entries: &[crate::model::MemoryPointerEntry]) {
         *MEMORY_POINTER_ENTRIES.lock() = entries.to_vec();
+    }
+
+    pub(crate) fn set_memory_code_entries(entries: &[crate::model::MemoryCodeEntry]) {
+        *MEMORY_CODE_ENTRIES.lock() = entries.to_vec();
     }
 
     pub(crate) fn take_memory_trigger_events() -> Vec<HotkeyBinding> {
@@ -2287,6 +2295,12 @@ mod windows_overlay {
         StartupStateLoadFailed(String),
         SyncMacroGroups(Vec<MacroGroup>, String),
         SyncCrosshairProfiles(Vec<ProfileRecord>, String),
+        MemoryTrackedCodeResolved {
+            pid: u32,
+            code_module: String,
+            code_offset: usize,
+            captured_address: usize,
+        },
         SetMacrosMasterEnabled(bool, String),
         SetVietnameseInputEnabled(bool, String),
         MousePathRecordingStarted(u32, String),
@@ -30507,6 +30521,104 @@ mod windows_overlay {
             .collect()
     }
 
+    fn schedule_memory_tracked_rebind(
+        pid: u32,
+        entry: &crate::model::MemoryPointerEntry,
+    ) {
+        let code = MEMORY_CODE_ENTRIES
+            .lock()
+            .iter()
+            .find(|code| {
+                code.module.eq_ignore_ascii_case(&entry.code_module)
+                    && code.offset == entry.code_offset
+            })
+            .cloned();
+        let Some(code) = code else {
+            return;
+        };
+        let key = (pid, code.module.to_ascii_lowercase(), code.offset);
+        {
+            let mut attempts = MEMORY_TRACKED_REBINDS.lock();
+            if attempts
+                .get(&key)
+                .is_some_and(|started| started.elapsed() < Duration::from_secs(5))
+            {
+                return;
+            }
+            attempts.insert(key.clone(), Instant::now());
+        }
+        thread::spawn(move || {
+            use crate::memory_debugger::debugger::{
+                AccessWatch, WatchEvent, disassemble_from, normalize_instruction,
+                resolve_module_offset,
+            };
+            use crate::model::MemoryDebuggerArchitecture;
+
+            let Ok(instruction_address) =
+                resolve_module_offset(pid, &code.module, code.offset)
+            else {
+                MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+                return;
+            };
+            let current_instruction = disassemble_from(
+                pid,
+                instruction_address,
+                MemoryDebuggerArchitecture::Auto,
+                1,
+            )
+            .ok()
+            .and_then(|mut rows| rows.pop())
+            .map(|(_, _, instruction)| instruction);
+            if current_instruction.as_deref().map(normalize_instruction)
+                != Some(normalize_instruction(&code.instruction))
+            {
+                MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+                return;
+            }
+
+            let (tx, rx) = std::sync::mpsc::channel();
+            let Ok(mut watch) = AccessWatch::start(
+                pid,
+                instruction_address,
+                MemoryDebuggerArchitecture::Auto,
+                move |event| {
+                    let _ = tx.send(event);
+                },
+            ) else {
+                MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+                return;
+            };
+            while let Ok(event) = rx.recv() {
+                match event {
+                    WatchEvent::AccessHit { data_address } => {
+                        watch.stop();
+                        for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
+                            if pointer.code_module.eq_ignore_ascii_case(&code.module)
+                                && pointer.code_offset == code.offset
+                            {
+                                pointer.runtime_address = data_address
+                                    .checked_add_signed(pointer.code_address_offset);
+                                pointer.runtime_process_id = Some(pid);
+                            }
+                        }
+                        send_ui_command(UiCommand::MemoryTrackedCodeResolved {
+                            pid,
+                            code_module: code.module.clone(),
+                            code_offset: code.offset,
+                            captured_address: data_address,
+                        });
+                        MEMORY_TRACKED_REBINDS.lock().remove(&key);
+                        return;
+                    }
+                    WatchEvent::Error(_) | WatchEvent::Stopped => break,
+                    _ => {}
+                }
+            }
+            watch.stop();
+            MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+        });
+    }
+
     fn resolve_memory_action_target(pid: Option<u32>, text: &str) -> Option<(u32, usize)> {
         let text = interpolate_variables(text);
         let text = text.trim();
@@ -30517,7 +30629,12 @@ mod windows_overlay {
                 .find(|entry| entry.name.eq_ignore_ascii_case(alias.trim()))
                 .cloned()?;
             if !entry.code_module.is_empty() {
-                return Some((entry.runtime_process_id?, entry.runtime_address?));
+                let pid = pid?;
+                if entry.runtime_process_id == Some(pid) {
+                    return Some((pid, entry.runtime_address?));
+                }
+                schedule_memory_tracked_rebind(pid, &entry);
+                return None;
             }
             let pid = pid?;
             if let Some(address) = entry.absolute_address {

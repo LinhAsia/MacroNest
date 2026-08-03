@@ -34,7 +34,8 @@ use crate::{
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, ProcessInfo, WatchEvent, WriteWatch, disassemble_from,
     get_instruction_bytes, instruction_writes_memory, list_process_details,
-    module_offset_for_address, process_modules, process_pointer_width, resolve_module_offset,
+    module_offset_for_address, normalize_instruction, process_modules, process_pointer_width,
+    resolve_module_offset,
 };
 
 use super::CrosshairApp;
@@ -3526,6 +3527,7 @@ impl CrosshairApp {
                     self.restore_code_entry_with_original_bytes(index);
                 }
                 self.state.memory_code_list.remove(index);
+                crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
                 self.persist();
             }
             Some(CodeAction::ReplaceAll) =>
@@ -3669,6 +3671,7 @@ impl CrosshairApp {
             original_bytes: None,
             replaced: false,
         });
+        crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
         self.memory_panel.code_list_open = true;
         self.memory_panel.status = "Instruction added to code list".to_owned();
         self.persist();
@@ -6137,7 +6140,7 @@ impl CrosshairApp {
                     Button::new("Save tracked"),
                 )
                 .on_hover_text(
-                    "Save this as a stable code-derived address; run Find written after restarting the game to resolve it again",
+                    "Save this code-derived address; memory actions using @name will rebind it automatically after the game restarts",
                 )
                 .clicked()
             {
@@ -8493,14 +8496,6 @@ fn parse_signed_hex_offset(text: &str) -> Option<isize> {
         .unwrap_or(digits);
     let value = isize::from_str_radix(digits, 16).ok()?;
     Some(if negative { -value } else { value })
-}
-
-fn normalize_instruction(instruction: &str) -> String {
-    instruction
-        .chars()
-        .filter(|character| !character.is_ascii_whitespace())
-        .flat_map(char::to_lowercase)
-        .collect()
 }
 
 fn resolve_memory_address(

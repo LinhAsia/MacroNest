@@ -131,6 +131,14 @@ pub fn resolve_module_offset(pid: u32, module: &str, offset: usize) -> io::Resul
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "module is not loaded"))
 }
 
+pub fn normalize_instruction(instruction: &str) -> String {
+    instruction
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
     let mut attempts = 0;
     let snapshot = loop {
