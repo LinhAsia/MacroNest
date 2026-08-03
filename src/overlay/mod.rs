@@ -30695,18 +30695,9 @@ mod windows_overlay {
         pid: u32,
         entry: &crate::model::MemoryPointerEntry,
     ) {
-        let code = MEMORY_CODE_ENTRIES
-            .lock()
-            .iter()
-            .find(|code| {
-                code.module.eq_ignore_ascii_case(&entry.code_module)
-                    && code.offset == entry.code_offset
-            })
-            .cloned();
-        let Some(code) = code else {
-            return;
-        };
-        let key = (pid, code.module.to_ascii_lowercase(), code.offset);
+        let code_module = entry.code_module.clone();
+        let code_offset = entry.code_offset;
+        let key = (pid, code_module.to_ascii_lowercase(), code_offset);
         {
             let mut attempts = MEMORY_TRACKED_REBINDS.lock();
             if attempts
@@ -30718,49 +30709,16 @@ mod windows_overlay {
             attempts.insert(key.clone(), Instant::now());
         }
         thread::spawn(move || {
-            use crate::memory_debugger::debugger::{
-                AccessWatch, WatchEvent, disassemble_from, is_instruction_compatible,
-                resolve_module_offset,
-            };
+            use crate::memory_debugger::debugger::{AccessWatch, WatchEvent, resolve_module_offset};
             use crate::model::MemoryDebuggerArchitecture;
 
             let Ok(instruction_address) =
-                resolve_module_offset(pid, &code.module, code.offset)
+                resolve_module_offset(pid, &code_module, code_offset)
             else {
                 MEMORY_TRACKED_REBINDS.lock().remove(&key);
                 return;
             };
-            let current_instruction = disassemble_from(
-                pid,
-                instruction_address,
-                MemoryDebuggerArchitecture::Auto,
-                1,
-            )
-            .ok()
-            .and_then(|mut rows| rows.pop())
-            .map(|(_, _, instruction)| instruction);
-            if !current_instruction
-                .as_deref()
-                .map_or(false, |current| is_instruction_compatible(&code.instruction, current))
-            {
-                MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
-                return;
-            }
 
-            let tracked_entries = MEMORY_POINTER_ENTRIES
-                .lock()
-                .iter()
-                .filter(|pointer| {
-                    pointer.code_module.eq_ignore_ascii_case(&code.module)
-                        && pointer.code_offset == code.offset
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            // Keep one debugger attachment instead of repeatedly attaching/detaching for every
-            // hit. Repeated attaches were the source of visible frame stalls in hot games.
-            // A tracked object signature needs more candidates than the normal debugger view,
-            // because a render instruction can touch hundreds of objects before the target one.
-            // Keep this bound finite so a broken instruction cannot hang the game indefinitely.
             let (tx, rx) = std::sync::mpsc::channel();
             let notify = move |event| {
                 let _ = tx.send(event);
@@ -30783,37 +30741,11 @@ mod windows_overlay {
                 }
             }
             drop(watch);
-            let mut best_candidate = None;
-            for data_address in &candidates {
-                let data_address = *data_address;
-                for pointer in &tracked_entries {
-                    let score = if pointer.tracked_signature.trim().is_empty() {
-                        usize::from(tracked_field_matches(pid, data_address, pointer))
-                    } else {
-                        let (matched, total) = tracked_signature_score(
-                            pid,
-                            data_address,
-                            &code.instruction,
-                            pointer,
-                        );
-                        // A child pointer can change between sessions; choose the strongest
-                        // surviving signature instead of rejecting the whole object.
-                        (matched > 0).then_some(matched * 100 / total.max(1)).unwrap_or(0)
-                    };
-                    if score > best_candidate.map_or(0, |(_, best)| best) {
-                        best_candidate = Some((data_address, score));
-                    }
-                }
-            }
-            if (best_candidate.is_none() || best_candidate.map_or(0, |(_, s)| s) == 0) && !candidates.is_empty() {
-                best_candidate = Some((candidates[0], 1));
-            }
-            if let Some((data_address, score)) = best_candidate
-                && score > 0
-            {
+
+            if let Some(data_address) = candidates.first().copied() {
                 for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
-                    if pointer.code_module.eq_ignore_ascii_case(&code.module)
-                        && pointer.code_offset == code.offset
+                    if pointer.code_module.eq_ignore_ascii_case(&code_module)
+                        && pointer.code_offset == code_offset
                     {
                         pointer.runtime_address = data_address
                             .checked_add_signed(pointer.code_address_offset);
@@ -30822,8 +30754,8 @@ mod windows_overlay {
                 }
                 send_ui_command(UiCommand::MemoryTrackedCodeResolved {
                     pid,
-                    code_module: code.module.clone(),
-                    code_offset: code.offset,
+                    code_module: code_module.clone(),
+                    code_offset,
                     captured_address: data_address,
                 });
                 MEMORY_TRACKED_REBINDS.lock().remove(&key);
