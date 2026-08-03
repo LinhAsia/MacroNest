@@ -30593,45 +30593,50 @@ mod windows_overlay {
         if negative { -value } else { value }
     }
 
-    fn tracked_signature_matches(
+    fn tracked_signature_score(
         pid: u32,
         data_address: usize,
         instruction: &str,
         entry: &crate::model::MemoryPointerEntry,
-    ) -> bool {
+    ) -> (usize, usize) {
         let displacement = instruction_memory_displacement(instruction);
         let Some(object_base) = data_address.checked_add_signed(-displacement) else {
-            return false;
+            return (0, 0);
         };
         let Some(pointer_width) = crate::memory_debugger::debugger::process_pointer_width(pid).ok()
         else {
-            return false;
+            return (0, 0);
         };
         let Ok(modules) = crate::memory_debugger::debugger::process_modules(pid) else {
-            return false;
+            return (0, 0);
         };
-        entry.tracked_signature.split(';').all(|part| {
+        let mut matched = 0;
+        let mut total = 0;
+        for part in entry.tracked_signature.split(';') {
             let Some((path_text, root)) = part.split_once('=') else {
-                return false;
+                continue;
             };
             let Some((module_name, offset_text)) = root.rsplit_once('+') else {
-                return false;
+                continue;
             };
             let offset_text = offset_text
                 .strip_prefix("0x")
                 .or_else(|| offset_text.strip_prefix("0X"))
                 .unwrap_or(offset_text);
             let Ok(module_offset) = usize::from_str_radix(offset_text, 16) else {
-                return false;
+                continue;
             };
+            total += 1;
             let mut address = object_base;
             let mut pointer = None;
             for slot_text in path_text.split('>') {
                 let Ok(slot) = usize::from_str_radix(slot_text, 16) else {
-                    return false;
+                    pointer = None;
+                    break;
                 };
                 let Some(slot_address) = address.checked_add(slot) else {
-                    return false;
+                    pointer = None;
+                    break;
                 };
                 pointer = match pointer_width {
                     4 => crate::process_memory::read_scan_value(
@@ -30656,22 +30661,34 @@ mod windows_overlay {
                         crate::process_memory::ScanValue::I64(value) => Some(value as usize),
                         _ => None,
                     }),
-                    _ => return false,
+                    _ => None,
                 };
                 let Some(next) = pointer else {
-                    return false;
+                    break;
                 };
                 address = next;
             }
-            let Some(pointer) = pointer else {
-                return false;
-            };
-            modules.iter().any(|(name, base, size)| {
-                name.eq_ignore_ascii_case(module_name)
-                    && (*base..base.saturating_add(*size)).contains(&pointer)
-                    && pointer - *base == module_offset
-            })
-        })
+            if let Some(pointer) = pointer
+                && modules.iter().any(|(name, base, size)| {
+                    name.eq_ignore_ascii_case(module_name)
+                        && (*base..base.saturating_add(*size)).contains(&pointer)
+                        && pointer - *base == module_offset
+                })
+            {
+                matched += 1;
+            }
+        }
+        (matched, total)
+    }
+
+    fn tracked_signature_matches(
+        pid: u32,
+        data_address: usize,
+        instruction: &str,
+        entry: &crate::model::MemoryPointerEntry,
+    ) -> bool {
+        let (matched, total) = tracked_signature_score(pid, data_address, instruction, entry);
+        total > 0 && matched == total
     }
 
     fn schedule_memory_tracked_rebind(
@@ -30747,7 +30764,7 @@ mod windows_overlay {
                 .iter()
                 .any(|pointer| !pointer.tracked_signature.trim().is_empty())
             {
-                2048
+                4096
             } else {
                 64
             };
@@ -30767,7 +30784,7 @@ mod windows_overlay {
                 return;
             };
             let mut candidates = Vec::new();
-            while let Ok(event) = rx.recv() {
+            while let Ok(event) = rx.recv_timeout(Duration::from_millis(1500)) {
                 match event {
                     WatchEvent::AccessHit { data_address } => {
                         if !candidates.contains(&data_address) {
@@ -30779,14 +30796,30 @@ mod windows_overlay {
                 }
             }
             drop(watch);
+            let mut best_candidate = None;
             for data_address in candidates {
-                if tracked_entries.iter().any(|pointer| {
-                    if pointer.tracked_signature.trim().is_empty() {
-                        tracked_field_matches(pid, data_address, pointer)
+                for pointer in &tracked_entries {
+                    let score = if pointer.tracked_signature.trim().is_empty() {
+                        usize::from(tracked_field_matches(pid, data_address, pointer))
                     } else {
-                        tracked_signature_matches(pid, data_address, &code.instruction, pointer)
+                        let (matched, total) = tracked_signature_score(
+                            pid,
+                            data_address,
+                            &code.instruction,
+                            pointer,
+                        );
+                        // A child pointer can change between sessions; choose the strongest
+                        // surviving signature instead of rejecting the whole object.
+                        (matched > 0).then_some(matched * 100 / total.max(1)).unwrap_or(0)
+                    };
+                    if score > best_candidate.map_or(0, |(_, best)| best) {
+                        best_candidate = Some((data_address, score));
                     }
-                }) {
+                }
+            }
+            if let Some((data_address, score)) = best_candidate
+                && score > 0
+            {
                         for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
                             if pointer.code_module.eq_ignore_ascii_case(&code.module)
                                 && pointer.code_offset == code.offset
@@ -30804,7 +30837,6 @@ mod windows_overlay {
                         });
                         MEMORY_TRACKED_REBINDS.lock().remove(&key);
                         return;
-                }
             }
             MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
         });
@@ -30861,16 +30893,30 @@ mod windows_overlay {
         if target_var.is_empty() {
             return;
         }
+        let is_tracked_alias = step.key.trim().starts_with('@');
+        let target_pid = window_list::process_id_for_window(step.memory_target_window.as_deref());
         let value = resolve_memory_action_target(
-            window_list::process_id_for_window(step.memory_target_window.as_deref()),
+            target_pid,
             &step.key,
         )
             .and_then(|(pid, address)| {
                 crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
             });
+        if is_tracked_alias
+            && value.is_none()
+            && let Some(pid) = target_pid
+            && let Some(alias) = step.key.trim().strip_prefix('@')
+            && let Some(entry) = MEMORY_POINTER_ENTRIES
+                .lock()
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case(alias.trim()))
+                .cloned()
+        {
+            schedule_memory_tracked_rebind(pid, &entry);
+        }
         if let Some(value) = value {
             smart_set_variable_from_expression(target_var, &value);
-        } else {
+        } else if !is_tracked_alias {
             set_variable_value(target_var, 0.0);
             TEXT_VARIABLES.lock().remove(target_var);
         }
