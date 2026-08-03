@@ -30777,7 +30777,7 @@ mod windows_overlay {
                 return;
             };
             let mut candidates = Vec::new();
-            if let Ok(event) = rx.recv_timeout(Duration::from_millis(500)) {
+            if let Ok(event) = rx.recv_timeout(Duration::from_secs(10)) {
                 if let WatchEvent::AccessHit { data_address } = event {
                     candidates.push(data_address);
                 }
