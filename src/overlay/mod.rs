@@ -30761,7 +30761,7 @@ mod windows_overlay {
                 MEMORY_TRACKED_REBINDS.lock().remove(&key);
                 return;
             }
-            MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
+            MEMORY_TRACKED_REBINDS.lock().remove(&key);
         });
     }
 
@@ -30774,6 +30774,21 @@ mod windows_overlay {
                 .iter()
                 .find(|entry| entry.name.eq_ignore_ascii_case(alias.trim()))
                 .cloned()?;
+            let pid = pid
+                .or_else(|| {
+                    if !entry.app_name.is_empty() {
+                        window_list::process_id_for_window(Some(&entry.app_name))
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    if !entry.code_module.is_empty() {
+                        window_list::process_id_for_window(Some(&entry.code_module))
+                    } else {
+                        None
+                    }
+                });
             if !entry.code_module.is_empty() {
                 let pid = pid?;
                 if let Some(address) = entry.runtime_address {
