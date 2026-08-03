@@ -6308,6 +6308,10 @@ impl CrosshairApp {
             .and_then(|pid| read_scan_value(pid, address, dialog.value_type).ok())
             .map(|value| format_scan_value(value, false))
             .unwrap_or_default();
+        let tracked_signature = self
+            .memory_panel
+            .process_pid
+            .and_then(|pid| tracked_object_signature(pid, captured, &code.instruction));
         let entry = MemoryPointerEntry {
             name: name.clone(),
             app_name,
@@ -6322,6 +6326,7 @@ impl CrosshairApp {
             runtime_address: Some(address),
             runtime_process_id: self.memory_panel.process_pid,
             tracked_value,
+            tracked_signature: tracked_signature.unwrap_or_default(),
         };
         if let Some(existing) = self
             .state
@@ -7857,6 +7862,7 @@ impl CrosshairApp {
                 runtime_address: None,
                 runtime_process_id: None,
                 tracked_value: String::new(),
+                tracked_signature: String::new(),
             };
             if let Some(existing) = self.state.memory_pointer_list.iter_mut().find(|existing| {
                 existing.module.eq_ignore_ascii_case(&entry.module)
@@ -8470,6 +8476,51 @@ fn parse_signed_hex_offset(text: &str) -> Option<isize> {
         .unwrap_or(digits);
     let value = isize::from_str_radix(digits, 16).ok()?;
     Some(if negative { -value } else { value })
+}
+
+#[cfg(windows)]
+fn instruction_memory_displacement(instruction: &str) -> isize {
+    let Some(open) = instruction.find('[') else {
+        return 0;
+    };
+    let Some(close) = instruction[open + 1..].find(']') else {
+        return 0;
+    };
+    let expression = &instruction[open + 1..open + 1 + close];
+    let Some((index, negative)) = expression
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| match character {
+            '+' => Some((index, false)),
+            '-' => Some((index, true)),
+            _ => None,
+        })
+    else {
+        return 0;
+    };
+    let mut digits = expression[index + 1..].trim();
+    if let Some(stripped) = digits.strip_suffix('h').or_else(|| digits.strip_suffix('H')) {
+        digits = stripped;
+    }
+    let Ok(value) = isize::from_str_radix(
+        digits.strip_prefix("0x").or_else(|| digits.strip_prefix("0X")).unwrap_or(digits),
+        16,
+    ) else {
+        return 0;
+    };
+    if negative { -value } else { value }
+}
+
+#[cfg(windows)]
+fn tracked_object_signature(pid: u32, captured_address: usize, instruction: &str) -> Option<String> {
+    let displacement = instruction_memory_displacement(instruction);
+    let object_base = captured_address.checked_add_signed(-displacement)?;
+    let object_pointer = match read_scan_value(pid, object_base, ScanValueType::I64).ok()? {
+        ScanValue::I64(value) => value as usize,
+        _ => return None,
+    };
+    let (module, offset) = module_offset_for_address(pid, object_pointer).ok()?;
+    Some(format!("{module}+{offset:X}"))
 }
 
 fn resolve_memory_address(

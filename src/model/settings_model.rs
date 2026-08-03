@@ -498,6 +498,10 @@ pub struct MemoryPointerEntry {
     /// objects after a process restart.
     #[serde(default)]
     pub tracked_value: String,
+    /// ASLR-safe signature of the object touched by the tracked instruction.
+    /// This is preferred over `tracked_value`, which is expected to change.
+    #[serde(default)]
+    pub tracked_signature: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
