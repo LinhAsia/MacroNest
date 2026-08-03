@@ -30740,14 +30740,28 @@ mod windows_overlay {
                 .collect::<Vec<_>>();
             // Keep one debugger attachment instead of repeatedly attaching/detaching for every
             // hit. Repeated attaches were the source of visible frame stalls in hot games.
+            // A tracked object signature needs more candidates than the normal debugger view,
+            // because a render instruction can touch hundreds of objects before the target one.
+            // Keep this bound finite so a broken instruction cannot hang the game indefinitely.
+            let capture_limit = if tracked_entries
+                .iter()
+                .any(|pointer| !pointer.tracked_signature.trim().is_empty())
+            {
+                2048
+            } else {
+                64
+            };
             let (tx, rx) = std::sync::mpsc::channel();
-            let Ok(watch) = AccessWatch::start(
+            let notify = move |event| {
+                let _ = tx.send(event);
+            };
+            let Ok(watch) = AccessWatch::start_matching(
                 pid,
                 instruction_address,
                 MemoryDebuggerArchitecture::Auto,
-                move |event| {
-                    let _ = tx.send(event);
-                },
+                capture_limit,
+                |_| true,
+                notify,
             ) else {
                 MEMORY_TRACKED_REBINDS.lock().insert(key, Instant::now());
                 return;
