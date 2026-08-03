@@ -151,6 +151,7 @@ struct StablePointerCandidate {
     resolved_base: Option<usize>,
     resolved_address: Option<usize>,
     observed_value: Option<ScanValue>,
+    live_value: Option<ScanValue>,
 }
 
 struct StablePointerJobResult {
@@ -171,6 +172,7 @@ struct StablePointerDialog {
     limits: PointerScanLimits,
     filter: String,
     exe_only: bool,
+    last_live_refresh: Instant,
 }
 
 enum DeepPointerJobResult {
@@ -3798,6 +3800,7 @@ impl CrosshairApp {
                     limits,
                     filter: String::new(),
                     exe_only: false,
+                    last_live_refresh: Instant::now(),
                 });
                 return;
             }
@@ -3833,6 +3836,7 @@ impl CrosshairApp {
             limits,
             filter: String::new(),
             exe_only: false,
+            last_live_refresh: Instant::now(),
         });
     }
 
@@ -4655,6 +4659,7 @@ impl CrosshairApp {
                                 resolved_base: None,
                                 resolved_address: None,
                                 observed_value: None,
+                                live_value: None,
                             })
                             .collect();
                         dialog.candidates.sort_by_key(|candidate| {
@@ -4734,6 +4739,7 @@ impl CrosshairApp {
                 const OFFSETS_WIDTH: f32 = 170.0;
                 const ADDRESS_WIDTH: f32 = 145.0;
                 const VALUE_WIDTH: f32 = 92.0;
+                const CURRENT_WIDTH: f32 = 92.0;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     for (width, title) in [
@@ -4742,6 +4748,7 @@ impl CrosshairApp {
                         (OFFSETS_WIDTH, "Offsets"),
                         (ADDRESS_WIDTH, "Resolved"),
                         (VALUE_WIDTH, "Value"),
+                        (CURRENT_WIDTH, "Current"),
                     ] {
                         Self::memory_label_cell(
                             ui,
@@ -4752,18 +4759,45 @@ impl CrosshairApp {
                     }
                 });
                 ui.separator();
-                egui::ScrollArea::both().show(ui, |ui| {
-                    ui.set_min_width(
-                        STATUS_WIDTH + ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH,
-                    );
-                    let filter = dialog.filter.trim().to_ascii_lowercase();
-                    for (index, candidate) in dialog.candidates.iter().enumerate() {
-                        let module_lower = candidate.path.module.to_ascii_lowercase();
-                        if (dialog.exe_only && !module_lower.ends_with(".exe"))
-                            || (!filter.is_empty() && !module_lower.contains(&filter))
-                        {
-                            continue;
+                let filter = dialog.filter.trim().to_ascii_lowercase();
+                let visible_indices = dialog
+                    .candidates
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, candidate)| {
+                        let module = candidate.path.module.to_ascii_lowercase();
+                        (!(dialog.exe_only && !module.ends_with(".exe"))
+                            && (filter.is_empty() || module.contains(&filter)))
+                        .then_some(index)
+                    })
+                    .collect::<Vec<_>>();
+                if dialog.last_live_refresh.elapsed() >= Duration::from_millis(100) {
+                    if let Some(pid) = self.memory_panel.process_pid {
+                        for index in visible_indices.iter().copied() {
+                            let candidate = &mut dialog.candidates[index];
+                            candidate.live_value = candidate.resolved_address.and_then(|address| {
+                                read_scan_value(pid, address, dialog.value_type).ok()
+                            });
                         }
+                    }
+                    dialog.last_live_refresh = Instant::now();
+                }
+                egui::ScrollArea::both().show_rows(
+                    ui,
+                    24.0,
+                    visible_indices.len(),
+                    |ui, rows| {
+                    ui.set_min_width(
+                        STATUS_WIDTH
+                            + ROOT_WIDTH
+                            + OFFSETS_WIDTH
+                            + ADDRESS_WIDTH
+                            + VALUE_WIDTH
+                            + CURRENT_WIDTH,
+                    );
+                    for visible_row in rows {
+                        let index = visible_indices[visible_row];
+                        let candidate = &dialog.candidates[index];
                         let state = match candidate.valid {
                             Some(true) => "VERIFIED",
                             Some(false) => "BROKEN",
@@ -4785,6 +4819,10 @@ impl CrosshairApp {
                             .resolved_address
                             .map_or_else(|| "—".to_owned(), format_prefixed_memory_address);
                         let value = candidate.observed_value.map_or_else(
+                            || "—".to_owned(),
+                            |value| editable_scan_value(value, false),
+                        );
+                        let current = candidate.live_value.map_or_else(
                             || "—".to_owned(),
                             |value| editable_scan_value(value, false),
                         );
@@ -4815,6 +4853,7 @@ impl CrosshairApp {
                                     (OFFSETS_WIDTH, offsets),
                                     (ADDRESS_WIDTH, address),
                                     (VALUE_WIDTH, value),
+                                    (CURRENT_WIDTH, current),
                                 ] {
                                     Self::memory_label_cell(
                                         ui,
@@ -4845,7 +4884,7 @@ impl CrosshairApp {
         if let Some(save_to_library) = add {
             self.add_stable_pointer_candidate(&dialog, save_to_library);
         }
-        if dialog.rx.is_some() {
+        if dialog.rx.is_some() || !dialog.candidates.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         self.memory_panel.stable_pointer_dialog = Some(dialog);
@@ -5250,6 +5289,7 @@ impl CrosshairApp {
             candidate.resolved_base = None;
             candidate.resolved_address = None;
             candidate.observed_value = None;
+            candidate.live_value = None;
             let Ok(base) =
                 resolve_module_offset(pid, &candidate.path.module, candidate.path.module_offset)
             else {
@@ -5275,6 +5315,7 @@ impl CrosshairApp {
                 continue;
             };
             candidate.observed_value = Some(observed);
+            candidate.live_value = Some(observed);
             if observed == dialog.expected_value {
                 candidate.valid = Some(true);
                 valid += 1;

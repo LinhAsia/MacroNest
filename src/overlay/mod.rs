@@ -17974,6 +17974,7 @@ mod windows_overlay {
                 || runtime.cached_search_overlay_capture_region_mode
                     != capture_region_preview_active;
             if static_changed {
+                let was_visible = runtime.search_area_overlay_visible;
                 unsafe {
                     paint_search_area_overlay(
                         runtime.search_area_hwnd,
@@ -17983,6 +17984,9 @@ mod windows_overlay {
                         &[],
                         capture_region_preview_active,
                     )?;
+                    if !was_visible {
+                        let _ = ShowWindow(runtime.search_area_hwnd, SW_SHOWNA);
+                    }
                 }
                 runtime.cached_search_overlay_regions = regions.clone();
                 runtime.cached_search_overlay_preview_regions = preview_regions.clone();
@@ -18004,6 +18008,7 @@ mod windows_overlay {
             let dynamic_changed = !runtime.dynamic_geometry_overlay_visible
                 || runtime.cached_search_overlay_dynamic_geometry != dynamic_geometry_shapes;
             if dynamic_changed {
+                let was_visible = runtime.dynamic_geometry_overlay_visible;
                 unsafe {
                     paint_search_area_overlay(
                         runtime.dynamic_geometry_hwnd,
@@ -18013,6 +18018,9 @@ mod windows_overlay {
                         &dynamic_geometry_shapes,
                         false,
                     )?;
+                    if !was_visible {
+                        let _ = ShowWindow(runtime.dynamic_geometry_hwnd, SW_SHOWNA);
+                    }
                 }
                 runtime.cached_search_overlay_dynamic_geometry = dynamic_geometry_shapes;
                 runtime.dynamic_geometry_overlay_visible = true;
@@ -37769,7 +37777,6 @@ mod windows_overlay {
             Some(&blend),
             ULW_ALPHA,
         );
-        let _ = ShowWindow(hwnd, SW_SHOWNA);
         let _ = SelectObject(mem_dc, old_bitmap);
         let _ = DeleteObject(HGDIOBJ(bitmap.0));
         let _ = DeleteDC(mem_dc);
