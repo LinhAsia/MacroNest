@@ -2934,6 +2934,7 @@ mod windows_overlay {
         cached_search_overlay_regions: Vec<VisionRegion>,
         cached_search_overlay_preview_regions: Vec<VisionRegion>,
         cached_search_overlay_static_geometry: Vec<GeometryRenderShape>,
+        cached_search_overlay_dynamic_geometry: Vec<GeometryRenderShape>,
         cached_search_overlay_capture_region_mode: bool,
         search_area_overlay_visible: bool,
         dynamic_geometry_overlay_visible: bool,
@@ -3769,6 +3770,7 @@ mod windows_overlay {
                 cached_search_overlay_regions: Vec::new(),
                 cached_search_overlay_preview_regions: Vec::new(),
                 cached_search_overlay_static_geometry: Vec::new(),
+                cached_search_overlay_dynamic_geometry: Vec::new(),
                 cached_search_overlay_capture_region_mode: false,
                 search_area_overlay_visible: false,
                 dynamic_geometry_overlay_visible: false,
@@ -17997,18 +17999,24 @@ mod windows_overlay {
                 }
                 runtime.dynamic_geometry_overlay_visible = false;
             }
+            runtime.cached_search_overlay_dynamic_geometry.clear();
         } else {
-            unsafe {
-                paint_search_area_overlay(
-                    runtime.dynamic_geometry_hwnd,
-                    &[],
-                    &[],
-                    &[],
-                    &dynamic_geometry_shapes,
-                    false,
-                )?;
+            let dynamic_changed = !runtime.dynamic_geometry_overlay_visible
+                || runtime.cached_search_overlay_dynamic_geometry != dynamic_geometry_shapes;
+            if dynamic_changed {
+                unsafe {
+                    paint_search_area_overlay(
+                        runtime.dynamic_geometry_hwnd,
+                        &[],
+                        &[],
+                        &[],
+                        &dynamic_geometry_shapes,
+                        false,
+                    )?;
+                }
+                runtime.cached_search_overlay_dynamic_geometry = dynamic_geometry_shapes;
+                runtime.dynamic_geometry_overlay_visible = true;
             }
-            runtime.dynamic_geometry_overlay_visible = true;
         }
 
         Ok(())
