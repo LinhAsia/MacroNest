@@ -26386,20 +26386,32 @@ mod windows_overlay {
                     value
                 })
         };
-        Ok((
-            [
-                read("Target X", &preset.target_x)?,
-                read("Target Y", &preset.target_y)?,
-                read("Target Z", &preset.target_z)?,
-            ],
-            [
-                read("Camera X", &preset.camera_x)?,
-                read("Camera Y", &preset.camera_y)?,
-                read("Camera Z", &preset.camera_z)?,
-            ],
-            read("Camera yaw", &preset.camera_yaw)?,
-            read("Camera pitch", &preset.camera_pitch)?,
-        ))
+        let target = [
+            read("Target X", &preset.target_x)?,
+            read("Target Y", &preset.target_y)?,
+            read("Target Z", &preset.target_z)?,
+        ];
+        let camera = [
+            read("Camera X", &preset.camera_x)?,
+            read("Camera Y", &preset.camera_y)?,
+            read("Camera Z", &preset.camera_z)?,
+        ];
+        let (yaw, pitch) = match preset.orientation_source {
+            crate::model::EspOrientationSource::Angles => (
+                read("Camera yaw", &preset.camera_yaw)?,
+                read("Camera pitch", &preset.camera_pitch)?,
+            ),
+            crate::model::EspOrientationSource::ForwardVector => {
+                let forward = [
+                    read("Camera forward X", &preset.camera_forward_x)?,
+                    read("Camera forward Y", &preset.camera_forward_y)?,
+                    read("Camera forward Z", &preset.camera_forward_z)?,
+                ];
+                crate::model::esp_orientation_from_forward(preset, forward)
+                    .ok_or_else(|| "Camera forward vector is zero or invalid".to_owned())?
+            }
+        };
+        Ok((target, camera, yaw, pitch))
     }
 
     fn capture_esp_calibration(preset: &crate::model::EspPreset) {

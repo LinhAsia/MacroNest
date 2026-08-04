@@ -1,7 +1,8 @@
 use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Grid, RichText, TextEdit};
 
 use crate::model::{
-    EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspPreset, MemoryValueType, RgbaColor,
+    EspAngleUnit, EspForwardLayout, EspHorizontalPlane, EspMarkerKind, EspOrientationSource,
+    EspPreset, MemoryValueType, RgbaColor,
 };
 
 use super::CrosshairApp;
@@ -132,8 +133,6 @@ impl CrosshairApp {
                             ("Camera X", &mut preset.camera_x),
                             ("Camera Y", &mut preset.camera_y),
                             ("Camera Z", &mut preset.camera_z),
-                            ("Camera yaw", &mut preset.camera_yaw),
-                            ("Camera pitch", &mut preset.camera_pitch),
                         ] {
                             ui.label(label);
                             ui.add(
@@ -143,6 +142,45 @@ impl CrosshairApp {
                                 ),
                             );
                             ui.end_row();
+                        }
+                        ui.label("Orientation source");
+                        ComboBox::from_id_salt(("esp_orientation_source", preset.id))
+                            .selected_text(match preset.orientation_source {
+                                EspOrientationSource::Angles => "Yaw + pitch angles",
+                                EspOrientationSource::ForwardVector => "Camera forward vector",
+                            })
+                            .width(240.0)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut preset.orientation_source,
+                                    EspOrientationSource::Angles,
+                                    "Yaw + pitch angles",
+                                );
+                                ui.selectable_value(
+                                    &mut preset.orientation_source,
+                                    EspOrientationSource::ForwardVector,
+                                    "Camera forward vector",
+                                );
+                            });
+                        ui.end_row();
+                        match preset.orientation_source {
+                            EspOrientationSource::Angles => {
+                                for (label, value) in [
+                                    ("Camera yaw", &mut preset.camera_yaw),
+                                    ("Camera pitch", &mut preset.camera_pitch),
+                                ] {
+                                    memory_expression_row(ui, label, value);
+                                }
+                            }
+                            EspOrientationSource::ForwardVector => {
+                                for (label, value) in [
+                                    ("Camera forward X", &mut preset.camera_forward_x),
+                                    ("Camera forward Y", &mut preset.camera_forward_y),
+                                    ("Camera forward Z", &mut preset.camera_forward_z),
+                                ] {
+                                    memory_expression_row(ui, label, value);
+                                }
+                            }
                         }
                     });
 
@@ -186,8 +224,34 @@ impl CrosshairApp {
                         });
                 });
                 ui.horizontal_wrapped(|ui| {
-                    angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
-                    angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
+                    if preset.orientation_source == EspOrientationSource::Angles {
+                        angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
+                        angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
+                    } else {
+                        ui.label("Vector orientation uses atan2 automatically");
+                        ui.label("Layout");
+                        ComboBox::from_id_salt(("esp_forward_layout", preset.id))
+                            .selected_text(match preset.forward_layout {
+                                EspForwardLayout::Xyz => "XYZ (vertical Z)",
+                                EspForwardLayout::Xzy => "XZY (vertical Y)",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut preset.forward_layout,
+                                    EspForwardLayout::Xyz,
+                                    "XYZ (vertical Z)",
+                                );
+                                ui.selectable_value(
+                                    &mut preset.forward_layout,
+                                    EspForwardLayout::Xzy,
+                                    "XZY (vertical Y)",
+                                );
+                            });
+                        ui.checkbox(&mut preset.swap_forward_horizontal, "Swap horizontal axes");
+                        ui.checkbox(&mut preset.invert_forward_x, "Invert vector X");
+                        ui.checkbox(&mut preset.invert_forward_y, "Invert vector Y");
+                        ui.checkbox(&mut preset.invert_forward_z, "Invert vector Z");
+                    }
                     ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw value")
                         .on_hover_text(
                             "Reverse only camera rotation. Use this when lateral movement is correct but rotating the camera moves ESP the wrong way.",
@@ -406,6 +470,17 @@ fn memory_type_name(value_type: MemoryValueType) -> &'static str {
         MemoryValueType::I64 => "8 Bytes",
         MemoryValueType::F64 => "Double (8 Bytes)",
     }
+}
+
+fn memory_expression_row(ui: &mut egui::Ui, label: &str, value: &mut String) {
+    ui.label(label);
+    ui.add(
+        TextEdit::singleline(value).desired_width(420.0).hint_text(
+            RichText::new("address / module+offset [offsets] / @alias")
+                .color(ui.visuals().weak_text_color()),
+        ),
+    );
+    ui.end_row();
 }
 
 fn angle_unit(ui: &mut egui::Ui, label: &str, id: u32, unit: &mut EspAngleUnit) {
