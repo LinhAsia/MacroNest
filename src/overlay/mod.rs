@@ -26224,13 +26224,67 @@ mod windows_overlay {
         if ESP_WORKER_STARTED.swap(true, Ordering::AcqRel) {
             return;
         }
-        let (render_tx, render_rx) = crossbeam_channel::bounded::<Vec<GeometryRenderShape>>(1);
+        let (render_tx, render_rx) = crossbeam_channel::bounded::<Vec<EspRenderPreset>>(1);
         let stale_render_rx = render_rx.clone();
         thread::spawn(move || {
             let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
             let mut renderer = None;
             let mut visible = false;
-            while let Ok(shapes) = render_rx.recv() {
+            let mut animations = HashMap::<u32, EspShapeAnimation>::new();
+            let mut last_frame = Instant::now();
+            loop {
+                let mut sample_received = false;
+                match render_rx.recv_timeout(Duration::from_millis(8)) {
+                    Ok(mut frames) => {
+                        sample_received = true;
+                        while let Ok(newer) = render_rx.try_recv() {
+                            frames = newer;
+                        }
+                        let active_ids =
+                            frames.iter().map(|frame| frame.id).collect::<HashSet<_>>();
+                        animations.retain(|id, _| active_ids.contains(id));
+                        for frame in frames {
+                            animations
+                                .entry(frame.id)
+                                .and_modify(|animation| {
+                                    animation.target = frame.shapes.clone();
+                                    animation.smoothing_ms = frame.smoothing_ms;
+                                })
+                                .or_insert_with(|| EspShapeAnimation {
+                                    current: frame.shapes.clone(),
+                                    target: frame.shapes,
+                                    smoothing_ms: frame.smoothing_ms,
+                                });
+                        }
+                    }
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                }
+                let now = Instant::now();
+                let elapsed_ms = now.duration_since(last_frame).as_secs_f32() * 1000.0;
+                last_frame = now;
+                let mut shapes = Vec::new();
+                let mut animation_changed = false;
+                for animation in animations.values_mut() {
+                    let alpha = if animation.smoothing_ms == 0 {
+                        1.0
+                    } else {
+                        1.0 - (-3.0 * elapsed_ms / animation.smoothing_ms as f32).exp()
+                    };
+                    let next = interpolate_esp_shapes(
+                        &animation.current,
+                        &animation.target,
+                        alpha.clamp(0.0, 1.0),
+                    );
+                    animation_changed |= next != animation.current;
+                    animation.current = next;
+                    shapes.extend(animation.current.iter().cloned());
+                }
+                // ponytail: present only while coordinates are moving or a new sample changed
+                // visibility. Repainting an identical frame at 125 Hz only steals GPU time.
+                if !sample_received && !animation_changed {
+                    continue;
+                }
                 let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
                 if hwnd_value == 0 {
                     continue;
@@ -26267,7 +26321,9 @@ mod windows_overlay {
                     }
                 }
             }
-            unsafe { CoUninitialize(); }
+            unsafe {
+                CoUninitialize();
+            }
         });
         thread::spawn(move || {
             // Keep a fixed frame deadline instead of sleeping after every read/render pass.
@@ -26309,14 +26365,18 @@ mod windows_overlay {
                     .map(|preset| preset.update_interval_ms.clamp(1, 1000))
                     .min()
                     .unwrap_or(33);
-                let mut shapes = Vec::new();
+                let mut frames = Vec::with_capacity(presets.len());
                 let mut frame = EspReadFrame::default();
                 for preset in &presets {
-                    shapes.extend(esp_shapes_for_preset(preset, &mut frame));
+                    frames.push(EspRenderPreset {
+                        id: preset.id,
+                        smoothing_ms: preset.motion_smoothing_ms,
+                        shapes: esp_shapes_for_preset(preset, &mut frame),
+                    });
                 }
-                had_shapes = !shapes.is_empty();
+                had_shapes = frames.iter().any(|frame| !frame.shapes.is_empty());
                 // Never queue behind presentation: only the newest sampled coordinates matter.
-                send_latest(shapes);
+                send_latest(frames);
                 next_frame += Duration::from_millis(interval as u64);
                 let now = Instant::now();
                 if next_frame > now {
@@ -26327,6 +26387,102 @@ mod windows_overlay {
                 }
             }
         });
+    }
+
+    struct EspRenderPreset {
+        id: u32,
+        smoothing_ms: u32,
+        shapes: Vec<GeometryRenderShape>,
+    }
+
+    struct EspShapeAnimation {
+        current: Vec<GeometryRenderShape>,
+        target: Vec<GeometryRenderShape>,
+        smoothing_ms: u32,
+    }
+
+    fn interpolate_esp_shapes(
+        current: &[GeometryRenderShape],
+        target: &[GeometryRenderShape],
+        alpha: f32,
+    ) -> Vec<GeometryRenderShape> {
+        if current.len() != target.len() {
+            return target.to_vec();
+        }
+        current
+            .iter()
+            .zip(target)
+            .map(|(current, target)| interpolate_esp_shape(current, target, alpha))
+            .collect()
+    }
+
+    fn lerp_esp_i32(from: i32, to: i32, alpha: f32) -> i32 {
+        let value = (from as f32 + (to - from) as f32 * alpha).round() as i32;
+        if from != to && value == from {
+            from + (to - from).signum()
+        } else {
+            value
+        }
+    }
+
+    fn interpolate_esp_shape(
+        current: &GeometryRenderShape,
+        target: &GeometryRenderShape,
+        alpha: f32,
+    ) -> GeometryRenderShape {
+        let mut shape = target.clone();
+        shape.bounds = (
+            lerp_esp_i32(current.bounds.0, target.bounds.0, alpha),
+            lerp_esp_i32(current.bounds.1, target.bounds.1, alpha),
+            lerp_esp_i32(current.bounds.2, target.bounds.2, alpha),
+            lerp_esp_i32(current.bounds.3, target.bounds.3, alpha),
+        );
+        match (&current.draw, &mut shape.draw) {
+            (
+                GeometryRenderDraw::Circle { cx, cy, .. },
+                GeometryRenderDraw::Circle {
+                    cx: target_x,
+                    cy: target_y,
+                    ..
+                },
+            ) => {
+                *target_x = lerp_esp_i32(*cx, *target_x, alpha);
+                *target_y = lerp_esp_i32(*cy, *target_y, alpha);
+            }
+            (
+                GeometryRenderDraw::Line { x1, y1, x2, y2, .. },
+                GeometryRenderDraw::Line {
+                    x1: target_x1,
+                    y1: target_y1,
+                    x2: target_x2,
+                    y2: target_y2,
+                    ..
+                },
+            ) => {
+                *target_x1 = lerp_esp_i32(*x1, *target_x1, alpha);
+                *target_y1 = lerp_esp_i32(*y1, *target_y1, alpha);
+                *target_x2 = lerp_esp_i32(*x2, *target_x2, alpha);
+                *target_y2 = lerp_esp_i32(*y2, *target_y2, alpha);
+            }
+            (
+                GeometryRenderDraw::Polygon { points, .. },
+                GeometryRenderDraw::Polygon {
+                    points: target_points,
+                    ..
+                },
+            ) if points.len() == target_points.len() => {
+                for (point, target_point) in points.iter().zip(target_points) {
+                    target_point.0 = lerp_esp_i32(point.0, target_point.0, alpha);
+                    target_point.1 = lerp_esp_i32(point.1, target_point.1, alpha);
+                }
+            }
+            (GeometryRenderDraw::Label(text), GeometryRenderDraw::Label(target_text)) => {
+                target_text.x = lerp_esp_i32(text.x, target_text.x, alpha);
+                target_text.y = lerp_esp_i32(text.y, target_text.y, alpha);
+            }
+            _ => return target.clone(),
+        }
+        shape
     }
 
     #[derive(Default)]
@@ -31859,6 +32015,39 @@ mod windows_overlay {
     mod tests {
         use super::*;
         static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+        #[test]
+        fn esp_animation_interpolates_marker_position_between_samples() {
+            let current = GeometryRenderShape {
+                bounds: (-10, -10, 10, 10),
+                draw: GeometryRenderDraw::Circle {
+                    cx: 0,
+                    cy: 0,
+                    radius: 10,
+                    stroke: [0, 255, 0, 255],
+                    fill: None,
+                    thickness: 1,
+                },
+            };
+            let target = GeometryRenderShape {
+                bounds: (90, 40, 110, 60),
+                draw: GeometryRenderDraw::Circle {
+                    cx: 100,
+                    cy: 50,
+                    radius: 10,
+                    stroke: [0, 255, 0, 255],
+                    fill: None,
+                    thickness: 1,
+                },
+            };
+
+            let interpolated = interpolate_esp_shape(&current, &target, 0.5);
+            assert_eq!(interpolated.bounds, (40, 15, 60, 35));
+            assert!(matches!(
+                interpolated.draw,
+                GeometryRenderDraw::Circle { cx: 50, cy: 25, .. }
+            ));
+        }
 
         #[test]
         fn parses_macro_pointer_offsets_in_dereference_order() {

@@ -412,6 +412,13 @@ impl CrosshairApp {
                             .range(1..=1000)
                             .suffix(" ms"),
                     );
+                    ui.label("Smooth");
+                    ui.add(
+                        DragValue::new(&mut preset.motion_smoothing_ms)
+                            .range(0..=500)
+                            .suffix(" ms"),
+                    )
+                    .on_hover_text("Smooth marker movement between RAM samples. Set 0 to disable.");
                 });
             });
             if preset != before {

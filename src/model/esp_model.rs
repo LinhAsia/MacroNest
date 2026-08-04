@@ -81,6 +81,7 @@ pub struct EspPreset {
     pub show_tracer: bool,
     pub show_distance: bool,
     pub update_interval_ms: u32,
+    pub motion_smoothing_ms: u32,
 }
 
 impl EspPreset {
@@ -133,6 +134,7 @@ impl EspPreset {
             show_tracer: false,
             show_distance: false,
             update_interval_ms: 33,
+            motion_smoothing_ms: 40,
         }
     }
 }
