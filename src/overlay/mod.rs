@@ -26401,14 +26401,14 @@ mod windows_overlay {
                 read("Camera yaw", &preset.camera_yaw)?,
                 read("Camera pitch", &preset.camera_pitch)?,
             ),
-            crate::model::EspOrientationSource::ForwardVector => {
-                let forward = [
-                    read("Camera forward X", &preset.camera_forward_x)?,
-                    read("Camera forward Y", &preset.camera_forward_y)?,
-                    read("Camera forward Z", &preset.camera_forward_z)?,
+            crate::model::EspOrientationSource::DirectionPairPitch => {
+                let direction = [
+                    read("Camera direction A", &preset.camera_direction_a)?,
+                    read("Camera direction B", &preset.camera_direction_b)?,
                 ];
-                crate::model::esp_orientation_from_forward(preset, forward)
-                    .ok_or_else(|| "Camera forward vector is zero or invalid".to_owned())?
+                let pitch = read("Camera pitch", &preset.camera_pitch)?;
+                crate::model::esp_orientation_from_direction_pair(preset, direction, pitch)
+                    .ok_or_else(|| "Camera direction pair is zero or invalid".to_owned())?
             }
         };
         Ok((target, camera, yaw, pitch))

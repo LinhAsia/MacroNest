@@ -1,8 +1,8 @@
 use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Grid, RichText, TextEdit};
 
 use crate::model::{
-    EspAngleUnit, EspForwardLayout, EspHorizontalPlane, EspMarkerKind, EspOrientationSource,
-    EspPreset, MemoryValueType, RgbaColor,
+    EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspOrientationSource, EspPreset,
+    MemoryValueType, RgbaColor,
 };
 
 use super::CrosshairApp;
@@ -147,7 +147,9 @@ impl CrosshairApp {
                         ComboBox::from_id_salt(("esp_orientation_source", preset.id))
                             .selected_text(match preset.orientation_source {
                                 EspOrientationSource::Angles => "Yaw + pitch angles",
-                                EspOrientationSource::ForwardVector => "Camera forward vector",
+                                EspOrientationSource::DirectionPairPitch => {
+                                    "Horizontal direction pair + pitch"
+                                }
                             })
                             .width(240.0)
                             .show_ui(ui, |ui| {
@@ -158,8 +160,8 @@ impl CrosshairApp {
                                 );
                                 ui.selectable_value(
                                     &mut preset.orientation_source,
-                                    EspOrientationSource::ForwardVector,
-                                    "Camera forward vector",
+                                    EspOrientationSource::DirectionPairPitch,
+                                    "Horizontal direction pair + pitch",
                                 );
                             });
                         ui.end_row();
@@ -172,11 +174,11 @@ impl CrosshairApp {
                                     memory_expression_row(ui, label, value);
                                 }
                             }
-                            EspOrientationSource::ForwardVector => {
+                            EspOrientationSource::DirectionPairPitch => {
                                 for (label, value) in [
-                                    ("Camera forward X", &mut preset.camera_forward_x),
-                                    ("Camera forward Y", &mut preset.camera_forward_y),
-                                    ("Camera forward Z", &mut preset.camera_forward_z),
+                                    ("Camera direction A", &mut preset.camera_direction_a),
+                                    ("Camera pitch", &mut preset.camera_pitch),
+                                    ("Camera direction B", &mut preset.camera_direction_b),
                                 ] {
                                     memory_expression_row(ui, label, value);
                                 }
@@ -228,29 +230,11 @@ impl CrosshairApp {
                         angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
                         angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
                     } else {
-                        ui.label("Vector orientation uses atan2 automatically");
-                        ui.label("Layout");
-                        ComboBox::from_id_salt(("esp_forward_layout", preset.id))
-                            .selected_text(match preset.forward_layout {
-                                EspForwardLayout::Xyz => "XYZ (vertical Z)",
-                                EspForwardLayout::Xzy => "XZY (vertical Y)",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut preset.forward_layout,
-                                    EspForwardLayout::Xyz,
-                                    "XYZ (vertical Z)",
-                                );
-                                ui.selectable_value(
-                                    &mut preset.forward_layout,
-                                    EspForwardLayout::Xzy,
-                                    "XZY (vertical Y)",
-                                );
-                            });
-                        ui.checkbox(&mut preset.swap_forward_horizontal, "Swap horizontal axes");
-                        ui.checkbox(&mut preset.invert_forward_x, "Invert vector X");
-                        ui.checkbox(&mut preset.invert_forward_y, "Invert vector Y");
-                        ui.checkbox(&mut preset.invert_forward_z, "Invert vector Z");
+                        ui.label("Yaw = atan2(Direction B, Direction A)");
+                        angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
+                        ui.checkbox(&mut preset.swap_direction_pair, "Swap direction A/B");
+                        ui.checkbox(&mut preset.invert_direction_a, "Invert direction A");
+                        ui.checkbox(&mut preset.invert_direction_b, "Invert direction B");
                     }
                     ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw value")
                         .on_hover_text(

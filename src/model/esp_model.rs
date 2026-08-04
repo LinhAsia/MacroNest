@@ -27,14 +27,8 @@ pub enum EspHorizontalPlane {
 pub enum EspOrientationSource {
     #[default]
     Angles,
-    ForwardVector,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum EspForwardLayout {
-    #[default]
-    Xyz,
-    Xzy,
+    #[serde(alias = "ForwardVector")]
+    DirectionPairPitch,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,14 +48,16 @@ pub struct EspPreset {
     pub camera_yaw: String,
     pub camera_pitch: String,
     pub orientation_source: EspOrientationSource,
-    pub camera_forward_x: String,
-    pub camera_forward_y: String,
-    pub camera_forward_z: String,
-    pub forward_layout: EspForwardLayout,
-    pub swap_forward_horizontal: bool,
-    pub invert_forward_x: bool,
-    pub invert_forward_y: bool,
-    pub invert_forward_z: bool,
+    #[serde(alias = "camera_forward_x")]
+    pub camera_direction_a: String,
+    #[serde(alias = "camera_forward_z")]
+    pub camera_direction_b: String,
+    #[serde(alias = "swap_forward_horizontal")]
+    pub swap_direction_pair: bool,
+    #[serde(alias = "invert_forward_x")]
+    pub invert_direction_a: bool,
+    #[serde(alias = "invert_forward_z")]
+    pub invert_direction_b: bool,
     pub value_type: MemoryValueType,
     pub yaw_unit: EspAngleUnit,
     pub pitch_unit: EspAngleUnit,
@@ -104,14 +100,11 @@ impl EspPreset {
             camera_yaw: String::new(),
             camera_pitch: String::new(),
             orientation_source: EspOrientationSource::Angles,
-            camera_forward_x: String::new(),
-            camera_forward_y: String::new(),
-            camera_forward_z: String::new(),
-            forward_layout: EspForwardLayout::Xyz,
-            swap_forward_horizontal: false,
-            invert_forward_x: false,
-            invert_forward_y: false,
-            invert_forward_z: false,
+            camera_direction_a: String::new(),
+            camera_direction_b: String::new(),
+            swap_direction_pair: false,
+            invert_direction_a: false,
+            invert_direction_b: false,
             value_type: MemoryValueType::F32,
             yaw_unit: EspAngleUnit::Degrees,
             pitch_unit: EspAngleUnit::Radians,
@@ -183,34 +176,27 @@ fn esp_angle_from_radians(value: f32, unit: EspAngleUnit) -> f32 {
     }
 }
 
-pub(crate) fn esp_orientation_from_forward(
+pub(crate) fn esp_orientation_from_direction_pair(
     preset: &EspPreset,
-    mut forward: [f32; 3],
+    mut direction: [f32; 2],
+    pitch: f32,
 ) -> Option<(f32, f32)> {
-    if preset.invert_forward_x {
-        forward[0] = -forward[0];
+    if preset.invert_direction_a {
+        direction[0] = -direction[0];
     }
-    if preset.invert_forward_y {
-        forward[1] = -forward[1];
+    if preset.invert_direction_b {
+        direction[1] = -direction[1];
     }
-    if preset.invert_forward_z {
-        forward[2] = -forward[2];
+    if preset.swap_direction_pair {
+        direction.swap(0, 1);
     }
-    let (mut forward_a, mut forward_b, vertical) = match preset.forward_layout {
-        EspForwardLayout::Xyz => (forward[0], forward[1], forward[2]),
-        EspForwardLayout::Xzy => (forward[0], forward[2], forward[1]),
-    };
-    if preset.swap_forward_horizontal {
-        std::mem::swap(&mut forward_a, &mut forward_b);
-    }
-    let horizontal = forward_a.hypot(forward_b);
-    let length = horizontal.hypot(vertical);
-    if !length.is_finite() || length <= f32::EPSILON {
+    let length = direction[0].hypot(direction[1]);
+    if !length.is_finite() || length <= f32::EPSILON || !pitch.is_finite() {
         return None;
     }
     Some((
-        esp_angle_from_radians(forward_b.atan2(forward_a), preset.yaw_unit),
-        esp_angle_from_radians(vertical.atan2(horizontal), preset.pitch_unit),
+        esp_angle_from_radians(direction[1].atan2(direction[0]), preset.yaw_unit),
+        pitch,
     ))
 }
 
@@ -460,18 +446,19 @@ mod tests {
     }
 
     #[test]
-    fn forward_vector_reconstructs_yaw_and_pitch() {
+    fn direction_pair_reconstructs_yaw_and_preserves_pitch() {
         let mut preset = EspPreset::default();
         preset.yaw_unit = EspAngleUnit::Radians;
         preset.pitch_unit = EspAngleUnit::Radians;
-        let (yaw, pitch) = esp_orientation_from_forward(&preset, [1.0, 1.0, 1.0]).unwrap();
+        let (yaw, pitch) =
+            esp_orientation_from_direction_pair(&preset, [1.0, 1.0], -0.29).unwrap();
         assert!((yaw - std::f32::consts::FRAC_PI_4).abs() < 0.001);
-        assert!((pitch - (1.0_f32 / 2.0_f32.sqrt()).atan()).abs() < 0.001);
+        assert!((pitch + 0.29).abs() < 0.001);
 
-        preset.forward_layout = EspForwardLayout::Xzy;
-        preset.swap_forward_horizontal = true;
-        preset.invert_forward_x = true;
-        let (yaw, _) = esp_orientation_from_forward(&preset, [1.0, 0.0, 0.0]).unwrap();
+        preset.swap_direction_pair = true;
+        preset.invert_direction_a = true;
+        let (yaw, _) =
+            esp_orientation_from_direction_pair(&preset, [1.0, 0.0], -0.29).unwrap();
         assert!((yaw + std::f32::consts::FRAC_PI_2).abs() < 0.001);
     }
 }
