@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     ffi::c_void,
     io,
     mem::{MaybeUninit, size_of},
@@ -7,6 +8,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use crate::model::MemoryValueType;
@@ -671,15 +673,46 @@ impl ScanProcess {
     }
 }
 
+struct CachedReadProcess {
+    pid: u32,
+    opened_at: Instant,
+    process: ScanProcess,
+}
+
+thread_local! {
+    static CACHED_READ_PROCESS: RefCell<Option<CachedReadProcess>> = const { RefCell::new(None) };
+}
+
+fn with_cached_read_process<T>(
+    pid: u32,
+    read: impl FnOnce(&ScanProcess) -> io::Result<T>,
+) -> io::Result<T> {
+    CACHED_READ_PROCESS.with(|cached| {
+        let mut cached = cached.borrow_mut();
+        let should_reopen = cached.as_ref().is_none_or(|entry| {
+            entry.pid != pid || entry.opened_at.elapsed() >= Duration::from_secs(2)
+        });
+        if should_reopen {
+            *cached = Some(CachedReadProcess {
+                pid,
+                opened_at: Instant::now(),
+                process: ScanProcess::open(pid, false)?,
+            });
+        }
+        read(&cached.as_ref().expect("cached process was just opened").process)
+    })
+}
+
 pub fn read_scan_value(
     pid: u32,
     address: usize,
     value_type: ScanValueType,
 ) -> io::Result<ScanValue> {
-    let process = ScanProcess::open(pid, false)?;
     let mut bytes = [0; 8];
     let width = value_type.width();
-    let read = process.read(address, &mut bytes[..width])?;
+    let read = with_cached_read_process(pid, |process| {
+        process.read(address, &mut bytes[..width])
+    })?;
     if read != width {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -1565,12 +1598,6 @@ fn claim_result_slots(total: &AtomicUsize, requested: usize, limit: usize) -> us
 }
 
 pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::Result<String> {
-    let handle =
-        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pid) };
-    if handle.is_null() {
-        return Err(io::Error::last_os_error());
-    }
-
     let mut bytes = [0u8; 8];
     let width = match value_type {
         MemoryValueType::I8 => 1,
@@ -1578,20 +1605,9 @@ pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::
         MemoryValueType::I32 | MemoryValueType::F32 => 4,
         MemoryValueType::I64 | MemoryValueType::F64 => 8,
     };
-    let mut read = 0;
-    let succeeded = unsafe {
-        ReadProcessMemory(
-            handle,
-            address as *const c_void,
-            bytes.as_mut_ptr().cast(),
-            width,
-            &mut read,
-        )
-    } != 0;
-    unsafe { CloseHandle(handle) };
-    if !succeeded {
-        return Err(io::Error::last_os_error());
-    }
+    let read = with_cached_read_process(pid, |process| {
+        process.read(address, &mut bytes[..width])
+    })?;
     if read != width {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,

@@ -30492,16 +30492,73 @@ mod windows_overlay {
             })
     }
 
+    struct MacroMemoryProcessInfo {
+        pid: u32,
+        refreshed_at: Instant,
+        modules: HashMap<String, (usize, usize)>,
+        pointer_width: usize,
+    }
+
+    thread_local! {
+        static MACRO_MEMORY_PROCESS_INFO: std::cell::RefCell<Option<MacroMemoryProcessInfo>> = const { std::cell::RefCell::new(None) };
+        static MACRO_MEMORY_TARGET_PID: std::cell::RefCell<Option<(String, Instant, Option<u32>)>> = const { std::cell::RefCell::new(None) };
+    }
+
+    fn macro_memory_process_info(pid: u32, module: &str) -> Option<(usize, usize, usize)> {
+        MACRO_MEMORY_PROCESS_INFO.with(|cached| {
+            let mut cached = cached.borrow_mut();
+            let should_refresh = cached.as_ref().is_none_or(|entry| {
+                entry.pid != pid || entry.refreshed_at.elapsed() >= Duration::from_secs(2)
+            });
+            if should_refresh {
+                let modules = crate::memory_debugger::debugger::process_modules(pid)
+                    .ok()?
+                    .into_iter()
+                    .map(|(name, base, size)| (name.to_ascii_lowercase(), (base, size)))
+                    .collect();
+                *cached = Some(MacroMemoryProcessInfo {
+                    pid,
+                    refreshed_at: Instant::now(),
+                    modules,
+                    pointer_width: crate::memory_debugger::debugger::process_pointer_width(pid)
+                        .ok()?,
+                });
+            }
+            let entry = cached.as_ref()?;
+            let (base, size) = entry.modules.get(&module.to_ascii_lowercase())?;
+            Some((*base, *size, entry.pointer_width))
+        })
+    }
+
+    fn macro_memory_target_pid(selector: Option<&str>) -> Option<u32> {
+        let Some(selector) = selector else {
+            return window_list::process_id_for_window(None);
+        };
+        MACRO_MEMORY_TARGET_PID.with(|cached| {
+            let mut cached = cached.borrow_mut();
+            if let Some((cached_selector, cached_at, pid)) = cached.as_ref()
+                && cached_selector == selector
+                && cached_at.elapsed() < Duration::from_millis(250)
+            {
+                return *pid;
+            }
+            let pid = window_list::process_id_for_window(Some(selector));
+            *cached = Some((selector.to_owned(), Instant::now(), pid));
+            pid
+        })
+    }
+
     fn resolve_memory_pointer_entry(
         pid: u32,
         module: &str,
         module_offset: usize,
         offsets: &[usize],
     ) -> Option<usize> {
-        let mut address =
-            crate::memory_debugger::debugger::resolve_module_offset(pid, module, module_offset)
-                .ok()?;
-        let pointer_width = crate::memory_debugger::debugger::process_pointer_width(pid).ok()?;
+        let (module_base, module_size, pointer_width) = macro_memory_process_info(pid, module)?;
+        if module_offset >= module_size {
+            return None;
+        }
+        let mut address = module_base.checked_add(module_offset)?;
         for offset in offsets {
             let next = match pointer_width {
                 4 => match crate::process_memory::read_scan_value(
@@ -31069,13 +31126,17 @@ mod windows_overlay {
             return;
         }
         let is_tracked_alias = step.key.trim().starts_with('@');
-        let target_pid = window_list::process_id_for_window(step.memory_target_window.as_deref());
+        let target_pid = macro_memory_target_pid(step.memory_target_window.as_deref());
         let value =
             resolve_memory_action_target(target_pid, &step.key).and_then(|(pid, address)| {
                 crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
             });
         if let Some(value) = value {
-            smart_set_variable_from_expression(target_var, &value);
+            if let Ok(value) = value.parse::<f64>() {
+                set_variable_value(target_var, value);
+            } else {
+                smart_set_variable_from_expression(target_var, &value);
+            }
         } else if !is_tracked_alias {
             set_variable_value(target_var, 0.0);
             TEXT_VARIABLES.lock().remove(target_var);
@@ -31084,7 +31145,7 @@ mod windows_overlay {
 
     fn execute_write_memory_action_step(step: &MacroStep) {
         let Some((pid, address)) = resolve_memory_action_target(
-            window_list::process_id_for_window(step.memory_target_window.as_deref()),
+            macro_memory_target_pid(step.memory_target_window.as_deref()),
             &step.key,
         ) else {
             return;
