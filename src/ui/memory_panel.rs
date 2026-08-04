@@ -348,6 +348,8 @@ struct MemoryViewDialog {
     previous_bytes: Vec<u8>,
     classes: Vec<StructureClass>,
     selected_class: usize,
+    class_detection_status: String,
+    class_detection_attempted: bool,
 }
 
 #[cfg(windows)]
@@ -2901,6 +2903,8 @@ impl CrosshairApp {
                                             elements: default_structure_elements(),
                                         }],
                                         selected_class: 0,
+                                        class_detection_status: String::new(),
+                                        class_detection_attempted: false,
                                     });
                                     ui.close();
                                 }
@@ -2936,6 +2940,8 @@ impl CrosshairApp {
                                             elements: default_structure_elements(),
                                         }],
                                         selected_class: 0,
+                                        class_detection_status: String::new(),
+                                        class_detection_attempted: false,
                                     });
                                     ui.close();
                                 }
@@ -6229,6 +6235,8 @@ impl CrosshairApp {
                     elements: default_structure_elements(),
                 }],
                 selected_class: 0,
+                class_detection_status: String::new(),
+                class_detection_attempted: false,
             });
         }
         if open {
@@ -6688,6 +6696,7 @@ impl CrosshairApp {
                             Self::render_memory_view_body(
                                 ui,
                                 self.state.ui_language,
+                                self.memory_panel.process_pid,
                                 &mut dialog,
                                 bytes.as_deref(),
                                 region,
@@ -6719,6 +6728,7 @@ impl CrosshairApp {
                 Self::render_memory_view_body(
                     ui,
                     self.state.ui_language,
+                    self.memory_panel.process_pid,
                     &mut dialog,
                     bytes.as_deref(),
                     region,
@@ -6737,6 +6747,7 @@ impl CrosshairApp {
     fn render_memory_view_body(
         ui: &mut egui::Ui,
         language: crate::model::UiLanguage,
+        process_pid: Option<u32>,
         dialog: &mut MemoryViewDialog,
         bytes: Option<&[u8]>,
         region: Option<MemoryRegionInfo>,
@@ -6771,6 +6782,15 @@ impl CrosshairApp {
                 });
             }
             MemoryViewKind::Structure => {
+                if !dialog.class_detection_attempted {
+                    dialog.class_detection_attempted = true;
+                    let previous_address = dialog.address;
+                    identify_structure_class(process_pid, dialog);
+                    if dialog.address != previous_address {
+                        ui.label(&dialog.class_detection_status);
+                        return;
+                    }
+                }
                 let available = ui.available_size();
                 ui.horizontal(|ui| {
                     ui.allocate_ui_with_layout(
@@ -6813,6 +6833,16 @@ impl CrosshairApp {
                         |ui| {
                             ui.set_min_height(available.y);
                             ui.horizontal(|ui| {
+                                if ui
+                                    .button(Self::tr_lang(
+                                        language,
+                                        "Identify class",
+                                        "Nhận diện class",
+                                    ))
+                                    .clicked()
+                                {
+                                    identify_structure_class(process_pid, dialog);
+                                }
                                 if ui.button("Auto dissect").clicked() {
                                     dialog.elements =
                                         auto_structure_elements(bytes, dialog.pointer_width);
@@ -6826,6 +6856,13 @@ impl CrosshairApp {
                                     );
                                 }
                             });
+                            if !dialog.class_detection_status.is_empty() {
+                                ui.label(
+                                    RichText::new(&dialog.class_detection_status)
+                                        .small()
+                                        .color(ui.visuals().weak_text_color()),
+                                );
+                            }
                             egui::ScrollArea::both()
                                 .id_salt("structure-elements")
                                 .scroll_bar_visibility(
@@ -7096,6 +7133,7 @@ impl CrosshairApp {
             dialog.address = address;
             dialog.elements = dialog.classes[index].elements.clone();
             dialog.previous_bytes.clear();
+            dialog.class_detection_attempted = false;
         }
     }
 
@@ -7798,6 +7836,8 @@ impl CrosshairApp {
                 elements,
             }],
             selected_class: 0,
+            class_detection_status: String::new(),
+            class_detection_attempted: false,
         });
     }
 
@@ -8401,6 +8441,202 @@ fn default_structure_elements() -> Vec<StructureElement> {
             name: format!("field_{offset:04X}"),
         })
         .collect()
+}
+
+struct StructureIdentity {
+    name: String,
+    address: usize,
+    evidence: String,
+}
+
+fn identify_structure_class(process_pid: Option<u32>, dialog: &mut MemoryViewDialog) {
+    let Some(pid) = process_pid else {
+        dialog.class_detection_status = "Select a process to identify this class".to_owned();
+        return;
+    };
+    let original_address = dialog.address;
+    let Some(identity) = detect_structure_identity(pid, original_address, dialog.pointer_width)
+    else {
+        if let Some(class) = dialog.classes.get_mut(dialog.selected_class)
+            && (class.name == "Class_0" || class.name.starts_with("Unknown @"))
+        {
+            class.name = format!("Unknown @ {}", format_memory_address(original_address));
+        }
+        dialog.class_detection_status =
+            "No usable RTTI or vtable was found; field names must be mapped manually".to_owned();
+        return;
+    };
+
+    let moved_to_object_base = identity.address != original_address;
+    if let Some(class) = dialog.classes.get_mut(dialog.selected_class) {
+        class.name = identity.name;
+        class.address = identity.address;
+        if moved_to_object_base {
+            class.elements = default_structure_elements();
+        }
+    }
+    dialog.address = identity.address;
+    if moved_to_object_base {
+        dialog.elements = default_structure_elements();
+        dialog.previous_bytes.clear();
+    }
+    dialog.class_detection_status = identity.evidence;
+}
+
+#[cfg(windows)]
+fn detect_structure_identity(
+    pid: u32,
+    field_address: usize,
+    pointer_width: usize,
+) -> Option<StructureIdentity> {
+    let modules = process_modules(pid).ok()?;
+    let mut vtable_fallback = None;
+    // ponytail: nearby-field recovery is capped at 0x100. A wider object search belongs in a
+    // dedicated scanner; keeping this bounded makes opening Dissect data effectively instant.
+    for field_offset in (0..=0x100usize).step_by(4) {
+        let Some(object_address) = field_address.checked_sub(field_offset) else {
+            continue;
+        };
+        let Some(vtable) = read_remote_pointer(pid, object_address, pointer_width) else {
+            continue;
+        };
+        let Some((module_name, module_base, module_size)) = module_containing(&modules, vtable)
+        else {
+            continue;
+        };
+        let Some(first_method) = read_remote_pointer(pid, vtable, pointer_width) else {
+            continue;
+        };
+        if module_containing(&modules, first_method).is_none() {
+            continue;
+        }
+
+        if let Some(class_name) = detect_msvc_rtti_name(
+            pid,
+            vtable,
+            pointer_width,
+            module_base,
+            module_size,
+        ) {
+            return Some(StructureIdentity {
+                name: class_name.clone(),
+                address: object_address,
+                evidence: format!(
+                    "MSVC RTTI: {class_name}; object base {}{}",
+                    format_memory_address(object_address),
+                    (field_offset != 0)
+                        .then(|| format!(" (-0x{field_offset:X} from selected field)"))
+                        .unwrap_or_default(),
+                ),
+            });
+        }
+
+        vtable_fallback.get_or_insert_with(|| StructureIdentity {
+            name: format!("Unknown ({module_name} vtable)"),
+            address: object_address,
+            evidence: format!(
+                "Vtable: {module_name}+{:X}; RTTI name is absent or stripped{}",
+                vtable - module_base,
+                (field_offset != 0)
+                    .then(|| format!("; object base is -0x{field_offset:X} from selected field"))
+                    .unwrap_or_default(),
+            ),
+        });
+    }
+    vtable_fallback
+}
+
+#[cfg(not(windows))]
+fn detect_structure_identity(
+    _pid: u32,
+    _field_address: usize,
+    _pointer_width: usize,
+) -> Option<StructureIdentity> {
+    None
+}
+
+#[cfg(windows)]
+fn module_containing(
+    modules: &[(String, usize, usize)],
+    address: usize,
+) -> Option<(&str, usize, usize)> {
+    modules.iter().find_map(|(name, base, size)| {
+        (*base..base.saturating_add(*size))
+            .contains(&address)
+            .then_some((name.as_str(), *base, *size))
+    })
+}
+
+#[cfg(windows)]
+fn read_remote_pointer(pid: u32, address: usize, pointer_width: usize) -> Option<usize> {
+    let bytes = read_memory_bytes(pid, address, pointer_width).ok()?;
+    (bytes.len() == pointer_width)
+        .then(|| decode_pointer(&bytes))
+        .flatten()
+}
+
+#[cfg(windows)]
+fn detect_msvc_rtti_name(
+    pid: u32,
+    vtable: usize,
+    pointer_width: usize,
+    module_base: usize,
+    module_size: usize,
+) -> Option<String> {
+    let locator = read_remote_pointer(pid, vtable.checked_sub(pointer_width)?, pointer_width)?;
+    if !(module_base..module_base.saturating_add(module_size)).contains(&locator) {
+        return None;
+    }
+
+    let (type_descriptor, name_offset) = if pointer_width == 8 {
+        let locator_bytes = read_memory_bytes(pid, locator, 24).ok()?;
+        if locator_bytes.len() != 24 {
+            return None;
+        }
+        let type_rva = u32::from_le_bytes(locator_bytes[12..16].try_into().ok()?) as usize;
+        let self_rva = u32::from_le_bytes(locator_bytes[20..24].try_into().ok()?) as usize;
+        let image_base = locator.checked_sub(self_rva)?;
+        if image_base != module_base {
+            return None;
+        }
+        (image_base.checked_add(type_rva)?, 16)
+    } else if pointer_width == 4 {
+        let locator_bytes = read_memory_bytes(pid, locator, 20).ok()?;
+        if locator_bytes.len() != 20 {
+            return None;
+        }
+        (
+            u32::from_le_bytes(locator_bytes[12..16].try_into().ok()?) as usize,
+            8,
+        )
+    } else {
+        return None;
+    };
+
+    let raw = read_memory_bytes(pid, type_descriptor.checked_add(name_offset)?, 256).ok()?;
+    let end = raw.iter().position(|byte| *byte == 0)?;
+    let decorated = std::str::from_utf8(raw.get(..end)?).ok()?;
+    demangle_msvc_type_name(decorated)
+}
+
+fn demangle_msvc_type_name(decorated: &str) -> Option<String> {
+    let body = decorated
+        .strip_prefix(".?AV")
+        .or_else(|| decorated.strip_prefix(".?AU"))
+        .or_else(|| decorated.strip_prefix(".?AW4"))?
+        .strip_suffix("@@")?;
+    if body.is_empty() {
+        return None;
+    }
+    if body.contains("?$") {
+        return Some(body.to_owned());
+    }
+    let mut parts = body
+        .split('@')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    parts.reverse();
+    Some(parts.join("::"))
 }
 
 fn auto_structure_elements(bytes: &[u8], pointer_width: usize) -> Vec<StructureElement> {
@@ -9027,6 +9263,15 @@ mod tests {
         let elements = auto_structure_elements(&bytes, 4);
         assert_eq!(elements[0].value_type, StructureElementType::Pointer);
         assert_eq!(elements[0].value_type.width(4), 4);
+    }
+
+    #[test]
+    fn demangles_basic_msvc_rtti_class_names() {
+        assert_eq!(
+            demangle_msvc_type_name(".?AVCamera@Game@@").as_deref(),
+            Some("Game::Camera")
+        );
+        assert_eq!(demangle_msvc_type_name("not-rtti"), None);
     }
 
     #[test]
