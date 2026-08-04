@@ -1,4 +1,4 @@
-use eframe::egui::{self, Color32, ComboBox, DragValue, Grid, TextEdit};
+use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Grid, RichText, TextEdit};
 
 use crate::model::{
     EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspPreset, MemoryValueType, RgbaColor,
@@ -22,28 +22,57 @@ impl CrosshairApp {
 
         let windows = crate::window_list::list_open_windows();
         let mut remove = None;
+        let mut copy_preset = None;
+        let mut paste_after = None;
+        let can_paste = matches!(
+            self.preset_clipboard,
+            Some(crate::ui::PresetClipboard::Esp(_))
+        );
         for index in 0..self.state.esp_presets.len() {
             let mut preset = self.state.esp_presets[index].clone();
             let before = preset.clone();
+            let snapshot = preset.clone();
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_sized(
-                        [Self::preset_header_name_width(ui), 22.0],
+                        [Self::preset_header_name_width(ui), 21.0],
                         TextEdit::singleline(&mut preset.name),
                     );
-                    let toggle = if preset.enabled { "On" } else { "Off" };
-                    if ui.selectable_label(preset.enabled, toggle).clicked() {
-                        preset.enabled = !preset.enabled;
-                    }
-                    if ui
-                        .button(if preset.collapsed { "Show" } else { "Hide" })
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(
+                                can_paste,
+                                Button::new("Paste").min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            paste_after = Some(index);
+                        }
+                        if Self::sound_style_toggle_button(ui, "Copy").clicked() {
+                            copy_preset = Some(snapshot.clone());
+                        }
+                        if Self::sound_style_remove_button(ui).clicked() {
+                            remove = Some(preset.id);
+                        }
+                        if Self::sound_style_toggle_button(
+                            ui,
+                            if preset.collapsed { "Show" } else { "Hide" },
+                        )
                         .clicked()
-                    {
-                        preset.collapsed = !preset.collapsed;
-                    }
-                    if Self::sound_style_remove_button(ui).clicked() {
-                        remove = Some(preset.id);
-                    }
+                        {
+                            preset.collapsed = !preset.collapsed;
+                        }
+                        if ui
+                            .add(
+                                Button::new(if preset.enabled { "ESP On" } else { "ESP Off" })
+                                    .selected(preset.enabled)
+                                    .min_size(egui::vec2(84.0, 24.0)),
+                            )
+                            .clicked()
+                        {
+                            preset.enabled = !preset.enabled;
+                        }
+                    });
                 });
                 if preset.collapsed {
                     return;
@@ -93,7 +122,12 @@ impl CrosshairApp {
                             ui.add(
                                 TextEdit::singleline(value)
                                     .desired_width(420.0)
-                                    .hint_text("address / module+offset [offsets] / @alias"),
+                                    .hint_text(
+                                        RichText::new(
+                                            "address / module+offset [offsets] / @alias",
+                                        )
+                                        .color(ui.visuals().weak_text_color()),
+                                    ),
                             );
                             ui.end_row();
                         }
@@ -206,6 +240,22 @@ impl CrosshairApp {
         }
         if let Some(id) = remove {
             self.state.esp_presets.retain(|preset| preset.id != id);
+            dirty = true;
+        }
+        if let Some(preset) = copy_preset {
+            self.preset_clipboard = Some(crate::ui::PresetClipboard::Esp(preset));
+        }
+        if let Some(index) = paste_after
+            && let Some(crate::ui::PresetClipboard::Esp(mut preset)) =
+                self.preset_clipboard.clone()
+        {
+            preset.id = Self::allocate_next_id(
+                &self.state.esp_presets,
+                &mut self.state.next_esp_preset_id,
+                |item| item.id,
+            );
+            preset.name = format!("{} (Copy)", preset.name);
+            self.state.esp_presets.insert(index + 1, preset);
             dirty = true;
         }
         if dirty {

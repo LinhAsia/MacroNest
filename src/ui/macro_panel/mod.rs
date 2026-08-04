@@ -7329,6 +7329,22 @@ impl CrosshairApp {
                                                         );
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
+                                                        for action in [
+                                                            MacroAction::EnableEspPreset,
+                                                            MacroAction::DisableEspPreset,
+                                                        ] {
+                                                            Self::render_macro_action_option(
+                                                                ui,
+                                                                language,
+                                                                &mut step.action,
+                                                                action,
+                                                                &mut live_sync,
+                                                                action_hover_id,
+                                                                false,
+                                                            );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
+                                                        }
                                                         Self::render_audio_sense_action_group_option(
                                                             ui,
                                                             language,
@@ -9680,6 +9696,22 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         );
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
+                                                        for action in [
+                                                            MacroAction::EnableEspPreset,
+                                                            MacroAction::DisableEspPreset,
+                                                        ] {
+                                                            Self::render_macro_action_option(
+                                                                ui,
+                                                                language,
+                                                                &mut step.action,
+                                                                action,
+                                                                &mut live_sync,
+                                                                action_hover_id,
+                                                                false,
+                                                            );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
+                                                        }
                                                         Self::render_audio_sense_action_group_option(
                                                             ui,
                                                             language,
@@ -12935,6 +12967,22 @@ if supports_move_mouse || show_detection_tuning {
                                                             );
                                                             grid_col += 1;
                                                             if grid_col % 8 == 0 { ui.end_row(); }
+                                                            for action in [
+                                                                MacroAction::EnableEspPreset,
+                                                                MacroAction::DisableEspPreset,
+                                                            ] {
+                                                                Self::render_macro_action_option(
+                                                                    ui,
+                                                                    language,
+                                                                    &mut step.action,
+                                                                    action,
+                                                                    &mut live_sync,
+                                                                    action_hover_id,
+                                                                    false,
+                                                                );
+                                                                grid_col += 1;
+                                                                if grid_col % 8 == 0 { ui.end_row(); }
+                                                            }
                                                             Self::render_audio_sense_action_group_option(
                                                                 ui,
                                                                 language,

@@ -620,6 +620,7 @@ enum PresetClipboard {
     AudioSense(AudioSensePreset),
     Ocr(OcrPreset),
     Geometry(GeometryPreset),
+    Esp(EspPreset),
     Sound(SoundPreset),
     Hud(HudPreset),
     Timer(TimerPreset),
