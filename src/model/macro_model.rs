@@ -608,9 +608,7 @@ impl MacroStep {
             | MacroAction::EnablePinPreset
             | MacroAction::ShowHud
             | MacroAction::DrawGeometry => {
-                let is_timed = self.timed_override
-                    || (!self.duration_expr.trim().is_empty() && self.duration_expr.trim() != "0");
-                if is_timed && !self.duration_expr.trim().is_empty() {
+                if self.timed_override && !self.duration_expr.trim().is_empty() {
                     let trimmed = self.duration_expr.trim();
                     let interpolated = crate::overlay::interpolate_variables(trimmed);
                     let val = crate::overlay::evaluate_math_expression(&interpolated);
@@ -989,10 +987,12 @@ mod tests {
         step.remember_duration_input();
 
         step.set_duration_permanent(true);
+        assert_eq!(step.get_duration_ms(), 0);
         step.set_duration_permanent(false);
 
         assert_eq!(step.duration_expr, "4321");
         assert_eq!(step.duration_override_ms, 4321);
+        assert_eq!(step.get_duration_ms(), 4321);
     }
 
     #[test]
