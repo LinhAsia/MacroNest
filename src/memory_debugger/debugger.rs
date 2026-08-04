@@ -762,7 +762,10 @@ fn watch_loop<F>(
     }
     for (_, thread) in threads {
         unsafe {
-            if SuspendThread(thread) != u32::MAX {
+            // A capture-limit stop already disarmed every paused thread before its debug event
+            // was continued. Suspending the now-running game threads again races the target and
+            // can crash it just after an alias is resolved.
+            if !capture_limit_reached && SuspendThread(thread) != u32::MAX {
                 disarm_thread(thread, architecture);
                 ResumeThread(thread);
             }

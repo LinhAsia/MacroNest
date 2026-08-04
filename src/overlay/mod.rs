@@ -31431,12 +31431,24 @@ mod windows_overlay {
             let notify = move |event| {
                 let _ = tx.send(event);
             };
+            let has_signature = !tracked_entry.tracked_signature.trim().is_empty();
+            let matcher_entry = tracked_entry.clone();
+            let matcher_instruction = code.instruction.clone();
+            let capture_limit = if has_signature { 1 } else { 64 };
             let Ok(watch) = AccessWatch::start_matching(
                 pid,
                 instruction_address,
                 MemoryDebuggerArchitecture::Auto,
-                64,
-                |_| true,
+                capture_limit,
+                move |data_address| {
+                    !has_signature
+                        || tracked_signature_matches(
+                            pid,
+                            data_address,
+                            &matcher_instruction,
+                            &matcher_entry,
+                        )
+                },
                 notify,
             ) else {
                 MEMORY_TRACKED_REBINDS.lock().insert(pid, Instant::now());
@@ -31450,17 +31462,8 @@ mod windows_overlay {
                     Ok(WatchEvent::AccessHit { data_address }) => {
                         if !candidates.contains(&data_address) {
                             candidates.push(data_address);
-                            if !tracked_entry.tracked_signature.trim().is_empty() {
-                                let (matched, total) = tracked_signature_score(
-                                    pid,
-                                    data_address,
-                                    &code.instruction,
-                                    &tracked_entry,
-                                );
-                                if total > 0 && matched == total {
-                                    exact_candidate = Some(data_address);
-                                    break;
-                                }
+                            if has_signature {
+                                exact_candidate = Some(data_address);
                             }
                         }
                     }
