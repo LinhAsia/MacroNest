@@ -26229,7 +26229,11 @@ mod windows_overlay {
             return Vec::new();
         }
         let read = |expression: &str| -> Option<f32> {
-            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression)?;
+            // ESP is a passive overlay. Never attach the debugger from its refresh loop:
+            // a stale tracked alias should hide the marker until the macro rebinds it,
+            // not risk suspending or crashing the target game.
+            let (target_pid, address) =
+                resolve_memory_action_target(Some(pid), expression, false)?;
             crate::process_memory::read_value(target_pid, address, preset.value_type)
                 .ok()?
                 .parse::<f32>()
@@ -31268,7 +31272,11 @@ mod windows_overlay {
         });
     }
 
-    fn resolve_memory_action_target(pid: Option<u32>, text: &str) -> Option<(u32, usize)> {
+    fn resolve_memory_action_target(
+        pid: Option<u32>,
+        text: &str,
+        allow_tracked_rebind: bool,
+    ) -> Option<(u32, usize)> {
         let text = interpolate_variables(text);
         let text = text.trim();
         if let Some(alias) = text.strip_prefix('@') {
@@ -31297,8 +31305,13 @@ mod windows_overlay {
                 if let Some(address) = entry.runtime_address
                     && entry.runtime_process_id == Some(pid)
                 {
-                    schedule_memory_tracked_validation(pid, address, &entry);
+                    if allow_tracked_rebind {
+                        schedule_memory_tracked_validation(pid, address, &entry);
+                    }
                     return Some((pid, address));
+                }
+                if !allow_tracked_rebind {
+                    return None;
                 }
                 for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
                     if pointer.name.eq_ignore_ascii_case(&entry.name) {
@@ -31351,9 +31364,11 @@ mod windows_overlay {
         let is_tracked_alias = step.key.trim().starts_with('@');
         let target_pid = macro_memory_target_pid(step.memory_target_window.as_deref());
         let value =
-            resolve_memory_action_target(target_pid, &step.key).and_then(|(pid, address)| {
-                crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
-            });
+            resolve_memory_action_target(target_pid, &step.key, true).and_then(
+                |(pid, address)| {
+                    crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
+                },
+            );
         if let Some(value) = value {
             if let Ok(value) = value.parse::<f64>() {
                 set_variable_value(target_var, value);
@@ -31370,6 +31385,7 @@ mod windows_overlay {
         let Some((pid, address)) = resolve_memory_action_target(
             macro_memory_target_pid(step.memory_target_window.as_deref()),
             &step.key,
+            true,
         ) else {
             return;
         };
