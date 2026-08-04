@@ -26269,8 +26269,12 @@ mod windows_overlay {
         ) else {
             return Vec::new();
         };
-        let x = left + ((normalized_x + 1.0) * 0.5 * width as f32).round() as i32;
-        let y = top + ((1.0 - normalized_y) * 0.5 * height as f32).round() as i32;
+        let x = left
+            + ((normalized_x + 1.0) * 0.5 * width as f32 + preset.screen_offset_x).round()
+                as i32;
+        let y = top
+            + ((1.0 - normalized_y) * 0.5 * height as f32 + preset.screen_offset_y).round()
+                as i32;
         let color = [
             preset.color.r,
             preset.color.g,

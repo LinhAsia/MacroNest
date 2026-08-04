@@ -35,6 +35,31 @@ use crate::{
     ui::{CrosshairApp, PopupBlobApp, PopupBlobKind},
 };
 
+#[cfg(windows)]
+unsafe extern "system" fn release_mouse_on_unhandled_exception(
+    _: *const windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS,
+) -> i32 {
+    // ponytail: this deliberately avoids application locks; an exception handler must be fail-open.
+    let _ = windows::Win32::UI::WindowsAndMessaging::ClipCursor(None);
+    windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_CONTINUE_SEARCH
+}
+
+#[cfg(windows)]
+fn install_crash_input_release() {
+    unsafe {
+        windows_sys::Win32::System::Diagnostics::Debug::SetUnhandledExceptionFilter(Some(
+            release_mouse_on_unhandled_exception,
+        ));
+    }
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::ClipCursor(None);
+        }
+        previous(info);
+    }));
+}
+
 #[cfg(not(windows))]
 compile_error!("This application currently supports Windows only.");
 
@@ -337,6 +362,12 @@ fn apply_process_startup_tuning(paths: &AppPaths) {
 }
 
 fn main() -> Result<()> {
+    // Intel's legacy OpenCL ICD can access-violate inside OpenCV. MacroNest's image matching is
+    // latency-safe on CPU and must not take the whole app (and an active ClipCursor) down with it.
+    unsafe {
+        std::env::set_var("OPENCV_OPENCL_RUNTIME", "disabled");
+    }
+    install_crash_input_release();
     let start_hidden_to_tray = std::env::args_os().any(|arg| arg == "--start-in-tray");
     let args = std::env::args().collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--already-running-popup") {

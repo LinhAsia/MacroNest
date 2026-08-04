@@ -181,6 +181,86 @@ impl CrosshairApp {
                     ui.add(DragValue::new(&mut preset.horizontal_fov).range(1.0..=179.0));
                 });
                 ui.horizontal_wrapped(|ui| {
+                    ui.label("Yaw zero offset").on_hover_text(
+                        "Use this when the marker is consistently rotated left/right. Try +90, -90, then 180.",
+                    );
+                    ui.add(
+                        DragValue::new(&mut preset.yaw_offset_degrees)
+                            .range(-360.0..=360.0)
+                            .suffix(" deg"),
+                    );
+                    for value in [-180.0, -90.0, 0.0, 90.0, 180.0] {
+                        if ui.small_button(format!("{value:+.0}")).clicked() {
+                            preset.yaw_offset_degrees = value;
+                        }
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Pitch zero offset").on_hover_text(
+                        "Use only when every marker is consistently too high/low as the camera tilts.",
+                    );
+                    ui.add(
+                        DragValue::new(&mut preset.pitch_offset_degrees)
+                            .range(-180.0..=180.0)
+                            .suffix(" deg"),
+                    );
+                    if ui.small_button("Reset pitch").clicked() {
+                        preset.pitch_offset_degrees = 0.0;
+                    }
+                    ui.label("Target height").on_hover_text(
+                        "World-unit correction for a target pivot at feet/waist. Start at 0; adjust only after yaw is correct.",
+                    );
+                    ui.add(
+                        DragValue::new(&mut preset.target_vertical_offset)
+                            .speed(0.1)
+                            .range(-10000.0..=10000.0),
+                    );
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Screen offset").on_hover_text(
+                        "Final pixel correction. It does not fix a wrong axis or angle convention.",
+                    );
+                    ui.label("X");
+                    ui.add(
+                        DragValue::new(&mut preset.screen_offset_x)
+                            .speed(1.0)
+                            .range(-10000.0..=10000.0)
+                            .suffix(" px"),
+                    );
+                    ui.label("Y");
+                    ui.add(
+                        DragValue::new(&mut preset.screen_offset_y)
+                            .speed(1.0)
+                            .range(-10000.0..=10000.0)
+                            .suffix(" px"),
+                    );
+                    if ui.small_button("Reset screen").clicked() {
+                        preset.screen_offset_x = 0.0;
+                        preset.screen_offset_y = 0.0;
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(
+                            "Suggested start for the shown values: XY + vertical Z, yaw Degrees, pitch Radians, FOV 90. If the marker is sideways try yaw +90/-90; if behind try 180.",
+                        )
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                    if ui.small_button("Apply suggested start").clicked() {
+                        preset.horizontal_plane = EspHorizontalPlane::Xy;
+                        preset.yaw_unit = EspAngleUnit::Degrees;
+                        preset.pitch_unit = EspAngleUnit::Radians;
+                        preset.invert_yaw = false;
+                        preset.invert_pitch = false;
+                        preset.yaw_offset_degrees = 0.0;
+                        preset.pitch_offset_degrees = 0.0;
+                        preset.target_vertical_offset = 0.0;
+                        preset.screen_offset_x = 0.0;
+                        preset.screen_offset_y = 0.0;
+                        preset.horizontal_fov = 90.0;
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Marker");
                     ComboBox::from_id_salt(("esp_marker", preset.id))
                         .selected_text(match preset.marker {

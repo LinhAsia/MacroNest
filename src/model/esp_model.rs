@@ -45,6 +45,11 @@ pub struct EspPreset {
     pub horizontal_plane: EspHorizontalPlane,
     pub invert_yaw: bool,
     pub invert_pitch: bool,
+    pub yaw_offset_degrees: f32,
+    pub pitch_offset_degrees: f32,
+    pub target_vertical_offset: f32,
+    pub screen_offset_x: f32,
+    pub screen_offset_y: f32,
     pub horizontal_fov: f32,
     pub marker: EspMarkerKind,
     pub dot_radius: f32,
@@ -80,6 +85,11 @@ impl EspPreset {
             horizontal_plane: EspHorizontalPlane::Xy,
             invert_yaw: false,
             invert_pitch: false,
+            yaw_offset_degrees: 0.0,
+            pitch_offset_degrees: 0.0,
+            target_vertical_offset: 0.0,
+            screen_offset_x: 0.0,
+            screen_offset_y: 0.0,
             horizontal_fov: 90.0,
             marker: EspMarkerKind::Dot,
             dot_radius: 7.0,
@@ -123,18 +133,20 @@ pub(crate) fn project_esp_normalized(
     let dy = target[1] - camera[1];
     let dz = target[2] - camera[2];
     let (forward_a, forward_b, vertical) = match preset.horizontal_plane {
-        EspHorizontalPlane::Xy => (dx, dy, dz),
-        EspHorizontalPlane::Xz => (dx, dz, dy),
+        EspHorizontalPlane::Xy => (dx, dy, dz + preset.target_vertical_offset),
+        EspHorizontalPlane::Xz => (dx, dz, dy + preset.target_vertical_offset),
     };
     let horizontal_distance = forward_a.hypot(forward_b);
     let distance = horizontal_distance.hypot(vertical);
     if distance <= f32::EPSILON {
         return None;
     }
-    let mut yaw_delta = forward_b.atan2(forward_a) - angle(yaw, preset.yaw_unit);
+    let yaw = angle(yaw, preset.yaw_unit) + preset.yaw_offset_degrees.to_radians();
+    let pitch = angle(pitch, preset.pitch_unit) + preset.pitch_offset_degrees.to_radians();
+    let mut yaw_delta = forward_b.atan2(forward_a) - yaw;
     yaw_delta =
         (yaw_delta + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-    let mut pitch_delta = vertical.atan2(horizontal_distance) - angle(pitch, preset.pitch_unit);
+    let mut pitch_delta = vertical.atan2(horizontal_distance) - pitch;
     if preset.invert_yaw {
         yaw_delta = -yaw_delta;
     }
@@ -158,6 +170,22 @@ mod tests {
         let projected = project_esp_normalized(
             &preset,
             [10.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            16.0 / 9.0,
+        )
+        .unwrap();
+        assert!(projected.0.abs() < 0.001 && projected.1.abs() < 0.001);
+    }
+
+    #[test]
+    fn yaw_offset_calibrates_a_different_game_zero_direction() {
+        let mut preset = EspPreset::default();
+        preset.yaw_offset_degrees = 90.0;
+        let projected = project_esp_normalized(
+            &preset,
+            [0.0, 10.0, 0.0],
             [0.0, 0.0, 0.0],
             0.0,
             0.0,
