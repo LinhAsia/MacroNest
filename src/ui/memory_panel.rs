@@ -173,6 +173,8 @@ struct StablePointerDialog {
     filter: String,
     exe_only: bool,
     last_live_refresh: Instant,
+    validation_pid: Option<u32>,
+    validation_cursor: usize,
 }
 
 enum DeepPointerJobResult {
@@ -3159,7 +3161,12 @@ impl CrosshairApp {
                         .changed();
                     ui.label("Path limit");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut self.state.memory_pointer_scan_result_limit).range(64..=4096))
+                        .add(
+                            egui::DragValue::new(
+                                &mut self.state.memory_pointer_scan_result_limit,
+                            )
+                            .range(64..=PointerScanLimits::MAX_RESULT_LIMIT),
+                        )
                         .changed();
                 });
             });
@@ -3183,7 +3190,10 @@ impl CrosshairApp {
         PointerScanLimits {
             max_offset: offset,
             max_depth: self.state.memory_pointer_scan_depth.clamp(3, 8),
-            result_limit: self.state.memory_pointer_scan_result_limit.clamp(64, 4096),
+            result_limit: self
+                .state
+                .memory_pointer_scan_result_limit
+                .clamp(64, PointerScanLimits::MAX_RESULT_LIMIT),
             max_bytes: self
                 .state
                 .memory_pointer_scan_memory_mb
@@ -3801,6 +3811,8 @@ impl CrosshairApp {
                     filter: String::new(),
                     exe_only: false,
                     last_live_refresh: Instant::now(),
+                    validation_pid: None,
+                    validation_cursor: 0,
                 });
                 return;
             }
@@ -3837,6 +3849,8 @@ impl CrosshairApp {
             filter: String::new(),
             exe_only: false,
             last_live_refresh: Instant::now(),
+            validation_pid: None,
+            validation_cursor: 0,
         });
     }
 
@@ -3901,17 +3915,26 @@ impl CrosshairApp {
                     worker_progress,
                 )
                 .map(|map_b| {
+                    // ponytail: search past the display limit before intersecting maps;
+                    // otherwise different traversal order can hide every common path.
+                    let comparison_limit = limits
+                        .result_limit
+                        .saturating_mul(16)
+                        .clamp(
+                            PointerScanLimits::MAX_RESULT_LIMIT,
+                            PointerScanLimits::MAX_RESULT_LIMIT.saturating_mul(4),
+                        );
                     let paths_a = map_a.paths_to(
                         target_a,
                         limits.max_offset,
                         limits.max_depth,
-                        limits.result_limit,
+                        comparison_limit,
                     );
                     let paths_b = map_b.paths_to(
                         target,
                         limits.max_offset,
                         limits.max_depth,
-                        limits.result_limit,
+                        comparison_limit,
                     );
                     let paths_b = paths_b.into_iter().collect::<HashSet<_>>();
                     paths_a
@@ -4674,9 +4697,13 @@ impl CrosshairApp {
                                 dialog.limits.max_offset,
                             )
                         } else {
+                            let limit_note = (dialog.candidates.len()
+                                >= dialog.limits.result_limit)
+                                .then_some(" (path limit reached)")
+                                .unwrap_or_default();
                             format!(
-                                "{} candidate(s). Restart the game, restore the target value, select the new process, then Validate.",
-                                dialog.candidates.len()
+                                "{} candidate(s){limit_note}. Restart the game, restore the target value, select the new process, then Validate.",
+                                dialog.candidates.len(),
                             )
                         };
                     }
@@ -4704,12 +4731,17 @@ impl CrosshairApp {
                         .is_some_and(|pid| pid != dialog.source_pid);
                     if ui
                         .add_enabled(
-                            new_process && !dialog.candidates.is_empty(),
+                            new_process
+                                && !dialog.candidates.is_empty()
+                                && dialog.validation_pid.is_none(),
                             Button::new("Validate after restart"),
                         )
                         .clicked()
                     {
                         validate = true;
+                    }
+                    if dialog.validation_pid.is_some() {
+                        ui.spinner();
                     }
                     if ui
                         .add_enabled(
@@ -4771,7 +4803,9 @@ impl CrosshairApp {
                         .then_some(index)
                     })
                     .collect::<Vec<_>>();
-                if dialog.last_live_refresh.elapsed() >= Duration::from_millis(100) {
+                if dialog.validation_pid.is_none()
+                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(100)
+                {
                     if let Some(pid) = self.memory_panel.process_pid {
                         for index in visible_indices.iter().copied() {
                             let candidate = &mut dialog.candidates[index];
@@ -4881,10 +4915,15 @@ impl CrosshairApp {
         if validate {
             self.validate_stable_pointer_candidates(&mut dialog);
         }
+        if dialog.validation_pid.is_some() {
+            self.advance_stable_pointer_validation(&mut dialog);
+        }
         if let Some(save_to_library) = add {
             self.add_stable_pointer_candidate(&dialog, save_to_library);
         }
-        if dialog.rx.is_some() || !dialog.candidates.is_empty() {
+        if dialog.validation_pid.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        } else if dialog.rx.is_some() || !dialog.candidates.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
         self.memory_panel.stable_pointer_dialog = Some(dialog);
@@ -5282,19 +5321,38 @@ impl CrosshairApp {
         let Some(pid) = self.memory_panel.process_pid else {
             return;
         };
-        let mut valid = 0usize;
-        let mut changed = 0usize;
-        let mut broken = 0usize;
         for candidate in &mut dialog.candidates {
+            candidate.valid = None;
             candidate.resolved_base = None;
             candidate.resolved_address = None;
             candidate.observed_value = None;
             candidate.live_value = None;
+        }
+        dialog.validation_pid = Some(pid);
+        dialog.validation_cursor = 0;
+        dialog.status = format!("Validating 0/{} pointer path(s)...", dialog.candidates.len());
+    }
+
+    #[cfg(windows)]
+    fn advance_stable_pointer_validation(&mut self, dialog: &mut StablePointerDialog) {
+        let Some(pid) = dialog.validation_pid else {
+            return;
+        };
+        if self.memory_panel.process_pid != Some(pid) {
+            dialog.validation_pid = None;
+            dialog.status = "The selected process changed during validation".to_owned();
+            return;
+        }
+        const BATCH_SIZE: usize = 64;
+        let end = dialog
+            .validation_cursor
+            .saturating_add(BATCH_SIZE)
+            .min(dialog.candidates.len());
+        for candidate in &mut dialog.candidates[dialog.validation_cursor..end] {
             let Ok(base) =
                 resolve_module_offset(pid, &candidate.path.module, candidate.path.module_offset)
             else {
                 candidate.valid = Some(false);
-                broken += 1;
                 continue;
             };
             let spec = PointerSpec {
@@ -5305,25 +5363,43 @@ impl CrosshairApp {
             candidate.resolved_base = Some(base);
             let Ok(address) = resolve_memory_address(pid, base, Some(&spec)) else {
                 candidate.valid = Some(false);
-                broken += 1;
                 continue;
             };
             candidate.resolved_address = Some(address);
             let Ok(observed) = read_scan_value(pid, address, dialog.value_type) else {
                 candidate.valid = Some(false);
-                broken += 1;
                 continue;
             };
             candidate.observed_value = Some(observed);
             candidate.live_value = Some(observed);
             if observed == dialog.expected_value {
                 candidate.valid = Some(true);
-                valid += 1;
             } else {
                 candidate.valid = None;
-                changed += 1;
             }
         }
+        dialog.validation_cursor = end;
+        if end < dialog.candidates.len() {
+            dialog.status = format!(
+                "Validating {end}/{} pointer path(s)...",
+                dialog.candidates.len()
+            );
+            return;
+        }
+        let valid = dialog
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.valid == Some(true))
+            .count();
+        let changed = dialog
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.valid.is_none() && candidate.observed_value.is_some()
+            })
+            .count();
+        let broken = dialog.candidates.len().saturating_sub(valid + changed);
+        dialog.validation_pid = None;
         dialog
             .candidates
             .sort_by_key(|candidate| match candidate.valid {
@@ -5340,6 +5416,9 @@ impl CrosshairApp {
 
     #[cfg(not(windows))]
     fn validate_stable_pointer_candidates(&mut self, _dialog: &mut StablePointerDialog) {}
+
+    #[cfg(not(windows))]
+    fn advance_stable_pointer_validation(&mut self, _dialog: &mut StablePointerDialog) {}
 
     fn add_stable_pointer_candidate(
         &mut self,

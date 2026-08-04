@@ -312,6 +312,8 @@ pub struct PointerScanLimits {
 }
 
 impl PointerScanLimits {
+    pub const MAX_RESULT_LIMIT: usize = 65_536;
+
     pub const SAFE: Self = Self {
         max_offset: 0x1000,
         max_depth: 5,
@@ -322,7 +324,7 @@ impl PointerScanLimits {
     pub const DEEP: Self = Self {
         max_offset: 0x4000,
         max_depth: 7,
-        result_limit: 1024,
+        result_limit: 16_384,
         max_bytes: 2048 * 1024 * 1024,
     };
 }
@@ -490,7 +492,9 @@ fn find_pointer_paths(
     max_depth: usize,
     result_limit: usize,
 ) -> Vec<PointerPath> {
-    const MAX_FRONTIER: usize = 50_000;
+    let max_frontier = result_limit
+        .saturating_mul(16)
+        .clamp(50_000, 1_000_000);
     let mut results = Vec::new();
     let mut frontier = vec![(target, Vec::<usize>::new())];
     for _ in 0..max_depth.max(1) {
@@ -517,7 +521,7 @@ fn find_pointer_paths(
                         return results;
                     }
                 }
-                if next.len() < MAX_FRONTIER {
+                if next.len() < max_frontier {
                     next.push((location, reverse_offsets));
                 }
             }

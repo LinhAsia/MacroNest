@@ -81,6 +81,13 @@ fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool, bool)> {
     if normalize_legacy_active_window_targets(&mut state) {
         state_changed = true;
     }
+    // The old UI could not express a path limit above 4096. Preserve the
+    // user's intent to use that former maximum when upgrading the scanner.
+    if state.memory_pointer_scan_result_limit == 4096 {
+        state.memory_pointer_scan_result_limit =
+            process_memory::PointerScanLimits::DEEP.result_limit;
+        state_changed = true;
+    }
     if state.reset_session_preset_visibility() {
         state_changed = true;
     }
