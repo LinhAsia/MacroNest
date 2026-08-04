@@ -46,6 +46,7 @@ impl CrosshairApp {
             AppPanel::Hud => "HUD",
             AppPanel::Ocr => "OCR",
             AppPanel::Geometry => "Geometry",
+            AppPanel::Esp => "ESP",
             AppPanel::Timer => "Timer",
             AppPanel::Memory => "Memory",
             AppPanel::Network => "Network",

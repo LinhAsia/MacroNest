@@ -22,10 +22,10 @@ use crate::{
     ai, audio, audiosense, hotkey,
     model::{
         AppPanel, AppState, AudioClipSettings, AudioSensePreset, AudioSettings, CaptureRequest,
-        CapturedInput, CommandPreset, CrosshairStyle, FocusHighlightDecoration, GeometryPreset,
-        GeometrySpec, GroqSettings, HotkeyBinding, HudPreset, MacroAction, MacroFolder, MacroGroup,
-        MacroPreset, MacroStep, MacroTriggerMode, MascotStyle, MasterMacroGroupState,
-        MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
+        CapturedInput, CommandPreset, CrosshairStyle, EspPreset, FocusHighlightDecoration,
+        GeometryPreset, GeometrySpec, GroqSettings, HotkeyBinding, HudPreset, MacroAction,
+        MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MascotStyle,
+        MasterMacroGroupState, MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
         MasterWindowPresetState, MasterZoomPresetState, MousePathEvent, MousePathEventKind,
         MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset, ProfileRecord,
         QuickKeyDisplayMode, QuickScreenDrawTool, QuickVideoRecordMode, RgbaColor, SoundPreset,
@@ -42,6 +42,7 @@ mod app_shell;
 mod audiosense_panel;
 mod command_panel;
 mod crosshair_panel;
+mod esp_panel;
 mod geometry_panel;
 mod hud_panel;
 mod layout;
@@ -663,6 +664,7 @@ pub struct CrosshairApp {
     last_synced_timer_presets: Option<Vec<TimerPreset>>,
     last_synced_audio_sense_presets: Option<Vec<crate::model::AudioSensePreset>>,
     last_synced_geometry_presets: Option<Vec<crate::model::GeometryPreset>>,
+    last_synced_esp_presets: Option<Vec<EspPreset>>,
     last_synced_mouse_sensitivity_presets: Option<Vec<crate::model::MouseSensitivityPreset>>,
     last_synced_macro_delays: Option<(u32, u32)>,
     last_synced_focus_highlight_config: Option<(RgbaColor, FocusHighlightDecoration)>,
@@ -1038,6 +1040,7 @@ impl CrosshairApp {
             last_synced_timer_presets: None,
             last_synced_audio_sense_presets: None,
             last_synced_geometry_presets: None,
+            last_synced_esp_presets: None,
             last_synced_mouse_sensitivity_presets: None,
             last_synced_macro_delays: None,
             last_synced_focus_highlight_config: None,
@@ -9417,6 +9420,8 @@ impl CrosshairApp {
             MacroAction::DrawGeometry => "DrawGeometry",
             MacroAction::ShowGeometryPreset => "ShowGeometry",
             MacroAction::HideGeometryPreset => "HideGeometry",
+            MacroAction::EnableEspPreset => "EnableESP",
+            MacroAction::DisableEspPreset => "DisableESP",
             MacroAction::FunnyMemeReply => "MemeReply",
             MacroAction::AiResponse => "AiResponse",
             MacroAction::JumpToStep => "JumpToStep",
@@ -9735,6 +9740,14 @@ impl CrosshairApp {
                 "macro_action_tooltip.hide_geometry_preset",
                 "Hide geometry preset (or clear all geometry overlay).",
             ),
+            MacroAction::EnableEspPreset => (
+                "macro_action_tooltip.enable_esp_preset",
+                "Enable one shared ESP preset from the ESP tab.",
+            ),
+            MacroAction::DisableEspPreset => (
+                "macro_action_tooltip.disable_esp_preset",
+                "Disable one shared ESP preset from the ESP tab.",
+            ),
             MacroAction::FunnyMemeReply => (
                 "macro_action_tooltip.funny_meme_reply",
                 "Turn one message into a meme search query, fetch the best image result, and copy it to the clipboard.",
@@ -9841,6 +9854,8 @@ impl CrosshairApp {
             MacroAction::DrawGeometry => 0xe85b,
             MacroAction::ShowGeometryPreset => 0xe8f4,
             MacroAction::HideGeometryPreset => 0xe8f5,
+            MacroAction::EnableEspPreset => 0xe8f4,
+            MacroAction::DisableEspPreset => 0xe8f5,
             MacroAction::FunnyMemeReply => 0xe420,
             MacroAction::AiResponse => 0xeb8e,
             MacroAction::JumpToStep => 0xe5c8,
@@ -10004,6 +10019,12 @@ impl CrosshairApp {
             }
             MacroAction::HideGeometryPreset => {
                 ("macro_action_short_label.hide_geometry_preset", "HideGeo")
+            }
+            MacroAction::EnableEspPreset => {
+                ("macro_action_short_label.enable_esp_preset", "ESP On")
+            }
+            MacroAction::DisableEspPreset => {
+                ("macro_action_short_label.disable_esp_preset", "ESP Off")
             }
             MacroAction::FunnyMemeReply => ("macro_action_short_label.funny_meme_reply", "Meme"),
             MacroAction::AiResponse => ("macro_action_short_label.ai_response", "AI"),
@@ -14667,6 +14688,17 @@ impl eframe::App for CrosshairApp {
                         self.persist();
                     }
                 }
+                UiCommand::EspPresetEnabled { preset_id, enabled } => {
+                    if let Some(preset) = self
+                        .state
+                        .esp_presets
+                        .iter_mut()
+                        .find(|preset| preset.id == preset_id)
+                    {
+                        preset.enabled = enabled;
+                        self.persist_esp_presets();
+                    }
+                }
                 UiCommand::SetMacrosMasterEnabled(enabled, status) => {
                     self.state.macros_master_enabled = enabled;
                     self.persist();
@@ -17171,6 +17203,7 @@ impl eframe::App for CrosshairApp {
                         AppPanel::AudioSense,
                         AppPanel::Ocr,
                         AppPanel::Geometry,
+                        AppPanel::Esp,
                         AppPanel::Sound,
                     ];
                     for panel in panels {
@@ -17342,6 +17375,7 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::AudioSense => self.render_audiosense_panel(ui),
                                 AppPanel::Ocr => self.render_ocr_panel(ui),
                                 AppPanel::Geometry => self.render_geometry_panel(ui),
+                                AppPanel::Esp => self.render_esp_panel(ui),
                                 AppPanel::Zoom => self.render_pin_panel(ui),
                                 AppPanel::Modes => self.render_macro_panel(ui),
                                 AppPanel::Macros => unreachable!(),

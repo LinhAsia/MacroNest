@@ -1,4 +1,5 @@
 mod audio_model;
+mod esp_model;
 mod geometry_model;
 mod macro_model;
 mod overlay_model;
@@ -7,6 +8,7 @@ mod vision_model;
 mod window_model;
 
 pub use audio_model::*;
+pub use esp_model::*;
 pub use geometry_model::*;
 pub use macro_model::*;
 pub use overlay_model::*;

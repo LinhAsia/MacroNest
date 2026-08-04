@@ -5471,6 +5471,12 @@ impl CrosshairApp {
             .iter()
             .map(|preset| (preset.id, preset.name.clone()))
             .collect();
+        let esp_preset_options: Vec<(u32, String)> = self
+            .state
+            .esp_presets
+            .iter()
+            .map(|preset| (preset.id, preset.name.clone()))
+            .collect();
         let audio_sense_preset_options: Vec<(u32, String)> = self
             .state
             .audio_sense_presets
@@ -9153,6 +9159,8 @@ if supports_move_mouse || show_detection_tuning {
                                                 MacroAction::DrawGeometry
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
+                                                    | MacroAction::EnableEspPreset
+                                                    | MacroAction::DisableEspPreset
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -9161,6 +9169,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     MacroAction::DrawGeometry
                                                         | MacroAction::ShowGeometryPreset
                                                         | MacroAction::HideGeometryPreset
+                                                        | MacroAction::EnableEspPreset
+                                                        | MacroAction::DisableEspPreset
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -9171,6 +9181,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         0,
                                                         true,
                                                         &geometry_preset_options,
+                                                        &esp_preset_options,
                                                         &mut geometry_manual_color,
                                                         &mut geometry_manual_color_hex,
                                                         &mut request_geometry_screen_color_pick,
@@ -11500,6 +11511,8 @@ if supports_move_mouse || show_detection_tuning {
                                                 MacroAction::DrawGeometry
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
+                                                    | MacroAction::EnableEspPreset
+                                                    | MacroAction::DisableEspPreset
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -11508,6 +11521,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     MacroAction::DrawGeometry
                                                         | MacroAction::ShowGeometryPreset
                                                         | MacroAction::HideGeometryPreset
+                                                        | MacroAction::EnableEspPreset
+                                                        | MacroAction::DisableEspPreset
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -11518,6 +11533,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         0,
                                                         true,
                                                         &geometry_preset_options,
+                                                        &esp_preset_options,
                                                         &mut geometry_manual_color,
                                                         &mut geometry_manual_color_hex,
                                                         &mut request_geometry_screen_color_pick,
@@ -15246,6 +15262,8 @@ if supports_move_mouse || show_detection_tuning {
                                                 MacroAction::DrawGeometry
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
+                                                    | MacroAction::EnableEspPreset
+                                                    | MacroAction::DisableEspPreset
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -15435,6 +15453,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     MacroAction::DrawGeometry
                                                         | MacroAction::ShowGeometryPreset
                                                         | MacroAction::HideGeometryPreset
+                                                        | MacroAction::EnableEspPreset
+                                                        | MacroAction::DisableEspPreset
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -15445,6 +15465,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         step_index,
                                                         false,
                                                         &geometry_preset_options,
+                                                        &esp_preset_options,
                                                         &mut geometry_manual_color,
                                                         &mut geometry_manual_color_hex,
                                                         &mut request_geometry_screen_color_pick,
@@ -17557,6 +17578,8 @@ if supports_move_mouse || show_detection_tuning {
             MacroAction::DrawGeometry,
             MacroAction::ShowGeometryPreset,
             MacroAction::HideGeometryPreset,
+            MacroAction::EnableEspPreset,
+            MacroAction::DisableEspPreset,
         ]
     }
 
@@ -19291,6 +19314,7 @@ if supports_move_mouse || show_detection_tuning {
         step_index: usize,
         is_hold_stop: bool,
         preset_options: &[(u32, String)],
+        esp_preset_options: &[(u32, String)],
         vision_manual_color: &mut RgbaColor,
         vision_manual_color_hex: &mut String,
         request_screen_color_pick: &mut bool,
@@ -19688,6 +19712,27 @@ if supports_move_mouse || show_detection_tuning {
                             );
                         }
                     });
+                }
+                MacroAction::EnableEspPreset | MacroAction::DisableEspPreset => {
+                    let selected = step
+                        .esp_preset_id
+                        .and_then(|id| {
+                            esp_preset_options
+                                .iter()
+                                .find(|preset| preset.0 == id)
+                                .map(|preset| preset.1.as_str())
+                        })
+                        .unwrap_or("Select ESP preset");
+                    ComboBox::from_id_salt((id_prefix, "esp-preset"))
+                        .width(180.0)
+                        .selected_text(selected)
+                        .show_ui(ui, |ui| {
+                            for (id, name) in esp_preset_options {
+                                *live_sync |= ui
+                                    .selectable_value(&mut step.esp_preset_id, Some(*id), name)
+                                    .changed();
+                            }
+                        });
                 }
                 _ => {}
             });

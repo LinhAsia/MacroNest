@@ -515,6 +515,12 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
                 | MacroAction::HideGeometryPreset
         );
     }
+    if field.starts_with("esp_") {
+        return matches!(
+            action,
+            MacroAction::EnableEspPreset | MacroAction::DisableEspPreset
+        );
+    }
     if field.starts_with("ocr_") {
         return action == MacroAction::OcrSearch;
     }

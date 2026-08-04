@@ -111,6 +111,17 @@ mod windows_impl {
         (process_id != 0).then_some(process_id)
     }
 
+    pub fn window_client_bounds(selector: Option<&str>) -> Option<(i32, i32, i32, i32)> {
+        let hwnd = find_window_handle(selector)?;
+        let rect = unsafe { client_rect_on_screen(hwnd)? };
+        Some((
+            rect.left,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
+        ))
+    }
+
     pub fn process_icon_rgba(path: &str) -> Option<Vec<u8>> {
         if path.is_empty() {
             return None;
@@ -1268,6 +1279,14 @@ mod fallback {
         Vec::new()
     }
 
+    pub fn process_id_for_window(_selector: Option<&str>) -> Option<u32> {
+        None
+    }
+
+    pub fn window_client_bounds(_selector: Option<&str>) -> Option<(i32, i32, i32, i32)> {
+        None
+    }
+
     pub fn capture_window_preview_with_candidates(
         _primary_title: Option<&str>,
         _extra_titles: &[String],
@@ -1309,10 +1328,6 @@ mod fallback {
 
     pub fn set_window_topmost(_selector: &str, _topmost: bool) -> bool {
         false
-    }
-
-    pub fn process_id_for_window(_selector: Option<&str>) -> Option<u32> {
-        None
     }
 
     pub(crate) fn close_window_capture_session() {}

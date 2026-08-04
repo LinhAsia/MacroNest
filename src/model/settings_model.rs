@@ -3,19 +3,19 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::ocr::OcrResult;
 
 use super::{
-    AudioSensePreset, AudioSettings, CrosshairStyle, GeometryPreset, HotkeyBinding, MacroFolder,
-    MacroGroup, MacroPreset, MasterPreset, MousePathPreset, MouseSensitivityPreset, OcrPreset,
-    PinPreset, ProfileRecord, RgbaColor, VisionPreset, VisionSettings, WindowExpandControls,
-    WindowFocusPreset, WindowLayout, WindowPreset, ZoomPreset, default_focus_highlight_color,
-    default_hud_border_color, default_hud_border_thickness, default_key_sound_volume,
-    default_macro_keyboard_key_press_delay_ms, default_macro_mouse_click_delay_ms,
-    default_ocr_language_code, default_protractor_center_x, default_protractor_center_y,
-    default_protractor_needle1_angle, default_protractor_needle2_angle, default_protractor_scale,
-    default_protractor_thickness, default_quick_key_display_size, default_quick_key_display_x,
-    default_quick_key_display_y, default_screen_draw_brush_size, default_screen_draw_color,
-    default_screen_draw_freeze, default_screen_draw_smoothing_amount,
-    default_timer_progress_border_color, default_timer_progress_border_thickness,
-    default_timer_progress_smoothness_fps, default_true,
+    AudioSensePreset, AudioSettings, CrosshairStyle, EspPreset, GeometryPreset, HotkeyBinding,
+    MacroFolder, MacroGroup, MacroPreset, MasterPreset, MousePathPreset, MouseSensitivityPreset,
+    OcrPreset, PinPreset, ProfileRecord, RgbaColor, VisionPreset, VisionSettings,
+    WindowExpandControls, WindowFocusPreset, WindowLayout, WindowPreset, ZoomPreset,
+    default_focus_highlight_color, default_hud_border_color, default_hud_border_thickness,
+    default_key_sound_volume, default_macro_keyboard_key_press_delay_ms,
+    default_macro_mouse_click_delay_ms, default_ocr_language_code, default_protractor_center_x,
+    default_protractor_center_y, default_protractor_needle1_angle,
+    default_protractor_needle2_angle, default_protractor_scale, default_protractor_thickness,
+    default_quick_key_display_size, default_quick_key_display_x, default_quick_key_display_y,
+    default_screen_draw_brush_size, default_screen_draw_color, default_screen_draw_freeze,
+    default_screen_draw_smoothing_amount, default_timer_progress_border_color,
+    default_timer_progress_border_thickness, default_timer_progress_smoothness_fps, default_true,
 };
 
 fn default_focus_mode_dim_percent() -> u8 {
@@ -135,6 +135,7 @@ pub enum AppPanel {
     Hud,
     Ocr,
     Geometry,
+    Esp,
     Timer,
     Memory,
     Network,
@@ -577,6 +578,10 @@ pub struct AppState {
     pub geometry_presets: Vec<GeometryPreset>,
     #[serde(default)]
     pub next_geometry_preset_id: u32,
+    #[serde(default)]
+    pub esp_presets: Vec<EspPreset>,
+    #[serde(default)]
+    pub next_esp_preset_id: u32,
     pub macros_master_enabled: bool,
     #[serde(default)]
     pub windows_key_locked: bool,
@@ -865,6 +870,13 @@ impl AppState {
             }
         }
 
+        for preset in &mut self.esp_presets {
+            if !preset.collapsed {
+                preset.collapsed = true;
+                changed = true;
+            }
+        }
+
         for preset in &mut self.vision_presets {
             if !preset.collapsed {
                 preset.collapsed = true;
@@ -989,6 +1001,8 @@ impl Default for AppState {
             next_macro_preset_id: 1,
             geometry_presets: Vec::new(),
             next_geometry_preset_id: 1,
+            esp_presets: Vec::new(),
+            next_esp_preset_id: 1,
             macros_master_enabled: true,
             windows_key_locked: false,
             native_focus_highlight_enabled: false,

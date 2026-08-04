@@ -111,6 +111,8 @@ pub enum MacroAction {
     DrawGeometry,
     ShowGeometryPreset,
     HideGeometryPreset,
+    EnableEspPreset,
+    DisableEspPreset,
     FunnyMemeReply,
     AiResponse,
     JumpToStep,
@@ -402,6 +404,8 @@ pub struct MacroStep {
     #[serde(default = "default_true")]
     pub geometry_collapsed: bool,
     #[serde(default)]
+    pub esp_preset_id: Option<u32>,
+    #[serde(default)]
     pub trigger_macro_group_id: Option<u32>,
 }
 
@@ -504,6 +508,7 @@ impl Default for MacroStep {
             geometry_preset_modify_initialized: false,
             geometry_spec: GeometrySpec::default(),
             geometry_collapsed: true,
+            esp_preset_id: None,
             trigger_macro_group_id: None,
         }
     }

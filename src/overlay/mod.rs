@@ -376,6 +376,7 @@ mod windows_overlay {
 
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
+    static ESP_WORKER_STARTED: AtomicBool = AtomicBool::new(false);
     static ACTIVE_BIN_PIN_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> =
         Lazy::new(|| Mutex::new(None));
     static ACTIVE_BIN_PIN_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
@@ -1799,6 +1800,7 @@ mod windows_overlay {
         UpdateVisionPresets(Vec<VisionPreset>),
         UpdateAudioSensePresets(Vec<AudioSensePreset>),
         UpdateGeometryPresets(Vec<crate::model::GeometryPreset>),
+        UpdateEspPresets(Vec<crate::model::EspPreset>),
         PreviewGeometrySpec(Option<GeometrySpec>),
         PreviewGeometryPreset(Option<u32>),
         RefreshSearchAreaOverlay,
@@ -2311,6 +2313,10 @@ mod windows_overlay {
             alias_name: String,
             runtime_address: usize,
         },
+        EspPresetEnabled {
+            preset_id: u32,
+            enabled: bool,
+        },
         SetMacrosMasterEnabled(bool, String),
         SetVietnameseInputEnabled(bool, String),
         MousePathRecordingStarted(u32, String),
@@ -2561,6 +2567,8 @@ mod windows_overlay {
         active_audio_sense_snapshots:
             std::collections::HashMap<String, crate::audiosense::PitchSnapshot>,
         geometry_presets: Vec<crate::model::GeometryPreset>,
+        esp_presets: Vec<crate::model::EspPreset>,
+        esp_rendered_shapes: Vec<GeometryRenderShape>,
         active_geometry_preset_ids: HashSet<u32>,
         active_geometry_preset_owner_ids: HashMap<(u32, usize), u32>,
         active_geometry_preset_owner_expires: HashMap<(u32, usize), Instant>,
@@ -2671,6 +2679,8 @@ mod windows_overlay {
                 active_audio_sense_keys: HashSet::new(),
                 active_audio_sense_snapshots: std::collections::HashMap::new(),
                 geometry_presets: Vec::new(),
+                esp_presets: Vec::new(),
+                esp_rendered_shapes: Vec::new(),
                 active_geometry_preset_ids: HashSet::new(),
                 active_geometry_preset_owner_ids: HashMap::new(),
                 active_geometry_preset_owner_expires: HashMap::new(),
@@ -9995,6 +10005,11 @@ mod windows_overlay {
                 OverlayCommand::UpdateGeometryPresets(presets) => {
                     HOOK_STATE.lock().geometry_presets = presets;
                     let _ = refresh_search_area_overlay(runtime);
+                }
+
+                OverlayCommand::UpdateEspPresets(presets) => {
+                    HOOK_STATE.lock().esp_presets = presets;
+                    ensure_esp_worker();
                 }
 
                 OverlayCommand::PreviewGeometrySpec(spec) => {
@@ -26151,6 +26166,195 @@ mod windows_overlay {
         }
     }
 
+    fn ensure_esp_worker() {
+        if ESP_WORKER_STARTED.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        thread::spawn(|| {
+            loop {
+                let presets = HOOK_STATE
+                    .lock()
+                    .esp_presets
+                    .iter()
+                    .filter(|preset| preset.enabled)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if presets.is_empty() {
+                    if !HOOK_STATE.lock().esp_rendered_shapes.is_empty() {
+                        HOOK_STATE.lock().esp_rendered_shapes.clear();
+                        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+
+                let interval = presets
+                    .iter()
+                    .map(|preset| preset.update_interval_ms.clamp(16, 1000))
+                    .min()
+                    .unwrap_or(33);
+                let mut shapes = Vec::new();
+                for preset in &presets {
+                    shapes.extend(esp_shapes_for_preset(preset));
+                }
+                let changed = {
+                    let mut state = HOOK_STATE.lock();
+                    if state.esp_rendered_shapes == shapes {
+                        false
+                    } else {
+                        state.esp_rendered_shapes = shapes;
+                        true
+                    }
+                };
+                if changed {
+                    send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                }
+                thread::sleep(Duration::from_millis(interval as u64));
+            }
+        });
+    }
+
+    fn esp_shapes_for_preset(preset: &crate::model::EspPreset) -> Vec<GeometryRenderShape> {
+        if preset.target_window.trim().is_empty() {
+            return Vec::new();
+        }
+        let selector = Some(preset.target_window.as_str());
+        let Some(pid) = window_list::process_id_for_window(selector) else {
+            return Vec::new();
+        };
+        let Some((left, top, width, height)) = window_list::window_client_bounds(selector) else {
+            return Vec::new();
+        };
+        if width <= 0 || height <= 0 {
+            return Vec::new();
+        }
+        let read = |expression: &str| -> Option<f32> {
+            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression)?;
+            crate::process_memory::read_value(target_pid, address, preset.value_type)
+                .ok()?
+                .parse::<f32>()
+                .ok()
+        };
+        let (Some(target_x), Some(target_y), Some(target_z)) = (
+            read(&preset.target_x),
+            read(&preset.target_y),
+            read(&preset.target_z),
+        ) else {
+            return Vec::new();
+        };
+        let (Some(camera_x), Some(camera_y), Some(camera_z)) = (
+            read(&preset.camera_x),
+            read(&preset.camera_y),
+            read(&preset.camera_z),
+        ) else {
+            return Vec::new();
+        };
+        let (Some(yaw), Some(pitch)) = (read(&preset.camera_yaw), read(&preset.camera_pitch))
+        else {
+            return Vec::new();
+        };
+        let target = [target_x, target_y, target_z];
+        let camera = [camera_x, camera_y, camera_z];
+        let Some((normalized_x, normalized_y, distance)) = crate::model::project_esp_normalized(
+            preset,
+            target,
+            camera,
+            yaw,
+            pitch,
+            width as f32 / height as f32,
+        ) else {
+            return Vec::new();
+        };
+        let x = left + ((normalized_x + 1.0) * 0.5 * width as f32).round() as i32;
+        let y = top + ((1.0 - normalized_y) * 0.5 * height as f32).round() as i32;
+        let color = [
+            preset.color.r,
+            preset.color.g,
+            preset.color.b,
+            preset.color.a,
+        ];
+        let thickness = preset.thickness.round().max(1.0) as i32;
+        let mut shapes = Vec::new();
+        match preset.marker {
+            crate::model::EspMarkerKind::Dot => {
+                let radius = preset.dot_radius.round().max(1.0) as i32;
+                shapes.push(GeometryRenderShape {
+                    bounds: (
+                        x - radius - thickness,
+                        y - radius - thickness,
+                        x + radius + thickness,
+                        y + radius + thickness,
+                    ),
+                    draw: GeometryRenderDraw::Circle {
+                        cx: x,
+                        cy: y,
+                        radius,
+                        stroke: color,
+                        fill: preset.filled.then_some(color),
+                        thickness,
+                    },
+                });
+            }
+            crate::model::EspMarkerKind::Box => {
+                let half_width = (preset.box_width * 0.5).round().max(1.0) as i32;
+                let half_height = (preset.box_height * 0.5).round().max(1.0) as i32;
+                let points = vec![
+                    (x - half_width, y - half_height),
+                    (x + half_width, y - half_height),
+                    (x + half_width, y + half_height),
+                    (x - half_width, y + half_height),
+                ];
+                shapes.push(GeometryRenderShape {
+                    bounds: (
+                        x - half_width - thickness,
+                        y - half_height - thickness,
+                        x + half_width + thickness,
+                        y + half_height + thickness,
+                    ),
+                    draw: GeometryRenderDraw::Polygon {
+                        points,
+                        stroke: color,
+                        fill: preset.filled.then_some(color),
+                        thickness,
+                    },
+                });
+            }
+        }
+        if preset.show_tracer {
+            shapes.push(GeometryRenderShape {
+                bounds: (
+                    left.min(x),
+                    y.min(top + height),
+                    (left + width / 2).max(x),
+                    (top + height).max(y),
+                ),
+                draw: GeometryRenderDraw::Line {
+                    x1: left + width / 2,
+                    y1: top + height,
+                    x2: x,
+                    y2: y,
+                    stroke: color,
+                    thickness,
+                },
+            });
+        }
+        if preset.show_distance {
+            let text = format!("{distance:.1}");
+            shapes.push(GeometryRenderShape {
+                bounds: geometry_label_bounds(x, y + 18, 14, &text, 0.0),
+                draw: GeometryRenderDraw::Label(GeometryRenderText {
+                    x,
+                    y: y + 18,
+                    font_size: 14,
+                    color,
+                    rotation_deg: 0.0,
+                    text,
+                }),
+            });
+        }
+        shapes
+    }
+
     pub(crate) fn apply_window_preset_by_id(spec: &str) -> Result<()> {
         window_preset::apply_window_preset_by_id(spec)
     }
@@ -28913,6 +29117,15 @@ mod windows_overlay {
                     }
                 }
 
+                MacroAction::EnableEspPreset | MacroAction::DisableEspPreset => {
+                    if let Some(esp_preset_id) = step.esp_preset_id {
+                        set_esp_preset_enabled(
+                            esp_preset_id,
+                            step.action == MacroAction::EnableEspPreset,
+                        );
+                    }
+                }
+
                 MacroAction::StopVisionWait => {
                     let _ = stop_vision_waiting(&step.key);
                 }
@@ -29676,6 +29889,15 @@ mod windows_overlay {
                         hide_geometry_preset_by_id(geometry_preset_id, step.geometry_hide_mode);
                     } else {
                         clear_geometry_overlay();
+                    }
+                }
+
+                MacroAction::EnableEspPreset | MacroAction::DisableEspPreset => {
+                    if let Some(esp_preset_id) = step.esp_preset_id {
+                        set_esp_preset_enabled(
+                            esp_preset_id,
+                            step.action == MacroAction::EnableEspPreset,
+                        );
                     }
                 }
 
@@ -30895,10 +31117,9 @@ mod windows_overlay {
         let tracked_entry = entry.clone();
         thread::spawn(move || {
             if tracked_runtime_address_is_valid(pid, address, &tracked_entry) {
-                MEMORY_TRACKED_VALIDATIONS.lock().insert(
-                    key,
-                    (Instant::now(), address, false),
-                );
+                MEMORY_TRACKED_VALIDATIONS
+                    .lock()
+                    .insert(key, (Instant::now(), address, false));
                 return;
             }
 
@@ -31000,7 +31221,9 @@ mod windows_overlay {
             let candidate = if tracked_entry.tracked_signature.trim().is_empty() {
                 let matching = candidates
                     .into_iter()
-                    .filter(|data_address| tracked_field_matches(pid, *data_address, &tracked_entry))
+                    .filter(|data_address| {
+                        tracked_field_matches(pid, *data_address, &tracked_entry)
+                    })
                     .collect::<Vec<_>>();
                 only_candidate(&matching)
             } else {
@@ -34725,6 +34948,7 @@ mod windows_overlay {
             .filter(|(key, _)| hook_state.active_geometry_steps.contains_key(key))
             .map(|(_, shape)| shape.clone())
             .collect::<Vec<_>>();
+        shapes.extend(hook_state.esp_rendered_shapes.iter().cloned());
         if let Some(spec) = &hook_state.preview_geometry_spec
             && let Some(shape) = geometry_render_shape_from_spec(spec)
         {
@@ -36090,7 +36314,8 @@ mod windows_overlay {
             }
 
             let current_shape = geometry_render_shape_from_spec(spec);
-            let shape_changed = match (&current_shape, hook_state.rendered_geometry_steps.get(&key)) {
+            let shape_changed = match (&current_shape, hook_state.rendered_geometry_steps.get(&key))
+            {
                 (Some(current), Some(rendered)) => current != rendered,
                 (Some(_), None) | (None, Some(_)) => true,
                 (None, None) => false,
@@ -38382,6 +38607,28 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
+    fn set_esp_preset_enabled(preset_id: u32, enabled: bool) {
+        let ui_tx = {
+            let mut state = HOOK_STATE.lock();
+            let Some(preset) = state
+                .esp_presets
+                .iter_mut()
+                .find(|preset| preset.id == preset_id)
+            else {
+                return;
+            };
+            if preset.enabled == enabled {
+                return;
+            }
+            preset.enabled = enabled;
+            state.ui_tx.clone()
+        };
+        if let Some(tx) = ui_tx {
+            let _ = tx.send(UiCommand::EspPresetEnabled { preset_id, enabled });
+        }
+        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+    }
+
     pub(crate) fn is_crosshair_active(profile_name: &str) -> bool {
         let name = profile_name.trim();
         if name.is_empty() {
@@ -38513,6 +38760,7 @@ mod fallback {
             keyboard_key_press_delay_ms: u32,
         },
         UpdateVisionPresets(Vec<VisionPreset>),
+        UpdateEspPresets(Vec<crate::model::EspPreset>),
         RefreshHud,
         SetArduinoFlashInProgress(bool),
         SetMacrosMasterEnabled(bool),
@@ -38583,6 +38831,10 @@ mod fallback {
         },
         AudioSenseDevicesLoaded {
             devices: Vec<String>,
+        },
+        EspPresetEnabled {
+            preset_id: u32,
+            enabled: bool,
         },
         UpdateScreenDrawConfig {
             color: crate::model::RgbaColor,
