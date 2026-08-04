@@ -377,6 +377,9 @@ mod windows_overlay {
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
     static ESP_WORKER_STARTED: AtomicBool = AtomicBool::new(false);
+    static ESP_CALIBRATION_SAMPLES: Lazy<
+        Mutex<HashMap<u32, Vec<crate::model::EspCalibrationSample>>>,
+    > = Lazy::new(|| Mutex::new(HashMap::new()));
     static ACTIVE_BIN_PIN_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> =
         Lazy::new(|| Mutex::new(None));
     static ACTIVE_BIN_PIN_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
@@ -1801,6 +1804,8 @@ mod windows_overlay {
         UpdateAudioSensePresets(Vec<AudioSensePreset>),
         UpdateGeometryPresets(Vec<crate::model::GeometryPreset>),
         UpdateEspPresets(Vec<crate::model::EspPreset>),
+        CaptureEspCalibration(crate::model::EspPreset),
+        ClearEspCalibration(u32),
         PreviewGeometrySpec(Option<GeometrySpec>),
         PreviewGeometryPreset(Option<u32>),
         RefreshSearchAreaOverlay,
@@ -2316,6 +2321,12 @@ mod windows_overlay {
         EspPresetEnabled {
             preset_id: u32,
             enabled: bool,
+        },
+        EspCalibrationUpdated {
+            preset_id: u32,
+            sample_count: usize,
+            result: Option<crate::model::EspCalibrationResult>,
+            status: String,
         },
         SetMacrosMasterEnabled(bool, String),
         SetVietnameseInputEnabled(bool, String),
@@ -10010,6 +10021,20 @@ mod windows_overlay {
                 OverlayCommand::UpdateEspPresets(presets) => {
                     HOOK_STATE.lock().esp_presets = presets;
                     ensure_esp_worker();
+                }
+
+                OverlayCommand::CaptureEspCalibration(preset) => {
+                    capture_esp_calibration(&preset);
+                }
+
+                OverlayCommand::ClearEspCalibration(preset_id) => {
+                    ESP_CALIBRATION_SAMPLES.lock().remove(&preset_id);
+                    send_ui_command(UiCommand::EspCalibrationUpdated {
+                        preset_id,
+                        sample_count: 0,
+                        result: None,
+                        status: "ESP calibration samples cleared".to_owned(),
+                    });
                 }
 
                 OverlayCommand::PreviewGeometrySpec(spec) => {
@@ -26214,51 +26239,114 @@ mod windows_overlay {
         });
     }
 
+    fn read_esp_inputs(
+        preset: &crate::model::EspPreset,
+    ) -> Result<([f32; 3], [f32; 3], f32, f32), String> {
+        if preset.target_window.trim().is_empty() {
+            return Err("select a running target window first".to_owned());
+        }
+        let selector = Some(preset.target_window.as_str());
+        let Some(pid) = window_list::process_id_for_window(selector) else {
+            return Err("the target window is not running".to_owned());
+        };
+        let read = |label: &str, expression: &str| -> Result<f32, String> {
+            // ESP is a passive overlay. Never attach the debugger from its refresh loop:
+            // a stale tracked alias should hide the marker until the macro rebinds it,
+            // not risk suspending or crashing the target game.
+            let (target_pid, address) =
+                resolve_memory_action_target(Some(pid), expression, false)
+                    .ok_or_else(|| format!("{label} could not be resolved"))?;
+            crate::process_memory::read_value(target_pid, address, preset.value_type)
+                .map_err(|error| format!("{label}: {error}"))?
+                .parse::<f32>()
+                .map_err(|_| format!("{label} is not a number"))
+        };
+        Ok((
+            [
+                read("Target X", &preset.target_x)?,
+                read("Target Y", &preset.target_y)?,
+                read("Target Z", &preset.target_z)?,
+            ],
+            [
+                read("Camera X", &preset.camera_x)?,
+                read("Camera Y", &preset.camera_y)?,
+                read("Camera Z", &preset.camera_z)?,
+            ],
+            read("Camera yaw", &preset.camera_yaw)?,
+            read("Camera pitch", &preset.camera_pitch)?,
+        ))
+    }
+
+    fn capture_esp_calibration(preset: &crate::model::EspPreset) {
+        let (target, camera, yaw, pitch) = match read_esp_inputs(preset) {
+            Ok(values) => values,
+            Err(error) => {
+                send_ui_command(UiCommand::EspCalibrationUpdated {
+                    preset_id: preset.id,
+                    sample_count: ESP_CALIBRATION_SAMPLES
+                        .lock()
+                        .get(&preset.id)
+                        .map_or(0, Vec::len),
+                    result: None,
+                    status: format!("ESP calibration: {error}"),
+                });
+                return;
+            }
+        };
+        let Some(sample) =
+            crate::model::esp_calibration_sample(preset, target, camera, yaw, pitch)
+        else {
+            send_ui_command(UiCommand::EspCalibrationUpdated {
+                preset_id: preset.id,
+                sample_count: 0,
+                result: None,
+                status: "ESP calibration: camera and target positions are identical".to_owned(),
+            });
+            return;
+        };
+        let mut all_samples = ESP_CALIBRATION_SAMPLES.lock();
+        let samples = all_samples.entry(preset.id).or_default();
+        if samples.len() == 4 {
+            samples.clear();
+        }
+        samples.push(sample);
+        let sample_count = samples.len();
+        let result = (sample_count == 4)
+            .then(|| crate::model::solve_esp_calibration(samples, preset.invert_pitch))
+            .flatten();
+        let status = if let Some(result) = result {
+            format!(
+                "ESP calibrated from 4 directions (yaw error {:.1} deg, pitch error {:.1} deg)",
+                result.yaw_error_degrees, result.pitch_error_degrees
+            )
+        } else {
+            format!(
+                "ESP calibration captured {sample_count}/4 - move to another side and aim at the target"
+            )
+        };
+        drop(all_samples);
+        send_ui_command(UiCommand::EspCalibrationUpdated {
+            preset_id: preset.id,
+            sample_count,
+            result,
+            status,
+        });
+    }
+
     fn esp_shapes_for_preset(preset: &crate::model::EspPreset) -> Vec<GeometryRenderShape> {
         if preset.target_window.trim().is_empty() {
             return Vec::new();
         }
         let selector = Some(preset.target_window.as_str());
-        let Some(pid) = window_list::process_id_for_window(selector) else {
-            return Vec::new();
-        };
         let Some((left, top, width, height)) = window_list::window_client_bounds(selector) else {
             return Vec::new();
         };
         if width <= 0 || height <= 0 {
             return Vec::new();
         }
-        let read = |expression: &str| -> Option<f32> {
-            // ESP is a passive overlay. Never attach the debugger from its refresh loop:
-            // a stale tracked alias should hide the marker until the macro rebinds it,
-            // not risk suspending or crashing the target game.
-            let (target_pid, address) =
-                resolve_memory_action_target(Some(pid), expression, false)?;
-            crate::process_memory::read_value(target_pid, address, preset.value_type)
-                .ok()?
-                .parse::<f32>()
-                .ok()
-        };
-        let (Some(target_x), Some(target_y), Some(target_z)) = (
-            read(&preset.target_x),
-            read(&preset.target_y),
-            read(&preset.target_z),
-        ) else {
+        let Ok((target, camera, yaw, pitch)) = read_esp_inputs(preset) else {
             return Vec::new();
         };
-        let (Some(camera_x), Some(camera_y), Some(camera_z)) = (
-            read(&preset.camera_x),
-            read(&preset.camera_y),
-            read(&preset.camera_z),
-        ) else {
-            return Vec::new();
-        };
-        let (Some(yaw), Some(pitch)) = (read(&preset.camera_yaw), read(&preset.camera_pitch))
-        else {
-            return Vec::new();
-        };
-        let target = [target_x, target_y, target_z];
-        let camera = [camera_x, camera_y, camera_z];
         let Some((normalized_x, normalized_y, distance)) = crate::model::project_esp_normalized(
             preset,
             target,
@@ -38781,6 +38869,8 @@ mod fallback {
         },
         UpdateVisionPresets(Vec<VisionPreset>),
         UpdateEspPresets(Vec<crate::model::EspPreset>),
+        CaptureEspCalibration(crate::model::EspPreset),
+        ClearEspCalibration(u32),
         RefreshHud,
         SetArduinoFlashInProgress(bool),
         SetMacrosMasterEnabled(bool),
@@ -38827,6 +38917,12 @@ mod fallback {
             startup_state_needs_cjk_fallback: bool,
         },
         VisionFinished(String),
+        EspCalibrationUpdated {
+            preset_id: u32,
+            sample_count: usize,
+            result: Option<crate::model::EspCalibrationResult>,
+            status: String,
+        },
         CrosshairDrawFinished {
             profile_name: String,
             asset_name: Option<String>,

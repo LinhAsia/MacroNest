@@ -14700,6 +14700,28 @@ impl eframe::App for CrosshairApp {
                         self.persist_esp_presets();
                     }
                 }
+                UiCommand::EspCalibrationUpdated {
+                    preset_id,
+                    sample_count: _,
+                    result,
+                    status,
+                } => {
+                    if let Some(result) = result
+                        && let Some(preset) = self
+                            .state
+                            .esp_presets
+                            .iter_mut()
+                            .find(|preset| preset.id == preset_id)
+                    {
+                        preset.invert_yaw = result.invert_yaw;
+                        preset.yaw_offset_degrees = result.yaw_offset_degrees;
+                        preset.invert_pitch = result.invert_pitch;
+                        preset.pitch_offset_degrees = result.pitch_offset_degrees;
+                        self.persist_esp_presets();
+                    }
+                    self.status = status;
+                    ctx.request_repaint();
+                }
                 UiCommand::SetMacrosMasterEnabled(enabled, status) => {
                     self.state.macros_master_enabled = enabled;
                     self.persist();

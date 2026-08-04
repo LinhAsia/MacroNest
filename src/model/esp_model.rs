@@ -116,6 +116,130 @@ impl Default for EspPreset {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EspCalibrationSample {
+    pub bearing_yaw: f32,
+    pub bearing_pitch: f32,
+    pub camera_yaw: f32,
+    pub camera_pitch: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EspCalibrationResult {
+    pub invert_yaw: bool,
+    pub yaw_offset_degrees: f32,
+    pub invert_pitch: bool,
+    pub pitch_offset_degrees: f32,
+    pub yaw_error_degrees: f32,
+    pub pitch_error_degrees: f32,
+}
+
+fn esp_angle_to_radians(value: f32, unit: EspAngleUnit) -> f32 {
+    match unit {
+        EspAngleUnit::Degrees => value.to_radians(),
+        EspAngleUnit::Radians => value,
+    }
+}
+
+fn wrap_angle(value: f32) -> f32 {
+    (value + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+}
+
+pub(crate) fn esp_calibration_sample(
+    preset: &EspPreset,
+    target: [f32; 3],
+    camera: [f32; 3],
+    yaw: f32,
+    pitch: f32,
+) -> Option<EspCalibrationSample> {
+    let dx = target[0] - camera[0];
+    let dy = target[1] - camera[1];
+    let dz = target[2] - camera[2];
+    let (forward_a, forward_b, vertical) = match preset.horizontal_plane {
+        EspHorizontalPlane::Xy => (dx, dy, dz + preset.target_vertical_offset),
+        EspHorizontalPlane::Xz => (dx, dz, dy + preset.target_vertical_offset),
+    };
+    let horizontal_distance = forward_a.hypot(forward_b);
+    (horizontal_distance > f32::EPSILON).then_some(EspCalibrationSample {
+        bearing_yaw: forward_b.atan2(forward_a),
+        bearing_pitch: vertical.atan2(horizontal_distance),
+        camera_yaw: esp_angle_to_radians(yaw, preset.yaw_unit),
+        camera_pitch: esp_angle_to_radians(pitch, preset.pitch_unit),
+    })
+}
+
+pub(crate) fn solve_esp_calibration(
+    samples: &[EspCalibrationSample],
+    current_invert_pitch: bool,
+) -> Option<EspCalibrationResult> {
+    if samples.len() < 2 {
+        return None;
+    }
+    let solve_wrapped = |sign: f32| {
+        let (sin_sum, cos_sum) = samples.iter().fold((0.0, 0.0), |(sin, cos), sample| {
+            let offset = wrap_angle(sample.bearing_yaw - sign * sample.camera_yaw);
+            (sin + offset.sin(), cos + offset.cos())
+        });
+        let offset = sin_sum.atan2(cos_sum);
+        let error = (samples
+            .iter()
+            .map(|sample| {
+                wrap_angle(sample.bearing_yaw - sign * sample.camera_yaw - offset).powi(2)
+            })
+            .sum::<f32>()
+            / samples.len() as f32)
+            .sqrt();
+        (offset, error)
+    };
+    let normal_yaw = solve_wrapped(1.0);
+    let inverted_yaw = solve_wrapped(-1.0);
+    let (invert_yaw, (yaw_offset, yaw_error)) = if inverted_yaw.1 < normal_yaw.1 {
+        (true, inverted_yaw)
+    } else {
+        (false, normal_yaw)
+    };
+
+    let solve_pitch = |sign: f32| {
+        let offset = samples
+            .iter()
+            .map(|sample| sample.bearing_pitch - sign * sample.camera_pitch)
+            .sum::<f32>()
+            / samples.len() as f32;
+        let error = (samples
+            .iter()
+            .map(|sample| (sample.bearing_pitch - sign * sample.camera_pitch - offset).powi(2))
+            .sum::<f32>()
+            / samples.len() as f32)
+            .sqrt();
+        (offset, error)
+    };
+    let normal_pitch = solve_pitch(1.0);
+    let inverted_pitch = solve_pitch(-1.0);
+    // ponytail: four horizontal samples may contain too little pitch motion to infer its sign;
+    // preserve the user's current choice when both fits are effectively identical.
+    let pitch_tie = (normal_pitch.1 - inverted_pitch.1).abs() < 0.001;
+    let (invert_pitch, (pitch_offset, pitch_error)) = if pitch_tie {
+        if current_invert_pitch {
+            (true, inverted_pitch)
+        } else {
+            (false, normal_pitch)
+        }
+    } else if inverted_pitch.1 < normal_pitch.1 {
+        (true, inverted_pitch)
+    } else {
+        (false, normal_pitch)
+    };
+
+    Some(EspCalibrationResult {
+        invert_yaw,
+        yaw_offset_degrees: wrap_angle(yaw_offset).to_degrees(),
+        invert_pitch,
+        pitch_offset_degrees: pitch_offset.to_degrees(),
+        yaw_error_degrees: yaw_error.to_degrees(),
+        pitch_error_degrees: pitch_error.to_degrees(),
+    })
+}
+
 /// Projects a world position into normalized screen coordinates (-1..=1).
 pub(crate) fn project_esp_normalized(
     preset: &EspPreset,
@@ -125,10 +249,6 @@ pub(crate) fn project_esp_normalized(
     pitch: f32,
     aspect: f32,
 ) -> Option<(f32, f32, f32)> {
-    let angle = |value: f32, unit: EspAngleUnit| match unit {
-        EspAngleUnit::Degrees => value.to_radians(),
-        EspAngleUnit::Radians => value,
-    };
     let dx = target[0] - camera[0];
     let dy = target[1] - camera[1];
     let dz = target[2] - camera[2];
@@ -141,18 +261,19 @@ pub(crate) fn project_esp_normalized(
     if distance <= f32::EPSILON {
         return None;
     }
-    let yaw = angle(yaw, preset.yaw_unit) + preset.yaw_offset_degrees.to_radians();
-    let pitch = angle(pitch, preset.pitch_unit) + preset.pitch_offset_degrees.to_radians();
-    let mut yaw_delta = forward_b.atan2(forward_a) - yaw;
-    yaw_delta =
-        (yaw_delta + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-    let mut pitch_delta = vertical.atan2(horizontal_distance) - pitch;
+    let mut yaw = esp_angle_to_radians(yaw, preset.yaw_unit);
+    let mut pitch = esp_angle_to_radians(pitch, preset.pitch_unit);
     if preset.invert_yaw {
-        yaw_delta = -yaw_delta;
+        yaw = -yaw;
     }
     if preset.invert_pitch {
-        pitch_delta = -pitch_delta;
+        pitch = -pitch;
     }
+    yaw += preset.yaw_offset_degrees.to_radians();
+    pitch += preset.pitch_offset_degrees.to_radians();
+    let mut yaw_delta = forward_b.atan2(forward_a) - yaw;
+    yaw_delta = wrap_angle(yaw_delta);
+    let pitch_delta = vertical.atan2(horizontal_distance) - pitch;
     let half_fov_x = (preset.horizontal_fov.clamp(1.0, 179.0).to_radians() * 0.5).max(0.001);
     let half_fov_y = (half_fov_x.tan() / aspect.max(0.01)).atan();
     let x = yaw_delta.tan() / half_fov_x.tan();
@@ -193,5 +314,38 @@ mod tests {
         )
         .unwrap();
         assert!(projected.0.abs() < 0.001 && projected.1.abs() < 0.001);
+    }
+
+    #[test]
+    fn inverted_yaw_converts_clockwise_game_angles_before_projection() {
+        let mut preset = EspPreset::default();
+        preset.invert_yaw = true;
+        let projected = project_esp_normalized(
+            &preset,
+            [10.0, 10.0, 0.0],
+            [0.0, 0.0, 0.0],
+            -45.0,
+            0.0,
+            16.0 / 9.0,
+        )
+        .unwrap();
+        assert!(projected.0.abs() < 0.001 && projected.1.abs() < 0.001);
+    }
+
+    #[test]
+    fn four_direction_calibration_recovers_inverted_yaw_and_offset() {
+        let samples = [0.0_f32, 90.0, 180.0, -90.0].map(|bearing| {
+            let bearing = bearing.to_radians();
+            EspCalibrationSample {
+                bearing_yaw: bearing,
+                bearing_pitch: 0.0,
+                camera_yaw: 30.0_f32.to_radians() - bearing,
+                camera_pitch: 0.0,
+            }
+        });
+        let result = solve_esp_calibration(&samples, false).unwrap();
+        assert!(result.invert_yaw);
+        assert!((result.yaw_offset_degrees - 30.0).abs() < 0.01);
+        assert!(result.yaw_error_degrees < 0.01);
     }
 }

@@ -120,14 +120,10 @@ impl CrosshairApp {
                         ] {
                             ui.label(label);
                             ui.add(
-                                TextEdit::singleline(value)
-                                    .desired_width(420.0)
-                                    .hint_text(
-                                        RichText::new(
-                                            "address / module+offset [offsets] / @alias",
-                                        )
+                                TextEdit::singleline(value).desired_width(420.0).hint_text(
+                                    RichText::new("address / module+offset [offsets] / @alias")
                                         .color(ui.visuals().weak_text_color()),
-                                    ),
+                                ),
                             );
                             ui.end_row();
                         }
@@ -261,6 +257,26 @@ impl CrosshairApp {
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(
+                            "Auto calibration: stand on four different sides, aim the screen center at the target, then capture once per side.",
+                        )
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                    if ui.button("Capture direction").clicked() {
+                        let _ = self
+                            .overlay_tx
+                            .send(crate::overlay::OverlayCommand::CaptureEspCalibration(
+                                preset.clone(),
+                            ));
+                    }
+                    if ui.small_button("Clear captures").clicked() {
+                        let _ = self
+                            .overlay_tx
+                            .send(crate::overlay::OverlayCommand::ClearEspCalibration(preset.id));
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Marker");
                     ComboBox::from_id_salt(("esp_marker", preset.id))
                         .selected_text(match preset.marker {
@@ -326,8 +342,7 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Esp(preset));
         }
         if let Some(index) = paste_after
-            && let Some(crate::ui::PresetClipboard::Esp(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Esp(mut preset)) = self.preset_clipboard.clone()
         {
             preset.id = Self::allocate_next_id(
                 &self.state.esp_presets,
