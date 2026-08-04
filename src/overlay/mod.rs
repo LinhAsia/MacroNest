@@ -2894,6 +2894,7 @@ mod windows_overlay {
         mouse_trail_hwnd: HWND,
         search_area_hwnd: HWND,
         dynamic_geometry_hwnd: HWND,
+        esp_hwnd: HWND,
         focus_highlight_hwnds: [HWND; 4],
         focus_mode_hwnd: HWND,
         hud_hwnd: HWND,
@@ -2959,6 +2960,8 @@ mod windows_overlay {
         cached_search_overlay_capture_region_mode: bool,
         search_area_overlay_visible: bool,
         dynamic_geometry_overlay_visible: bool,
+        cached_esp_shapes: Vec<GeometryRenderShape>,
+        esp_overlay_visible: bool,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -3525,6 +3528,24 @@ mod windows_overlay {
                 Some(instance),
                 None,
             )?;
+            let esp_hwnd = CreateWindowExW(
+                WS_EX_LAYERED
+                    | WS_EX_TRANSPARENT
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_TOPMOST
+                    | WS_EX_NOACTIVATE,
+                w!("CrosshairOverlay"),
+                w!("CrosshairEsp"),
+                WS_POPUP,
+                0,
+                0,
+                32,
+                32,
+                None,
+                None,
+                Some(instance),
+                None,
+            )?;
             let focus_highlight_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TRANSPARENT
@@ -3725,6 +3746,7 @@ mod windows_overlay {
                 mouse_trail_hwnd,
                 search_area_hwnd,
                 dynamic_geometry_hwnd,
+                esp_hwnd,
                 focus_highlight_hwnds,
                 focus_mode_hwnd,
                 hud_hwnd,
@@ -3795,6 +3817,8 @@ mod windows_overlay {
                 cached_search_overlay_capture_region_mode: false,
                 search_area_overlay_visible: false,
                 dynamic_geometry_overlay_visible: false,
+                cached_esp_shapes: Vec::new(),
+                esp_overlay_visible: false,
             });
             let _controller_hwnd = CreateWindowExW(
                 WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
@@ -17906,6 +17930,7 @@ mod windows_overlay {
             preview_regions,
             static_geometry_shapes,
             dynamic_geometry_shapes,
+            esp_shapes,
             capture_region_preview_active,
         ) = {
             let mut hook_state = HOOK_STATE.lock();
@@ -17948,6 +17973,7 @@ mod windows_overlay {
                 hook_state.vision_capture_preview_regions.clone(),
                 geometry_overlay_static_shapes(&mut hook_state),
                 geometry_overlay_dynamic_shapes(&mut hook_state),
+                hook_state.esp_rendered_shapes.clone(),
                 hook_state.vision_capture_mouse_blocked
                     && (hook_state.vision_capture_is_region_mode
                         || !hook_state.vision_capture_preview_regions.is_empty()),
@@ -18065,6 +18091,30 @@ mod windows_overlay {
                 runtime.cached_search_overlay_dynamic_geometry = dynamic_geometry_shapes;
                 runtime.dynamic_geometry_overlay_visible = true;
             }
+        }
+
+        // ESP gets its own click-through layered window.  Keeping it separate from
+        // the geometry canvas avoids repainting every macro label whenever a marker
+        // moves, which is the hot path for high-frequency ESP updates.
+        let esp_layer_is_empty = esp_shapes.is_empty();
+        if esp_layer_is_empty {
+            if runtime.esp_overlay_visible {
+                unsafe {
+                    let _ = ShowWindow(runtime.esp_hwnd, SW_HIDE);
+                }
+                runtime.esp_overlay_visible = false;
+            }
+            runtime.cached_esp_shapes.clear();
+        } else if !runtime.esp_overlay_visible || runtime.cached_esp_shapes != esp_shapes {
+            let was_visible = runtime.esp_overlay_visible;
+            unsafe {
+                paint_search_area_overlay(runtime.esp_hwnd, &[], &[], &[], &esp_shapes, false)?;
+                if !was_visible {
+                    let _ = ShowWindow(runtime.esp_hwnd, SW_SHOWNA);
+                }
+            }
+            runtime.cached_esp_shapes = esp_shapes;
+            runtime.esp_overlay_visible = true;
         }
 
         Ok(())
@@ -26196,6 +26246,9 @@ mod windows_overlay {
             return;
         }
         thread::spawn(|| {
+            // Keep a fixed frame deadline instead of sleeping after every read/render pass.
+            // This prevents the read cost from accumulating on top of the requested interval.
+            let mut next_frame = Instant::now();
             loop {
                 let presets = HOOK_STATE
                     .lock()
@@ -26209,6 +26262,7 @@ mod windows_overlay {
                         HOOK_STATE.lock().esp_rendered_shapes.clear();
                         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
                     }
+                    next_frame = Instant::now() + Duration::from_millis(100);
                     thread::sleep(Duration::from_millis(100));
                     continue;
                 }
@@ -26219,8 +26273,9 @@ mod windows_overlay {
                     .min()
                     .unwrap_or(33);
                 let mut shapes = Vec::new();
+                let mut frame = EspReadFrame::default();
                 for preset in &presets {
-                    shapes.extend(esp_shapes_for_preset(preset));
+                    shapes.extend(esp_shapes_for_preset(preset, &mut frame));
                 }
                 let changed = {
                     let mut state = HOOK_STATE.lock();
@@ -26234,32 +26289,75 @@ mod windows_overlay {
                 if changed {
                     send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
                 }
-                thread::sleep(Duration::from_millis(interval as u64));
+                next_frame += Duration::from_millis(interval as u64);
+                let now = Instant::now();
+                if next_frame > now {
+                    thread::sleep(next_frame - now);
+                } else {
+                    // A slow frame must not make every following frame late.
+                    next_frame = now;
+                }
             }
         });
     }
 
+    #[derive(Default)]
+    struct EspReadFrame {
+        pids: HashMap<String, Option<u32>>,
+        values: HashMap<(u32, usize, u8), f32>,
+    }
+
+    impl EspReadFrame {
+        fn pid_for(&mut self, target_window: &str) -> Option<u32> {
+            let key = target_window.trim().to_owned();
+            if let Some(pid) = self.pids.get(&key) {
+                return *pid;
+            }
+            let pid = window_list::process_id_for_window(Some(key.as_str()));
+            self.pids.insert(key, pid);
+            pid
+        }
+    }
+
+    fn esp_value_type_tag(value_type: crate::model::MemoryValueType) -> u8 {
+        match value_type {
+            crate::model::MemoryValueType::I8 => 0,
+            crate::model::MemoryValueType::I16 => 1,
+            crate::model::MemoryValueType::I32 => 2,
+            crate::model::MemoryValueType::F32 => 3,
+            crate::model::MemoryValueType::I64 => 4,
+            crate::model::MemoryValueType::F64 => 5,
+        }
+    }
+
     fn read_esp_inputs(
         preset: &crate::model::EspPreset,
+        frame: &mut EspReadFrame,
     ) -> Result<([f32; 3], [f32; 3], f32, f32), String> {
         if preset.target_window.trim().is_empty() {
             return Err("select a running target window first".to_owned());
         }
-        let selector = Some(preset.target_window.as_str());
-        let Some(pid) = window_list::process_id_for_window(selector) else {
+        let Some(pid) = frame.pid_for(&preset.target_window) else {
             return Err("the target window is not running".to_owned());
         };
-        let read = |label: &str, expression: &str| -> Result<f32, String> {
+        let mut read = |label: &str, expression: &str| -> Result<f32, String> {
             // ESP is a passive overlay. Never attach the debugger from its refresh loop:
             // a stale tracked alias should hide the marker until the macro rebinds it,
             // not risk suspending or crashing the target game.
-            let (target_pid, address) =
-                resolve_memory_action_target(Some(pid), expression, false)
-                    .ok_or_else(|| format!("{label} could not be resolved"))?;
+            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression, false)
+                .ok_or_else(|| format!("{label} could not be resolved"))?;
+            let key = (target_pid, address, esp_value_type_tag(preset.value_type));
+            if let Some(value) = frame.values.get(&key) {
+                return Ok(*value);
+            }
             crate::process_memory::read_value(target_pid, address, preset.value_type)
                 .map_err(|error| format!("{label}: {error}"))?
                 .parse::<f32>()
                 .map_err(|_| format!("{label} is not a number"))
+                .map(|value| {
+                    frame.values.insert(key, value);
+                    value
+                })
         };
         Ok((
             [
@@ -26278,23 +26376,23 @@ mod windows_overlay {
     }
 
     fn capture_esp_calibration(preset: &crate::model::EspPreset) {
-        let (target, camera, yaw, pitch) = match read_esp_inputs(preset) {
-            Ok(values) => values,
-            Err(error) => {
-                send_ui_command(UiCommand::EspCalibrationUpdated {
-                    preset_id: preset.id,
-                    sample_count: ESP_CALIBRATION_SAMPLES
-                        .lock()
-                        .get(&preset.id)
-                        .map_or(0, Vec::len),
-                    result: None,
-                    status: format!("ESP calibration: {error}"),
-                });
-                return;
-            }
-        };
-        let Some(sample) =
-            crate::model::esp_calibration_sample(preset, target, camera, yaw, pitch)
+        let (target, camera, yaw, pitch) =
+            match read_esp_inputs(preset, &mut EspReadFrame::default()) {
+                Ok(values) => values,
+                Err(error) => {
+                    send_ui_command(UiCommand::EspCalibrationUpdated {
+                        preset_id: preset.id,
+                        sample_count: ESP_CALIBRATION_SAMPLES
+                            .lock()
+                            .get(&preset.id)
+                            .map_or(0, Vec::len),
+                        result: None,
+                        status: format!("ESP calibration: {error}"),
+                    });
+                    return;
+                }
+            };
+        let Some(sample) = crate::model::esp_calibration_sample(preset, target, camera, yaw, pitch)
         else {
             send_ui_command(UiCommand::EspCalibrationUpdated {
                 preset_id: preset.id,
@@ -26340,7 +26438,10 @@ mod windows_overlay {
         });
     }
 
-    fn esp_shapes_for_preset(preset: &crate::model::EspPreset) -> Vec<GeometryRenderShape> {
+    fn esp_shapes_for_preset(
+        preset: &crate::model::EspPreset,
+        frame: &mut EspReadFrame,
+    ) -> Vec<GeometryRenderShape> {
         if preset.target_window.trim().is_empty() {
             return Vec::new();
         }
@@ -26351,7 +26452,7 @@ mod windows_overlay {
         if width <= 0 || height <= 0 {
             return Vec::new();
         }
-        let Ok((target, camera, yaw, pitch)) = read_esp_inputs(preset) else {
+        let Ok((target, camera, yaw, pitch)) = read_esp_inputs(preset, frame) else {
             return Vec::new();
         };
         let Some((normalized_x, normalized_y, distance)) = crate::model::project_esp_normalized(
@@ -26365,11 +26466,9 @@ mod windows_overlay {
             return Vec::new();
         };
         let x = left
-            + ((normalized_x + 1.0) * 0.5 * width as f32 + preset.screen_offset_x).round()
-                as i32;
+            + ((normalized_x + 1.0) * 0.5 * width as f32 + preset.screen_offset_x).round() as i32;
         let y = top
-            + ((1.0 - normalized_y) * 0.5 * height as f32 + preset.screen_offset_y).round()
-                as i32;
+            + ((1.0 - normalized_y) * 0.5 * height as f32 + preset.screen_offset_y).round() as i32;
         let color = [
             preset.color.r,
             preset.color.g,
@@ -31463,11 +31562,9 @@ mod windows_overlay {
         let is_tracked_alias = step.key.trim().starts_with('@');
         let target_pid = macro_memory_target_pid(step.memory_target_window.as_deref());
         let value =
-            resolve_memory_action_target(target_pid, &step.key, true).and_then(
-                |(pid, address)| {
-                    crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
-                },
-            );
+            resolve_memory_action_target(target_pid, &step.key, true).and_then(|(pid, address)| {
+                crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
+            });
         if let Some(value) = value {
             if let Ok(value) = value.parse::<f64>() {
                 set_variable_value(target_var, value);
@@ -35063,7 +35160,6 @@ mod windows_overlay {
             .filter(|(key, _)| hook_state.active_geometry_steps.contains_key(key))
             .map(|(_, shape)| shape.clone())
             .collect::<Vec<_>>();
-        shapes.extend(hook_state.esp_rendered_shapes.iter().cloned());
         if let Some(spec) = &hook_state.preview_geometry_spec
             && let Some(shape) = geometry_render_shape_from_spec(spec)
         {
