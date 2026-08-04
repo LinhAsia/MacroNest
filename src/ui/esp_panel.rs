@@ -345,7 +345,7 @@ impl CrosshairApp {
                     ui.label("Update");
                     ui.add(
                         DragValue::new(&mut preset.update_interval_ms)
-                            .range(16..=1000)
+                            .range(1..=1000)
                             .suffix(" ms"),
                     );
                 });

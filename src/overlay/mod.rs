@@ -2584,7 +2584,6 @@ mod windows_overlay {
             std::collections::HashMap<String, crate::audiosense::PitchSnapshot>,
         geometry_presets: Vec<crate::model::GeometryPreset>,
         esp_presets: Vec<crate::model::EspPreset>,
-        esp_rendered_shapes: Vec<GeometryRenderShape>,
         active_geometry_preset_ids: HashSet<u32>,
         active_geometry_preset_owner_ids: HashMap<(u32, usize), u32>,
         active_geometry_preset_owner_expires: HashMap<(u32, usize), Instant>,
@@ -2696,7 +2695,6 @@ mod windows_overlay {
                 active_audio_sense_snapshots: std::collections::HashMap::new(),
                 geometry_presets: Vec::new(),
                 esp_presets: Vec::new(),
-                esp_rendered_shapes: Vec::new(),
                 active_geometry_preset_ids: HashSet::new(),
                 active_geometry_preset_owner_ids: HashMap::new(),
                 active_geometry_preset_owner_expires: HashMap::new(),
@@ -26221,9 +26219,11 @@ mod windows_overlay {
             return;
         }
         let (render_tx, render_rx) = crossbeam_channel::bounded::<Vec<GeometryRenderShape>>(1);
+        let stale_render_rx = render_rx.clone();
         thread::spawn(move || {
             let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
             let mut renderer = None;
+            let mut visible = false;
             while let Ok(shapes) = render_rx.recv() {
                 let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
                 if hwnd_value == 0 {
@@ -26231,7 +26231,12 @@ mod windows_overlay {
                 }
                 let hwnd = HWND(hwnd_value as _);
                 if shapes.is_empty() {
-                    unsafe { let _ = ShowWindow(hwnd, SW_HIDE); }
+                    if visible {
+                        unsafe {
+                            let _ = ShowWindow(hwnd, SW_HIDE);
+                        }
+                        visible = false;
+                    }
                     continue;
                 }
                 if renderer.is_none() {
@@ -26239,10 +26244,20 @@ mod windows_overlay {
                 }
                 if let Some(gpu) = renderer.as_mut() {
                     if gpu.paint(&shapes).is_ok() {
-                        unsafe { let _ = ShowWindow(hwnd, SW_SHOWNA); }
+                        if !visible {
+                            unsafe {
+                                let _ = ShowWindow(hwnd, SW_SHOWNA);
+                            }
+                            visible = true;
+                        }
                     } else {
                         renderer = None;
-                        unsafe { let _ = ShowWindow(hwnd, SW_HIDE); }
+                        if visible {
+                            unsafe {
+                                let _ = ShowWindow(hwnd, SW_HIDE);
+                            }
+                            visible = false;
+                        }
                     }
                 }
             }
@@ -26252,6 +26267,19 @@ mod windows_overlay {
             // Keep a fixed frame deadline instead of sleeping after every read/render pass.
             // This prevents the read cost from accumulating on top of the requested interval.
             let mut next_frame = Instant::now();
+            let mut had_shapes = false;
+            let send_latest = |shapes| {
+                match render_tx.try_send(shapes) {
+                    Ok(()) => {}
+                    Err(crossbeam_channel::TrySendError::Full(shapes)) => {
+                        // ponytail: one pending frame is enough; retaining an older frame adds
+                        // visible latency. Replace it with the newest sample instead.
+                        let _ = stale_render_rx.try_recv();
+                        let _ = render_tx.try_send(shapes);
+                    }
+                    Err(crossbeam_channel::TrySendError::Disconnected(_)) => {}
+                }
+            };
             loop {
                 let presets = HOOK_STATE
                     .lock()
@@ -26261,9 +26289,9 @@ mod windows_overlay {
                     .cloned()
                     .collect::<Vec<_>>();
                 if presets.is_empty() {
-                    if !HOOK_STATE.lock().esp_rendered_shapes.is_empty() {
-                        HOOK_STATE.lock().esp_rendered_shapes.clear();
-                        let _ = render_tx.try_send(Vec::new());
+                    if had_shapes {
+                        had_shapes = false;
+                        send_latest(Vec::new());
                     }
                     next_frame = Instant::now() + Duration::from_millis(100);
                     thread::sleep(Duration::from_millis(100));
@@ -26272,7 +26300,7 @@ mod windows_overlay {
 
                 let interval = presets
                     .iter()
-                    .map(|preset| preset.update_interval_ms.clamp(16, 1000))
+                    .map(|preset| preset.update_interval_ms.clamp(1, 1000))
                     .min()
                     .unwrap_or(33);
                 let mut shapes = Vec::new();
@@ -26280,15 +26308,9 @@ mod windows_overlay {
                 for preset in &presets {
                     shapes.extend(esp_shapes_for_preset(preset, &mut frame));
                 }
-                {
-                    let mut state = HOOK_STATE.lock();
-                    if state.esp_rendered_shapes != shapes {
-                        state.esp_rendered_shapes = shapes.clone();
-                    }
-                }
-                // The bounded channel drops stale frames instead of making memory reads wait
-                // for GPU presentation. Sending each deadline also lets a lost device recover.
-                let _ = render_tx.try_send(shapes);
+                had_shapes = !shapes.is_empty();
+                // Never queue behind presentation: only the newest sampled coordinates matter.
+                send_latest(shapes);
                 next_frame += Duration::from_millis(interval as u64);
                 let now = Instant::now();
                 if next_frame > now {
@@ -26313,7 +26335,7 @@ mod windows_overlay {
             if let Some(pid) = self.pids.get(&key) {
                 return *pid;
             }
-            let pid = window_list::process_id_for_window(Some(key.as_str()));
+            let pid = macro_memory_target_pid(Some(key.as_str()));
             self.pids.insert(key, pid);
             pid
         }
@@ -26341,10 +26363,9 @@ mod windows_overlay {
             return Err("the target window is not running".to_owned());
         };
         let mut read = |label: &str, expression: &str| -> Result<f32, String> {
-            // ESP is a passive overlay. Never attach the debugger from its refresh loop:
-            // a stale tracked alias should hide the marker until the macro rebinds it,
-            // not risk suspending or crashing the target game.
-            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression, false)
+            // Alias rebinding is throttled and runs in its own worker. Enabling it here lets an
+            // ESP preset recover after a scene/process change without requiring a macro step.
+            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression, true)
                 .ok_or_else(|| format!("{label} could not be resolved"))?;
             let key = (target_pid, address, esp_value_type_tag(preset.value_type));
             if let Some(value) = frame.values.get(&key) {
@@ -26445,8 +26466,8 @@ mod windows_overlay {
         if preset.target_window.trim().is_empty() {
             return Vec::new();
         }
-        let selector = Some(preset.target_window.as_str());
-        let Some((left, top, width, height)) = window_list::window_client_bounds(selector) else {
+        let selector = preset.target_window.as_str();
+        let Some((left, top, width, height)) = esp_target_bounds(selector) else {
             return Vec::new();
         };
         if width <= 0 || height <= 0 {
@@ -30918,7 +30939,6 @@ mod windows_overlay {
 
     struct MacroMemoryProcessInfo {
         pid: u32,
-        refreshed_at: Instant,
         modules: HashMap<String, (usize, usize)>,
         pointer_width: usize,
     }
@@ -30926,13 +30946,15 @@ mod windows_overlay {
     thread_local! {
         static MACRO_MEMORY_PROCESS_INFO: std::cell::RefCell<Option<MacroMemoryProcessInfo>> = const { std::cell::RefCell::new(None) };
         static MACRO_MEMORY_TARGET_PID: std::cell::RefCell<Option<(String, Instant, Option<u32>)>> = const { std::cell::RefCell::new(None) };
+        static ESP_TARGET_BOUNDS: std::cell::RefCell<Option<(String, Instant, Option<(i32, i32, i32, i32)>)>> = const { std::cell::RefCell::new(None) };
     }
 
     fn macro_memory_process_info(pid: u32, module: &str) -> Option<(usize, usize, usize)> {
         MACRO_MEMORY_PROCESS_INFO.with(|cached| {
             let mut cached = cached.borrow_mut();
+            let module = module.to_ascii_lowercase();
             let should_refresh = cached.as_ref().is_none_or(|entry| {
-                entry.pid != pid || entry.refreshed_at.elapsed() >= Duration::from_secs(2)
+                entry.pid != pid || !entry.modules.contains_key(&module)
             });
             if should_refresh {
                 let modules = crate::memory_debugger::debugger::process_modules(pid)
@@ -30942,14 +30964,13 @@ mod windows_overlay {
                     .collect();
                 *cached = Some(MacroMemoryProcessInfo {
                     pid,
-                    refreshed_at: Instant::now(),
                     modules,
                     pointer_width: crate::memory_debugger::debugger::process_pointer_width(pid)
                         .ok()?,
                 });
             }
             let entry = cached.as_ref()?;
-            let (base, size) = entry.modules.get(&module.to_ascii_lowercase())?;
+            let (base, size) = entry.modules.get(&module)?;
             Some((*base, *size, entry.pointer_width))
         })
     }
@@ -30969,6 +30990,21 @@ mod windows_overlay {
             let pid = window_list::process_id_for_window(Some(selector));
             *cached = Some((selector.to_owned(), Instant::now(), pid));
             pid
+        })
+    }
+
+    fn esp_target_bounds(selector: &str) -> Option<(i32, i32, i32, i32)> {
+        ESP_TARGET_BOUNDS.with(|cached| {
+            let mut cached = cached.borrow_mut();
+            if let Some((cached_selector, cached_at, bounds)) = cached.as_ref()
+                && cached_selector == selector
+                && cached_at.elapsed() < Duration::from_millis(100)
+            {
+                return *bounds;
+            }
+            let bounds = window_list::window_client_bounds(Some(selector));
+            *cached = Some((selector.to_owned(), Instant::now(), bounds));
+            bounds
         })
     }
 
@@ -31402,11 +31438,24 @@ mod windows_overlay {
             };
             let deadline = Instant::now() + Duration::from_secs(2);
             let mut candidates = Vec::new();
+            let mut exact_candidate = None;
             while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
                 match rx.recv_timeout(remaining) {
                     Ok(WatchEvent::AccessHit { data_address }) => {
                         if !candidates.contains(&data_address) {
                             candidates.push(data_address);
+                            if !tracked_entry.tracked_signature.trim().is_empty() {
+                                let (matched, total) = tracked_signature_score(
+                                    pid,
+                                    data_address,
+                                    &code.instruction,
+                                    &tracked_entry,
+                                );
+                                if total > 0 && matched == total {
+                                    exact_candidate = Some(data_address);
+                                    break;
+                                }
+                            }
                         }
                     }
                     Ok(
@@ -31420,7 +31469,7 @@ mod windows_overlay {
             }
             drop(watch);
 
-            let candidate = if tracked_entry.tracked_signature.trim().is_empty() {
+            let candidate = exact_candidate.or_else(|| if tracked_entry.tracked_signature.trim().is_empty() {
                 let matching = candidates
                     .into_iter()
                     .filter(|data_address| {
@@ -31442,7 +31491,7 @@ mod windows_overlay {
                     })
                     .collect::<Vec<_>>();
                 unique_best_signature_candidate(&scores)
-            };
+            });
 
             if let Some(data_address) = candidate {
                 for pointer in MEMORY_POINTER_ENTRIES.lock().iter_mut() {
