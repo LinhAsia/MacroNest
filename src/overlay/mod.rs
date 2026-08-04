@@ -26312,7 +26312,13 @@ mod windows_overlay {
         samples.push(sample);
         let sample_count = samples.len();
         let result = (sample_count == 4)
-            .then(|| crate::model::solve_esp_calibration(samples, preset.invert_pitch))
+            .then(|| {
+                crate::model::solve_esp_calibration(
+                    samples,
+                    preset.invert_yaw,
+                    preset.invert_pitch,
+                )
+            })
             .flatten();
         let status = if let Some(result) = result {
             format!(

@@ -901,6 +901,7 @@ pub struct CrosshairApp {
     geometry_preview_target: Option<(u32, u32)>,
     geometry_preset_preview_target: Option<u32>,
     geometry_preview_sent: Option<GeometrySpec>,
+    esp_calibration_feedback: HashMap<u32, String>,
     show_geometry_preset_preview_target: Option<(u32, u32, usize, bool)>,
     show_geometry_preset_preview_sent: Option<Option<u32>>,
     audio_sense_devices: Vec<String>,
@@ -1254,6 +1255,7 @@ impl CrosshairApp {
             geometry_preview_target: None,
             geometry_preset_preview_target: None,
             geometry_preview_sent: None,
+            esp_calibration_feedback: HashMap::new(),
             show_geometry_preset_preview_target: None,
             show_geometry_preset_preview_sent: None,
             audio_sense_devices: Vec::new(),
@@ -14719,6 +14721,8 @@ impl eframe::App for CrosshairApp {
                         preset.pitch_offset_degrees = result.pitch_offset_degrees;
                         self.persist_esp_presets();
                     }
+                    self.esp_calibration_feedback
+                        .insert(preset_id, status.clone());
                     self.status = status;
                     ctx.request_repaint();
                 }

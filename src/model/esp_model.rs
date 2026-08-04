@@ -170,6 +170,7 @@ pub(crate) fn esp_calibration_sample(
 
 pub(crate) fn solve_esp_calibration(
     samples: &[EspCalibrationSample],
+    current_invert_yaw: bool,
     current_invert_pitch: bool,
 ) -> Option<EspCalibrationResult> {
     if samples.len() < 2 {
@@ -191,13 +192,7 @@ pub(crate) fn solve_esp_calibration(
             .sqrt();
         (offset, error)
     };
-    let normal_yaw = solve_wrapped(1.0);
-    let inverted_yaw = solve_wrapped(-1.0);
-    let (invert_yaw, (yaw_offset, yaw_error)) = if inverted_yaw.1 < normal_yaw.1 {
-        (true, inverted_yaw)
-    } else {
-        (false, normal_yaw)
-    };
+    let (yaw_offset, yaw_error) = solve_wrapped(1.0);
 
     let solve_pitch = |sign: f32| {
         let offset = samples
@@ -213,27 +208,14 @@ pub(crate) fn solve_esp_calibration(
             .sqrt();
         (offset, error)
     };
-    let normal_pitch = solve_pitch(1.0);
-    let inverted_pitch = solve_pitch(-1.0);
-    // ponytail: four horizontal samples may contain too little pitch motion to infer its sign;
-    // preserve the user's current choice when both fits are effectively identical.
-    let pitch_tie = (normal_pitch.1 - inverted_pitch.1).abs() < 0.001;
-    let (invert_pitch, (pitch_offset, pitch_error)) = if pitch_tie {
-        if current_invert_pitch {
-            (true, inverted_pitch)
-        } else {
-            (false, normal_pitch)
-        }
-    } else if inverted_pitch.1 < normal_pitch.1 {
-        (true, inverted_pitch)
-    } else {
-        (false, normal_pitch)
-    };
+    let (pitch_offset, pitch_error) = solve_pitch(1.0);
 
     Some(EspCalibrationResult {
-        invert_yaw,
+        // Centered calibration samples determine angular zero, not which side of the screen is
+        // positive. Preserve the explicit screen-axis choices instead of guessing them.
+        invert_yaw: current_invert_yaw,
         yaw_offset_degrees: wrap_angle(yaw_offset).to_degrees(),
-        invert_pitch,
+        invert_pitch: current_invert_pitch,
         pitch_offset_degrees: pitch_offset.to_degrees(),
         yaw_error_degrees: yaw_error.to_degrees(),
         pitch_error_degrees: pitch_error.to_degrees(),
@@ -263,17 +245,17 @@ pub(crate) fn project_esp_normalized(
     }
     let mut yaw = esp_angle_to_radians(yaw, preset.yaw_unit);
     let mut pitch = esp_angle_to_radians(pitch, preset.pitch_unit);
-    if preset.invert_yaw {
-        yaw = -yaw;
-    }
-    if preset.invert_pitch {
-        pitch = -pitch;
-    }
     yaw += preset.yaw_offset_degrees.to_radians();
     pitch += preset.pitch_offset_degrees.to_radians();
     let mut yaw_delta = forward_b.atan2(forward_a) - yaw;
     yaw_delta = wrap_angle(yaw_delta);
-    let pitch_delta = vertical.atan2(horizontal_distance) - pitch;
+    let mut pitch_delta = vertical.atan2(horizontal_distance) - pitch;
+    if preset.invert_yaw {
+        yaw_delta = -yaw_delta;
+    }
+    if preset.invert_pitch {
+        pitch_delta = -pitch_delta;
+    }
     let half_fov_x = (preset.horizontal_fov.clamp(1.0, 179.0).to_radians() * 0.5).max(0.001);
     let half_fov_y = (half_fov_x.tan() / aspect.max(0.01)).atan();
     let x = yaw_delta.tan() / half_fov_x.tan();
@@ -317,14 +299,34 @@ mod tests {
     }
 
     #[test]
-    fn inverted_yaw_converts_clockwise_game_angles_before_projection() {
+    fn inverted_yaw_flips_screen_side_without_moving_the_center() {
         let mut preset = EspPreset::default();
+        let normal_side = project_esp_normalized(
+            &preset,
+            [10.0, 5.0, 0.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            16.0 / 9.0,
+        )
+        .unwrap();
         preset.invert_yaw = true;
+        let inverted_side = project_esp_normalized(
+            &preset,
+            [10.0, 5.0, 0.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            16.0 / 9.0,
+        )
+        .unwrap();
+        assert!((normal_side.0 + inverted_side.0).abs() < 0.001);
+
         let projected = project_esp_normalized(
             &preset,
             [10.0, 10.0, 0.0],
             [0.0, 0.0, 0.0],
-            -45.0,
+            45.0,
             0.0,
             16.0 / 9.0,
         )
@@ -333,17 +335,17 @@ mod tests {
     }
 
     #[test]
-    fn four_direction_calibration_recovers_inverted_yaw_and_offset() {
+    fn four_direction_calibration_recovers_offset_and_preserves_screen_axis() {
         let samples = [0.0_f32, 90.0, 180.0, -90.0].map(|bearing| {
             let bearing = bearing.to_radians();
             EspCalibrationSample {
                 bearing_yaw: bearing,
                 bearing_pitch: 0.0,
-                camera_yaw: 30.0_f32.to_radians() - bearing,
+                camera_yaw: bearing - 30.0_f32.to_radians(),
                 camera_pitch: 0.0,
             }
         });
-        let result = solve_esp_calibration(&samples, false).unwrap();
+        let result = solve_esp_calibration(&samples, true, false).unwrap();
         assert!(result.invert_yaw);
         assert!((result.yaw_offset_degrees - 30.0).abs() < 0.01);
         assert!(result.yaw_error_degrees < 0.01);

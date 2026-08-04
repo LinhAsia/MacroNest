@@ -32,6 +32,7 @@ impl CrosshairApp {
             let mut preset = self.state.esp_presets[index].clone();
             let before = preset.clone();
             let snapshot = preset.clone();
+            let calibration_feedback = self.esp_calibration_feedback.get(&preset.id).cloned();
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_sized(
@@ -264,18 +265,32 @@ impl CrosshairApp {
                         .color(ui.visuals().weak_text_color()),
                     );
                     if ui.button("Capture direction").clicked() {
-                        let _ = self
+                        self.esp_calibration_feedback
+                            .insert(preset.id, "Capturing direction...".to_owned());
+                        if self
                             .overlay_tx
                             .send(crate::overlay::OverlayCommand::CaptureEspCalibration(
                                 preset.clone(),
-                            ));
+                            ))
+                            .is_err()
+                        {
+                            self.esp_calibration_feedback.insert(
+                                preset.id,
+                                "Calibration unavailable: overlay worker stopped".to_owned(),
+                            );
+                        }
                     }
                     if ui.small_button("Clear captures").clicked() {
+                        self.esp_calibration_feedback
+                            .insert(preset.id, "Clearing captures...".to_owned());
                         let _ = self
                             .overlay_tx
                             .send(crate::overlay::OverlayCommand::ClearEspCalibration(preset.id));
                     }
                 });
+                if let Some(feedback) = calibration_feedback {
+                    ui.label(RichText::new(feedback).color(ui.visuals().weak_text_color()));
+                }
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Marker");
                     ComboBox::from_id_salt(("esp_marker", preset.id))
@@ -336,6 +351,7 @@ impl CrosshairApp {
         }
         if let Some(id) = remove {
             self.state.esp_presets.retain(|preset| preset.id != id);
+            self.esp_calibration_feedback.remove(&id);
             dirty = true;
         }
         if let Some(preset) = copy_preset {
