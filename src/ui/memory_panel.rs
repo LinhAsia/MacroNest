@@ -4870,25 +4870,28 @@ impl CrosshairApp {
                         .then_some(index)
                     })
                     .collect::<Vec<_>>();
-                if dialog.validation_pid.is_none()
+                let refresh_visible_values = dialog.validation_pid.is_none()
                     && dialog.filter_rx.is_none()
-                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(100)
-                {
-                    if let Some(pid) = self.memory_panel.process_pid {
-                        for index in visible_indices.iter().copied() {
-                            let candidate = &mut dialog.candidates[index];
-                            candidate.live_value = candidate.resolved_address.and_then(|address| {
-                                read_scan_value(pid, address, dialog.value_type).ok()
-                            });
-                        }
-                    }
-                    dialog.last_live_refresh = Instant::now();
-                }
+                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(100);
+                let refresh_pid = self.memory_panel.process_pid;
                 egui::ScrollArea::both().show_rows(
                     ui,
                     24.0,
                     visible_indices.len(),
                     |ui, rows| {
+                    if refresh_visible_values {
+                        if let Some(pid) = refresh_pid {
+                            // ponytail: refresh only rendered rows; reading every pointer candidate
+                            // here makes large validation results stall the UI for seconds.
+                            for visible_row in rows.clone() {
+                                let candidate = &mut dialog.candidates[visible_indices[visible_row]];
+                                candidate.live_value = candidate.resolved_address.and_then(|address| {
+                                    read_scan_value(pid, address, dialog.value_type).ok()
+                                });
+                            }
+                        }
+                        dialog.last_live_refresh = Instant::now();
+                    }
                     ui.set_min_width(
                         STATUS_WIDTH
                             + ROOT_WIDTH

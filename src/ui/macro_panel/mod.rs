@@ -5726,6 +5726,7 @@ impl CrosshairApp {
                     let mut cancel_active_capture = false;
                     let mut remove_step = None;
                     let mut insert_step_after = None;
+                    let mut append_missing_loop_end = None;
                     let mut move_step_to: Option<(u32, Vec<usize>, usize)> = None;
                     let mut remove_preset = None;
                     let mut pending_step_selection = None;
@@ -12193,6 +12194,18 @@ if supports_move_mouse || show_detection_tuning {
                                     .map(|set| set.contains(&step_index))
                                     .unwrap_or(false);
                                 let step_ref = &preset.steps[step_index];
+                                let loop_start_needs_end = step_ref.action == MacroAction::LoopStart && {
+                                    let mut nested = 0usize;
+                                    !preset.steps[step_index + 1..].iter().any(|candidate| {
+                                        match candidate.action {
+                                            MacroAction::LoopStart => nested += 1,
+                                            MacroAction::LoopEnd if nested == 0 => return true,
+                                            MacroAction::LoopEnd => nested -= 1,
+                                            _ => {}
+                                        }
+                                        false
+                                    })
+                                };
                                 let is_vision_active = step_ref.action == MacroAction::StartVisionSearch && {
                                     crate::overlay::is_vision_following_active_by_spec(&step_ref.key)
                                 };
@@ -14005,6 +14018,26 @@ if supports_move_mouse || show_detection_tuning {
                                                           );
                                                           if response.changed() {
                                                               live_sync = true;
+                                                          }
+                                                      }
+                                                      if loop_start_needs_end {
+                                                          ui.colored_label(
+                                                              Color32::from_rgb(255, 196, 80),
+                                                              Self::tr_lang(
+                                                                  language,
+                                                                  "LoopEnd is required",
+                                                                  "Cần có LoopEnd",
+                                                              ),
+                                                          );
+                                                          if ui
+                                                              .button(Self::tr_lang(
+                                                                  language,
+                                                                  "+ Add LoopEnd at end",
+                                                                  "+ Thêm LoopEnd ở cuối",
+                                                              ))
+                                                              .clicked()
+                                                          {
+                                                              append_missing_loop_end = Some(preset.id);
                                                           }
                                                       }
                                                 } else if step.action == MacroAction::StopIfKeyPressed {
@@ -16091,6 +16124,19 @@ if supports_move_mouse || show_detection_tuning {
                             {
                                 let insert_at = (step_index + 1).min(target_preset.steps.len());
                                 target_preset.steps.insert(insert_at, MacroStep::default());
+                                live_sync = true;
+                                clear_step_selection = Some((group.id, preset_id));
+                            }
+                        }
+                        if let Some(preset_id) = append_missing_loop_end {
+                            if let Some(target_preset) = group
+                                .presets
+                                .iter_mut()
+                                .find(|preset| preset.id == preset_id)
+                            {
+                                let mut loop_end = MacroStep::default();
+                                loop_end.action = MacroAction::LoopEnd;
+                                target_preset.steps.push(loop_end);
                                 live_sync = true;
                                 clear_step_selection = Some((group.id, preset_id));
                             }
