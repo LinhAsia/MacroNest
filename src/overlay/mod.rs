@@ -3531,7 +3531,8 @@ mod windows_overlay {
                 None,
             )?;
             let esp_hwnd = CreateWindowExW(
-                WS_EX_TRANSPARENT
+                WS_EX_LAYERED
+                    | WS_EX_TRANSPARENT
                     | WS_EX_TOOLWINDOW
                     | WS_EX_TOPMOST
                     | WS_EX_NOACTIVATE
