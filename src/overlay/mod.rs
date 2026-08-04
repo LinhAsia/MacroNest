@@ -152,8 +152,9 @@ mod windows_overlay {
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE,
                     WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYDOWN,
                     WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION,
-                    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
-                    WS_EX_TRANSPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP, WindowFromPoint,
+                    WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+                    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP,
+                    WindowFromPoint,
                 },
             },
         },
@@ -3450,6 +3451,11 @@ mod windows_overlay {
                 Some(controller_wnd_proc),
             )?;
             register_class(instance, w!("CrosshairOverlay"), Some(overlay_wnd_proc))?;
+            register_class(
+                instance,
+                w!("MacroNestEspOverlay"),
+                Some(overlay_wnd_proc),
+            )?;
             register_class(instance, w!("CrosshairToolbox"), Some(hud_wnd_proc))?;
             register_class(
                 instance,
@@ -3531,12 +3537,12 @@ mod windows_overlay {
             let esp_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TRANSPARENT
-                    | WS_EX_TOOLWINDOW
+                    | WS_EX_APPWINDOW
                     | WS_EX_TOPMOST
                     | WS_EX_NOACTIVATE
                     | windows::Win32::UI::WindowsAndMessaging::WS_EX_NOREDIRECTIONBITMAP,
-                w!("CrosshairOverlay"),
-                w!("CrosshairEsp"),
+                w!("MacroNestEspOverlay"),
+                w!("MacroNest ESP Overlay"),
                 WS_POPUP,
                 0,
                 0,
@@ -26363,9 +26369,9 @@ mod windows_overlay {
             return Err("the target window is not running".to_owned());
         };
         let mut read = |label: &str, expression: &str| -> Result<f32, String> {
-            // Alias rebinding is throttled and runs in its own worker. Enabling it here lets an
-            // ESP preset recover after a scene/process change without requiring a macro step.
-            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression, true)
+            // ponytail: ESP rendering is a read-only hot path. Rebinding may attach a debugger,
+            // so it must only be initiated by the macro memory path, never by every ESP frame.
+            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression, false)
                 .ok_or_else(|| format!("{label} could not be resolved"))?;
             let key = (target_pid, address, esp_value_type_tag(preset.value_type));
             if let Some(value) = frame.values.get(&key) {

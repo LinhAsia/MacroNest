@@ -85,9 +85,25 @@ impl CrosshairApp {
                     .spacing([8.0, 4.0])
                     .show(ui, |ui| {
                         ui.label("Target window");
-                        let target_label = windows
+                        let matched_window = windows
                             .iter()
                             .find(|window| window.selector == preset.target_window)
+                            .or_else(|| {
+                                let title = crate::window_list::selector_base_title(
+                                    &preset.target_window,
+                                );
+                                (!title.is_empty())
+                                    .then(|| windows.iter().find(|window| window.title == title))
+                                    .flatten()
+                            })
+                            .cloned();
+                        if let Some(window) = &matched_window
+                            && preset.target_window != window.selector
+                        {
+                            preset.target_window = window.selector.clone();
+                        }
+                        let target_label = matched_window
+                            .as_ref()
                             .map(|window| format!("{} [PID {}]", window.title, window.process_id))
                             .unwrap_or_else(|| {
                                 if preset.target_window.trim().is_empty() {

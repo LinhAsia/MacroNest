@@ -17231,7 +17231,6 @@ impl eframe::App for CrosshairApp {
                         AppPanel::AudioSense,
                         AppPanel::Ocr,
                         AppPanel::Geometry,
-                        AppPanel::Esp,
                         AppPanel::Sound,
                     ];
                     for panel in panels {
@@ -17313,6 +17312,29 @@ impl eframe::App for CrosshairApp {
                         .on_hover_text(personal_warning);
                         if response.clicked() {
                             self.state.active_panel = AppPanel::Memory;
+                        }
+
+                        let selected = self.state.active_panel == AppPanel::Esp;
+                        let enabled_count = self
+                            .state
+                            .esp_presets
+                            .iter()
+                            .filter(|preset| preset.enabled)
+                            .count();
+                        let label = self.panel_label(AppPanel::Esp);
+                        let text = if enabled_count == 0 {
+                            RichText::new(label).strong()
+                        } else {
+                            RichText::new(format!("{label} ({enabled_count})")).strong()
+                        };
+                        let response = Self::add_with_show_hover_radius(
+                            ui,
+                            10,
+                            self.top_tab_button_danger(text, selected),
+                        )
+                        .on_hover_text(personal_warning);
+                        if response.clicked() {
+                            self.state.active_panel = AppPanel::Esp;
                         }
                     });
                 });
