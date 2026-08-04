@@ -152,11 +152,19 @@ struct StablePointerCandidate {
     resolved_address: Option<usize>,
     observed_value: Option<ScanValue>,
     live_value: Option<ScanValue>,
+    filter_value: Option<ScanValue>,
 }
 
 struct StablePointerJobResult {
     pid: u32,
     result: Result<Vec<PointerPath>, String>,
+}
+
+struct StablePointerFilterResult {
+    pid: u32,
+    action: MemoryScanAction,
+    input_count: usize,
+    result: Result<Vec<ScanCandidate>, String>,
 }
 
 struct StablePointerDialog {
@@ -175,6 +183,7 @@ struct StablePointerDialog {
     last_live_refresh: Instant,
     validation_pid: Option<u32>,
     validation_cursor: usize,
+    filter_rx: Option<Receiver<StablePointerFilterResult>>,
 }
 
 enum DeepPointerJobResult {
@@ -1650,18 +1659,29 @@ impl CrosshairApp {
         let width = ui.available_width();
         let action_btn_text = self.tr(action.label(), action.label());
         ui.horizontal(|ui| {
-            let enabled = !self.memory_panel.scanning
-                && self.memory_panel.process_pid.is_some()
-                && (self.memory_panel.text_encoding.is_none()
-                    || matches!(
-                        action,
-                        MemoryScanAction::FirstScan | MemoryScanAction::Exact
-                    ))
-                && (matches!(
-                    action,
-                    MemoryScanAction::FirstScan | MemoryScanAction::Unknown
-                ) || !self.memory_panel.candidates.is_empty()
-                    || !self.memory_panel.text_candidates.is_empty());
+            let stable_filter_enabled = self
+                .memory_panel
+                .stable_pointer_dialog
+                .as_ref()
+                .is_some_and(|dialog| {
+                    !dialog.candidates.is_empty()
+                        && dialog.rx.is_none()
+                        && dialog.validation_pid.is_none()
+                        && dialog.filter_rx.is_none()
+                });
+            let enabled = self.memory_panel.process_pid.is_some()
+                && (stable_filter_enabled
+                    || (!self.memory_panel.scanning
+                        && (self.memory_panel.text_encoding.is_none()
+                            || matches!(
+                                action,
+                                MemoryScanAction::FirstScan | MemoryScanAction::Exact
+                            ))
+                        && (matches!(
+                            action,
+                            MemoryScanAction::FirstScan | MemoryScanAction::Unknown
+                        ) || !self.memory_panel.candidates.is_empty()
+                            || !self.memory_panel.text_candidates.is_empty())));
             if ui
                 .add_enabled_ui(enabled, |ui| {
                     ui.add_sized(
@@ -3813,6 +3833,7 @@ impl CrosshairApp {
                     last_live_refresh: Instant::now(),
                     validation_pid: None,
                     validation_cursor: 0,
+                    filter_rx: None,
                 });
                 return;
             }
@@ -3851,6 +3872,7 @@ impl CrosshairApp {
             last_live_refresh: Instant::now(),
             validation_pid: None,
             validation_cursor: 0,
+            filter_rx: None,
         });
     }
 
@@ -4683,6 +4705,7 @@ impl CrosshairApp {
                                 resolved_address: None,
                                 observed_value: None,
                                 live_value: None,
+                                filter_value: None,
                             })
                             .collect();
                         dialog.candidates.sort_by_key(|candidate| {
@@ -4711,6 +4734,49 @@ impl CrosshairApp {
                 }
             }
         }
+        if let Some(rx) = dialog.filter_rx.as_ref()
+            && let Ok(outcome) = rx.try_recv()
+        {
+            dialog.filter_rx = None;
+            if self.memory_panel.process_pid != Some(outcome.pid) {
+                dialog.status = "The selected process changed during pointer filtering".to_owned();
+            } else {
+                match outcome.result {
+                    Ok(filtered) => {
+                        let values = filtered
+                            .into_iter()
+                            .map(|candidate| {
+                                (
+                                    candidate.address,
+                                    candidate.current(dialog.value_type),
+                                )
+                            })
+                            .collect::<HashMap<_, _>>();
+                        dialog.candidates.retain_mut(|candidate| {
+                            let Some(value) = candidate
+                                .resolved_address
+                                .and_then(|address| values.get(&address).copied())
+                            else {
+                                return false;
+                            };
+                            candidate.filter_value = Some(value);
+                            candidate.live_value = Some(value);
+                            true
+                        });
+                        dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+                        dialog.status = format!(
+                            "{}: {} → {} candidate(s)",
+                            outcome.action.label(),
+                            outcome.input_count,
+                            dialog.candidates.len(),
+                        );
+                    }
+                    Err(error) => {
+                        dialog.status = format!("Pointer candidate filter failed: {error}")
+                    }
+                }
+            }
+        }
 
         let mut validate = false;
         let mut add = None;
@@ -4733,19 +4799,20 @@ impl CrosshairApp {
                         .add_enabled(
                             new_process
                                 && !dialog.candidates.is_empty()
-                                && dialog.validation_pid.is_none(),
+                                && dialog.validation_pid.is_none()
+                                && dialog.filter_rx.is_none(),
                             Button::new("Validate after restart"),
                         )
                         .clicked()
                     {
                         validate = true;
                     }
-                    if dialog.validation_pid.is_some() {
+                    if dialog.validation_pid.is_some() || dialog.filter_rx.is_some() {
                         ui.spinner();
                     }
                     if ui
                         .add_enabled(
-                            dialog.selected.is_some(),
+                            dialog.selected.is_some() && dialog.filter_rx.is_none(),
                             Button::new("Save selected pointer"),
                         )
                         .clicked()
@@ -4804,6 +4871,7 @@ impl CrosshairApp {
                     })
                     .collect::<Vec<_>>();
                 if dialog.validation_pid.is_none()
+                    && dialog.filter_rx.is_none()
                     && dialog.last_live_refresh.elapsed() >= Duration::from_millis(100)
                 {
                     if let Some(pid) = self.memory_panel.process_pid {
@@ -4921,7 +4989,7 @@ impl CrosshairApp {
         if let Some(save_to_library) = add {
             self.add_stable_pointer_candidate(&dialog, save_to_library);
         }
-        if dialog.validation_pid.is_some() {
+        if dialog.validation_pid.is_some() || dialog.filter_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if dialog.rx.is_some() || !dialog.candidates.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -5327,6 +5395,7 @@ impl CrosshairApp {
             candidate.resolved_address = None;
             candidate.observed_value = None;
             candidate.live_value = None;
+            candidate.filter_value = None;
         }
         dialog.validation_pid = Some(pid);
         dialog.validation_cursor = 0;
@@ -5372,6 +5441,7 @@ impl CrosshairApp {
             };
             candidate.observed_value = Some(observed);
             candidate.live_value = Some(observed);
+            candidate.filter_value = Some(observed);
             if observed == dialog.expected_value {
                 candidate.valid = Some(true);
             } else {
@@ -7193,7 +7263,126 @@ impl CrosshairApp {
         self.persist_memory_pointers();
     }
 
+    fn start_stable_pointer_filter(&mut self, action: MemoryScanAction) -> bool {
+        let Some(mut dialog) = self.memory_panel.stable_pointer_dialog.take() else {
+            return false;
+        };
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select the restarted process before filtering candidates".to_owned();
+            self.memory_panel.stable_pointer_dialog = Some(dialog);
+            return true;
+        };
+        if dialog.validation_pid.is_some() || dialog.filter_rx.is_some() || dialog.rx.is_some() {
+            self.memory_panel.stable_pointer_dialog = Some(dialog);
+            return true;
+        }
+        let range = if action == MemoryScanAction::Between {
+            let Some(min) = parse_scan_value(
+                &self.memory_panel.between_min_input,
+                dialog.value_type,
+                self.memory_panel.hex,
+            ) else {
+                dialog.status = "Invalid minimum value".to_owned();
+                self.memory_panel.stable_pointer_dialog = Some(dialog);
+                return true;
+            };
+            let Some(max) = parse_scan_value(
+                &self.memory_panel.between_max_input,
+                dialog.value_type,
+                self.memory_panel.hex,
+            ) else {
+                dialog.status = "Invalid maximum value".to_owned();
+                self.memory_panel.stable_pointer_dialog = Some(dialog);
+                return true;
+            };
+            if !scan_bounds_are_ordered(min, max) {
+                dialog.status = "Minimum must not exceed maximum".to_owned();
+                self.memory_panel.stable_pointer_dialog = Some(dialog);
+                return true;
+            }
+            Some((min, max))
+        } else {
+            None
+        };
+        let exact = if matches!(
+            action,
+            MemoryScanAction::FirstScan
+                | MemoryScanAction::Exact
+                | MemoryScanAction::Less
+                | MemoryScanAction::Greater
+        ) {
+            let Some(value) = parse_scan_value(
+                &self.memory_panel.value_input,
+                dialog.value_type,
+                self.memory_panel.hex,
+            ) else {
+                dialog.status = "Invalid value".to_owned();
+                self.memory_panel.stable_pointer_dialog = Some(dialog);
+                return true;
+            };
+            Some(value)
+        } else {
+            None
+        };
+        let mut inputs = dialog
+            .candidates
+            .iter()
+            .filter_map(|candidate| {
+                Some(ScanCandidate::new(
+                    candidate.resolved_address?,
+                    candidate
+                        .filter_value
+                        .or(candidate.observed_value)
+                        .or(candidate.live_value)?,
+                ))
+            })
+            .collect::<Vec<_>>();
+        if inputs.is_empty() {
+            dialog.status = "Validate candidates before applying value filters".to_owned();
+            self.memory_panel.stable_pointer_dialog = Some(dialog);
+            return true;
+        }
+        inputs.sort_unstable_by_key(|candidate| candidate.address);
+        let input_count = dialog.candidates.len();
+        let comparison = if action == MemoryScanAction::FirstScan {
+            Some(ScanComparison::Exact)
+        } else {
+            action.comparison()
+        };
+        let value_type = dialog.value_type;
+        let (tx, rx) = mpsc::channel();
+        dialog.filter_rx = Some(rx);
+        dialog.status = format!("{} — filtering {} candidate(s)…", action.label(), input_count);
+        thread::spawn(move || {
+            let result = if let Some(comparison) = comparison {
+                filter_scan_candidates(
+                    pid,
+                    inputs,
+                    value_type,
+                    comparison,
+                    exact,
+                    range,
+                )
+            } else {
+                refresh_scan_candidates(pid, &mut inputs, value_type).map(|()| inputs)
+            }
+            .map_err(|error| error.to_string());
+            let _ = tx.send(StablePointerFilterResult {
+                pid,
+                action,
+                input_count,
+                result,
+            });
+        });
+        self.memory_panel.last_action = action.label().to_owned();
+        self.memory_panel.stable_pointer_dialog = Some(dialog);
+        true
+    }
+
     fn start_memory_action(&mut self, action: MemoryScanAction) {
+        if self.start_stable_pointer_filter(action) {
+            return;
+        }
         #[cfg(windows)]
         self.close_memory_debuggers();
         let Some(pid) = self.memory_panel.process_pid else {

@@ -173,7 +173,7 @@ pub struct ScanCandidate {
 }
 
 impl ScanCandidate {
-    fn new(address: usize, current: ScanValue) -> Self {
+    pub(crate) fn new(address: usize, current: ScanValue) -> Self {
         Self {
             address,
             current: u64::from_le_bytes(current.bytes()),
