@@ -1693,6 +1693,9 @@ mod windows_overlay {
     static ACTIVE_FOCUS_MODE_HWND: AtomicIsize = AtomicIsize::new(0);
     static ACTIVE_PIN_SOURCE_HWND: AtomicIsize = AtomicIsize::new(0);
     static PROTRACTOR_HWND: AtomicIsize = AtomicIsize::new(0);
+    // ESP is refreshed by its worker thread, so it does not have to wait for
+    // the general overlay command queue or repaint the geometry canvas.
+    static ESP_OVERLAY_HWND: AtomicIsize = AtomicIsize::new(0);
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum ProtractorDragTarget {
@@ -2894,7 +2897,6 @@ mod windows_overlay {
         mouse_trail_hwnd: HWND,
         search_area_hwnd: HWND,
         dynamic_geometry_hwnd: HWND,
-        esp_hwnd: HWND,
         focus_highlight_hwnds: [HWND; 4],
         focus_mode_hwnd: HWND,
         hud_hwnd: HWND,
@@ -2960,8 +2962,6 @@ mod windows_overlay {
         cached_search_overlay_capture_region_mode: bool,
         search_area_overlay_visible: bool,
         dynamic_geometry_overlay_visible: bool,
-        cached_esp_shapes: Vec<GeometryRenderShape>,
-        esp_overlay_visible: bool,
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -3546,6 +3546,7 @@ mod windows_overlay {
                 Some(instance),
                 None,
             )?;
+            ESP_OVERLAY_HWND.store(esp_hwnd.0 as isize, Ordering::Release);
             let focus_highlight_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TRANSPARENT
@@ -3746,7 +3747,6 @@ mod windows_overlay {
                 mouse_trail_hwnd,
                 search_area_hwnd,
                 dynamic_geometry_hwnd,
-                esp_hwnd,
                 focus_highlight_hwnds,
                 focus_mode_hwnd,
                 hud_hwnd,
@@ -3817,8 +3817,6 @@ mod windows_overlay {
                 cached_search_overlay_capture_region_mode: false,
                 search_area_overlay_visible: false,
                 dynamic_geometry_overlay_visible: false,
-                cached_esp_shapes: Vec::new(),
-                esp_overlay_visible: false,
             });
             let _controller_hwnd = CreateWindowExW(
                 WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
@@ -17930,7 +17928,6 @@ mod windows_overlay {
             preview_regions,
             static_geometry_shapes,
             dynamic_geometry_shapes,
-            esp_shapes,
             capture_region_preview_active,
         ) = {
             let mut hook_state = HOOK_STATE.lock();
@@ -17973,7 +17970,6 @@ mod windows_overlay {
                 hook_state.vision_capture_preview_regions.clone(),
                 geometry_overlay_static_shapes(&mut hook_state),
                 geometry_overlay_dynamic_shapes(&mut hook_state),
-                hook_state.esp_rendered_shapes.clone(),
                 hook_state.vision_capture_mouse_blocked
                     && (hook_state.vision_capture_is_region_mode
                         || !hook_state.vision_capture_preview_regions.is_empty()),
@@ -18091,30 +18087,6 @@ mod windows_overlay {
                 runtime.cached_search_overlay_dynamic_geometry = dynamic_geometry_shapes;
                 runtime.dynamic_geometry_overlay_visible = true;
             }
-        }
-
-        // ESP gets its own click-through layered window.  Keeping it separate from
-        // the geometry canvas avoids repainting every macro label whenever a marker
-        // moves, which is the hot path for high-frequency ESP updates.
-        let esp_layer_is_empty = esp_shapes.is_empty();
-        if esp_layer_is_empty {
-            if runtime.esp_overlay_visible {
-                unsafe {
-                    let _ = ShowWindow(runtime.esp_hwnd, SW_HIDE);
-                }
-                runtime.esp_overlay_visible = false;
-            }
-            runtime.cached_esp_shapes.clear();
-        } else if !runtime.esp_overlay_visible || runtime.cached_esp_shapes != esp_shapes {
-            let was_visible = runtime.esp_overlay_visible;
-            unsafe {
-                paint_search_area_overlay(runtime.esp_hwnd, &[], &[], &[], &esp_shapes, false)?;
-                if !was_visible {
-                    let _ = ShowWindow(runtime.esp_hwnd, SW_SHOWNA);
-                }
-            }
-            runtime.cached_esp_shapes = esp_shapes;
-            runtime.esp_overlay_visible = true;
         }
 
         Ok(())
@@ -26241,6 +26213,25 @@ mod windows_overlay {
         }
     }
 
+    fn paint_esp_frame(shapes: &[GeometryRenderShape]) {
+        let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
+        if hwnd_value == 0 {
+            return;
+        }
+        let hwnd = HWND(hwnd_value as _);
+        unsafe {
+            if shapes.is_empty() {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                return;
+            }
+            // This window is click-through and isolated from the general geometry
+            // canvas. Painting it here keeps ESP off the UI/command-queue path.
+            if paint_search_area_overlay(hwnd, &[], &[], &[], shapes, false).is_ok() {
+                let _ = ShowWindow(hwnd, SW_SHOWNA);
+            }
+        }
+    }
+
     fn ensure_esp_worker() {
         if ESP_WORKER_STARTED.swap(true, Ordering::AcqRel) {
             return;
@@ -26260,7 +26251,7 @@ mod windows_overlay {
                 if presets.is_empty() {
                     if !HOOK_STATE.lock().esp_rendered_shapes.is_empty() {
                         HOOK_STATE.lock().esp_rendered_shapes.clear();
-                        send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                        paint_esp_frame(&[]);
                     }
                     next_frame = Instant::now() + Duration::from_millis(100);
                     thread::sleep(Duration::from_millis(100));
@@ -26282,12 +26273,12 @@ mod windows_overlay {
                     if state.esp_rendered_shapes == shapes {
                         false
                     } else {
-                        state.esp_rendered_shapes = shapes;
+                        state.esp_rendered_shapes = shapes.clone();
                         true
                     }
                 };
                 if changed {
-                    send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+                    paint_esp_frame(&shapes);
                 }
                 next_frame += Duration::from_millis(interval as u64);
                 let now = Instant::now();
