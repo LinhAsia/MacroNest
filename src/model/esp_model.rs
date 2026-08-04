@@ -13,6 +13,7 @@ pub enum EspMarkerKind {
 pub enum EspMarkerSource {
     #[default]
     Geometry,
+    Text,
     Svg,
     Image,
 }
@@ -82,6 +83,11 @@ pub struct EspPreset {
     pub marker_source: EspMarkerSource,
     pub marker: EspMarkerKind,
     pub marker_asset_path: String,
+    pub marker_text: String,
+    pub text_offset_x: f32,
+    pub text_offset_y: f32,
+    pub text_font_size: f32,
+    pub text_opacity: f32,
     pub scale_with_distance: bool,
     pub distance_reference: f32,
     pub marker_size_offset_percent: f32,
@@ -136,6 +142,11 @@ impl EspPreset {
             marker_source: EspMarkerSource::Geometry,
             marker: EspMarkerKind::Dot,
             marker_asset_path: String::new(),
+            marker_text: "Target".to_owned(),
+            text_offset_x: 0.0,
+            text_offset_y: 0.0,
+            text_font_size: 18.0,
+            text_opacity: 1.0,
             scale_with_distance: false,
             distance_reference: 100.0,
             marker_size_offset_percent: 0.0,
@@ -383,6 +394,11 @@ mod tests {
         let object = value.as_object_mut().unwrap();
         object.remove("marker_source");
         object.remove("marker_asset_path");
+        object.remove("marker_text");
+        object.remove("text_offset_x");
+        object.remove("text_offset_y");
+        object.remove("text_font_size");
+        object.remove("text_opacity");
         object.remove("scale_with_distance");
         object.remove("distance_reference");
         object.remove("marker_size_offset_percent");
@@ -391,6 +407,11 @@ mod tests {
         let preset: EspPreset = serde_json::from_value(value).unwrap();
         assert_eq!(preset.marker_source, EspMarkerSource::Geometry);
         assert!(preset.marker_asset_path.is_empty());
+        assert_eq!(preset.marker_text, "Target");
+        assert_eq!(preset.text_offset_x, 0.0);
+        assert_eq!(preset.text_offset_y, 0.0);
+        assert_eq!(preset.text_font_size, 18.0);
+        assert_eq!(preset.text_opacity, 1.0);
         assert!(!preset.scale_with_distance);
         assert_eq!(preset.distance_reference, 100.0);
         assert_eq!(preset.marker_size_offset_percent, 0.0);

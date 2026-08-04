@@ -26750,6 +26750,31 @@ mod windows_overlay {
                     });
                 }
             },
+            crate::model::EspMarkerSource::Text => {
+                let text = interpolate_variables(&preset.marker_text);
+                if !text.is_empty() {
+                    let text_x = x + preset.text_offset_x.round() as i32;
+                    let text_y = y + preset.text_offset_y.round() as i32;
+                    let font_size = (preset.text_font_size * marker_scale)
+                        .round()
+                        .clamp(8.0, 512.0) as i32;
+                    let mut text_color = color;
+                    text_color[3] = ((text_color[3] as f32)
+                        * preset.text_opacity.clamp(0.0, 1.0))
+                    .round() as u8;
+                    shapes.push(GeometryRenderShape {
+                        bounds: geometry_label_bounds(text_x, text_y, font_size, &text, 0.0),
+                        draw: GeometryRenderDraw::Label(GeometryRenderText {
+                            x: text_x,
+                            y: text_y,
+                            font_size,
+                            color: text_color,
+                            rotation_deg: 0.0,
+                            text,
+                        }),
+                    });
+                }
+            }
             crate::model::EspMarkerSource::Svg | crate::model::EspMarkerSource::Image => {
                 let path = preset.marker_asset_path.trim();
                 let valid_source = std::path::Path::new(path).is_file()

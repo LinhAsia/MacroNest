@@ -372,6 +372,7 @@ impl CrosshairApp {
                     ComboBox::from_id_salt(("esp_marker_source", preset.id))
                         .selected_text(match preset.marker_source {
                             EspMarkerSource::Geometry => "Geometry",
+                            EspMarkerSource::Text => "Text",
                             EspMarkerSource::Svg => "SVG",
                             EspMarkerSource::Image => "Image",
                         })
@@ -380,6 +381,11 @@ impl CrosshairApp {
                                 &mut preset.marker_source,
                                 EspMarkerSource::Geometry,
                                 "Geometry",
+                            );
+                            ui.selectable_value(
+                                &mut preset.marker_source,
+                                EspMarkerSource::Text,
+                                "Text",
                             );
                             ui.selectable_value(
                                 &mut preset.marker_source,
@@ -433,6 +439,23 @@ impl CrosshairApp {
                                 .range(1.0..=30.0),
                         );
                         ui.checkbox(&mut preset.filled, "Fill");
+                    } else if preset.marker_source == EspMarkerSource::Text {
+                        ui.label("Offset X");
+                        ui.add(DragValue::new(&mut preset.text_offset_x).speed(1.0));
+                        ui.label("Offset Y");
+                        ui.add(DragValue::new(&mut preset.text_offset_y).speed(1.0));
+                        ui.label("Size");
+                        ui.add(
+                            DragValue::new(&mut preset.text_font_size)
+                                .speed(1.0)
+                                .range(8.0..=256.0),
+                        );
+                        ui.label("Opacity");
+                        ui.add(
+                            DragValue::new(&mut preset.text_opacity)
+                                .speed(0.01)
+                                .range(0.0..=1.0),
+                        );
                     } else {
                         let label = if preset.marker_source == EspMarkerSource::Svg {
                             "Choose SVG"
@@ -478,6 +501,22 @@ impl CrosshairApp {
                             );
                     }
                 });
+                if preset.marker_source == EspMarkerSource::Text {
+                    ui.label("Text");
+                    let text_id = ui.make_persistent_id(("esp_marker_text", preset.id));
+                    let text_width = ui.available_width();
+                    Self::render_interpolated_text_edit(
+                        ui,
+                        &mut preset.marker_text,
+                        text_id,
+                        text_width,
+                        text_width,
+                        21.0,
+                        72.0,
+                        "Text with {variable}, e.g. Hunter: {health}",
+                        true,
+                    );
+                }
                 if preset.marker_source == EspMarkerSource::Svg {
                     ui.label("SVG file or inline SVG code");
                     ui.add_sized(
