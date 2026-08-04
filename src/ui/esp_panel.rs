@@ -172,7 +172,12 @@ impl CrosshairApp {
                 ui.horizontal_wrapped(|ui| {
                     angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
                     angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
-                    ui.checkbox(&mut preset.invert_yaw, "Invert yaw");
+                    ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw value")
+                        .on_hover_text(
+                            "Reverse only camera rotation. Use this when lateral movement is correct but rotating the camera moves ESP the wrong way.",
+                        );
+                    ui.checkbox(&mut preset.invert_yaw, "Mirror screen X")
+                        .on_hover_text("Mirror only the final left/right screen position.");
                     ui.checkbox(&mut preset.invert_pitch, "Invert pitch");
                     ui.label("Horizontal FOV");
                     ui.add(DragValue::new(&mut preset.horizontal_fov).range(1.0..=179.0));
@@ -247,6 +252,7 @@ impl CrosshairApp {
                         preset.horizontal_plane = EspHorizontalPlane::Xy;
                         preset.yaw_unit = EspAngleUnit::Degrees;
                         preset.pitch_unit = EspAngleUnit::Radians;
+                        preset.invert_camera_yaw = false;
                         preset.invert_yaw = false;
                         preset.invert_pitch = false;
                         preset.yaw_offset_degrees = 0.0;

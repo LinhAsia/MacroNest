@@ -14715,6 +14715,7 @@ impl eframe::App for CrosshairApp {
                             .iter_mut()
                             .find(|preset| preset.id == preset_id)
                     {
+                        preset.invert_camera_yaw = result.invert_camera_yaw;
                         preset.invert_yaw = result.invert_yaw;
                         preset.yaw_offset_degrees = result.yaw_offset_degrees;
                         preset.invert_pitch = result.invert_pitch;

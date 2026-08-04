@@ -26315,6 +26315,7 @@ mod windows_overlay {
             .then(|| {
                 crate::model::solve_esp_calibration(
                     samples,
+                    preset.invert_camera_yaw,
                     preset.invert_yaw,
                     preset.invert_pitch,
                 )
