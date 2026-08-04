@@ -1,7 +1,7 @@
 use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Grid, RichText, TextEdit};
 
 use crate::model::{
-    EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspOrientationSource, EspPreset,
+    EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspMarkerSource, EspOrientationSource, EspPreset,
     MemoryValueType, RgbaColor,
 };
 
@@ -244,7 +244,11 @@ impl CrosshairApp {
                         .on_hover_text("Mirror only the final left/right screen position.");
                     ui.checkbox(&mut preset.invert_pitch, "Invert pitch");
                     ui.label("Horizontal FOV");
-                    ui.add(DragValue::new(&mut preset.horizontal_fov).range(1.0..=179.0));
+                    ui.add(
+                        DragValue::new(&mut preset.horizontal_fov)
+                            .speed(1.0)
+                            .range(1.0..=179.0),
+                    );
                 });
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Yaw zero offset").on_hover_text(
@@ -252,6 +256,7 @@ impl CrosshairApp {
                     );
                     ui.add(
                         DragValue::new(&mut preset.yaw_offset_degrees)
+                            .speed(1.0)
                             .range(-360.0..=360.0)
                             .suffix(" deg"),
                     );
@@ -267,6 +272,7 @@ impl CrosshairApp {
                     );
                     ui.add(
                         DragValue::new(&mut preset.pitch_offset_degrees)
+                            .speed(1.0)
                             .range(-180.0..=180.0)
                             .suffix(" deg"),
                     );
@@ -278,7 +284,7 @@ impl CrosshairApp {
                     );
                     ui.add(
                         DragValue::new(&mut preset.target_vertical_offset)
-                            .speed(0.1)
+                            .speed(1.0)
                             .range(-10000.0..=10000.0),
                     );
                 });
@@ -363,30 +369,108 @@ impl CrosshairApp {
                 }
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Marker");
-                    ComboBox::from_id_salt(("esp_marker", preset.id))
-                        .selected_text(match preset.marker {
-                            EspMarkerKind::Dot => "Dot",
-                            EspMarkerKind::Box => "Box",
+                    ComboBox::from_id_salt(("esp_marker_source", preset.id))
+                        .selected_text(match preset.marker_source {
+                            EspMarkerSource::Geometry => "Geometry",
+                            EspMarkerSource::Svg => "SVG",
+                            EspMarkerSource::Image => "Image",
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut preset.marker, EspMarkerKind::Dot, "Dot");
-                            ui.selectable_value(&mut preset.marker, EspMarkerKind::Box, "Box");
+                            ui.selectable_value(
+                                &mut preset.marker_source,
+                                EspMarkerSource::Geometry,
+                                "Geometry",
+                            );
+                            ui.selectable_value(
+                                &mut preset.marker_source,
+                                EspMarkerSource::Svg,
+                                "SVG",
+                            );
+                            ui.selectable_value(
+                                &mut preset.marker_source,
+                                EspMarkerSource::Image,
+                                "Image",
+                            );
                         });
-                    match preset.marker {
-                        EspMarkerKind::Dot => {
-                            ui.label("Radius");
-                            ui.add(DragValue::new(&mut preset.dot_radius).range(1.0..=100.0));
+                    if preset.marker_source == EspMarkerSource::Geometry {
+                        ComboBox::from_id_salt(("esp_marker", preset.id))
+                            .selected_text(match preset.marker {
+                                EspMarkerKind::Dot => "Dot",
+                                EspMarkerKind::Box => "Box",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut preset.marker, EspMarkerKind::Dot, "Dot");
+                                ui.selectable_value(&mut preset.marker, EspMarkerKind::Box, "Box");
+                            });
+                        match preset.marker {
+                            EspMarkerKind::Dot => {
+                                ui.label("Radius");
+                                ui.add(
+                                    DragValue::new(&mut preset.dot_radius)
+                                        .speed(1.0)
+                                        .range(1.0..=100.0),
+                                );
+                            }
+                            EspMarkerKind::Box => {
+                                ui.label("Width");
+                                ui.add(
+                                    DragValue::new(&mut preset.box_width)
+                                        .speed(1.0)
+                                        .range(2.0..=1000.0),
+                                );
+                                ui.label("Height");
+                                ui.add(
+                                    DragValue::new(&mut preset.box_height)
+                                        .speed(1.0)
+                                        .range(2.0..=1000.0),
+                                );
+                            }
                         }
-                        EspMarkerKind::Box => {
-                            ui.label("Width");
-                            ui.add(DragValue::new(&mut preset.box_width).range(2.0..=1000.0));
-                            ui.label("Height");
-                            ui.add(DragValue::new(&mut preset.box_height).range(2.0..=1000.0));
+                        ui.label("Thickness");
+                        ui.add(
+                            DragValue::new(&mut preset.thickness)
+                                .speed(1.0)
+                                .range(1.0..=30.0),
+                        );
+                        ui.checkbox(&mut preset.filled, "Fill");
+                    } else {
+                        let label = if preset.marker_source == EspMarkerSource::Svg {
+                            "Choose SVG"
+                        } else {
+                            "Import image"
+                        };
+                        if ui.button(label).clicked() {
+                            let mut dialog = rfd::FileDialog::new();
+                            dialog = if preset.marker_source == EspMarkerSource::Svg {
+                                dialog.add_filter("SVG", &["svg"])
+                            } else {
+                                dialog.add_filter(
+                                    "Images",
+                                    &["png", "jpg", "jpeg", "webp", "bmp", "ico"],
+                                )
+                            };
+                            if let Some(path) = dialog.pick_file() {
+                                preset.marker_asset_path = path.to_string_lossy().into_owned();
+                            }
                         }
+                        ui.add_sized(
+                            [260.0, 21.0],
+                            TextEdit::singleline(&mut preset.marker_asset_path)
+                                .hint_text("SVG/image file"),
+                        );
+                        ui.label("Width");
+                        ui.add(
+                            DragValue::new(&mut preset.box_width)
+                                .speed(1.0)
+                                .range(2.0..=1000.0),
+                        );
+                        ui.label("Height");
+                        ui.add(
+                            DragValue::new(&mut preset.box_height)
+                                .speed(1.0)
+                                .range(2.0..=1000.0),
+                        );
                     }
-                    ui.label("Thickness");
-                    ui.add(DragValue::new(&mut preset.thickness).range(1.0..=30.0));
-                    ui.checkbox(&mut preset.filled, "Fill");
                 });
                 ui.horizontal_wrapped(|ui| {
                     let mut color = Color32::from_rgba_unmultiplied(
@@ -409,12 +493,14 @@ impl CrosshairApp {
                     ui.label("Update");
                     ui.add(
                         DragValue::new(&mut preset.update_interval_ms)
+                            .speed(1.0)
                             .range(1..=1000)
                             .suffix(" ms"),
                     );
                     ui.label("Smooth");
                     ui.add(
                         DragValue::new(&mut preset.motion_smoothing_ms)
+                            .speed(1.0)
                             .range(0..=500)
                             .suffix(" ms"),
                     )

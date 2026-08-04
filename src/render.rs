@@ -518,14 +518,12 @@ fn render_svg_to_pixmap(path: &Path, target_width: u32, target_height: u32) -> R
 }
 
 fn render_raster_to_pixmap(path: &Path, target_width: u32, target_height: u32) -> Result<Pixmap> {
-    let image = ImageReader::open(path)
-        .with_context(|| format!("Failed to open image {}", path.display()))?
-        .decode()
-        .with_context(|| format!("Failed to decode image {}", path.display()))?;
+    let image = load_cached_raster_asset(path)?;
     let (iw, ih) = image.dimensions();
     let (out_w, out_h) = resolve_dimensions(iw, ih, target_width, target_height);
     let resized = image.resize_exact(out_w.max(1), out_h.max(1), FilterType::CatmullRom);
-    let rgba = resized.to_rgba8();
+    let mut rgba = resized.to_rgba8();
+    premultiply_rgba(rgba.as_mut());
     let (w, h) = resized.dimensions();
     let mut pixmap = Pixmap::new(w, h).context("Failed to create raster pixmap")?;
     pixmap.data_mut().copy_from_slice(rgba.as_raw());

@@ -1,18 +1,19 @@
 use super::{GeometryRenderDraw, GeometryRenderShape};
 use anyhow::{Context, Result, bail};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use windows::{
     Win32::{
         Foundation::{HMODULE, HWND},
         Graphics::{
             Direct2D::{
                 Common::{
-                    D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
+                    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
                     D2D1_PIXEL_FORMAT,
                 },
-                D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_TARGET,
+                D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_NONE,
+                D2D1_BITMAP_OPTIONS_TARGET,
                 D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
-                D2D1_ELLIPSE, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
+                D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_LINEAR, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
                 ID2D1SolidColorBrush,
             },
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
@@ -62,6 +63,8 @@ pub(super) struct EspGpuRenderer {
     _visual: IDCompositionVisual,
     brushes: HashMap<[u8; 4], ID2D1SolidColorBrush>,
     formats: HashMap<i32, IDWriteTextFormat>,
+    bitmaps: HashMap<(String, u32, u32, u32), ID2D1Bitmap1>,
+    failed_bitmaps: HashSet<(String, u32, u32, u32)>,
 }
 
 impl EspGpuRenderer {
@@ -145,6 +148,8 @@ impl EspGpuRenderer {
                 _visual: visual,
                 brushes: HashMap::new(),
                 formats: HashMap::new(),
+                bitmaps: HashMap::new(),
+                failed_bitmaps: HashSet::new(),
             })
         }
     }
@@ -278,6 +283,32 @@ impl EspGpuRenderer {
                     DWRITE_MEASURING_MODE_NATURAL,
                 );
             }
+            GeometryRenderDraw::Svg {
+                x,
+                y,
+                width,
+                height,
+                opacity,
+                rotation,
+                code,
+            } => {
+                if let Some(bitmap) = self.bitmap(code, *width, *height, *rotation)? {
+                    let rect = D2D_RECT_F {
+                        left: (*x - ox) as f32,
+                        top: (*y - oy) as f32,
+                        right: (*x - ox) as f32 + *width as f32,
+                        bottom: (*y - oy) as f32 + *height as f32,
+                    };
+                    self.d2d.DrawBitmap(
+                        &bitmap,
+                        Some(&rect),
+                        opacity.clamp(0.0, 1.0),
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        None,
+                        None,
+                    );
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -310,6 +341,61 @@ impl EspGpuRenderer {
         format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
         self.formats.insert(font_size, format.clone());
         Ok(format)
+    }
+
+    unsafe fn bitmap(
+        &mut self,
+        source: &str,
+        width: u32,
+        height: u32,
+        rotation: f32,
+    ) -> Result<Option<ID2D1Bitmap1>> {
+        let key = (source.to_owned(), width, height, rotation.to_bits());
+        if let Some(bitmap) = self.bitmaps.get(&key) {
+            return Ok(Some(bitmap.clone()));
+        }
+        if self.failed_bitmaps.contains(&key) {
+            return Ok(None);
+        }
+        let rendered = match crate::render::render_svg_image(
+            source,
+            width,
+            height,
+            1.0,
+            rotation,
+        ) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                eprintln!("ESP marker asset: {error}");
+                self.failed_bitmaps.insert(key);
+                return Ok(None);
+            }
+        };
+        let mut bgra = rendered.rgba;
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        let properties = D2D1_BITMAP_PROPERTIES1 {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+            bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
+            colorContext: Default::default(),
+        };
+        let bitmap = self.d2d.CreateBitmap(
+            D2D_SIZE_U {
+                width: rendered.width,
+                height: rendered.height,
+            },
+            Some(bgra.as_ptr().cast()),
+            rendered.width * 4,
+            &properties,
+        )?;
+        self.bitmaps.insert(key, bitmap.clone());
+        Ok(Some(bitmap))
     }
 }
 

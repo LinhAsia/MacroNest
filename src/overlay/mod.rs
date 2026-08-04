@@ -26480,6 +26480,18 @@ mod windows_overlay {
                 target_text.x = lerp_esp_i32(text.x, target_text.x, alpha);
                 target_text.y = lerp_esp_i32(text.y, target_text.y, alpha);
             }
+            (
+                GeometryRenderDraw::Svg { x, y, code, .. },
+                GeometryRenderDraw::Svg {
+                    x: target_x,
+                    y: target_y,
+                    code: target_code,
+                    ..
+                },
+            ) if code == target_code => {
+                *target_x = lerp_esp_i32(*x, *target_x, alpha);
+                *target_y = lerp_esp_i32(*y, *target_y, alpha);
+            }
             _ => return target.clone(),
         }
         shape
@@ -26672,8 +26684,9 @@ mod windows_overlay {
         ];
         let thickness = preset.thickness.round().max(1.0) as i32;
         let mut shapes = Vec::new();
-        match preset.marker {
-            crate::model::EspMarkerKind::Dot => {
+        match preset.marker_source {
+            crate::model::EspMarkerSource::Geometry => match preset.marker {
+                crate::model::EspMarkerKind::Dot => {
                 let radius = preset.dot_radius.round().max(1.0) as i32;
                 shapes.push(GeometryRenderShape {
                     bounds: (
@@ -26691,30 +26704,52 @@ mod windows_overlay {
                         thickness,
                     },
                 });
-            }
-            crate::model::EspMarkerKind::Box => {
-                let half_width = (preset.box_width * 0.5).round().max(1.0) as i32;
-                let half_height = (preset.box_height * 0.5).round().max(1.0) as i32;
-                let points = vec![
-                    (x - half_width, y - half_height),
-                    (x + half_width, y - half_height),
-                    (x + half_width, y + half_height),
-                    (x - half_width, y + half_height),
-                ];
-                shapes.push(GeometryRenderShape {
-                    bounds: (
-                        x - half_width - thickness,
-                        y - half_height - thickness,
-                        x + half_width + thickness,
-                        y + half_height + thickness,
-                    ),
-                    draw: GeometryRenderDraw::Polygon {
-                        points,
-                        stroke: color,
-                        fill: preset.filled.then_some(color),
-                        thickness,
-                    },
-                });
+                }
+                crate::model::EspMarkerKind::Box => {
+                    let half_width = (preset.box_width * 0.5).round().max(1.0) as i32;
+                    let half_height = (preset.box_height * 0.5).round().max(1.0) as i32;
+                    let points = vec![
+                        (x - half_width, y - half_height),
+                        (x + half_width, y - half_height),
+                        (x + half_width, y + half_height),
+                        (x - half_width, y + half_height),
+                    ];
+                    shapes.push(GeometryRenderShape {
+                        bounds: (
+                            x - half_width - thickness,
+                            y - half_height - thickness,
+                            x + half_width + thickness,
+                            y + half_height + thickness,
+                        ),
+                        draw: GeometryRenderDraw::Polygon {
+                            points,
+                            stroke: color,
+                            fill: preset.filled.then_some(color),
+                            thickness,
+                        },
+                    });
+                }
+            },
+            crate::model::EspMarkerSource::Svg | crate::model::EspMarkerSource::Image => {
+                let path = preset.marker_asset_path.trim();
+                if !path.is_empty() && std::path::Path::new(path).is_file() {
+                    let width = preset.box_width.round().clamp(2.0, 1000.0) as u32;
+                    let height = preset.box_height.round().clamp(2.0, 1000.0) as u32;
+                    let left = x - width as i32 / 2;
+                    let top = y - height as i32 / 2;
+                    shapes.push(GeometryRenderShape {
+                        bounds: (left, top, left + width as i32, top + height as i32),
+                        draw: GeometryRenderDraw::Svg {
+                            x: left,
+                            y: top,
+                            width,
+                            height,
+                            opacity: preset.color.a as f32 / 255.0,
+                            rotation: 0.0,
+                            code: path.to_owned(),
+                        },
+                    });
+                }
             }
         }
         if preset.show_tracer {

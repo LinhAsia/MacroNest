@@ -10,6 +10,14 @@ pub enum EspMarkerKind {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum EspMarkerSource {
+    #[default]
+    Geometry,
+    Svg,
+    Image,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum EspAngleUnit {
     #[default]
     Degrees,
@@ -71,7 +79,9 @@ pub struct EspPreset {
     pub screen_offset_x: f32,
     pub screen_offset_y: f32,
     pub horizontal_fov: f32,
+    pub marker_source: EspMarkerSource,
     pub marker: EspMarkerKind,
+    pub marker_asset_path: String,
     pub dot_radius: f32,
     pub box_width: f32,
     pub box_height: f32,
@@ -119,7 +129,9 @@ impl EspPreset {
             screen_offset_x: 0.0,
             screen_offset_y: 0.0,
             horizontal_fov: 90.0,
+            marker_source: EspMarkerSource::Geometry,
             marker: EspMarkerKind::Dot,
+            marker_asset_path: String::new(),
             dot_radius: 7.0,
             box_width: 44.0,
             box_height: 88.0,
@@ -345,6 +357,18 @@ pub(crate) fn project_esp_normalized(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn older_presets_default_to_geometry_markers() {
+        let mut value = serde_json::to_value(EspPreset::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("marker_source");
+        object.remove("marker_asset_path");
+
+        let preset: EspPreset = serde_json::from_value(value).unwrap();
+        assert_eq!(preset.marker_source, EspMarkerSource::Geometry);
+        assert!(preset.marker_asset_path.is_empty());
+    }
 
     #[test]
     fn forward_target_projects_to_screen_center() {
