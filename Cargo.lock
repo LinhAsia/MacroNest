@@ -39,6 +39,7 @@ dependencies = [
  "vi",
  "wasapi",
  "windows 0.61.3",
+ "windows-numerics 0.2.0",
  "windows-sys 0.61.2",
  "zip",
 ]

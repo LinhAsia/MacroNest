@@ -1,0 +1,354 @@
+use super::{GeometryRenderDraw, GeometryRenderShape};
+use anyhow::{Context, Result, bail};
+use std::collections::HashMap;
+use windows::{
+    Win32::{
+        Foundation::{HMODULE, HWND},
+        Graphics::{
+            Direct2D::{
+                Common::{
+                    D2D_RECT_F, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
+                    D2D1_PIXEL_FORMAT,
+                },
+                D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_TARGET,
+                D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
+                D2D1_ELLIPSE, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
+                ID2D1SolidColorBrush,
+            },
+            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
+            Direct3D11::{
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
+                ID3D11Device,
+            },
+            DirectComposition::{
+                DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget,
+                IDCompositionVisual,
+            },
+            DirectWrite::{
+                DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_MEASURING_MODE_NATURAL,
+                DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER,
+                DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
+            },
+            Dxgi::{
+                Common::{
+                    DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM,
+                    DXGI_SAMPLE_DESC,
+                },
+                DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
+                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice,
+                IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1,
+            },
+        },
+        UI::WindowsAndMessaging::{
+            HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos,
+        },
+    },
+    core::Interface,
+};
+use windows_numerics::Vector2;
+
+pub(super) struct EspGpuRenderer {
+    hwnd: HWND,
+    origin: (i32, i32),
+    size: (u32, u32),
+    _d3d: ID3D11Device,
+    swap_chain: IDXGISwapChain1,
+    d2d: ID2D1DeviceContext,
+    _target_bitmap: ID2D1Bitmap1,
+    dwrite: IDWriteFactory,
+    _composition: IDCompositionDevice,
+    _composition_target: IDCompositionTarget,
+    _visual: IDCompositionVisual,
+    brushes: HashMap<[u8; 4], ID2D1SolidColorBrush>,
+    formats: HashMap<i32, IDWriteTextFormat>,
+}
+
+impl EspGpuRenderer {
+    pub(super) fn new(hwnd: HWND) -> Result<Self> {
+        unsafe {
+            let (left, top, width, height) = super::window_list::virtual_screen_bounds();
+            if width <= 0 || height <= 0 {
+                bail!("invalid virtual screen bounds");
+            }
+            SetWindowPos(
+                hwnd,
+                Some(HWND_TOPMOST),
+                left,
+                top,
+                width,
+                height,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )?;
+
+            let d3d = create_d3d_device()?;
+            let dxgi_device: IDXGIDevice = d3d.cast()?;
+            let adapter = dxgi_device.GetAdapter()?;
+            let factory: IDXGIFactory2 = adapter.GetParent()?;
+            let desc = DXGI_SWAP_CHAIN_DESC1 {
+                Width: width as u32,
+                Height: height as u32,
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                Stereo: false.into(),
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                BufferCount: 2,
+                Scaling: DXGI_SCALING_STRETCH,
+                SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
+                AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
+                Flags: 0,
+            };
+            let swap_chain = factory.CreateSwapChainForComposition(
+                &d3d,
+                &desc,
+                None::<&IDXGIOutput>,
+            )?;
+
+            let composition: IDCompositionDevice = DCompositionCreateDevice(&dxgi_device)?;
+            let composition_target = composition.CreateTargetForHwnd(hwnd, true)?;
+            let visual = composition.CreateVisual()?;
+            visual.SetContent(&swap_chain)?;
+            composition_target.SetRoot(&visual)?;
+            composition.Commit()?;
+
+            let d2d_device = D2D1CreateDevice(&dxgi_device, None)?;
+            let d2d = d2d_device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
+            let surface: IDXGISurface = swap_chain.GetBuffer(0)?;
+            let bitmap_properties = D2D1_BITMAP_PROPERTIES1 {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.0,
+                dpiY: 96.0,
+                bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                colorContext: Default::default(),
+            };
+            let target_bitmap =
+                d2d.CreateBitmapFromDxgiSurface(&surface, Some(&bitmap_properties))?;
+            d2d.SetTarget(&target_bitmap);
+
+            Ok(Self {
+                hwnd,
+                origin: (left, top),
+                size: (width as u32, height as u32),
+                _d3d: d3d,
+                swap_chain,
+                d2d,
+                _target_bitmap: target_bitmap,
+                dwrite: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?,
+                _composition: composition,
+                _composition_target: composition_target,
+                _visual: visual,
+                brushes: HashMap::new(),
+                formats: HashMap::new(),
+            })
+        }
+    }
+
+    pub(super) fn paint(&mut self, shapes: &[GeometryRenderShape]) -> Result<()> {
+        unsafe {
+            let (left, top, width, height) = super::window_list::virtual_screen_bounds();
+            if (left, top) != self.origin || (width as u32, height as u32) != self.size {
+                bail!("display layout changed");
+            }
+
+            self.d2d.BeginDraw();
+            self.d2d.Clear(Some(&D2D1_COLOR_F {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            }));
+            for shape in shapes {
+                self.draw_shape(shape)?;
+            }
+            self.d2d.EndDraw(None, None).context("Direct2D EndDraw")?;
+            self.swap_chain
+                .Present(1, DXGI_PRESENT(0))
+                .ok()
+                .context("DXGI Present")?;
+            Ok(())
+        }
+    }
+
+    unsafe fn draw_shape(&mut self, shape: &GeometryRenderShape) -> Result<()> {
+        let ox = self.origin.0;
+        let oy = self.origin.1;
+        match &shape.draw {
+            GeometryRenderDraw::Point { x, y, radius, fill } => {
+                let brush = self.brush(*fill)?;
+                self.d2d.FillEllipse(
+                    &D2D1_ELLIPSE {
+                        point: point(*x - ox, *y - oy),
+                        radiusX: *radius as f32,
+                        radiusY: *radius as f32,
+                    },
+                    &brush,
+                );
+            }
+            GeometryRenderDraw::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                stroke,
+                thickness,
+            } => {
+                let brush = self.brush(*stroke)?;
+                self.d2d.DrawLine(
+                    point(*x1 - ox, *y1 - oy),
+                    point(*x2 - ox, *y2 - oy),
+                    &brush,
+                    (*thickness).max(1) as f32,
+                    None,
+                );
+            }
+            GeometryRenderDraw::Circle {
+                cx,
+                cy,
+                radius,
+                stroke,
+                fill,
+                thickness,
+            } => {
+                let ellipse = D2D1_ELLIPSE {
+                    point: point(*cx - ox, *cy - oy),
+                    radiusX: *radius as f32,
+                    radiusY: *radius as f32,
+                };
+                if let Some(fill) = fill {
+                    let brush = self.brush(*fill)?;
+                    self.d2d.FillEllipse(&ellipse, &brush);
+                }
+                let brush = self.brush(*stroke)?;
+                self.d2d.DrawEllipse(
+                    &ellipse,
+                    &brush,
+                    (*thickness).max(1) as f32,
+                    None,
+                );
+            }
+            GeometryRenderDraw::Polygon {
+                points,
+                stroke,
+                fill,
+                thickness,
+            } if points.len() == 4 => {
+                // ponytail: ESP only emits axis-aligned four-point boxes. If general polygons
+                // ever use this backend, replace this with one cached ID2D1PathGeometry.
+                let rect = D2D_RECT_F {
+                    left: points.iter().map(|p| p.0).min().unwrap_or(0) as f32 - ox as f32,
+                    top: points.iter().map(|p| p.1).min().unwrap_or(0) as f32 - oy as f32,
+                    right: points.iter().map(|p| p.0).max().unwrap_or(0) as f32 - ox as f32,
+                    bottom: points.iter().map(|p| p.1).max().unwrap_or(0) as f32 - oy as f32,
+                };
+                if let Some(fill) = fill {
+                    let brush = self.brush(*fill)?;
+                    self.d2d.FillRectangle(&rect, &brush);
+                }
+                let brush = self.brush(*stroke)?;
+                self.d2d.DrawRectangle(
+                    &rect,
+                    &brush,
+                    (*thickness).max(1) as f32,
+                    None,
+                );
+            }
+            GeometryRenderDraw::Label(text) => {
+                let brush = self.brush(text.color)?;
+                let format = self.text_format(text.font_size)?;
+                let (left, top, right, bottom) = shape.bounds;
+                let rect = D2D_RECT_F {
+                    left: (left - ox) as f32,
+                    top: (top - oy) as f32,
+                    right: (right - ox) as f32,
+                    bottom: (bottom - oy) as f32,
+                };
+                let utf16 = text.text.encode_utf16().collect::<Vec<_>>();
+                self.d2d.DrawText(
+                    &utf16,
+                    &format,
+                    &rect,
+                    &brush,
+                    D2D1_DRAW_TEXT_OPTIONS_NONE,
+                    DWRITE_MEASURING_MODE_NATURAL,
+                );
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    unsafe fn brush(&mut self, color: [u8; 4]) -> Result<ID2D1SolidColorBrush> {
+        if let Some(brush) = self.brushes.get(&color) {
+            return Ok(brush.clone());
+        }
+        let brush = self.d2d.CreateSolidColorBrush(&d2d_color(color), None)?;
+        self.brushes.insert(color, brush.clone());
+        Ok(brush)
+    }
+
+    unsafe fn text_format(&mut self, font_size: i32) -> Result<IDWriteTextFormat> {
+        let font_size = font_size.clamp(8, 128);
+        if let Some(format) = self.formats.get(&font_size) {
+            return Ok(format.clone());
+        }
+        let format = self.dwrite.CreateTextFormat(
+            windows::core::w!("Segoe UI"),
+            None,
+            DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            font_size as f32,
+            windows::core::w!(""),
+        )?;
+        format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        format.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+        self.formats.insert(font_size, format.clone());
+        Ok(format)
+    }
+}
+
+fn create_d3d_device() -> Result<ID3D11Device> {
+    unsafe {
+        for driver in [D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP] {
+            let mut device = None;
+            if D3D11CreateDevice(
+                None,
+                driver,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                None,
+            )
+            .is_ok()
+            {
+                return device.context("D3D11CreateDevice returned no device");
+            }
+        }
+        bail!("unable to create a Direct3D 11 device")
+    }
+}
+
+fn point(x: i32, y: i32) -> Vector2 {
+    Vector2 {
+        X: x as f32,
+        Y: y as f32,
+    }
+}
+
+fn d2d_color([r, g, b, a]: [u8; 4]) -> D2D1_COLOR_F {
+    D2D1_COLOR_F {
+        r: r as f32 / 255.0,
+        g: g as f32 / 255.0,
+        b: b as f32 / 255.0,
+        a: a as f32 / 255.0,
+    }
+}

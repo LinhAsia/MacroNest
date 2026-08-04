@@ -84,6 +84,11 @@ windows = { version = "0.61", features = [
     "Win32_System_WinRT_Direct3D11",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_DirectWrite",
+    "Foundation_Numerics",
 ] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
@@ -94,6 +99,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Registry",
     "Win32_System_Threading",
 ] }
+windows-numerics = "0.2"
 
 [build-dependencies]
 anyhow = "1.0"

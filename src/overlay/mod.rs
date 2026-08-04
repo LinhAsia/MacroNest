@@ -26,6 +26,8 @@ mod windows_overlay {
     pub mod audio_sense;
     #[path = "../drawing.rs"]
     pub mod drawing;
+    #[path = "../esp_gpu.rs"]
+    mod esp_gpu;
     #[path = "../math_expr.rs"]
     pub mod math_expr;
     #[path = "../native_capture.rs"]
@@ -3457,7 +3459,7 @@ mod windows_overlay {
                 Some(screen_draw_wnd_proc),
             )?;
             let overlay_hwnd = CreateWindowExW(
-                WS_EX_LAYERED
+                    WS_EX_LAYERED
                     | WS_EX_TRANSPARENT
                     | WS_EX_TOOLWINDOW
                     | WS_EX_TOPMOST
@@ -3529,11 +3531,11 @@ mod windows_overlay {
                 None,
             )?;
             let esp_hwnd = CreateWindowExW(
-                WS_EX_LAYERED
-                    | WS_EX_TRANSPARENT
+                WS_EX_TRANSPARENT
                     | WS_EX_TOOLWINDOW
                     | WS_EX_TOPMOST
-                    | WS_EX_NOACTIVATE,
+                    | WS_EX_NOACTIVATE
+                    | windows::Win32::UI::WindowsAndMessaging::WS_EX_NOREDIRECTIONBITMAP,
                 w!("CrosshairOverlay"),
                 w!("CrosshairEsp"),
                 WS_POPUP,
@@ -26213,30 +26215,39 @@ mod windows_overlay {
         }
     }
 
-    fn paint_esp_frame(shapes: &[GeometryRenderShape]) {
-        let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
-        if hwnd_value == 0 {
-            return;
-        }
-        let hwnd = HWND(hwnd_value as _);
-        unsafe {
-            if shapes.is_empty() {
-                let _ = ShowWindow(hwnd, SW_HIDE);
-                return;
-            }
-            // This window is click-through and isolated from the general geometry
-            // canvas. Painting it here keeps ESP off the UI/command-queue path.
-            if paint_search_area_overlay(hwnd, &[], &[], &[], shapes, false).is_ok() {
-                let _ = ShowWindow(hwnd, SW_SHOWNA);
-            }
-        }
-    }
-
     fn ensure_esp_worker() {
         if ESP_WORKER_STARTED.swap(true, Ordering::AcqRel) {
             return;
         }
-        thread::spawn(|| {
+        let (render_tx, render_rx) = crossbeam_channel::bounded::<Vec<GeometryRenderShape>>(1);
+        thread::spawn(move || {
+            let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            let mut renderer = None;
+            while let Ok(shapes) = render_rx.recv() {
+                let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
+                if hwnd_value == 0 {
+                    continue;
+                }
+                let hwnd = HWND(hwnd_value as _);
+                if shapes.is_empty() {
+                    unsafe { let _ = ShowWindow(hwnd, SW_HIDE); }
+                    continue;
+                }
+                if renderer.is_none() {
+                    renderer = esp_gpu::EspGpuRenderer::new(hwnd).ok();
+                }
+                if let Some(gpu) = renderer.as_mut() {
+                    if gpu.paint(&shapes).is_ok() {
+                        unsafe { let _ = ShowWindow(hwnd, SW_SHOWNA); }
+                    } else {
+                        renderer = None;
+                        unsafe { let _ = ShowWindow(hwnd, SW_HIDE); }
+                    }
+                }
+            }
+            unsafe { CoUninitialize(); }
+        });
+        thread::spawn(move || {
             // Keep a fixed frame deadline instead of sleeping after every read/render pass.
             // This prevents the read cost from accumulating on top of the requested interval.
             let mut next_frame = Instant::now();
@@ -26251,7 +26262,7 @@ mod windows_overlay {
                 if presets.is_empty() {
                     if !HOOK_STATE.lock().esp_rendered_shapes.is_empty() {
                         HOOK_STATE.lock().esp_rendered_shapes.clear();
-                        paint_esp_frame(&[]);
+                        let _ = render_tx.try_send(Vec::new());
                     }
                     next_frame = Instant::now() + Duration::from_millis(100);
                     thread::sleep(Duration::from_millis(100));
@@ -26268,18 +26279,15 @@ mod windows_overlay {
                 for preset in &presets {
                     shapes.extend(esp_shapes_for_preset(preset, &mut frame));
                 }
-                let changed = {
+                {
                     let mut state = HOOK_STATE.lock();
-                    if state.esp_rendered_shapes == shapes {
-                        false
-                    } else {
+                    if state.esp_rendered_shapes != shapes {
                         state.esp_rendered_shapes = shapes.clone();
-                        true
                     }
-                };
-                if changed {
-                    paint_esp_frame(&shapes);
                 }
+                // The bounded channel drops stale frames instead of making memory reads wait
+                // for GPU presentation. Sending each deadline also lets a lost device recover.
+                let _ = render_tx.try_send(shapes);
                 next_frame += Duration::from_millis(interval as u64);
                 let now = Instant::now();
                 if next_frame > now {
