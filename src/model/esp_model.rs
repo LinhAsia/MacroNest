@@ -82,6 +82,10 @@ pub struct EspPreset {
     pub marker_source: EspMarkerSource,
     pub marker: EspMarkerKind,
     pub marker_asset_path: String,
+    pub scale_with_distance: bool,
+    pub distance_reference: f32,
+    pub marker_size_offset_percent: f32,
+    pub marker_billboard_3d: bool,
     pub dot_radius: f32,
     pub box_width: f32,
     pub box_height: f32,
@@ -132,6 +136,10 @@ impl EspPreset {
             marker_source: EspMarkerSource::Geometry,
             marker: EspMarkerKind::Dot,
             marker_asset_path: String::new(),
+            scale_with_distance: false,
+            distance_reference: 100.0,
+            marker_size_offset_percent: 0.0,
+            marker_billboard_3d: false,
             dot_radius: 7.0,
             box_width: 44.0,
             box_height: 88.0,
@@ -155,6 +163,17 @@ impl Default for EspPreset {
     fn default() -> Self {
         Self::new(1)
     }
+}
+
+pub fn esp_marker_scale(preset: &EspPreset, distance: f32) -> f32 {
+    let size_offset = 1.0 + preset.marker_size_offset_percent / 100.0;
+    let perspective = if preset.scale_with_distance || preset.marker_billboard_3d {
+        preset.distance_reference.max(0.01) / distance.max(0.01)
+    } else {
+        1.0
+    };
+    // ponytail: keep malformed presets from producing invisible or enormous overlay surfaces.
+    (perspective * size_offset).clamp(0.05, 20.0)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -364,10 +383,30 @@ mod tests {
         let object = value.as_object_mut().unwrap();
         object.remove("marker_source");
         object.remove("marker_asset_path");
+        object.remove("scale_with_distance");
+        object.remove("distance_reference");
+        object.remove("marker_size_offset_percent");
+        object.remove("marker_billboard_3d");
 
         let preset: EspPreset = serde_json::from_value(value).unwrap();
         assert_eq!(preset.marker_source, EspMarkerSource::Geometry);
         assert!(preset.marker_asset_path.is_empty());
+        assert!(!preset.scale_with_distance);
+        assert_eq!(preset.distance_reference, 100.0);
+        assert_eq!(preset.marker_size_offset_percent, 0.0);
+        assert!(!preset.marker_billboard_3d);
+    }
+
+    #[test]
+    fn marker_distance_scale_uses_reference_distance_and_size_offset() {
+        let mut preset = EspPreset::default();
+        preset.scale_with_distance = true;
+        preset.distance_reference = 100.0;
+        assert!((esp_marker_scale(&preset, 50.0) - 2.0).abs() < f32::EPSILON);
+        assert!((esp_marker_scale(&preset, 200.0) - 0.5).abs() < f32::EPSILON);
+
+        preset.marker_size_offset_percent = 25.0;
+        assert!((esp_marker_scale(&preset, 100.0) - 1.25).abs() < f32::EPSILON);
     }
 
     #[test]

@@ -350,27 +350,31 @@ impl EspGpuRenderer {
         height: u32,
         rotation: f32,
     ) -> Result<Option<ID2D1Bitmap1>> {
-        let key = (source.to_owned(), width, height, rotation.to_bits());
+        let aspect_bucket =
+            (((width as f64 / height.max(1) as f64) * 20.0).round() as u32).clamp(1, 400);
+        let key = (source.to_owned(), aspect_bucket, 0, rotation.to_bits());
         if let Some(bitmap) = self.bitmaps.get(&key) {
             return Ok(Some(bitmap.clone()));
         }
         if self.failed_bitmaps.contains(&key) {
             return Ok(None);
         }
-        let rendered = match crate::render::render_svg_image(
-            source,
-            width,
-            height,
-            1.0,
-            rotation,
-        ) {
-            Ok(rendered) => rendered,
-            Err(error) => {
-                eprintln!("ESP marker asset: {error}");
-                self.failed_bitmaps.insert(key);
-                return Ok(None);
-            }
+        let aspect = aspect_bucket as f32 / 20.0;
+        let (cache_width, cache_height) = if aspect >= 1.0 {
+            (1024, (1024.0 / aspect).round().max(2.0) as u32)
+        } else {
+            ((1024.0 * aspect).round().max(2.0) as u32, 1024)
         };
+        let rendered =
+            match crate::render::render_svg_image(source, cache_width, cache_height, 1.0, rotation)
+            {
+                Ok(rendered) => rendered,
+                Err(error) => {
+                    eprintln!("ESP marker asset: {error}");
+                    self.failed_bitmaps.insert(key);
+                    return Ok(None);
+                }
+            };
         let mut bgra = rendered.rgba;
         for pixel in bgra.chunks_exact_mut(4) {
             pixel.swap(0, 2);

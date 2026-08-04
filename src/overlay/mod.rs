@@ -26425,6 +26425,10 @@ mod windows_overlay {
         }
     }
 
+    fn lerp_esp_u32(from: u32, to: u32, alpha: f32) -> u32 {
+        lerp_esp_i32(from as i32, to as i32, alpha).max(1) as u32
+    }
+
     fn interpolate_esp_shape(
         current: &GeometryRenderShape,
         target: &GeometryRenderShape,
@@ -26439,15 +26443,17 @@ mod windows_overlay {
         );
         match (&current.draw, &mut shape.draw) {
             (
-                GeometryRenderDraw::Circle { cx, cy, .. },
+                GeometryRenderDraw::Circle { cx, cy, radius, .. },
                 GeometryRenderDraw::Circle {
                     cx: target_x,
                     cy: target_y,
+                    radius: target_radius,
                     ..
                 },
             ) => {
                 *target_x = lerp_esp_i32(*cx, *target_x, alpha);
                 *target_y = lerp_esp_i32(*cy, *target_y, alpha);
+                *target_radius = lerp_esp_i32(*radius, *target_radius, alpha).max(1);
             }
             (
                 GeometryRenderDraw::Line { x1, y1, x2, y2, .. },
@@ -26481,16 +26487,27 @@ mod windows_overlay {
                 target_text.y = lerp_esp_i32(text.y, target_text.y, alpha);
             }
             (
-                GeometryRenderDraw::Svg { x, y, code, .. },
+                GeometryRenderDraw::Svg {
+                    x,
+                    y,
+                    width,
+                    height,
+                    code,
+                    ..
+                },
                 GeometryRenderDraw::Svg {
                     x: target_x,
                     y: target_y,
+                    width: target_width,
+                    height: target_height,
                     code: target_code,
                     ..
                 },
             ) if code == target_code => {
                 *target_x = lerp_esp_i32(*x, *target_x, alpha);
                 *target_y = lerp_esp_i32(*y, *target_y, alpha);
+                *target_width = lerp_esp_u32(*width, *target_width, alpha);
+                *target_height = lerp_esp_u32(*height, *target_height, alpha);
             }
             _ => return target.clone(),
         }
@@ -26683,31 +26700,34 @@ mod windows_overlay {
             preset.color.a,
         ];
         let thickness = preset.thickness.round().max(1.0) as i32;
+        let marker_scale = crate::model::esp_marker_scale(preset, distance);
         let mut shapes = Vec::new();
         match preset.marker_source {
             crate::model::EspMarkerSource::Geometry => match preset.marker {
                 crate::model::EspMarkerKind::Dot => {
-                let radius = preset.dot_radius.round().max(1.0) as i32;
-                shapes.push(GeometryRenderShape {
-                    bounds: (
-                        x - radius - thickness,
-                        y - radius - thickness,
-                        x + radius + thickness,
-                        y + radius + thickness,
-                    ),
-                    draw: GeometryRenderDraw::Circle {
-                        cx: x,
-                        cy: y,
-                        radius,
-                        stroke: color,
-                        fill: preset.filled.then_some(color),
-                        thickness,
-                    },
-                });
+                    let radius = (preset.dot_radius * marker_scale).round().max(1.0) as i32;
+                    shapes.push(GeometryRenderShape {
+                        bounds: (
+                            x - radius - thickness,
+                            y - radius - thickness,
+                            x + radius + thickness,
+                            y + radius + thickness,
+                        ),
+                        draw: GeometryRenderDraw::Circle {
+                            cx: x,
+                            cy: y,
+                            radius,
+                            stroke: color,
+                            fill: preset.filled.then_some(color),
+                            thickness,
+                        },
+                    });
                 }
                 crate::model::EspMarkerKind::Box => {
-                    let half_width = (preset.box_width * 0.5).round().max(1.0) as i32;
-                    let half_height = (preset.box_height * 0.5).round().max(1.0) as i32;
+                    let half_width =
+                        (preset.box_width * marker_scale * 0.5).round().max(1.0) as i32;
+                    let half_height =
+                        (preset.box_height * marker_scale * 0.5).round().max(1.0) as i32;
                     let points = vec![
                         (x - half_width, y - half_height),
                         (x + half_width, y - half_height),
@@ -26732,9 +26752,16 @@ mod windows_overlay {
             },
             crate::model::EspMarkerSource::Svg | crate::model::EspMarkerSource::Image => {
                 let path = preset.marker_asset_path.trim();
-                if !path.is_empty() && std::path::Path::new(path).is_file() {
-                    let width = preset.box_width.round().clamp(2.0, 1000.0) as u32;
-                    let height = preset.box_height.round().clamp(2.0, 1000.0) as u32;
+                let valid_source = std::path::Path::new(path).is_file()
+                    || (preset.marker_source == crate::model::EspMarkerSource::Svg
+                        && path.contains("<svg"));
+                if !path.is_empty() && valid_source {
+                    let width = (preset.box_width * marker_scale)
+                        .round()
+                        .clamp(2.0, 20_000.0) as u32;
+                    let height = (preset.box_height * marker_scale)
+                        .round()
+                        .clamp(2.0, 20_000.0) as u32;
                     let left = x - width as i32 / 2;
                     let top = y - height as i32 / 2;
                     shapes.push(GeometryRenderShape {

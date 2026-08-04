@@ -453,11 +453,13 @@ impl CrosshairApp {
                                 preset.marker_asset_path = path.to_string_lossy().into_owned();
                             }
                         }
-                        ui.add_sized(
-                            [260.0, 21.0],
-                            TextEdit::singleline(&mut preset.marker_asset_path)
-                                .hint_text("SVG/image file"),
-                        );
+                        if preset.marker_source == EspMarkerSource::Image {
+                            ui.add_sized(
+                                [260.0, 21.0],
+                                TextEdit::singleline(&mut preset.marker_asset_path)
+                                    .hint_text("Image file"),
+                            );
+                        }
                         ui.label("Width");
                         ui.add(
                             DragValue::new(&mut preset.box_width)
@@ -470,7 +472,42 @@ impl CrosshairApp {
                                 .speed(1.0)
                                 .range(2.0..=1000.0),
                         );
+                        ui.checkbox(&mut preset.marker_billboard_3d, "3D billboard")
+                            .on_hover_text(
+                                "Anchor the sprite in world space and keep it facing the camera/player. This also enables perspective distance scaling.",
+                            );
                     }
+                });
+                if preset.marker_source == EspMarkerSource::Svg {
+                    ui.label("SVG file or inline SVG code");
+                    ui.add_sized(
+                        [ui.available_width(), 72.0],
+                        TextEdit::multiline(&mut preset.marker_asset_path)
+                            .desired_rows(3)
+                            .hint_text(
+                                "Paste <svg ...>...</svg> here, or choose an SVG file above",
+                            ),
+                    );
+                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut preset.scale_with_distance, "Scale with distance")
+                        .on_hover_text(
+                            "Scale every marker type from the existing camera-target distance; no target box address is needed.",
+                        );
+                    ui.label("Reference distance");
+                    ui.add(
+                        DragValue::new(&mut preset.distance_reference)
+                            .speed(1.0)
+                            .range(0.01..=1_000_000.0),
+                    )
+                    .on_hover_text("At this world distance, the marker uses its configured base size.");
+                    ui.label("Size offset");
+                    ui.add(
+                        DragValue::new(&mut preset.marker_size_offset_percent)
+                            .speed(1.0)
+                            .range(-95.0..=1000.0)
+                            .suffix("%"),
+                    );
                 });
                 ui.horizontal_wrapped(|ui| {
                     let mut color = Color32::from_rgba_unmultiplied(
