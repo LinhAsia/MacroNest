@@ -20926,28 +20926,12 @@ if supports_move_mouse || show_detection_tuning {
         } else {
             normal_width
         };
-        // Calculate dynamic height based on text content when focused
-        let normal_row_height = normal_height;
-        let expanded_row_height = expanded_height;
+        // ponytail: the caller owns the expanded height; content-driven growth can overlap the
+        // rest of a preset card. A dedicated editor can opt into a taller fixed height instead.
         let target_height = if has_focus {
-            if !multiline_on_focus {
-                expanded_row_height
-            } else {
-                let chars_per_line = ((expanded_width / 7.2) as usize).max(10);
-                let mut estimated_rows = 0;
-                for line in text.split('\n') {
-                    let line_len = line.chars().count();
-                    estimated_rows += 1 + line_len / chars_per_line;
-                }
-                let rows = estimated_rows.clamp(1, 12);
-                if rows > 1 {
-                    (rows as f32 * 20.0 + 6.0).max(expanded_row_height)
-                } else {
-                    expanded_row_height
-                }
-            }
+            expanded_height
         } else {
-            normal_row_height
+            normal_height
         };
         let animated_width = ui
             .ctx()
@@ -20966,7 +20950,8 @@ if supports_move_mouse || show_detection_tuning {
                 let line_len = line.chars().count();
                 estimated_rows += 1 + line_len / chars_per_line;
             }
-            let rows = estimated_rows.clamp(1, 12);
+            let rows = estimated_rows
+                .clamp(1, ((expanded_height / 20.0).floor() as usize).max(1));
             egui::TextEdit::multiline(text)
                 .hint_text(hint)
                 .desired_rows(rows)
@@ -20983,9 +20968,8 @@ if supports_move_mouse || show_detection_tuning {
         // and makes hint text appear at full brightness instead of the dimmed weak_text_color.
         let prev_override = ui.visuals().override_text_color;
         ui.visuals_mut().override_text_color = None;
-        let current_interact_height = ui.spacing().interact_size.y;
         let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(animated_width, current_interact_height),
+            egui::vec2(animated_width, animated_height),
             egui::Sense::hover(),
         );
         let top_y = if animated_height > normal_height + 0.1 {

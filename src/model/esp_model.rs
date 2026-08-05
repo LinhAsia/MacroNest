@@ -82,7 +82,10 @@ pub struct EspPreset {
     pub horizontal_fov: f32,
     pub marker_source: EspMarkerSource,
     pub marker: EspMarkerKind,
+    /// Image file path. Kept under its original key for saved-preset compatibility.
     pub marker_asset_path: String,
+    /// Inline SVG or an SVG file path. Separate from image paths so changing marker type is lossless.
+    pub marker_svg_source: String,
     pub marker_text: String,
     pub text_offset_x: f32,
     pub text_offset_y: f32,
@@ -142,6 +145,7 @@ impl EspPreset {
             marker_source: EspMarkerSource::Geometry,
             marker: EspMarkerKind::Dot,
             marker_asset_path: String::new(),
+            marker_svg_source: String::new(),
             marker_text: "Target".to_owned(),
             text_offset_x: 0.0,
             text_offset_y: 0.0,
@@ -167,6 +171,17 @@ impl EspPreset {
             update_interval_ms: 33,
             motion_smoothing_ms: 40,
         }
+    }
+
+    pub fn migrate_marker_sources(&mut self) -> bool {
+        if self.marker_source == EspMarkerSource::Svg
+            && self.marker_svg_source.trim().is_empty()
+            && !self.marker_asset_path.trim().is_empty()
+        {
+            self.marker_svg_source = std::mem::take(&mut self.marker_asset_path);
+            return true;
+        }
+        false
     }
 }
 
@@ -394,6 +409,7 @@ mod tests {
         let object = value.as_object_mut().unwrap();
         object.remove("marker_source");
         object.remove("marker_asset_path");
+        object.remove("marker_svg_source");
         object.remove("marker_text");
         object.remove("text_offset_x");
         object.remove("text_offset_y");
@@ -407,6 +423,7 @@ mod tests {
         let preset: EspPreset = serde_json::from_value(value).unwrap();
         assert_eq!(preset.marker_source, EspMarkerSource::Geometry);
         assert!(preset.marker_asset_path.is_empty());
+        assert!(preset.marker_svg_source.is_empty());
         assert_eq!(preset.marker_text, "Target");
         assert_eq!(preset.text_offset_x, 0.0);
         assert_eq!(preset.text_offset_y, 0.0);
@@ -428,6 +445,26 @@ mod tests {
 
         preset.marker_size_offset_percent = 25.0;
         assert!((esp_marker_scale(&preset, 100.0) - 1.25).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn billboard_enables_perspective_scaling() {
+        let mut preset = EspPreset::default();
+        preset.marker_billboard_3d = true;
+        preset.distance_reference = 100.0;
+        assert!((esp_marker_scale(&preset, 50.0) - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn legacy_svg_source_moves_out_of_image_path() {
+        let mut preset = EspPreset::default();
+        preset.marker_source = EspMarkerSource::Svg;
+        preset.marker_asset_path = "<svg/>".to_owned();
+
+        assert!(preset.migrate_marker_sources());
+        assert_eq!(preset.marker_svg_source, "<svg/>");
+        assert!(preset.marker_asset_path.is_empty());
+        assert!(!preset.migrate_marker_sources());
     }
 
     #[test]

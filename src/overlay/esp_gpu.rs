@@ -1,6 +1,9 @@
 use super::{GeometryRenderDraw, GeometryRenderShape};
 use anyhow::{Context, Result, bail};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use windows::{
     Win32::{
         Foundation::{HMODULE, HWND},
@@ -63,8 +66,8 @@ pub(super) struct EspGpuRenderer {
     _visual: IDCompositionVisual,
     brushes: HashMap<[u8; 4], ID2D1SolidColorBrush>,
     formats: HashMap<i32, IDWriteTextFormat>,
-    bitmaps: HashMap<(String, u32, u32, u32), ID2D1Bitmap1>,
-    failed_bitmaps: HashSet<(String, u32, u32, u32)>,
+    bitmaps: HashMap<(Arc<str>, u32, u32, u32), ID2D1Bitmap1>,
+    failed_bitmaps: HashSet<(Arc<str>, u32, u32, u32)>,
 }
 
 impl EspGpuRenderer {
@@ -345,14 +348,14 @@ impl EspGpuRenderer {
 
     unsafe fn bitmap(
         &mut self,
-        source: &str,
+        source: &Arc<str>,
         width: u32,
         height: u32,
         rotation: f32,
     ) -> Result<Option<ID2D1Bitmap1>> {
         let aspect_bucket =
             (((width as f64 / height.max(1) as f64) * 20.0).round() as u32).clamp(1, 400);
-        let key = (source.to_owned(), aspect_bucket, 0, rotation.to_bits());
+        let key = (Arc::clone(source), aspect_bucket, 0, rotation.to_bits());
         if let Some(bitmap) = self.bitmaps.get(&key) {
             return Ok(Some(bitmap.clone()));
         }
@@ -366,7 +369,13 @@ impl EspGpuRenderer {
             ((1024.0 * aspect).round().max(2.0) as u32, 1024)
         };
         let rendered =
-            match crate::render::render_svg_image(source, cache_width, cache_height, 1.0, rotation)
+            match crate::render::render_svg_image(
+                source.as_ref(),
+                cache_width,
+                cache_height,
+                1.0,
+                rotation,
+            )
             {
                 Ok(rendered) => rendered,
                 Err(error) => {

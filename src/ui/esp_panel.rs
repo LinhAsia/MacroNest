@@ -31,6 +31,7 @@ impl CrosshairApp {
         );
         for index in 0..self.state.esp_presets.len() {
             let mut preset = self.state.esp_presets[index].clone();
+            let migrated_marker_source = preset.migrate_marker_sources();
             let before = preset.clone();
             let snapshot = preset.clone();
             let calibration_feedback = self.esp_calibration_feedback.get(&preset.id).cloned();
@@ -473,14 +474,21 @@ impl CrosshairApp {
                                 )
                             };
                             if let Some(path) = dialog.pick_file() {
-                                preset.marker_asset_path = path.to_string_lossy().into_owned();
+                                let path = path.to_string_lossy().into_owned();
+                                if preset.marker_source == EspMarkerSource::Svg {
+                                    preset.marker_svg_source = path;
+                                } else {
+                                    preset.marker_asset_path = path;
+                                }
                             }
                         }
                         if preset.marker_source == EspMarkerSource::Image {
+                            let hint = RichText::new("Image file")
+                                .color(ui.visuals().weak_text_color());
                             ui.add_sized(
                                 [260.0, 21.0],
                                 TextEdit::singleline(&mut preset.marker_asset_path)
-                                    .hint_text("Image file"),
+                                    .hint_text(hint),
                             );
                         }
                         ui.label("Width");
@@ -495,9 +503,12 @@ impl CrosshairApp {
                                 .speed(1.0)
                                 .range(2.0..=1000.0),
                         );
-                        ui.checkbox(&mut preset.marker_billboard_3d, "3D billboard")
+                        ui.checkbox(
+                            &mut preset.marker_billboard_3d,
+                            "World-space billboard",
+                        )
                             .on_hover_text(
-                                "Anchor the sprite in world space and keep it facing the camera/player. This also enables perspective distance scaling.",
+                                "Keep the sprite facing the camera and scale it by world distance. A billboard intentionally stays flat to the viewer; perspective size is its visible 3D effect.",
                             );
                     }
                 });
@@ -519,14 +530,21 @@ impl CrosshairApp {
                 }
                 if preset.marker_source == EspMarkerSource::Svg {
                     ui.label("SVG file or inline SVG code");
-                    ui.add_sized(
-                        [ui.available_width(), 72.0],
-                        TextEdit::multiline(&mut preset.marker_asset_path)
-                            .desired_rows(3)
-                            .hint_text(
-                                "Paste <svg ...>...</svg> here, or choose an SVG file above",
-                            ),
-                    );
+                    let hint = RichText::new(
+                        "Paste <svg ...>...</svg> here, or choose an SVG file above",
+                    )
+                    .color(ui.visuals().weak_text_color());
+                    egui::ScrollArea::vertical()
+                        .id_salt(("esp_svg_source_scroll", preset.id))
+                        .max_height(72.0)
+                        .show(ui, |ui| {
+                            ui.add_sized(
+                                [ui.available_width(), 72.0],
+                                TextEdit::multiline(&mut preset.marker_svg_source)
+                                    .desired_rows(3)
+                                    .hint_text(hint),
+                            );
+                        });
                 }
                 ui.horizontal_wrapped(|ui| {
                     ui.checkbox(&mut preset.scale_with_distance, "Scale with distance")
@@ -583,7 +601,7 @@ impl CrosshairApp {
                     .on_hover_text("Smooth marker movement between RAM samples. Set 0 to disable.");
                 });
             });
-            if preset != before {
+            if migrated_marker_source || preset != before {
                 self.state.esp_presets[index] = preset;
                 dirty = true;
             }
