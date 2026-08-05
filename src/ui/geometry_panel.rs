@@ -1032,9 +1032,9 @@ impl CrosshairApp {
                             120.0,
                             120.0,
                             18.0,
-                            18.0,
+                            96.0,
                             "Text",
-                            false,
+                            true,
                         );
                         changed |= response.changed();
                         Self::apply_vietnamese_input_if_changed(

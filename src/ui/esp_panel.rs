@@ -1,8 +1,8 @@
 use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Grid, RichText, TextEdit};
 
 use crate::model::{
-    EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspMarkerSource, EspOrientationSource, EspPreset,
-    MemoryValueType, RgbaColor,
+    EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspMarkerSource, EspOrientationSource,
+    EspPreset, MemoryValueType, RgbaColor,
 };
 
 use super::CrosshairApp;
@@ -91,9 +91,8 @@ impl CrosshairApp {
                             .iter()
                             .find(|window| window.selector == preset.target_window)
                             .or_else(|| {
-                                let title = crate::window_list::selector_base_title(
-                                    &preset.target_window,
-                                );
+                                let title =
+                                    crate::window_list::selector_base_title(&preset.target_window);
                                 (!title.is_empty())
                                     .then(|| windows.iter().find(|window| window.title == title))
                                     .flatten()
@@ -491,18 +490,33 @@ impl CrosshairApp {
                                     .hint_text(hint),
                             );
                         }
-                        ui.label("Width");
-                        ui.add(
-                            DragValue::new(&mut preset.box_width)
-                                .speed(1.0)
-                                .range(2.0..=1000.0),
-                        );
-                        ui.label("Height");
-                        ui.add(
-                            DragValue::new(&mut preset.box_height)
-                                .speed(1.0)
-                                .range(2.0..=1000.0),
-                        );
+                        if preset.marker_source == EspMarkerSource::Svg {
+                            ui.label("SVG width");
+                            ui.add(
+                                DragValue::new(&mut preset.svg_width)
+                                    .speed(1.0)
+                                    .range(2.0..=1000.0),
+                            );
+                            ui.label("SVG height");
+                            ui.add(
+                                DragValue::new(&mut preset.svg_height)
+                                    .speed(1.0)
+                                    .range(2.0..=1000.0),
+                            );
+                        } else {
+                            ui.label("Image width");
+                            ui.add(
+                                DragValue::new(&mut preset.image_width)
+                                    .speed(1.0)
+                                    .range(2.0..=1000.0),
+                            );
+                            ui.label("Image height");
+                            ui.add(
+                                DragValue::new(&mut preset.image_height)
+                                    .speed(1.0)
+                                    .range(2.0..=1000.0),
+                            );
+                        }
                         ui.checkbox(
                             &mut preset.marker_billboard_3d,
                             "World-space billboard",
@@ -510,6 +524,29 @@ impl CrosshairApp {
                             .on_hover_text(
                                 "Keep the sprite facing the camera and scale it by world distance. A billboard intentionally stays flat to the viewer; perspective size is its visible 3D effect.",
                             );
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Marker offset").on_hover_text(
+                        "Move only the marker in screen pixels; this does not alter projection, FOV, or marker size.",
+                    );
+                    ui.label("X");
+                    ui.add(
+                        DragValue::new(&mut preset.marker_offset_x)
+                            .speed(1.0)
+                            .range(-10000.0..=10000.0)
+                            .suffix(" px"),
+                    );
+                    ui.label("Y");
+                    ui.add(
+                        DragValue::new(&mut preset.marker_offset_y)
+                            .speed(1.0)
+                            .range(-10000.0..=10000.0)
+                            .suffix(" px"),
+                    );
+                    if ui.small_button("Reset marker offset").clicked() {
+                        preset.marker_offset_x = 0.0;
+                        preset.marker_offset_y = 0.0;
                     }
                 });
                 if preset.marker_source == EspMarkerSource::Text {
@@ -530,10 +567,9 @@ impl CrosshairApp {
                 }
                 if preset.marker_source == EspMarkerSource::Svg {
                     ui.label("SVG file or inline SVG code");
-                    let hint = RichText::new(
-                        "Paste <svg ...>...</svg> here, or choose an SVG file above",
-                    )
-                    .color(ui.visuals().weak_text_color());
+                    let hint =
+                        RichText::new("Paste <svg ...>...</svg> here, or choose an SVG file above")
+                            .color(ui.visuals().weak_text_color());
                     egui::ScrollArea::vertical()
                         .id_salt(("esp_svg_source_scroll", preset.id))
                         .max_height(72.0)
@@ -599,6 +635,49 @@ impl CrosshairApp {
                             .suffix(" ms"),
                     )
                     .on_hover_text("Smooth marker movement between RAM samples. Set 0 to disable.");
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut preset.target_audio_enabled, "Target sound")
+                        .on_hover_text(
+                            "Play spatial audio from the target: stereo follows its direction and volume fades with distance.",
+                        );
+                    if ui.button("Choose sound").clicked()
+                        && let Some(path) = rfd::FileDialog::new()
+                            .add_filter(
+                                "Audio",
+                                &["wav", "mp3", "flac", "ogg", "m4a", "aac"],
+                            )
+                            .pick_file()
+                    {
+                        preset.target_audio_path = path.to_string_lossy().into_owned();
+                    }
+                    let hint = RichText::new("Audio file").color(ui.visuals().weak_text_color());
+                    ui.add_sized(
+                        [260.0, 21.0],
+                        TextEdit::singleline(&mut preset.target_audio_path).hint_text(hint),
+                    );
+                    ui.checkbox(&mut preset.target_audio_loop, "Loop");
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Volume");
+                    ui.add(
+                        DragValue::new(&mut preset.target_audio_volume)
+                            .speed(0.01)
+                            .range(0.0..=2.0),
+                    )
+                    .on_hover_text("1.0 is the original file volume; up to 2.0 boosts it.");
+                    ui.label("Full volume within");
+                    ui.add(
+                        DragValue::new(&mut preset.target_audio_full_volume_distance)
+                            .speed(1.0)
+                            .range(0.0..=1_000_000.0),
+                    );
+                    ui.label("Silent after");
+                    ui.add(
+                        DragValue::new(&mut preset.target_audio_max_distance)
+                            .speed(1.0)
+                            .range(0.01..=1_000_000.0),
+                    );
                 });
             });
             if migrated_marker_source || preset != before {

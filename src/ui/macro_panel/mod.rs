@@ -20917,10 +20917,9 @@ if supports_move_mouse || show_detection_tuning {
         multiline_on_focus: bool,
         highlight_mode: TextHighlightMode,
     ) -> egui::Response {
-        let focus_key = id.with("expand-focus");
-        let has_focus = ui
-            .memory(|mem| mem.data.get_temp::<bool>(focus_key))
-            .unwrap_or(false);
+        // The widget itself is the source of truth. A separately cached focus bit can survive
+        // after a preset/card is hidden and reopen a long editor at its expanded height.
+        let has_focus = ui.memory(|mem| mem.has_focus(id));
         let target_width = if has_focus {
             expanded_width
         } else {
@@ -20950,8 +20949,7 @@ if supports_move_mouse || show_detection_tuning {
                 let line_len = line.chars().count();
                 estimated_rows += 1 + line_len / chars_per_line;
             }
-            let rows = estimated_rows
-                .clamp(1, ((expanded_height / 20.0).floor() as usize).max(1));
+            let rows = estimated_rows.clamp(1, ((expanded_height / 20.0).floor() as usize).max(1));
             egui::TextEdit::multiline(text)
                 .hint_text(hint)
                 .desired_rows(rows)
@@ -21048,9 +21046,6 @@ if supports_move_mouse || show_detection_tuning {
             && let Some(help_text) = Self::text_edit_field_tooltip(ui, highlight_mode)
         {
             Self::show_text_edit_focus_help(ui, response.id, textbox_rect, help_text);
-        }
-        if now_focused != has_focus {
-            ui.memory_mut(|mem| mem.data.insert_temp(focus_key, now_focused));
         }
         Self::apply_vietnamese_input_static(&response, text);
         response

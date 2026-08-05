@@ -1,11 +1,11 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::File,
     io::BufReader,
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -15,7 +15,7 @@ use anyhow::{Context, Result, bail};
 use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
 use rodio::buffer::SamplesBuffer;
-use rodio::{Decoder, OutputStreamBuilder, Sink, Source};
+use rodio::{Decoder, OutputStreamBuilder, Sink, Source, SpatialSink};
 use symphonia::core::{
     audio::{AudioBufferRef, SampleBuffer},
     codecs::DecoderOptions,
@@ -81,6 +81,138 @@ impl Source for SharedSamplesSource {
         Some(Duration::from_secs_f32(
             frames as f32 / self.sample_rate.max(1) as f32,
         ))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct EspSpatialAudioUpdate {
+    pub preset_id: u32,
+    pub path: String,
+    pub looped: bool,
+    pub volume: f32,
+    pub pan: f32,
+}
+
+struct ActiveEspSpatialAudio {
+    path: PathBuf,
+    looped: bool,
+    sink: SpatialSink,
+}
+
+struct EspSpatialAudioState {
+    _stream: rodio::OutputStream,
+    cache: HashMap<PathBuf, CachedAudio>,
+    active: HashMap<u32, ActiveEspSpatialAudio>,
+}
+
+static ESP_SPATIAL_AUDIO_STARTED: AtomicBool = AtomicBool::new(false);
+static ESP_SPATIAL_AUDIO_LATEST: Lazy<(Mutex<Option<Vec<EspSpatialAudioUpdate>>>, Condvar)> =
+    Lazy::new(|| (Mutex::new(None), Condvar::new()));
+
+pub(crate) fn update_esp_spatial_audio(updates: Vec<EspSpatialAudioUpdate>) {
+    if updates.is_empty() && !ESP_SPATIAL_AUDIO_STARTED.load(Ordering::Acquire) {
+        return;
+    }
+    if !ESP_SPATIAL_AUDIO_STARTED.swap(true, Ordering::AcqRel) {
+        thread::spawn(esp_spatial_audio_worker);
+    }
+    let (latest, wake) = &*ESP_SPATIAL_AUDIO_LATEST;
+    *latest.lock() = Some(updates);
+    wake.notify_one();
+}
+
+fn esp_spatial_audio_worker() {
+    let mut state: Option<EspSpatialAudioState> = None;
+    loop {
+        let updates = {
+            let (latest, wake) = &*ESP_SPATIAL_AUDIO_LATEST;
+            let mut latest = latest.lock();
+            while latest.is_none() {
+                wake.wait(&mut latest);
+            }
+            latest.take().unwrap_or_default()
+        };
+        if updates.is_empty() {
+            if let Some(state) = state.as_mut() {
+                state.active.clear();
+            }
+            continue;
+        }
+        if state.is_none() {
+            let Ok(stream) = OutputStreamBuilder::open_default_stream() else {
+                continue;
+            };
+            state = Some(EspSpatialAudioState {
+                _stream: stream,
+                cache: HashMap::new(),
+                active: HashMap::new(),
+            });
+        }
+        let state = state
+            .as_mut()
+            .expect("ESP audio state should be initialized");
+        let wanted = updates
+            .iter()
+            .map(|update| update.preset_id)
+            .collect::<HashSet<_>>();
+        state
+            .active
+            .retain(|preset_id, _| wanted.contains(preset_id));
+
+        for update in updates {
+            let path = PathBuf::from(update.path.trim());
+            if path.as_os_str().is_empty() || !path.is_file() {
+                state.active.remove(&update.preset_id);
+                continue;
+            }
+            let needs_source = state
+                .active
+                .get(&update.preset_id)
+                .is_none_or(|active| active.path != path || active.looped != update.looped);
+            if needs_source {
+                state.active.remove(&update.preset_id);
+                if !state.cache.contains_key(&path) {
+                    let Ok(audio) = load_cached_audio(path.to_string_lossy().as_ref()) else {
+                        continue;
+                    };
+                    state.cache.insert(path.clone(), audio);
+                }
+                let audio = state.cache.get(&path).expect("cached audio should exist");
+                let source = SharedSamplesSource {
+                    samples: Arc::clone(&audio.samples),
+                    index: 0,
+                    end: audio.samples.len(),
+                    channels: audio.channels,
+                    sample_rate: audio.sample_rate,
+                };
+                let sink = SpatialSink::connect_new(
+                    state._stream.mixer(),
+                    [update.pan.clamp(-1.0, 1.0), 0.0, 1.0],
+                    [-0.3, 0.0, 0.0],
+                    [0.3, 0.0, 0.0],
+                );
+                if update.looped {
+                    sink.append(source.repeat_infinite());
+                } else {
+                    sink.append(source);
+                }
+                sink.play();
+                state.active.insert(
+                    update.preset_id,
+                    ActiveEspSpatialAudio {
+                        path: path.clone(),
+                        looped: update.looped,
+                        sink,
+                    },
+                );
+            }
+            if let Some(active) = state.active.get(&update.preset_id) {
+                active.sink.set_volume(update.volume.clamp(0.0, 2.0));
+                active
+                    .sink
+                    .set_emitter_position([update.pan.clamp(-1.0, 1.0), 0.0, 1.0]);
+            }
+        }
     }
 }
 

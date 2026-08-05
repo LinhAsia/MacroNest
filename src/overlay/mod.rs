@@ -26370,6 +26370,7 @@ mod windows_overlay {
                 }
                 if presets.is_empty() {
                     read_frame = EspReadFrame::default();
+                    crate::audio::update_esp_spatial_audio(Vec::new());
                     if had_shapes {
                         had_shapes = false;
                         send_latest(Vec::new());
@@ -26385,6 +26386,7 @@ mod windows_overlay {
                     .min()
                     .unwrap_or(33);
                 let mut frames = Vec::with_capacity(presets.len());
+                let mut audio_updates = Vec::new();
                 read_frame.begin_sample();
                 for sample in &presets {
                     let preset = &sample.preset;
@@ -26395,10 +26397,12 @@ mod windows_overlay {
                             preset,
                             sample.marker_asset.as_ref(),
                             &mut read_frame,
+                            &mut audio_updates,
                         ),
                     });
                 }
                 had_shapes = frames.iter().any(|frame| !frame.shapes.is_empty());
+                crate::audio::update_esp_spatial_audio(audio_updates);
                 // Never queue behind presentation: only the newest sampled coordinates matter.
                 send_latest(frames);
                 next_frame += Duration::from_millis(interval as u64);
@@ -26875,6 +26879,7 @@ mod windows_overlay {
         preset: &crate::model::EspPreset,
         marker_asset: Option<&Arc<str>>,
         frame: &mut EspReadFrame,
+        audio_updates: &mut Vec<crate::audio::EspSpatialAudioUpdate>,
     ) -> Vec<GeometryRenderShape> {
         if preset.target_window.trim().is_empty() {
             return Vec::new();
@@ -26889,6 +26894,19 @@ mod windows_overlay {
         let Ok((target, camera, yaw, pitch)) = read_esp_inputs(preset, frame) else {
             return Vec::new();
         };
+        if preset.target_audio_enabled && !preset.target_audio_path.trim().is_empty() {
+            let dx = target[0] - camera[0];
+            let dy = target[1] - camera[1];
+            let dz = target[2] - camera[2];
+            let distance = (dx * dx + dy * dy + dz * dz).sqrt();
+            audio_updates.push(crate::audio::EspSpatialAudioUpdate {
+                preset_id: preset.id,
+                path: preset.target_audio_path.clone(),
+                looped: preset.target_audio_loop,
+                volume: crate::model::esp_spatial_audio_gain(preset, distance),
+                pan: crate::model::esp_spatial_audio_pan(preset, target, camera, yaw),
+            });
+        }
         let Some((normalized_x, normalized_y, distance)) = crate::model::project_esp_normalized(
             preset,
             target,
@@ -26900,9 +26918,15 @@ mod windows_overlay {
             return Vec::new();
         };
         let x = left
-            + ((normalized_x + 1.0) * 0.5 * width as f32 + preset.screen_offset_x).round() as i32;
+            + ((normalized_x + 1.0) * 0.5 * width as f32
+                + preset.screen_offset_x
+                + preset.marker_offset_x)
+                .round() as i32;
         let y = top
-            + ((1.0 - normalized_y) * 0.5 * height as f32 + preset.screen_offset_y).round() as i32;
+            + ((1.0 - normalized_y) * 0.5 * height as f32
+                + preset.screen_offset_y
+                + preset.marker_offset_y)
+                .round() as i32;
         let color = [
             preset.color.r,
             preset.color.g,
@@ -26991,10 +27015,19 @@ mod windows_overlay {
             }
             crate::model::EspMarkerSource::Svg | crate::model::EspMarkerSource::Image => {
                 if let Some(code) = marker_asset {
-                    let width = (preset.box_width * marker_scale)
+                    let (marker_width, marker_height) = match preset.marker_source {
+                        crate::model::EspMarkerSource::Svg => {
+                            (preset.svg_width, preset.svg_height)
+                        }
+                        crate::model::EspMarkerSource::Image => {
+                            (preset.image_width, preset.image_height)
+                        }
+                        _ => unreachable!(),
+                    };
+                    let width = (marker_width * marker_scale)
                         .round()
                         .clamp(2.0, 20_000.0) as u32;
-                    let height = (preset.box_height * marker_scale)
+                    let height = (marker_height * marker_scale)
                         .round()
                         .clamp(2.0, 20_000.0) as u32;
                     let left = x - width as i32 / 2;

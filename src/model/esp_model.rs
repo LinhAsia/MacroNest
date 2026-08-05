@@ -95,14 +95,26 @@ pub struct EspPreset {
     pub distance_reference: f32,
     pub marker_size_offset_percent: f32,
     pub marker_billboard_3d: bool,
+    pub marker_offset_x: f32,
+    pub marker_offset_y: f32,
     pub dot_radius: f32,
     pub box_width: f32,
     pub box_height: f32,
+    pub svg_width: f32,
+    pub svg_height: f32,
+    pub image_width: f32,
+    pub image_height: f32,
     pub thickness: f32,
     pub filled: bool,
     pub color: RgbaColor,
     pub show_tracer: bool,
     pub show_distance: bool,
+    pub target_audio_enabled: bool,
+    pub target_audio_path: String,
+    pub target_audio_loop: bool,
+    pub target_audio_volume: f32,
+    pub target_audio_full_volume_distance: f32,
+    pub target_audio_max_distance: f32,
     pub update_interval_ms: u32,
     pub motion_smoothing_ms: u32,
 }
@@ -155,9 +167,15 @@ impl EspPreset {
             distance_reference: 100.0,
             marker_size_offset_percent: 0.0,
             marker_billboard_3d: false,
+            marker_offset_x: 0.0,
+            marker_offset_y: 0.0,
             dot_radius: 7.0,
             box_width: 44.0,
             box_height: 88.0,
+            svg_width: 44.0,
+            svg_height: 88.0,
+            image_width: 44.0,
+            image_height: 88.0,
             thickness: 2.0,
             filled: false,
             color: RgbaColor {
@@ -168,6 +186,12 @@ impl EspPreset {
             },
             show_tracer: false,
             show_distance: false,
+            target_audio_enabled: false,
+            target_audio_path: String::new(),
+            target_audio_loop: true,
+            target_audio_volume: 1.0,
+            target_audio_full_volume_distance: 5.0,
+            target_audio_max_distance: 500.0,
             update_interval_ms: 33,
             motion_smoothing_ms: 40,
         }
@@ -200,6 +224,51 @@ pub fn esp_marker_scale(preset: &EspPreset, distance: f32) -> f32 {
     };
     // ponytail: keep malformed presets from producing invisible or enormous overlay surfaces.
     (perspective * size_offset).clamp(0.05, 20.0)
+}
+
+pub(crate) fn esp_spatial_audio_gain(preset: &EspPreset, distance: f32) -> f32 {
+    let near = preset.target_audio_full_volume_distance.max(0.0);
+    let far = preset.target_audio_max_distance.max(near + 0.01);
+    let distance_gain = if distance <= near {
+        1.0
+    } else if distance >= far {
+        0.0
+    } else {
+        let remaining = 1.0 - (distance - near) / (far - near);
+        remaining * remaining
+    };
+    preset.target_audio_volume.clamp(0.0, 2.0) * distance_gain
+}
+
+pub(crate) fn esp_spatial_audio_pan(
+    preset: &EspPreset,
+    target: [f32; 3],
+    camera: [f32; 3],
+    yaw: f32,
+) -> f32 {
+    let delta = [
+        target[0] - camera[0],
+        target[1] - camera[1],
+        target[2] - camera[2],
+    ];
+    let (forward_a, forward_b) = match preset.horizontal_plane {
+        EspHorizontalPlane::Xy => (delta[0], delta[1]),
+        EspHorizontalPlane::Xz => (delta[0], delta[2]),
+    };
+    if forward_a.hypot(forward_b) <= f32::EPSILON {
+        return 0.0;
+    }
+    let mut camera_yaw = esp_angle_to_radians(yaw, preset.yaw_unit);
+    if preset.invert_camera_yaw {
+        camera_yaw = -camera_yaw;
+    }
+    camera_yaw += preset.yaw_offset_degrees.to_radians();
+    let mut yaw_delta = wrap_angle(forward_b.atan2(forward_a) - camera_yaw);
+    if preset.invert_yaw {
+        yaw_delta = -yaw_delta;
+    }
+    // Sine preserves left/right even when the target is outside the visible FOV or behind.
+    yaw_delta.sin().clamp(-1.0, 1.0)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -419,6 +488,18 @@ mod tests {
         object.remove("distance_reference");
         object.remove("marker_size_offset_percent");
         object.remove("marker_billboard_3d");
+        object.remove("marker_offset_x");
+        object.remove("marker_offset_y");
+        object.remove("svg_width");
+        object.remove("svg_height");
+        object.remove("image_width");
+        object.remove("image_height");
+        object.remove("target_audio_enabled");
+        object.remove("target_audio_path");
+        object.remove("target_audio_loop");
+        object.remove("target_audio_volume");
+        object.remove("target_audio_full_volume_distance");
+        object.remove("target_audio_max_distance");
 
         let preset: EspPreset = serde_json::from_value(value).unwrap();
         assert_eq!(preset.marker_source, EspMarkerSource::Geometry);
@@ -433,6 +514,16 @@ mod tests {
         assert_eq!(preset.distance_reference, 100.0);
         assert_eq!(preset.marker_size_offset_percent, 0.0);
         assert!(!preset.marker_billboard_3d);
+        assert_eq!(preset.marker_offset_x, 0.0);
+        assert_eq!(preset.marker_offset_y, 0.0);
+        assert_eq!(preset.svg_width, 44.0);
+        assert_eq!(preset.svg_height, 88.0);
+        assert_eq!(preset.image_width, 44.0);
+        assert_eq!(preset.image_height, 88.0);
+        assert!(!preset.target_audio_enabled);
+        assert!(preset.target_audio_path.is_empty());
+        assert!(preset.target_audio_loop);
+        assert_eq!(preset.target_audio_volume, 1.0);
     }
 
     #[test]
@@ -453,6 +544,24 @@ mod tests {
         preset.marker_billboard_3d = true;
         preset.distance_reference = 100.0;
         assert!((esp_marker_scale(&preset, 50.0) - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn spatial_audio_is_full_nearby_and_silent_past_max_distance() {
+        let mut preset = EspPreset::default();
+        preset.target_audio_volume = 0.8;
+        preset.target_audio_full_volume_distance = 10.0;
+        preset.target_audio_max_distance = 110.0;
+        assert!((esp_spatial_audio_gain(&preset, 5.0) - 0.8).abs() < f32::EPSILON);
+        assert!((esp_spatial_audio_gain(&preset, 60.0) - 0.2).abs() < 0.001);
+        assert_eq!(esp_spatial_audio_gain(&preset, 120.0), 0.0);
+    }
+
+    #[test]
+    fn spatial_audio_pan_tracks_target_side_outside_the_visible_fov() {
+        let preset = EspPreset::default();
+        assert!(esp_spatial_audio_pan(&preset, [0.0, 1.0, 0.0], [0.0; 3], 0.0) > 0.9);
+        assert!(esp_spatial_audio_pan(&preset, [0.0, -1.0, 0.0], [0.0; 3], 0.0) < -0.9);
     }
 
     #[test]
@@ -573,15 +682,13 @@ mod tests {
         let mut preset = EspPreset::default();
         preset.yaw_unit = EspAngleUnit::Radians;
         preset.pitch_unit = EspAngleUnit::Radians;
-        let (yaw, pitch) =
-            esp_orientation_from_direction_pair(&preset, [1.0, 1.0], -0.29).unwrap();
+        let (yaw, pitch) = esp_orientation_from_direction_pair(&preset, [1.0, 1.0], -0.29).unwrap();
         assert!((yaw - std::f32::consts::FRAC_PI_4).abs() < 0.001);
         assert!((pitch + 0.29).abs() < 0.001);
 
         preset.swap_direction_pair = true;
         preset.invert_direction_a = true;
-        let (yaw, _) =
-            esp_orientation_from_direction_pair(&preset, [1.0, 0.0], -0.29).unwrap();
+        let (yaw, _) = esp_orientation_from_direction_pair(&preset, [1.0, 0.0], -0.29).unwrap();
         assert!((yaw + std::f32::consts::FRAC_PI_2).abs() < 0.001);
     }
 }
