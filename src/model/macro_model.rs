@@ -113,6 +113,7 @@ pub enum MacroAction {
     HideGeometryPreset,
     EnableEspPreset,
     DisableEspPreset,
+    ReadEspTarget,
     FunnyMemeReply,
     AiResponse,
     JumpToStep,
@@ -406,6 +407,22 @@ pub struct MacroStep {
     #[serde(default)]
     pub esp_preset_id: Option<u32>,
     #[serde(default)]
+    pub esp_screen_x_var: String,
+    #[serde(default)]
+    pub esp_screen_y_var: String,
+    #[serde(default)]
+    pub esp_screen_abs_x_var: String,
+    #[serde(default)]
+    pub esp_screen_abs_y_var: String,
+    #[serde(default)]
+    pub esp_distance_var: String,
+    #[serde(default)]
+    pub esp_valid_var: String,
+    #[serde(default)]
+    pub esp_on_screen_var: String,
+    #[serde(default)]
+    pub esp_in_front_var: String,
+    #[serde(default)]
     pub trigger_macro_group_id: Option<u32>,
 }
 
@@ -509,6 +526,14 @@ impl Default for MacroStep {
             geometry_spec: GeometrySpec::default(),
             geometry_collapsed: true,
             esp_preset_id: None,
+            esp_screen_x_var: "screen_x".to_string(),
+            esp_screen_y_var: "screen_y".to_string(),
+            esp_screen_abs_x_var: "screen_abs_x".to_string(),
+            esp_screen_abs_y_var: "screen_abs_y".to_string(),
+            esp_distance_var: "distance".to_string(),
+            esp_valid_var: "valid".to_string(),
+            esp_on_screen_var: "on_screen".to_string(),
+            esp_in_front_var: "in_front".to_string(),
             trigger_macro_group_id: None,
         }
     }

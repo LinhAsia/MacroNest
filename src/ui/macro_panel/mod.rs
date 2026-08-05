@@ -7329,22 +7329,16 @@ impl CrosshairApp {
                                                         );
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
-                                                        for action in [
-                                                            MacroAction::EnableEspPreset,
-                                                            MacroAction::DisableEspPreset,
-                                                        ] {
-                                                            Self::render_macro_action_option(
-                                                                ui,
-                                                                language,
-                                                                &mut step.action,
-                                                                action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                                false,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                        }
+                                                        Self::render_esp_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "hold-stop-esp-group"),
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
                                                         Self::render_audio_sense_action_group_option(
                                                             ui,
                                                             language,
@@ -9177,6 +9171,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
+                                                    | MacroAction::ReadEspTarget
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -9187,6 +9182,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::HideGeometryPreset
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
+                                                        | MacroAction::ReadEspTarget
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -9696,22 +9692,16 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         );
                                                         grid_col += 1;
                                                         if grid_col % 8 == 0 { ui.end_row(); }
-                                                        for action in [
-                                                            MacroAction::EnableEspPreset,
-                                                            MacroAction::DisableEspPreset,
-                                                        ] {
-                                                            Self::render_macro_action_option(
-                                                                ui,
-                                                                language,
-                                                                &mut step.action,
-                                                                action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                                false,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                        }
+                                                        Self::render_esp_action_group_option(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, "press-stop-esp-group"),
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                            action_hover_id,
+                                                        );
+                                                        grid_col += 1;
+                                                        if grid_col % 8 == 0 { ui.end_row(); }
                                                         Self::render_audio_sense_action_group_option(
                                                             ui,
                                                             language,
@@ -11545,6 +11535,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
+                                                    | MacroAction::ReadEspTarget
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -11555,6 +11546,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::HideGeometryPreset
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
+                                                        | MacroAction::ReadEspTarget
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -12967,22 +12959,16 @@ if supports_move_mouse || show_detection_tuning {
                                                             );
                                                             grid_col += 1;
                                                             if grid_col % 8 == 0 { ui.end_row(); }
-                                                            for action in [
-                                                                MacroAction::EnableEspPreset,
-                                                                MacroAction::DisableEspPreset,
-                                                            ] {
-                                                                Self::render_macro_action_option(
-                                                                    ui,
-                                                                    language,
-                                                                    &mut step.action,
-                                                                    action,
-                                                                    &mut live_sync,
-                                                                    action_hover_id,
-                                                                    false,
-                                                                );
-                                                                grid_col += 1;
-                                                                if grid_col % 8 == 0 { ui.end_row(); }
-                                                            }
+                                                            Self::render_esp_action_group_option(
+                                                                ui,
+                                                                language,
+                                                                (group.id, preset.id, step_index, "esp-group"),
+                                                                &mut step.action,
+                                                                &mut live_sync,
+                                                                action_hover_id,
+                                                            );
+                                                            grid_col += 1;
+                                                            if grid_col % 8 == 0 { ui.end_row(); }
                                                             Self::render_audio_sense_action_group_option(
                                                                 ui,
                                                                 language,
@@ -15312,6 +15298,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
+                                                    | MacroAction::ReadEspTarget
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -15503,6 +15490,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::HideGeometryPreset
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
+                                                        | MacroAction::ReadEspTarget
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -17626,8 +17614,14 @@ if supports_move_mouse || show_detection_tuning {
             MacroAction::DrawGeometry,
             MacroAction::ShowGeometryPreset,
             MacroAction::HideGeometryPreset,
+        ]
+    }
+
+    fn esp_macro_actions() -> &'static [MacroAction] {
+        &[
             MacroAction::EnableEspPreset,
             MacroAction::DisableEspPreset,
+            MacroAction::ReadEspTarget,
         ]
     }
 
@@ -17764,6 +17758,10 @@ if supports_move_mouse || show_detection_tuning {
 
     fn macro_action_is_geometry(action: MacroAction) -> bool {
         Self::geometry_macro_actions().contains(&action)
+    }
+
+    fn macro_action_is_esp(action: MacroAction) -> bool {
+        Self::esp_macro_actions().contains(&action)
     }
 
     fn audio_sense_macro_actions() -> &'static [MacroAction] {
@@ -17921,6 +17919,137 @@ if supports_move_mouse || show_detection_tuning {
                     "Geometry\nOpen draw, show, hide, and clear geometry actions.",
                     "Geometry\nOpen draw, show, hide, and clear geometry actions.",
                 ),
+            );
+        }
+    }
+
+    fn render_esp_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        _id_source: impl std::hash::Hash + Copy,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        let id_source = action_hover_id;
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
+        let selected = Self::macro_action_is_esp(*current);
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
+        let popup_id = egui::Id::new((id_source, "esp-submenu-popup"));
+        let active_owner = ui
+            .ctx()
+            .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
+        let top_level_hovered = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(action_hover_id))
+            .unwrap_or(false);
+        let mut open = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
+        if active_owner != Some(MacroActionSubmenuKind::Esp) {
+            open = false;
+        }
+        if top_level_hovered {
+            open = false;
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
+        }
+        let inner = ui.allocate_ui_with_layout(
+            vec2(58.0, 42.0),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                let response = ui.add_sized(
+                    [34.0, 24.0],
+                    Button::new(Self::material_icon_text(0xe8b6, 18.0)).selected(selected),
+                );
+                if response.clicked() || (!hover_blocked && response.hovered()) {
+                    Self::clear_macro_action_submenus(ui, id_source);
+                    open = true;
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(owner_id, MacroActionSubmenuKind::Esp));
+                }
+                let popup_rect_id = ui.make_persistent_id((id_source, "esp-submenu-rect"));
+                let popup_response = egui::Popup::from_response(&response)
+                    .id(popup_id)
+                    .open_bool(&mut open)
+                    .align(egui::RectAlign::BOTTOM_START)
+                    .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                    .width(220.0)
+                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .show(|ui| {
+                        let rect = ui.max_rect();
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(popup_rect_id, rect));
+                        egui::Grid::new((id_source, "esp-action-grid"))
+                            .num_columns(2)
+                            .spacing([6.0, 6.0])
+                            .show(ui, |ui| {
+                                for action in Self::esp_macro_actions().iter().copied() {
+                                    Self::render_macro_action_option(
+                                        ui,
+                                        language,
+                                        current,
+                                        action,
+                                        live_sync,
+                                        action_hover_id,
+                                        true,
+                                    );
+                                }
+                            });
+                    });
+                let popup_rect: Option<egui::Rect> =
+                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
+                if open {
+                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+                        let mut keep_open_rect = response.rect.expand(10.0);
+                        if let Some(rect) = popup_rect {
+                            keep_open_rect = keep_open_rect.union(rect.expand(10.0));
+                            if rect.contains(pointer_pos) {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(owner_id, MacroActionSubmenuKind::Esp)
+                                });
+                            }
+                        }
+                        if !keep_open_rect.contains(pointer_pos) {
+                            open = false;
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                            });
+                        }
+                    } else {
+                        open = false;
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                        });
+                    }
+                }
+                ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
+                let label_color = if selected {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.label(RichText::new("ESP").size(9.0).color(label_color));
+                if let Some(popup) = popup_response {
+                    popup.response
+                } else {
+                    response
+                }
+            },
+        );
+        let response = inner.inner;
+        if !open {
+            Self::show_instant_hover_tooltip(
+                ui,
+                &response,
+                "ESP\nOpen enable, disable, and target data actions.",
             );
         }
     }
@@ -19761,7 +19890,9 @@ if supports_move_mouse || show_detection_tuning {
                         }
                     });
                 }
-                MacroAction::EnableEspPreset | MacroAction::DisableEspPreset => {
+                MacroAction::EnableEspPreset
+                | MacroAction::DisableEspPreset
+                | MacroAction::ReadEspTarget => {
                     let selected = step
                         .esp_preset_id
                         .and_then(|id| {
@@ -19781,6 +19912,72 @@ if supports_move_mouse || show_detection_tuning {
                                     .changed();
                             }
                         });
+                    if step.action == MacroAction::ReadEspTarget {
+                        egui::Grid::new((id_prefix, "esp-target-output-vars"))
+                            .num_columns(4)
+                            .spacing([4.0, 2.0])
+                            .show(ui, |ui| {
+                                ui.label("X");
+                                *live_sync |= ui
+                                    .add_sized(
+                                        [86.0, 20.0],
+                                        TextEdit::singleline(&mut step.esp_screen_x_var),
+                                    )
+                                    .changed();
+                                ui.label("Y");
+                                *live_sync |= ui
+                                    .add_sized(
+                                        [86.0, 20.0],
+                                        TextEdit::singleline(&mut step.esp_screen_y_var),
+                                    )
+                                    .changed();
+                                ui.end_row();
+                                ui.label("Abs X");
+                                *live_sync |= ui
+                                    .add_sized(
+                                        [86.0, 20.0],
+                                        TextEdit::singleline(&mut step.esp_screen_abs_x_var),
+                                    )
+                                    .changed();
+                                ui.label("Abs Y");
+                                *live_sync |= ui
+                                    .add_sized(
+                                        [86.0, 20.0],
+                                        TextEdit::singleline(&mut step.esp_screen_abs_y_var),
+                                    )
+                                    .changed();
+                                ui.end_row();
+                                ui.label("Distance");
+                                *live_sync |= ui
+                                    .add_sized(
+                                        [86.0, 20.0],
+                                        TextEdit::singleline(&mut step.esp_distance_var),
+                                    )
+                                    .changed();
+                                ui.label("Valid");
+                                *live_sync |= ui
+                                    .add_sized(
+                                        [86.0, 20.0],
+                                        TextEdit::singleline(&mut step.esp_valid_var),
+                                    )
+                                    .changed();
+                                ui.end_row();
+                                ui.label("On screen");
+                                *live_sync |= ui
+                                    .add_sized(
+                                        [86.0, 20.0],
+                                        TextEdit::singleline(&mut step.esp_on_screen_var),
+                                    )
+                                    .changed();
+                                ui.label("In front");
+                                *live_sync |= ui
+                                    .add_sized(
+                                        [86.0, 20.0],
+                                        TextEdit::singleline(&mut step.esp_in_front_var),
+                                    )
+                                    .changed();
+                            });
+                    }
                 }
                 _ => {}
             });

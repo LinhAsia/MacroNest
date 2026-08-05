@@ -383,6 +383,19 @@ mod windows_overlay {
     static ESP_CALIBRATION_SAMPLES: Lazy<
         Mutex<HashMap<u32, Vec<crate::model::EspCalibrationSample>>>,
     > = Lazy::new(|| Mutex::new(HashMap::new()));
+    #[derive(Clone, Copy)]
+    struct EspTargetSnapshot {
+        sampled_at: Instant,
+        relative_x: f64,
+        relative_y: f64,
+        absolute_x: f64,
+        absolute_y: f64,
+        distance: f64,
+        on_screen: bool,
+        in_front: bool,
+    }
+    static ESP_TARGET_SNAPSHOTS: Lazy<Mutex<HashMap<u32, EspTargetSnapshot>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
     static ACTIVE_BIN_PIN_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> =
         Lazy::new(|| Mutex::new(None));
     static ACTIVE_BIN_PIN_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
@@ -26370,6 +26383,7 @@ mod windows_overlay {
                 }
                 if presets.is_empty() {
                     read_frame = EspReadFrame::default();
+                    ESP_TARGET_SNAPSHOTS.lock().clear();
                     crate::audio::update_esp_spatial_audio(Vec::new());
                     if had_shapes {
                         had_shapes = false;
@@ -26386,21 +26400,27 @@ mod windows_overlay {
                     .min()
                     .unwrap_or(33);
                 let mut frames = Vec::with_capacity(presets.len());
+                let mut snapshots = HashMap::with_capacity(presets.len());
                 let mut audio_updates = Vec::new();
                 read_frame.begin_sample();
                 for sample in &presets {
                     let preset = &sample.preset;
+                    let (shapes, snapshot) = esp_shapes_for_preset(
+                        preset,
+                        sample.marker_asset.as_ref(),
+                        &mut read_frame,
+                        &mut audio_updates,
+                    );
+                    if let Some(snapshot) = snapshot {
+                        snapshots.insert(preset.id, snapshot);
+                    }
                     frames.push(EspRenderPreset {
                         id: preset.id,
                         smoothing_ms: preset.motion_smoothing_ms,
-                        shapes: esp_shapes_for_preset(
-                            preset,
-                            sample.marker_asset.as_ref(),
-                            &mut read_frame,
-                            &mut audio_updates,
-                        ),
+                        shapes,
                     });
                 }
+                *ESP_TARGET_SNAPSHOTS.lock() = snapshots;
                 had_shapes = frames.iter().any(|frame| !frame.shapes.is_empty());
                 crate::audio::update_esp_spatial_audio(audio_updates);
                 // Never queue behind presentation: only the newest sampled coordinates matter.
@@ -26880,19 +26900,19 @@ mod windows_overlay {
         marker_asset: Option<&Arc<str>>,
         frame: &mut EspReadFrame,
         audio_updates: &mut Vec<crate::audio::EspSpatialAudioUpdate>,
-    ) -> Vec<GeometryRenderShape> {
+    ) -> (Vec<GeometryRenderShape>, Option<EspTargetSnapshot>) {
         if preset.target_window.trim().is_empty() {
-            return Vec::new();
+            return (Vec::new(), None);
         }
         let selector = preset.target_window.as_str();
         let Some((left, top, width, height)) = esp_target_bounds(selector) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         if width <= 0 || height <= 0 {
-            return Vec::new();
+            return (Vec::new(), None);
         }
         let Ok((target, camera, yaw, pitch)) = read_esp_inputs(preset, frame) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         if preset.target_audio_enabled && !preset.target_audio_path.trim().is_empty() {
             let dx = target[0] - camera[0];
@@ -26907,7 +26927,7 @@ mod windows_overlay {
                 pan: crate::model::esp_spatial_audio_pan(preset, target, camera, yaw),
             });
         }
-        let Some((normalized_x, normalized_y, distance)) = crate::model::project_esp_normalized(
+        let Some(projection) = crate::model::project_esp(
             preset,
             target,
             camera,
@@ -26915,8 +26935,34 @@ mod windows_overlay {
             pitch,
             width as f32 / height as f32,
         ) else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
+        let normalized_x = projection.normalized_x;
+        let normalized_y = projection.normalized_y;
+        let distance = projection.distance;
+        let relative_x = ((normalized_x + 1.0) * 0.5 * width as f32
+            + preset.screen_offset_x
+            + preset.marker_offset_x) as f64;
+        let relative_y = ((1.0 - normalized_y) * 0.5 * height as f32
+            + preset.screen_offset_y
+            + preset.marker_offset_y) as f64;
+        let snapshot = EspTargetSnapshot {
+            sampled_at: Instant::now(),
+            relative_x,
+            relative_y,
+            absolute_x: left as f64 + relative_x,
+            absolute_y: top as f64 + relative_y,
+            distance: distance as f64,
+            on_screen: projection.on_screen
+                && relative_x >= 0.0
+                && relative_x < width as f64
+                && relative_y >= 0.0
+                && relative_y < height as f64,
+            in_front: projection.in_front,
+        };
+        if !projection.on_screen {
+            return (Vec::new(), Some(snapshot));
+        }
         let x = left
             + ((normalized_x + 1.0) * 0.5 * width as f32
                 + preset.screen_offset_x
@@ -27079,7 +27125,7 @@ mod windows_overlay {
                 }),
             });
         }
-        shapes
+        (shapes, Some(snapshot))
     }
 
     pub(crate) fn apply_window_preset_by_id(spec: &str) -> Result<()> {
@@ -29853,6 +29899,10 @@ mod windows_overlay {
                     }
                 }
 
+                MacroAction::ReadEspTarget => {
+                    read_esp_target_snapshot(step);
+                }
+
                 MacroAction::StopVisionWait => {
                     let _ = stop_vision_waiting(&step.key);
                 }
@@ -30626,6 +30676,10 @@ mod windows_overlay {
                             step.action == MacroAction::EnableEspPreset,
                         );
                     }
+                }
+
+                MacroAction::ReadEspTarget => {
+                    read_esp_target_snapshot(step);
                 }
 
                 MacroAction::StopVisionWait => {
@@ -39407,6 +39461,52 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
+    fn read_esp_target_snapshot(step: &crate::model::MacroStep) {
+        let set_valid = |value: bool| {
+            if !step.esp_valid_var.trim().is_empty() {
+                set_variable_value(&step.esp_valid_var, value as u8 as f64);
+            }
+        };
+        let Some(preset_id) = step.esp_preset_id else {
+            set_valid(false);
+            return;
+        };
+        let (enabled, max_age) = {
+            let state = HOOK_STATE.lock();
+            let Some(preset) = state.esp_presets.iter().find(|preset| preset.id == preset_id)
+            else {
+                set_valid(false);
+                return;
+            };
+            (
+                preset.enabled,
+                Duration::from_millis(
+                    (preset.update_interval_ms.clamp(1, 1000) as u64 * 4).clamp(250, 4000),
+                ),
+            )
+        };
+        let snapshot = ESP_TARGET_SNAPSHOTS.lock().get(&preset_id).copied();
+        let Some(snapshot) = snapshot.filter(|snapshot| {
+            enabled && snapshot.sampled_at.elapsed() <= max_age
+        }) else {
+            set_valid(false);
+            return;
+        };
+        let set = |name: &str, value: f64| {
+            if !name.trim().is_empty() {
+                set_variable_value(name, value);
+            }
+        };
+        set(&step.esp_screen_x_var, snapshot.relative_x);
+        set(&step.esp_screen_y_var, snapshot.relative_y);
+        set(&step.esp_screen_abs_x_var, snapshot.absolute_x);
+        set(&step.esp_screen_abs_y_var, snapshot.absolute_y);
+        set(&step.esp_distance_var, snapshot.distance);
+        set(&step.esp_on_screen_var, snapshot.on_screen as u8 as f64);
+        set(&step.esp_in_front_var, snapshot.in_front as u8 as f64);
+        set_valid(true);
+    }
+
     fn set_esp_preset_enabled(preset_id: u32, enabled: bool) {
         let ui_tx = {
             let mut state = HOOK_STATE.lock();
@@ -39423,6 +39523,9 @@ mod windows_overlay {
             preset.enabled = enabled;
             state.ui_tx.clone()
         };
+        if !enabled {
+            ESP_TARGET_SNAPSHOTS.lock().remove(&preset_id);
+        }
         if let Some(tx) = ui_tx {
             let _ = tx.send(UiCommand::EspPresetEnabled { preset_id, enabled });
         }

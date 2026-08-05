@@ -424,15 +424,31 @@ pub(crate) fn solve_esp_calibration(
     })
 }
 
-/// Projects a world position into normalized screen coordinates (-1..=1).
-pub(crate) fn project_esp_normalized(
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EspProjection {
+    pub normalized_x: f32,
+    pub normalized_y: f32,
+    pub distance: f32,
+    pub in_front: bool,
+    pub on_screen: bool,
+}
+
+/// Projects a world position and keeps visibility metadata for non-rendering consumers.
+pub(crate) fn project_esp(
     preset: &EspPreset,
     target: [f32; 3],
     camera: [f32; 3],
     yaw: f32,
     pitch: f32,
     aspect: f32,
-) -> Option<(f32, f32, f32)> {
+) -> Option<EspProjection> {
+    if !target.into_iter().chain(camera).all(f32::is_finite)
+        || !yaw.is_finite()
+        || !pitch.is_finite()
+        || !aspect.is_finite()
+    {
+        return None;
+    }
     let dx = target[0] - camera[0];
     let dy = target[1] - camera[1];
     let dz = target[2] - camera[2];
@@ -465,7 +481,36 @@ pub(crate) fn project_esp_normalized(
     let half_fov_y = (half_fov_x.tan() / aspect.max(0.01)).atan();
     let x = yaw_delta.tan() / half_fov_x.tan();
     let y = pitch_delta.tan() / half_fov_y.tan();
-    (yaw_delta.abs() < half_fov_x && pitch_delta.abs() < half_fov_y).then_some((x, y, distance))
+    if !x.is_finite() || !y.is_finite() || !distance.is_finite() {
+        return None;
+    }
+    let in_front = yaw_delta.abs() < std::f32::consts::FRAC_PI_2;
+    Some(EspProjection {
+        normalized_x: x,
+        normalized_y: y,
+        distance,
+        in_front,
+        on_screen: in_front
+            && yaw_delta.abs() < half_fov_x
+            && pitch_delta.abs() < half_fov_y,
+    })
+}
+
+/// Projects a world position into normalized screen coordinates (-1..=1).
+pub(crate) fn project_esp_normalized(
+    preset: &EspPreset,
+    target: [f32; 3],
+    camera: [f32; 3],
+    yaw: f32,
+    pitch: f32,
+    aspect: f32,
+) -> Option<(f32, f32, f32)> {
+    let projection = project_esp(preset, target, camera, yaw, pitch, aspect)?;
+    projection.on_screen.then_some((
+        projection.normalized_x,
+        projection.normalized_y,
+        projection.distance,
+    ))
 }
 
 #[cfg(test)]

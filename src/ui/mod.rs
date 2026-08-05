@@ -598,6 +598,7 @@ pub(crate) enum MacroActionSubmenuKind {
     Timer,
     If,
     Geometry,
+    Esp,
     AudioSense,
     Funny,
 }
@@ -9425,6 +9426,7 @@ impl CrosshairApp {
             MacroAction::HideGeometryPreset => "HideGeometry",
             MacroAction::EnableEspPreset => "EnableESP",
             MacroAction::DisableEspPreset => "DisableESP",
+            MacroAction::ReadEspTarget => "ReadESPTarget",
             MacroAction::FunnyMemeReply => "MemeReply",
             MacroAction::AiResponse => "AiResponse",
             MacroAction::JumpToStep => "JumpToStep",
@@ -9751,6 +9753,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.disable_esp_preset",
                 "Disable one shared ESP preset from the ESP tab.",
             ),
+            MacroAction::ReadEspTarget => (
+                "macro_action_tooltip.read_esp_target",
+                "Read the selected ESP preset's latest projected target data into macro variables.",
+            ),
             MacroAction::FunnyMemeReply => (
                 "macro_action_tooltip.funny_meme_reply",
                 "Turn one message into a meme search query, fetch the best image result, and copy it to the clipboard.",
@@ -9859,6 +9865,7 @@ impl CrosshairApp {
             MacroAction::HideGeometryPreset => 0xe8f5,
             MacroAction::EnableEspPreset => 0xe8f4,
             MacroAction::DisableEspPreset => 0xe8f5,
+            MacroAction::ReadEspTarget => 0xe8b6,
             MacroAction::FunnyMemeReply => 0xe420,
             MacroAction::AiResponse => 0xeb8e,
             MacroAction::JumpToStep => 0xe5c8,
@@ -10028,6 +10035,9 @@ impl CrosshairApp {
             }
             MacroAction::DisableEspPreset => {
                 ("macro_action_short_label.disable_esp_preset", "ESP Off")
+            }
+            MacroAction::ReadEspTarget => {
+                ("macro_action_short_label.read_esp_target", "ESP Data")
             }
             MacroAction::FunnyMemeReply => ("macro_action_short_label.funny_meme_reply", "Meme"),
             MacroAction::AiResponse => ("macro_action_short_label.ai_response", "AI"),
