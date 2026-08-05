@@ -240,9 +240,10 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
 const ERROR_SEM_TIMEOUT: i32 = 121;
 const ERROR_BAD_LENGTH: i32 = 24;
 const ERROR_MORE_DATA: i32 = 234;
-// ponytail: one decoded instruction is enough for the next code-list step. Keeping the
-// debugger attached for repeated writes can stall a hot render/gameplay value.
-const MAX_INSTRUCTION_HITS: usize = 1;
+// ponytail: keep address watches bounded. A single hit is not enough to tell an
+// initialization write from a live position update, while an unbounded hardware
+// watchpoint can pause a hot game thread until the game stalls or crashes.
+const MAX_ADDRESS_WATCH_HITS: usize = 64;
 const RESUME_FLAG: u32 = 1 << 16;
 
 #[repr(C, align(16))]
@@ -655,7 +656,7 @@ fn watch_loop<F>(
                                     let likely_stack_copy =
                                         address.abs_diff(context.Rsp as usize) < 8 * 1024 * 1024;
                                     access_hits += 1;
-                                    let limit = if read_write { 1 } else { MAX_INSTRUCTION_HITS };
+                                    let limit = MAX_ADDRESS_WATCH_HITS;
                                     let should_stop = access_hits >= limit;
                                     if should_stop {
                                         // Every target thread is paused while this debug event is
