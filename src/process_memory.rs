@@ -748,9 +748,8 @@ pub fn query_memory_region(pid: u32, address: usize) -> io::Result<MemoryRegionI
 }
 
 pub fn read_memory_bytes(pid: u32, address: usize, length: usize) -> io::Result<Vec<u8>> {
-    let process = ScanProcess::open(pid, false)?;
     let mut bytes = vec![0; length];
-    let read = process.read(address, &mut bytes)?;
+    let read = with_cached_read_process(pid, |process| process.read(address, &mut bytes))?;
     bytes.truncate(read);
     Ok(bytes)
 }

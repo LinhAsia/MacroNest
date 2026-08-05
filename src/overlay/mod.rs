@@ -26330,6 +26330,7 @@ mod windows_overlay {
             // This prevents the read cost from accumulating on top of the requested interval.
             let mut next_frame = Instant::now();
             let mut had_shapes = false;
+            let mut read_frame = EspReadFrame::default();
             let send_latest = |shapes| {
                 match render_tx.try_send(shapes) {
                     Ok(()) => {}
@@ -26351,6 +26352,7 @@ mod windows_overlay {
                     .cloned()
                     .collect::<Vec<_>>();
                 if presets.is_empty() {
+                    read_frame = EspReadFrame::default();
                     if had_shapes {
                         had_shapes = false;
                         send_latest(Vec::new());
@@ -26366,12 +26368,12 @@ mod windows_overlay {
                     .min()
                     .unwrap_or(33);
                 let mut frames = Vec::with_capacity(presets.len());
-                let mut frame = EspReadFrame::default();
+                read_frame.begin_sample();
                 for preset in &presets {
                     frames.push(EspRenderPreset {
                         id: preset.id,
                         smoothing_ms: preset.motion_smoothing_ms,
-                        shapes: esp_shapes_for_preset(preset, &mut frame),
+                        shapes: esp_shapes_for_preset(preset, &mut read_frame),
                     });
                 }
                 had_shapes = frames.iter().any(|frame| !frame.shapes.is_empty());
@@ -26514,21 +26516,130 @@ mod windows_overlay {
         shape
     }
 
+    const ESP_RESOLVED_ADDRESS_TTL: Duration = Duration::from_millis(50);
+
+    #[derive(Clone, Copy)]
+    struct EspResolvedAddress {
+        target_pid: u32,
+        address: usize,
+        resolved_at: Instant,
+    }
+
     #[derive(Default)]
     struct EspReadFrame {
-        pids: HashMap<String, Option<u32>>,
+        pids: HashMap<String, (Instant, Option<u32>)>,
         values: HashMap<(u32, usize, u8), f32>,
+        memory_blocks: HashMap<(u32, usize), Vec<u8>>,
+        resolved_addresses: HashMap<u32, HashMap<String, EspResolvedAddress>>,
     }
 
     impl EspReadFrame {
+        fn begin_sample(&mut self) {
+            self.values.clear();
+            self.memory_blocks.clear();
+        }
+
         fn pid_for(&mut self, target_window: &str) -> Option<u32> {
-            let key = target_window.trim().to_owned();
-            if let Some(pid) = self.pids.get(&key) {
+            let key = target_window.trim();
+            if let Some((cached_at, pid)) = self.pids.get(key)
+                && cached_at.elapsed() < Duration::from_millis(250)
+            {
                 return *pid;
             }
-            let pid = macro_memory_target_pid(Some(key.as_str()));
-            self.pids.insert(key, pid);
+            let pid = macro_memory_target_pid(Some(key));
+            self.pids.insert(key.to_owned(), (Instant::now(), pid));
             pid
+        }
+
+        fn resolve_address(
+            &mut self,
+            pid: u32,
+            expression: &str,
+            force: bool,
+        ) -> Option<(u32, usize)> {
+            let expression = expression.trim();
+            if !force
+                && let Some(cached) = self
+                    .resolved_addresses
+                    .get(&pid)
+                    .and_then(|addresses| addresses.get(expression))
+                && cached.resolved_at.elapsed() < ESP_RESOLVED_ADDRESS_TTL
+            {
+                return Some((cached.target_pid, cached.address));
+            }
+            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression, false)?;
+            self.resolved_addresses
+                .entry(pid)
+                .or_default()
+                .insert(
+                    expression.to_owned(),
+                    EspResolvedAddress {
+                        target_pid,
+                        address,
+                        resolved_at: Instant::now(),
+                    },
+                );
+            Some((target_pid, address))
+        }
+
+        fn read_value(
+            &mut self,
+            pid: u32,
+            expression: &str,
+            value_type: crate::model::MemoryValueType,
+        ) -> Result<f32, String> {
+            let (mut target_pid, mut address) = self
+                .resolve_address(pid, expression, false)
+                .ok_or_else(|| "could not be resolved".to_owned())?;
+            let tag = esp_value_type_tag(value_type);
+            if let Some(value) = self.values.get(&(target_pid, address, tag)) {
+                return Ok(*value);
+            }
+            let value = match self.read_numeric_value(target_pid, address, value_type) {
+                Ok(value) => value,
+                Err(_) => {
+                    // A scene change can replace a pointer chain between refreshes. Retry the
+                    // chain immediately instead of showing the stale sample for the cache TTL.
+                    (target_pid, address) = self
+                        .resolve_address(pid, expression, true)
+                        .ok_or_else(|| "could not be resolved".to_owned())?;
+                    self.read_numeric_value(target_pid, address, value_type)
+                        .map_err(|error| error.to_string())?
+                }
+            };
+            self.values.insert((target_pid, address, tag), value);
+            Ok(value)
+        }
+
+        fn read_numeric_value(
+            &mut self,
+            pid: u32,
+            address: usize,
+            value_type: crate::model::MemoryValueType,
+        ) -> std::io::Result<f32> {
+            // Nearby fields such as X/Y/Z normally live in one object. Reading one small block
+            // turns three or more cross-process syscalls into one without caching stale values.
+            const ALIGNMENT: usize = 16;
+            const BLOCK_SIZE: usize = 32;
+            let block_address = address & !(ALIGNMENT - 1);
+            let offset = address - block_address;
+            let width = esp_value_width(value_type);
+            let key = (pid, block_address);
+            if !self.memory_blocks.contains_key(&key)
+                && let Ok(bytes) =
+                    crate::process_memory::read_memory_bytes(pid, block_address, BLOCK_SIZE)
+                && bytes.len() == BLOCK_SIZE
+            {
+                self.memory_blocks.insert(key, bytes);
+            }
+            if let Some(bytes) = self.memory_blocks.get(&key)
+                && let Some(value) = bytes
+                    .get(offset..offset + width)
+                    .and_then(|bytes| decode_esp_numeric_bytes(bytes, value_type))
+            {
+                return Ok(value);
+            }
+            read_esp_numeric_value(pid, address, value_type)
         }
     }
 
@@ -26543,6 +26654,62 @@ mod windows_overlay {
         }
     }
 
+    fn esp_value_width(value_type: crate::model::MemoryValueType) -> usize {
+        match value_type {
+            crate::model::MemoryValueType::I8 => 1,
+            crate::model::MemoryValueType::I16 => 2,
+            crate::model::MemoryValueType::I32 | crate::model::MemoryValueType::F32 => 4,
+            crate::model::MemoryValueType::I64 | crate::model::MemoryValueType::F64 => 8,
+        }
+    }
+
+    fn decode_esp_numeric_bytes(
+        bytes: &[u8],
+        value_type: crate::model::MemoryValueType,
+    ) -> Option<f32> {
+        Some(match value_type {
+            crate::model::MemoryValueType::I8 => i8::from_le_bytes(bytes.try_into().ok()?) as f32,
+            crate::model::MemoryValueType::I16 => {
+                i16::from_le_bytes(bytes.try_into().ok()?) as f32
+            }
+            crate::model::MemoryValueType::I32 => {
+                i32::from_le_bytes(bytes.try_into().ok()?) as f32
+            }
+            crate::model::MemoryValueType::F32 => f32::from_le_bytes(bytes.try_into().ok()?),
+            crate::model::MemoryValueType::I64 => {
+                i64::from_le_bytes(bytes.try_into().ok()?) as f32
+            }
+            crate::model::MemoryValueType::F64 => {
+                f64::from_le_bytes(bytes.try_into().ok()?) as f32
+            }
+        })
+    }
+
+    fn read_esp_numeric_value(
+        pid: u32,
+        address: usize,
+        value_type: crate::model::MemoryValueType,
+    ) -> std::io::Result<f32> {
+        use crate::process_memory::{ScanValue, ScanValueType};
+
+        let scan_type = match value_type {
+            crate::model::MemoryValueType::I8 => ScanValueType::I8,
+            crate::model::MemoryValueType::I16 => ScanValueType::I16,
+            crate::model::MemoryValueType::I32 => ScanValueType::I32,
+            crate::model::MemoryValueType::F32 => ScanValueType::F32,
+            crate::model::MemoryValueType::I64 => ScanValueType::I64,
+            crate::model::MemoryValueType::F64 => ScanValueType::F64,
+        };
+        Ok(match crate::process_memory::read_scan_value(pid, address, scan_type)? {
+            ScanValue::I8(value) => value as f32,
+            ScanValue::I16(value) => value as f32,
+            ScanValue::I32(value) => value as f32,
+            ScanValue::F32(value) => value,
+            ScanValue::I64(value) => value as f32,
+            ScanValue::F64(value) => value as f32,
+        })
+    }
+
     fn read_esp_inputs(
         preset: &crate::model::EspPreset,
         frame: &mut EspReadFrame,
@@ -26554,22 +26721,11 @@ mod windows_overlay {
             return Err("the target window is not running".to_owned());
         };
         let mut read = |label: &str, expression: &str| -> Result<f32, String> {
-            // ponytail: ESP rendering is a read-only hot path. Rebinding may attach a debugger,
-            // so it must only be initiated by the macro memory path, never by every ESP frame.
-            let (target_pid, address) = resolve_memory_action_target(Some(pid), expression, false)
-                .ok_or_else(|| format!("{label} could not be resolved"))?;
-            let key = (target_pid, address, esp_value_type_tag(preset.value_type));
-            if let Some(value) = frame.values.get(&key) {
-                return Ok(*value);
-            }
-            crate::process_memory::read_value(target_pid, address, preset.value_type)
-                .map_err(|error| format!("{label}: {error}"))?
-                .parse::<f32>()
-                .map_err(|_| format!("{label} is not a number"))
-                .map(|value| {
-                    frame.values.insert(key, value);
-                    value
-                })
+            // ponytail: resolve pointer chains at 20 Hz while values remain fresh every sample.
+            // If a game replaces the chain, a failed final read forces an immediate re-resolve.
+            frame
+                .read_value(pid, expression, preset.value_type)
+                .map_err(|error| format!("{label}: {error}"))
         };
         let target = [
             read("Target X", &preset.target_x)?,
