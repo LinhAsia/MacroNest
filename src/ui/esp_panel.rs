@@ -658,16 +658,33 @@ impl CrosshairApp {
                     );
                     let mut smooth_enabled = preset.motion_smoothing_ms > 0;
                     if ui.checkbox(&mut smooth_enabled, "Smooth").clicked() {
-                        preset.motion_smoothing_ms = if smooth_enabled { 16 } else { 0 };
+                        preset.motion_smoothing_ms = if smooth_enabled { 40 } else { 0 };
                     }
                     if smooth_enabled {
+                        egui::ComboBox::from_id_source(format!("smooth_mode_{}", preset.id))
+                            .selected_text(match preset.smoothing_mode {
+                                crate::model::EspSmoothingMode::SoftInertial => "Quán tính mềm (Smooth cũ)",
+                                crate::model::EspSmoothingMode::ResponsiveFrame => "Siêu tốc (Smooth mới)",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut preset.smoothing_mode,
+                                    crate::model::EspSmoothingMode::SoftInertial,
+                                    "Quán tính mềm (Smooth cũ - Mượt đằm)",
+                                );
+                                ui.selectable_value(
+                                    &mut preset.smoothing_mode,
+                                    crate::model::EspSmoothingMode::ResponsiveFrame,
+                                    "Siêu tốc (Smooth mới - Không trễ)",
+                                );
+                            });
                         ui.add(
                             DragValue::new(&mut preset.motion_smoothing_ms)
                                 .speed(1.0)
-                                .range(1..=100)
+                                .range(1..=500)
                                 .suffix(" ms"),
                         )
-                        .on_hover_text("Frame interpolation time for high-FPS sub-step motion. Lower = faster response.");
+                        .on_hover_text("Thời gian trôi mượt giữa các lần đọc RAM.");
                     }
                 });
                 ui.horizontal_wrapped(|ui| {

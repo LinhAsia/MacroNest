@@ -26281,11 +26281,13 @@ mod windows_overlay {
                                 .and_modify(|animation| {
                                     animation.target = frame.shapes.clone();
                                     animation.smoothing_ms = frame.smoothing_ms;
+                                    animation.smoothing_mode = frame.smoothing_mode;
                                 })
                                 .or_insert_with(|| EspShapeAnimation {
                                     current: frame.shapes.clone(),
                                     target: frame.shapes,
                                     smoothing_ms: frame.smoothing_ms,
+                                    smoothing_mode: frame.smoothing_mode,
                                 });
                         }
                     }
@@ -26301,8 +26303,11 @@ mod windows_overlay {
                     let alpha = if animation.smoothing_ms == 0 {
                         1.0
                     } else {
-                        // High-response frame interpolation: Fast decay rate guarantees >99% alignment within 1-2 frames without lagging behind movement
-                        1.0 - (-24.0 * elapsed_ms / animation.smoothing_ms.max(5) as f32).exp()
+                        let rate = match animation.smoothing_mode {
+                            crate::model::EspSmoothingMode::SoftInertial => -3.0,
+                            crate::model::EspSmoothingMode::ResponsiveFrame => -24.0,
+                        };
+                        1.0 - (rate * elapsed_ms / animation.smoothing_ms.max(5) as f32).exp()
                     };
                     let next = interpolate_esp_shapes(
                         &animation.current,
@@ -26429,6 +26434,7 @@ mod windows_overlay {
                     frames.push(EspRenderPreset {
                         id: preset.id,
                         smoothing_ms: preset.motion_smoothing_ms,
+                        smoothing_mode: preset.smoothing_mode,
                         shapes,
                     });
                 }
@@ -26452,6 +26458,7 @@ mod windows_overlay {
     struct EspRenderPreset {
         id: u32,
         smoothing_ms: u32,
+        smoothing_mode: crate::model::EspSmoothingMode,
         shapes: Vec<GeometryRenderShape>,
     }
 
@@ -26490,6 +26497,7 @@ mod windows_overlay {
         current: Vec<GeometryRenderShape>,
         target: Vec<GeometryRenderShape>,
         smoothing_ms: u32,
+        smoothing_mode: crate::model::EspSmoothingMode,
     }
 
     fn interpolate_esp_shapes(
