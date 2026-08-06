@@ -14,9 +14,9 @@ use windows::{
                     D2D1_PIXEL_FORMAT,
                 },
                 D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_NONE,
-                D2D1_BITMAP_OPTIONS_TARGET,
-                D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
-                D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_LINEAR, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
+                D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1,
+                D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
+                D2D1_INTERPOLATION_MODE_LINEAR, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
                 ID2D1SolidColorBrush,
             },
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
@@ -36,17 +36,14 @@ use windows::{
             },
             Dxgi::{
                 Common::{
-                    DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM,
-                    DXGI_SAMPLE_DESC,
+                    DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
                 },
                 DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
                 DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice,
                 IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1,
             },
         },
-        UI::WindowsAndMessaging::{
-            HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos,
-        },
+        UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos},
     },
     core::Interface,
 };
@@ -107,11 +104,8 @@ impl EspGpuRenderer {
                 AlphaMode: DXGI_ALPHA_MODE_PREMULTIPLIED,
                 Flags: 0,
             };
-            let swap_chain = factory.CreateSwapChainForComposition(
-                &d3d,
-                &desc,
-                None::<&IDXGIOutput>,
-            )?;
+            let swap_chain =
+                factory.CreateSwapChainForComposition(&d3d, &desc, None::<&IDXGIOutput>)?;
 
             let composition: IDCompositionDevice = DCompositionCreateDevice(&dxgi_device)?;
             let composition_target = composition.CreateTargetForHwnd(hwnd, true)?;
@@ -233,12 +227,8 @@ impl EspGpuRenderer {
                     self.d2d.FillEllipse(&ellipse, &brush);
                 }
                 let brush = self.brush(*stroke)?;
-                self.d2d.DrawEllipse(
-                    &ellipse,
-                    &brush,
-                    (*thickness).max(1) as f32,
-                    None,
-                );
+                self.d2d
+                    .DrawEllipse(&ellipse, &brush, (*thickness).max(1) as f32, None);
             }
             GeometryRenderDraw::Polygon {
                 points,
@@ -259,12 +249,8 @@ impl EspGpuRenderer {
                     self.d2d.FillRectangle(&rect, &brush);
                 }
                 let brush = self.brush(*stroke)?;
-                self.d2d.DrawRectangle(
-                    &rect,
-                    &brush,
-                    (*thickness).max(1) as f32,
-                    None,
-                );
+                self.d2d
+                    .DrawRectangle(&rect, &brush, (*thickness).max(1) as f32, None);
             }
             GeometryRenderDraw::Label(text) => {
                 let brush = self.brush(text.color)?;
@@ -368,22 +354,20 @@ impl EspGpuRenderer {
         } else {
             ((1024.0 * aspect).round().max(2.0) as u32, 1024)
         };
-        let rendered =
-            match crate::render::render_svg_image(
-                source.as_ref(),
-                cache_width,
-                cache_height,
-                1.0,
-                rotation,
-            )
-            {
-                Ok(rendered) => rendered,
-                Err(error) => {
-                    eprintln!("ESP marker asset: {error}");
-                    self.failed_bitmaps.insert(key);
-                    return Ok(None);
-                }
-            };
+        let rendered = match crate::render::render_svg_image(
+            source.as_ref(),
+            cache_width,
+            cache_height,
+            1.0,
+            rotation,
+        ) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                eprintln!("ESP marker asset: {error}");
+                self.failed_bitmaps.insert(key);
+                return Ok(None);
+            }
+        };
         let mut bgra = rendered.rgba;
         for pixel in bgra.chunks_exact_mut(4) {
             pixel.swap(0, 2);

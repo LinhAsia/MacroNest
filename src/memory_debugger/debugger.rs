@@ -392,7 +392,7 @@ impl AccessWatch {
             pid,
             instruction_address,
             architecture,
-            EXECUTE_CAPTURE_LIMIT,
+            usize::MAX,
             notify,
         )
     }
@@ -595,6 +595,7 @@ fn watch_loop<F>(
     let mut access_hits = 0usize;
     let mut execute_candidates_seen = 0usize;
     let mut capture_limit_reached = false;
+    let mut seen_instruction_details = HashMap::<usize, (String, String)>::new();
     while !stop.load(Ordering::Acquire) {
         let mut event = DEBUG_EVENT::default();
         if unsafe { WaitForDebugEvent(&mut event, 100) } == 0 {
@@ -636,7 +637,7 @@ fn watch_loop<F>(
                             WatchKind::Write { address } | WatchKind::ReadWrite { address } => {
                                 let read_write = matches!(kind, WatchKind::ReadWrite { .. });
                                 if !capture_limit_reached
-                                    && let Some((instruction_address, decoded, instruction)) =
+                                    && let Some((instruction_address, decoded, instruction_decoded)) =
                                         decode_previous_access(
                                             &process,
                                             &context,
@@ -645,28 +646,26 @@ fn watch_loop<F>(
                                             architecture,
                                         )
                                 {
-                                    let details = format_hit_details(
-                                        &process,
-                                        &decoded,
-                                        &context,
-                                        *address,
-                                        if read_write { "truy cáº­p" } else { "ghi" },
-                                        architecture,
-                                    );
+                                    let (instruction, details) = if let Some(cached) =
+                                        seen_instruction_details.get(&instruction_address)
+                                    {
+                                        cached.clone()
+                                    } else {
+                                        let details = format_hit_details(
+                                            &process,
+                                            &decoded,
+                                            &context,
+                                            *address,
+                                            if read_write { "truy cập" } else { "ghi" },
+                                            architecture,
+                                        );
+                                        let pair = (instruction_decoded, details);
+                                        seen_instruction_details.insert(instruction_address, pair.clone());
+                                        pair
+                                    };
                                     let likely_stack_copy =
                                         address.abs_diff(context.Rsp as usize) < 8 * 1024 * 1024;
                                     access_hits += 1;
-                                    let limit = MAX_ADDRESS_WATCH_HITS;
-                                    let should_stop = access_hits >= limit;
-                                    if should_stop {
-                                        // Every target thread is paused while this debug event is
-                                        // being handled. Clear DR0 now, before ContinueDebugEvent,
-                                        // so a hot write cannot queue another single-step while the
-                                        // worker is detaching.
-                                        disarm_paused_threads(&threads, architecture);
-                                        capture_limit_reached = true;
-                                        stop.store(true, Ordering::Release);
-                                    }
                                     notify(WatchEvent::AddressHit {
                                         instruction_address,
                                         instruction,
@@ -674,9 +673,6 @@ fn watch_loop<F>(
                                         details,
                                         likely_stack_copy,
                                     });
-                                    if should_stop {
-                                        notify(WatchEvent::CaptureLimitReached(limit));
-                                    }
                                 }
                             }
                             WatchKind::Execute {
@@ -761,12 +757,34 @@ fn watch_loop<F>(
         }
         unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
     }
+    unsafe { disarm_paused_threads(&threads, architecture) };
+    let flush_start = std::time::Instant::now();
+    while flush_start.elapsed() < std::time::Duration::from_millis(150) {
+        let mut event = DEBUG_EVENT::default();
+        if unsafe { WaitForDebugEvent(&mut event, 10) } != 0 {
+            let mut status = DBG_CONTINUE;
+            if event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT {
+                let exception = unsafe { event.u.Exception.ExceptionRecord.ExceptionCode };
+                if exception == EXCEPTION_SINGLE_STEP || exception == STATUS_WX86_SINGLE_STEP {
+                    status = DBG_CONTINUE;
+                } else if exception == EXCEPTION_BREAKPOINT || exception == STATUS_WX86_BREAKPOINT {
+                    status = DBG_CONTINUE;
+                } else {
+                    status = DBG_EXCEPTION_NOT_HANDLED;
+                }
+            } else if event.dwDebugEventCode == EXIT_THREAD_DEBUG_EVENT {
+                if let Some(thread) = threads.remove(&event.dwThreadId) {
+                    unsafe { close_if_valid(thread) };
+                }
+            }
+            unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
+        } else {
+            break;
+        }
+    }
     for (_, thread) in threads {
         unsafe {
-            // A capture-limit stop already disarmed every paused thread before its debug event
-            // was continued. Suspending the now-running game threads again races the target and
-            // can crash it just after an alias is resolved.
-            if !capture_limit_reached && SuspendThread(thread) != u32::MAX {
+            if SuspendThread(thread) != u32::MAX {
                 disarm_thread(thread, architecture);
                 ResumeThread(thread);
             }
@@ -1327,8 +1345,11 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
         };
         if unsafe { Wow64GetThreadContext(thread, &mut context) } != 0 {
             context.Dr0 = 0;
+            context.Dr1 = 0;
+            context.Dr2 = 0;
+            context.Dr3 = 0;
             context.Dr6 = 0;
-            context.Dr7 &= !0xF0003;
+            context.Dr7 = 0;
             unsafe { Wow64SetThreadContext(thread, &context) };
         }
         return;
@@ -1338,8 +1359,11 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
     context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
     if unsafe { GetThreadContext(thread, context) } != 0 {
         context.Dr0 = 0;
+        context.Dr1 = 0;
+        context.Dr2 = 0;
+        context.Dr3 = 0;
         context.Dr6 = 0;
-        context.Dr7 &= !0xF0003;
+        context.Dr7 = 0;
         unsafe { SetThreadContext(thread, context) };
     }
 }

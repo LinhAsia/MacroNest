@@ -206,22 +206,22 @@ impl CrosshairApp {
                                 );
                             }
                         });
-                    ui.label("World plane");
+                    ui.label("Height axis");
                     ComboBox::from_id_salt(("esp_plane", preset.id))
                         .selected_text(match preset.horizontal_plane {
-                            EspHorizontalPlane::Xy => "XY + vertical Z",
-                            EspHorizontalPlane::Xz => "XZ + vertical Y",
+                            EspHorizontalPlane::Xz => "Y is Height (NeoX / IdentityV)",
+                            EspHorizontalPlane::Xy => "Z is Height (Unreal)",
                         })
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
                                 &mut preset.horizontal_plane,
-                                EspHorizontalPlane::Xy,
-                                "XY + vertical Z",
+                                EspHorizontalPlane::Xz,
+                                "Y is Height (NeoX / IdentityV)",
                             );
                             ui.selectable_value(
                                 &mut preset.horizontal_plane,
-                                EspHorizontalPlane::Xz,
-                                "XZ + vertical Y",
+                                EspHorizontalPlane::Xy,
+                                "Z is Height (Unreal)",
                             );
                         });
                 });
@@ -240,9 +240,18 @@ impl CrosshairApp {
                         .on_hover_text(
                             "Reverse only camera rotation. Use this when lateral movement is correct but rotating the camera moves ESP the wrong way.",
                         );
+                    ui.checkbox(&mut preset.invert_camera_pitch, "Reverse pitch value")
+                        .on_hover_text(
+                            "Reverse only camera pitch angle. Use this when looking down with camera moves ESP the wrong way.",
+                        );
+                    ui.checkbox(&mut preset.invert_vertical, "Invert elevation (height)")
+                        .on_hover_text(
+                            "Invert target elevation difference. Use this when moving player up/down moves ESP the wrong way.",
+                        );
                     ui.checkbox(&mut preset.invert_yaw, "Mirror screen X")
                         .on_hover_text("Mirror only the final left/right screen position.");
-                    ui.checkbox(&mut preset.invert_pitch, "Invert pitch");
+                    ui.checkbox(&mut preset.invert_pitch, "Mirror screen Y")
+                        .on_hover_text("Mirror only the final up/down screen position.");
                     ui.label("Horizontal FOV");
                     ui.add(
                         DragValue::new(&mut preset.horizontal_fov)
@@ -264,6 +273,15 @@ impl CrosshairApp {
                         if ui.small_button(format!("{value:+.0}")).clicked() {
                             preset.yaw_offset_degrees = value;
                         }
+                    }
+                    ui.label("Direction scale").on_hover_text("Multiplier for Direction A/B vector values");
+                    ui.add(
+                        DragValue::new(&mut preset.direction_multiplier)
+                            .speed(0.001)
+                            .range(0.0001..=100.0),
+                    );
+                    if ui.small_button("Reset scale").clicked() {
+                        preset.direction_multiplier = 1.0;
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
@@ -287,6 +305,17 @@ impl CrosshairApp {
                             .speed(1.0)
                             .range(-10000.0..=10000.0),
                     );
+                    ui.label("Height scale").on_hover_text(
+                        "Multiplier for Z elevation distance (e.g., 0.01 if Z is in cm while X/Y are in m)",
+                    );
+                    ui.add(
+                        DragValue::new(&mut preset.height_scale)
+                            .speed(0.001)
+                            .range(0.0001..=100.0),
+                    );
+                    if ui.small_button("Reset height scale").clicked() {
+                        preset.height_scale = 1.0;
+                    }
                 });
                 ui.horizontal_wrapped(|ui| {
                     ui.label("Screen offset").on_hover_text(
@@ -627,14 +656,19 @@ impl CrosshairApp {
                             .range(1..=1000)
                             .suffix(" ms"),
                     );
-                    ui.label("Smooth");
-                    ui.add(
-                        DragValue::new(&mut preset.motion_smoothing_ms)
-                            .speed(1.0)
-                            .range(0..=500)
-                            .suffix(" ms"),
-                    )
-                    .on_hover_text("Smooth marker movement between RAM samples. Set 0 to disable.");
+                    let mut smooth_enabled = preset.motion_smoothing_ms > 0;
+                    if ui.checkbox(&mut smooth_enabled, "Smooth").clicked() {
+                        preset.motion_smoothing_ms = if smooth_enabled { 16 } else { 0 };
+                    }
+                    if smooth_enabled {
+                        ui.add(
+                            DragValue::new(&mut preset.motion_smoothing_ms)
+                                .speed(1.0)
+                                .range(1..=100)
+                                .suffix(" ms"),
+                        )
+                        .on_hover_text("Frame interpolation time for high-FPS sub-step motion. Lower = faster response.");
+                    }
                 });
                 ui.horizontal_wrapped(|ui| {
                     ui.checkbox(&mut preset.target_audio_enabled, "Target sound")

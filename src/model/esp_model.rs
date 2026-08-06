@@ -61,6 +61,7 @@ pub struct EspPreset {
     pub camera_direction_a: String,
     #[serde(alias = "camera_forward_z")]
     pub camera_direction_b: String,
+    pub direction_multiplier: f32,
     #[serde(alias = "swap_forward_horizontal")]
     pub swap_direction_pair: bool,
     #[serde(alias = "invert_forward_x")]
@@ -72,11 +73,14 @@ pub struct EspPreset {
     pub pitch_unit: EspAngleUnit,
     pub horizontal_plane: EspHorizontalPlane,
     pub invert_camera_yaw: bool,
+    pub invert_camera_pitch: bool,
+    pub invert_vertical: bool,
     pub invert_yaw: bool,
     pub invert_pitch: bool,
     pub yaw_offset_degrees: f32,
     pub pitch_offset_degrees: f32,
     pub target_vertical_offset: f32,
+    pub height_scale: f32,
     pub screen_offset_x: f32,
     pub screen_offset_y: f32,
     pub horizontal_fov: f32,
@@ -138,19 +142,23 @@ impl EspPreset {
             orientation_source: EspOrientationSource::Angles,
             camera_direction_a: String::new(),
             camera_direction_b: String::new(),
+            direction_multiplier: 1.0,
             swap_direction_pair: false,
             invert_direction_a: false,
             invert_direction_b: false,
             value_type: MemoryValueType::F32,
             yaw_unit: EspAngleUnit::Degrees,
             pitch_unit: EspAngleUnit::Radians,
-            horizontal_plane: EspHorizontalPlane::Xy,
+            horizontal_plane: EspHorizontalPlane::Xz,
             invert_camera_yaw: false,
+            invert_camera_pitch: false,
+            invert_vertical: false,
             invert_yaw: false,
             invert_pitch: false,
             yaw_offset_degrees: 0.0,
             pitch_offset_degrees: 0.0,
             target_vertical_offset: 0.0,
+            height_scale: 1.0,
             screen_offset_x: 0.0,
             screen_offset_y: 0.0,
             horizontal_fov: 90.0,
@@ -318,6 +326,13 @@ pub(crate) fn esp_orientation_from_direction_pair(
     if preset.swap_direction_pair {
         direction.swap(0, 1);
     }
+    let mult = if preset.direction_multiplier.is_finite() && preset.direction_multiplier != 0.0 {
+        preset.direction_multiplier
+    } else {
+        1.0
+    };
+    direction[0] *= mult;
+    direction[1] *= mult;
     let length = direction[0].hypot(direction[1]);
     if !length.is_finite() || length <= f32::EPSILON || !pitch.is_finite() {
         return None;
@@ -342,10 +357,14 @@ pub(crate) fn esp_calibration_sample(
     let dx = target[0] - camera[0];
     let dy = target[1] - camera[1];
     let dz = target[2] - camera[2];
-    let (forward_a, forward_b, vertical) = match preset.horizontal_plane {
-        EspHorizontalPlane::Xy => (dx, dy, dz + preset.target_vertical_offset),
-        EspHorizontalPlane::Xz => (dx, dz, dy + preset.target_vertical_offset),
+    let h_mult = if preset.height_scale.is_finite() && preset.height_scale != 0.0 { preset.height_scale } else { 1.0 };
+    let (forward_a, forward_b, mut vertical) = match preset.horizontal_plane {
+        EspHorizontalPlane::Xy => (dx, dy, (dz + preset.target_vertical_offset) * h_mult),
+        EspHorizontalPlane::Xz => (dx, dz, (dy + preset.target_vertical_offset) * h_mult),
     };
+    if preset.invert_vertical {
+        vertical = -vertical;
+    }
     let horizontal_distance = forward_a.hypot(forward_b);
     (horizontal_distance > f32::EPSILON).then_some(EspCalibrationSample {
         bearing_yaw: forward_b.atan2(forward_a),
@@ -358,6 +377,7 @@ pub(crate) fn esp_calibration_sample(
 pub(crate) fn solve_esp_calibration(
     samples: &[EspCalibrationSample],
     current_invert_camera_yaw: bool,
+    current_invert_camera_pitch: bool,
     current_invert_yaw: bool,
     current_invert_pitch: bool,
 ) -> Option<EspCalibrationResult> {
@@ -396,6 +416,7 @@ pub(crate) fn solve_esp_calibration(
     };
 
     let solve_pitch = |sign: f32| {
+        let sign = if current_invert_camera_pitch { -sign } else { sign };
         let offset = samples
             .iter()
             .map(|sample| sample.bearing_pitch - sign * sample.camera_pitch)
@@ -452,10 +473,14 @@ pub(crate) fn project_esp(
     let dx = target[0] - camera[0];
     let dy = target[1] - camera[1];
     let dz = target[2] - camera[2];
-    let (forward_a, forward_b, vertical) = match preset.horizontal_plane {
-        EspHorizontalPlane::Xy => (dx, dy, dz + preset.target_vertical_offset),
-        EspHorizontalPlane::Xz => (dx, dz, dy + preset.target_vertical_offset),
+    let h_mult = if preset.height_scale.is_finite() && preset.height_scale != 0.0 { preset.height_scale } else { 1.0 };
+    let (forward_a, forward_b, mut vertical) = match preset.horizontal_plane {
+        EspHorizontalPlane::Xy => (dx, dy, (dz + preset.target_vertical_offset) * h_mult),
+        EspHorizontalPlane::Xz => (dx, dz, (dy + preset.target_vertical_offset) * h_mult),
     };
+    if preset.invert_vertical {
+        vertical = -vertical;
+    }
     let horizontal_distance = forward_a.hypot(forward_b);
     let distance = horizontal_distance.hypot(vertical);
     if distance <= f32::EPSILON {
@@ -465,6 +490,9 @@ pub(crate) fn project_esp(
     let mut pitch = esp_angle_to_radians(pitch, preset.pitch_unit);
     if preset.invert_camera_yaw {
         yaw = -yaw;
+    }
+    if preset.invert_camera_pitch {
+        pitch = -pitch;
     }
     yaw += preset.yaw_offset_degrees.to_radians();
     pitch += preset.pitch_offset_degrees.to_radians();
@@ -490,9 +518,7 @@ pub(crate) fn project_esp(
         normalized_y: y,
         distance,
         in_front,
-        on_screen: in_front
-            && yaw_delta.abs() < half_fov_x
-            && pitch_delta.abs() < half_fov_y,
+        on_screen: in_front && yaw_delta.abs() < half_fov_x && pitch_delta.abs() < half_fov_y,
     })
 }
 
@@ -715,7 +741,7 @@ mod tests {
                 camera_pitch: 0.0,
             }
         });
-        let result = solve_esp_calibration(&samples, false, true, false).unwrap();
+        let result = solve_esp_calibration(&samples, false, false, true, false).unwrap();
         assert!(!result.invert_camera_yaw);
         assert!(result.invert_yaw);
         assert!((result.yaw_offset_degrees - 30.0).abs() < 0.01);

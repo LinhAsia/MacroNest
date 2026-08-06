@@ -299,6 +299,23 @@ mod windows_impl {
         }
     }
 
+    pub fn focus_window(selector: &str) -> bool {
+        let Some(hwnd) = find_window_handle(Some(selector)) else {
+            return false;
+        };
+        unsafe {
+            if !IsWindow(Some(hwnd)).as_bool() {
+                return false;
+            }
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = BringWindowToTop(hwnd);
+            let _ = SetForegroundWindow(hwnd);
+            true
+        }
+    }
+
     unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         if !IsWindowVisible(hwnd).as_bool() {
             return true.into();

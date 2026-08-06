@@ -494,9 +494,7 @@ fn find_pointer_paths(
     max_depth: usize,
     result_limit: usize,
 ) -> Vec<PointerPath> {
-    let max_frontier = result_limit
-        .saturating_mul(16)
-        .clamp(50_000, 1_000_000);
+    let max_frontier = result_limit.saturating_mul(16).clamp(50_000, 1_000_000);
     let mut results = Vec::new();
     let mut frontier = vec![(target, Vec::<usize>::new())];
     for _ in 0..max_depth.max(1) {
@@ -699,7 +697,12 @@ fn with_cached_read_process<T>(
                 process: ScanProcess::open(pid, false)?,
             });
         }
-        read(&cached.as_ref().expect("cached process was just opened").process)
+        read(
+            &cached
+                .as_ref()
+                .expect("cached process was just opened")
+                .process,
+        )
     })
 }
 
@@ -710,9 +713,7 @@ pub fn read_scan_value(
 ) -> io::Result<ScanValue> {
     let mut bytes = [0; 8];
     let width = value_type.width();
-    let read = with_cached_read_process(pid, |process| {
-        process.read(address, &mut bytes[..width])
-    })?;
+    let read = with_cached_read_process(pid, |process| process.read(address, &mut bytes[..width]))?;
     if read != width {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -1604,9 +1605,7 @@ pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::
         MemoryValueType::I32 | MemoryValueType::F32 => 4,
         MemoryValueType::I64 | MemoryValueType::F64 => 8,
     };
-    let read = with_cached_read_process(pid, |process| {
-        process.read(address, &mut bytes[..width])
-    })?;
+    let read = with_cached_read_process(pid, |process| process.read(address, &mut bytes[..width]))?;
     if read != width {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,

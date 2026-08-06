@@ -6,6 +6,7 @@ impl CrosshairApp {
     pub(crate) const GEOMETRY_LABEL_COL_WIDTH: f32 = 110.0;
     pub(crate) const GEOMETRY_FIELD_WIDTH: f32 = 96.0;
     pub(crate) const GEOMETRY_FIELD_EXPANDED_WIDTH: f32 = 120.0;
+    pub(crate) const GEOMETRY_FIELD_HEIGHT: f32 = 20.0;
     pub(crate) const GEOMETRY_GRID_SPACING_X: f32 = 2.0;
 
     fn geometry_label_text<'a>(language: UiLanguage, label: &'a str) -> &'a str {
@@ -1021,7 +1022,7 @@ impl CrosshairApp {
                             group_id_override,
                         );
                         ui.add_sized(
-                            [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
+                            [Self::GEOMETRY_LABEL_COL_WIDTH, Self::GEOMETRY_FIELD_HEIGHT],
                             egui::Label::new(Self::tr_lang(language, "Text", "Text")),
                         );
                         let text_id = ui.make_persistent_id((preset_id, object_id, "label-text"));
@@ -1030,11 +1031,11 @@ impl CrosshairApp {
                             &mut spec.text,
                             text_id,
                             120.0,
-                            120.0,
-                            18.0,
-                            96.0,
+                            280.0,
+                            Self::GEOMETRY_FIELD_HEIGHT,
+                            Self::GEOMETRY_FIELD_HEIGHT,
                             "Text",
-                            true,
+                            false,
                         );
                         changed |= response.changed();
                         Self::apply_vietnamese_input_if_changed(
@@ -1045,7 +1046,6 @@ impl CrosshairApp {
                         );
                         ui.label("");
                         ui.label("");
-                        ui.add_space(24.0);
                         ui.end_row();
                         changed |= Self::geometry_expr_pair_row(
                             ui,
@@ -1325,9 +1325,9 @@ impl CrosshairApp {
                     450.0,
                     450.0,
                     18.0,
-                    72.0,
+                    18.0,
                     "<svg>...</svg>",
-                    true,
+                    false,
                 );
                 changed |= text_edit_response.changed();
                 Self::apply_vietnamese_input_if_changed(
@@ -1456,7 +1456,7 @@ impl CrosshairApp {
         let width = width.min(Self::GEOMETRY_FIELD_WIDTH);
         let expanded_width = expanded_width.min(Self::GEOMETRY_FIELD_EXPANDED_WIDTH);
         ui.add_sized(
-            [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
+            [Self::GEOMETRY_LABEL_COL_WIDTH, Self::GEOMETRY_FIELD_HEIGHT],
             egui::Label::new(Self::geometry_label_text(language, label)),
         );
         let id = ui.make_persistent_id((preset_id, object_id, row_id, "expr"));
@@ -1466,8 +1466,8 @@ impl CrosshairApp {
             id,
             width,
             expanded_width,
-            18.0,
-            18.0,
+            Self::GEOMETRY_FIELD_HEIGHT,
+            Self::GEOMETRY_FIELD_HEIGHT,
             "",
             false,
         );
@@ -1511,7 +1511,7 @@ impl CrosshairApp {
 
         if !label_a.is_empty() {
             ui.add_sized(
-                [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
+                [Self::GEOMETRY_LABEL_COL_WIDTH, Self::GEOMETRY_FIELD_HEIGHT],
                 egui::Label::new(Self::geometry_label_text(language, label_a)),
             );
             let id_a = ui.make_persistent_id((preset_id, object_id, row_id, "expr-a"));
@@ -1521,8 +1521,8 @@ impl CrosshairApp {
                 id_a,
                 width_a,
                 expanded_width_a,
-                18.0,
-                18.0,
+                Self::GEOMETRY_FIELD_HEIGHT,
+                Self::GEOMETRY_FIELD_HEIGHT,
                 "",
                 false,
             );
@@ -1541,7 +1541,7 @@ impl CrosshairApp {
 
         if !label_b.is_empty() {
             ui.add_sized(
-                [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
+                [Self::GEOMETRY_LABEL_COL_WIDTH, Self::GEOMETRY_FIELD_HEIGHT],
                 egui::Label::new(Self::geometry_label_text(language, label_b)),
             );
             let id_b = ui.make_persistent_id((preset_id, object_id, row_id, "expr-b"));
@@ -1553,8 +1553,8 @@ impl CrosshairApp {
                     id_b,
                     width_b,
                     expanded_width_b,
-                    18.0,
-                    18.0,
+                    Self::GEOMETRY_FIELD_HEIGHT,
+                    Self::GEOMETRY_FIELD_HEIGHT,
                     "",
                     false,
                 );
@@ -1673,7 +1673,7 @@ impl CrosshairApp {
             "Chưa đặt màu ghi đè.",
         );
         ui.add_sized(
-            [Self::GEOMETRY_LABEL_COL_WIDTH, 18.0],
+            [Self::GEOMETRY_LABEL_COL_WIDTH, Self::GEOMETRY_FIELD_HEIGHT],
             egui::Label::new(Self::geometry_label_text(language, label)),
         );
         ui.horizontal(|ui| {
@@ -1686,8 +1686,8 @@ impl CrosshairApp {
                     color_expr_id,
                     Self::GEOMETRY_FIELD_WIDTH,
                     Self::GEOMETRY_FIELD_EXPANDED_WIDTH,
-                    18.0,
-                    18.0,
+                    Self::GEOMETRY_FIELD_HEIGHT,
+                    Self::GEOMETRY_FIELD_HEIGHT,
                     "{A} hoặc #RRGGBB",
                     false,
                 );

@@ -40,7 +40,9 @@ unsafe extern "system" fn release_mouse_on_unhandled_exception(
     _: *const windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS,
 ) -> i32 {
     // ponytail: this deliberately avoids application locks; an exception handler must be fail-open.
-    let _ = windows::Win32::UI::WindowsAndMessaging::ClipCursor(None);
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::ClipCursor(None);
+    }
     windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_CONTINUE_SEARCH
 }
 

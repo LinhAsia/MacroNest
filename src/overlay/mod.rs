@@ -3465,11 +3465,7 @@ mod windows_overlay {
                 Some(controller_wnd_proc),
             )?;
             register_class(instance, w!("CrosshairOverlay"), Some(overlay_wnd_proc))?;
-            register_class(
-                instance,
-                w!("MacroNestEspOverlay"),
-                Some(overlay_wnd_proc),
-            )?;
+            register_class(instance, w!("MacroNestEspOverlay"), Some(overlay_wnd_proc))?;
             register_class(instance, w!("CrosshairToolbox"), Some(hud_wnd_proc))?;
             register_class(
                 instance,
@@ -3477,7 +3473,7 @@ mod windows_overlay {
                 Some(screen_draw_wnd_proc),
             )?;
             let overlay_hwnd = CreateWindowExW(
-                    WS_EX_LAYERED
+                WS_EX_LAYERED
                     | WS_EX_TRANSPARENT
                     | WS_EX_TOOLWINDOW
                     | WS_EX_TOPMOST
@@ -10879,7 +10875,22 @@ mod windows_overlay {
         let hud_visible =
             unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(runtime.hud_hwnd) }
                 .as_bool();
-        if runtime.hud_display.as_ref() == Some(&display) && hud_visible {
+        let same_content = runtime.hud_display.as_ref().map_or(false, |prev| {
+            prev.text == display.text
+                && prev.x == display.x
+                && prev.y == display.y
+                && prev.width == display.width
+                && prev.height == display.height
+                && prev.font_size == display.font_size
+                && prev.text_color == display.text_color
+                && prev.background_color == display.background_color
+                && prev.background_opacity == display.background_opacity
+                && prev.border_enabled == display.border_enabled
+                && prev.border_color == display.border_color
+                && prev.border_thickness == display.border_thickness
+        });
+        if same_content && hud_visible {
+            runtime.hud_display = Some(display);
             return Ok(());
         }
 
@@ -26290,7 +26301,8 @@ mod windows_overlay {
                     let alpha = if animation.smoothing_ms == 0 {
                         1.0
                     } else {
-                        1.0 - (-3.0 * elapsed_ms / animation.smoothing_ms as f32).exp()
+                        // High-response frame interpolation: Fast decay rate guarantees >99% alignment within 1-2 frames without lagging behind movement
+                        1.0 - (-24.0 * elapsed_ms / animation.smoothing_ms.max(5) as f32).exp()
                     };
                     let next = interpolate_esp_shapes(
                         &animation.current,
@@ -26645,17 +26657,14 @@ mod windows_overlay {
                 return Some((cached.target_pid, cached.address));
             }
             let (target_pid, address) = resolve_memory_action_target(Some(pid), expression, false)?;
-            self.resolved_addresses
-                .entry(pid)
-                .or_default()
-                .insert(
-                    expression.to_owned(),
-                    EspResolvedAddress {
-                        target_pid,
-                        address,
-                        resolved_at: Instant::now(),
-                    },
-                );
+            self.resolved_addresses.entry(pid).or_default().insert(
+                expression.to_owned(),
+                EspResolvedAddress {
+                    target_pid,
+                    address,
+                    resolved_at: Instant::now(),
+                },
+            );
             Some((target_pid, address))
         }
 
@@ -26665,8 +26674,81 @@ mod windows_overlay {
             expression: &str,
             value_type: crate::model::MemoryValueType,
         ) -> Result<f32, String> {
+            let expr = expression.trim();
+            if expr.is_empty() {
+                return Err("expression is empty".to_owned());
+            }
+
+            // 1. Direct float literal (e.g. "-466", "65.5", "1251.916")
+            if let Ok(val) = expr.parse::<f32>() {
+                return Ok(val);
+            }
+
+            // 2. Direct hex address (e.g. "0x2813B5CC928" or "0X2813B5CC928")
+            if expr.starts_with("0x") || expr.starts_with("0X") {
+                if let Ok(addr) = usize::from_str_radix(expr.trim_start_matches("0x").trim_start_matches("0X"), 16) {
+                    let tag = esp_value_type_tag(value_type);
+                    if let Some(value) = self.values.get(&(pid, addr, tag)) {
+                        return Ok(*value);
+                    }
+                    if let Ok(val) = self.read_numeric_value(pid, addr, value_type) {
+                        self.values.insert((pid, addr, tag), val);
+                        return Ok(val);
+                    }
+                }
+            }
+
+            // 3. Simple math operators: +, -, *, / outside bracket scope ']'
+            let mut op_idx = None;
+            let mut chosen_op = None;
+            let mut bracket_depth = 0;
+
+            for (idx, ch) in expr.char_indices().rev() {
+                match ch {
+                    ']' => bracket_depth += 1,
+                    '[' => if bracket_depth > 0 { bracket_depth -= 1; },
+                    '+' | '-' | '*' | '/' if bracket_depth == 0 => {
+                        let before = &expr[..idx];
+                        let after = &expr[idx + ch.len_utf8()..];
+                        if !before.trim().is_empty() && !after.trim().is_empty() {
+                            let is_module_offset = (ch == '+' || ch == '-')
+                                && !before.contains('[')
+                                && !before.contains(' ')
+                                && before.to_lowercase().contains(".dll");
+                            if !is_module_offset {
+                                op_idx = Some(idx);
+                                chosen_op = Some(ch);
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if let (Some(idx), Some(op)) = (op_idx, chosen_op) {
+                let left_str = &expr[..idx];
+                let right_str = &expr[idx + 1..];
+                let left_val = self.read_value(pid, left_str, value_type)?;
+                let right_val = self.read_value(pid, right_str, value_type)?;
+                return match op {
+                    '+' => Ok(left_val + right_val),
+                    '-' => Ok(left_val - right_val),
+                    '*' => Ok(left_val * right_val),
+                    '/' => {
+                        if right_val.abs() > 0.00001 {
+                            Ok(left_val / right_val)
+                        } else {
+                            Err("division by zero".to_owned())
+                        }
+                    }
+                    _ => Err("invalid operator".to_owned()),
+                };
+            }
+
+            // 4. Memory pointer chain resolution (standard expression)
             let (mut target_pid, mut address) = self
-                .resolve_address(pid, expression, false)
+                .resolve_address(pid, expr, false)
                 .ok_or_else(|| "could not be resolved".to_owned())?;
             let tag = esp_value_type_tag(value_type);
             if let Some(value) = self.values.get(&(target_pid, address, tag)) {
@@ -26675,10 +26757,8 @@ mod windows_overlay {
             let value = match self.read_numeric_value(target_pid, address, value_type) {
                 Ok(value) => value,
                 Err(_) => {
-                    // A scene change can replace a pointer chain between refreshes. Retry the
-                    // chain immediately instead of showing the stale sample for the cache TTL.
                     (target_pid, address) = self
-                        .resolve_address(pid, expression, true)
+                        .resolve_address(pid, expr, true)
                         .ok_or_else(|| "could not be resolved".to_owned())?;
                     self.read_numeric_value(target_pid, address, value_type)
                         .map_err(|error| error.to_string())?
@@ -26746,19 +26826,11 @@ mod windows_overlay {
     ) -> Option<f32> {
         Some(match value_type {
             crate::model::MemoryValueType::I8 => i8::from_le_bytes(bytes.try_into().ok()?) as f32,
-            crate::model::MemoryValueType::I16 => {
-                i16::from_le_bytes(bytes.try_into().ok()?) as f32
-            }
-            crate::model::MemoryValueType::I32 => {
-                i32::from_le_bytes(bytes.try_into().ok()?) as f32
-            }
+            crate::model::MemoryValueType::I16 => i16::from_le_bytes(bytes.try_into().ok()?) as f32,
+            crate::model::MemoryValueType::I32 => i32::from_le_bytes(bytes.try_into().ok()?) as f32,
             crate::model::MemoryValueType::F32 => f32::from_le_bytes(bytes.try_into().ok()?),
-            crate::model::MemoryValueType::I64 => {
-                i64::from_le_bytes(bytes.try_into().ok()?) as f32
-            }
-            crate::model::MemoryValueType::F64 => {
-                f64::from_le_bytes(bytes.try_into().ok()?) as f32
-            }
+            crate::model::MemoryValueType::I64 => i64::from_le_bytes(bytes.try_into().ok()?) as f32,
+            crate::model::MemoryValueType::F64 => f64::from_le_bytes(bytes.try_into().ok()?) as f32,
         })
     }
 
@@ -26777,14 +26849,16 @@ mod windows_overlay {
             crate::model::MemoryValueType::I64 => ScanValueType::I64,
             crate::model::MemoryValueType::F64 => ScanValueType::F64,
         };
-        Ok(match crate::process_memory::read_scan_value(pid, address, scan_type)? {
-            ScanValue::I8(value) => value as f32,
-            ScanValue::I16(value) => value as f32,
-            ScanValue::I32(value) => value as f32,
-            ScanValue::F32(value) => value,
-            ScanValue::I64(value) => value as f32,
-            ScanValue::F64(value) => value as f32,
-        })
+        Ok(
+            match crate::process_memory::read_scan_value(pid, address, scan_type)? {
+                ScanValue::I8(value) => value as f32,
+                ScanValue::I16(value) => value as f32,
+                ScanValue::I32(value) => value as f32,
+                ScanValue::F32(value) => value,
+                ScanValue::I64(value) => value as f32,
+                ScanValue::F64(value) => value as f32,
+            },
+        )
     }
 
     fn read_esp_inputs(
@@ -26871,6 +26945,7 @@ mod windows_overlay {
                 crate::model::solve_esp_calibration(
                     samples,
                     preset.invert_camera_yaw,
+                    preset.invert_camera_pitch,
                     preset.invert_yaw,
                     preset.invert_pitch,
                 )
@@ -27043,9 +27118,8 @@ mod windows_overlay {
                         .round()
                         .clamp(8.0, 512.0) as i32;
                     let mut text_color = color;
-                    text_color[3] = ((text_color[3] as f32)
-                        * preset.text_opacity.clamp(0.0, 1.0))
-                    .round() as u8;
+                    text_color[3] = ((text_color[3] as f32) * preset.text_opacity.clamp(0.0, 1.0))
+                        .round() as u8;
                     shapes.push(GeometryRenderShape {
                         bounds: geometry_label_bounds(text_x, text_y, font_size, &text, 0.0),
                         draw: GeometryRenderDraw::Label(GeometryRenderText {
@@ -27062,20 +27136,14 @@ mod windows_overlay {
             crate::model::EspMarkerSource::Svg | crate::model::EspMarkerSource::Image => {
                 if let Some(code) = marker_asset {
                     let (marker_width, marker_height) = match preset.marker_source {
-                        crate::model::EspMarkerSource::Svg => {
-                            (preset.svg_width, preset.svg_height)
-                        }
+                        crate::model::EspMarkerSource::Svg => (preset.svg_width, preset.svg_height),
                         crate::model::EspMarkerSource::Image => {
                             (preset.image_width, preset.image_height)
                         }
                         _ => unreachable!(),
                     };
-                    let width = (marker_width * marker_scale)
-                        .round()
-                        .clamp(2.0, 20_000.0) as u32;
-                    let height = (marker_height * marker_scale)
-                        .round()
-                        .clamp(2.0, 20_000.0) as u32;
+                    let width = (marker_width * marker_scale).round().clamp(2.0, 20_000.0) as u32;
+                    let height = (marker_height * marker_scale).round().clamp(2.0, 20_000.0) as u32;
                     let left = x - width as i32 / 2;
                     let top = y - height as i32 / 2;
                     shapes.push(GeometryRenderShape {
@@ -29903,6 +29971,10 @@ mod windows_overlay {
                     read_esp_target_snapshot(step);
                 }
 
+                MacroAction::Esp3DAimLock => {
+                    execute_esp_3d_aim_lock(step);
+                }
+
                 MacroAction::StopVisionWait => {
                     let _ = stop_vision_waiting(&step.key);
                 }
@@ -30680,6 +30752,10 @@ mod windows_overlay {
 
                 MacroAction::ReadEspTarget => {
                     read_esp_target_snapshot(step);
+                }
+
+                MacroAction::Esp3DAimLock => {
+                    execute_esp_3d_aim_lock(step);
                 }
 
                 MacroAction::StopVisionWait => {
@@ -31511,9 +31587,9 @@ mod windows_overlay {
         MACRO_MEMORY_PROCESS_INFO.with(|cached| {
             let mut cached = cached.borrow_mut();
             let module = module.to_ascii_lowercase();
-            let should_refresh = cached.as_ref().is_none_or(|entry| {
-                entry.pid != pid || !entry.modules.contains_key(&module)
-            });
+            let should_refresh = cached
+                .as_ref()
+                .is_none_or(|entry| entry.pid != pid || !entry.modules.contains_key(&module));
             if should_refresh {
                 let modules = crate::memory_debugger::debugger::process_modules(pid)
                     .ok()?
@@ -32006,7 +32082,7 @@ mod windows_overlay {
                 MEMORY_TRACKED_REBINDS.lock().insert(pid, Instant::now());
                 return;
             };
-            let deadline = Instant::now() + Duration::from_secs(2);
+            let deadline = Instant::now() + Duration::from_secs(12);
             let mut candidates = Vec::new();
             let mut exact_candidate = None;
             while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
@@ -32016,6 +32092,7 @@ mod windows_overlay {
                             candidates.push(data_address);
                             if has_signature {
                                 exact_candidate = Some(data_address);
+                                break;
                             }
                         }
                     }
@@ -32030,28 +32107,30 @@ mod windows_overlay {
             }
             drop(watch);
 
-            let candidate = exact_candidate.or_else(|| if tracked_entry.tracked_signature.trim().is_empty() {
-                let matching = candidates
-                    .into_iter()
-                    .filter(|data_address| {
-                        tracked_field_matches(pid, *data_address, &tracked_entry)
-                    })
-                    .collect::<Vec<_>>();
-                only_candidate(&matching)
-            } else {
-                let scores = candidates
-                    .into_iter()
-                    .map(|data_address| {
-                        let (matched, total) = tracked_signature_score(
-                            pid,
-                            data_address,
-                            &code.instruction,
-                            &tracked_entry,
-                        );
-                        (data_address, matched, total)
-                    })
-                    .collect::<Vec<_>>();
-                unique_best_signature_candidate(&scores)
+            let candidate = exact_candidate.or_else(|| {
+                if tracked_entry.tracked_signature.trim().is_empty() {
+                    let matching = candidates
+                        .into_iter()
+                        .filter(|data_address| {
+                            tracked_field_matches(pid, *data_address, &tracked_entry)
+                        })
+                        .collect::<Vec<_>>();
+                    only_candidate(&matching)
+                } else {
+                    let scores = candidates
+                        .into_iter()
+                        .map(|data_address| {
+                            let (matched, total) = tracked_signature_score(
+                                pid,
+                                data_address,
+                                &code.instruction,
+                                &tracked_entry,
+                            );
+                            (data_address, matched, total)
+                        })
+                        .collect::<Vec<_>>();
+                    unique_best_signature_candidate(&scores)
+                }
             });
 
             if let Some(data_address) = candidate {
@@ -34729,11 +34808,61 @@ mod windows_overlay {
         };
         match step.action {
             MacroAction::MouseMoveAbsolute => {
-                return send_mouse_move_absolute(step.get_x(), step.get_y());
+                let mut x = step.get_x() + step.vision_move_offset_x;
+                let mut y = step.get_y() + step.vision_move_offset_y;
+                match step.vision_move_axis_lock {
+                    crate::model::VisionMoveAxisLock::HorizontalOnly => {
+                        let mut pt = windows::Win32::Foundation::POINT::default();
+                        if unsafe { GetCursorPos(&mut pt) }.is_ok() {
+                            y = pt.y;
+                        }
+                    }
+                    crate::model::VisionMoveAxisLock::VerticalOnly => {
+                        let mut pt = windows::Win32::Foundation::POINT::default();
+                        if unsafe { GetCursorPos(&mut pt) }.is_ok() {
+                            x = pt.x;
+                        }
+                    }
+                    crate::model::VisionMoveAxisLock::None => {}
+                }
+                return settle_image_search_mouse_move(
+                    x,
+                    y,
+                    step.vision_move_relative,
+                    step.vision_move_passes,
+                    step.vision_move_delay_ms,
+                );
             }
 
             MacroAction::MouseMoveRelative => {
-                return send_mouse_move_relative(step.get_x(), step.get_y());
+                let mut x = step.get_x() + step.vision_move_offset_x;
+                let mut y = step.get_y() + step.vision_move_offset_y;
+                match step.vision_move_axis_lock {
+                    crate::model::VisionMoveAxisLock::HorizontalOnly => {
+                        y = 0;
+                    }
+                    crate::model::VisionMoveAxisLock::VerticalOnly => {
+                        x = 0;
+                    }
+                    crate::model::VisionMoveAxisLock::None => {}
+                }
+                if step.vision_move_passes > 1 || step.vision_move_delay_ms > 0 {
+                    let passes = step.vision_move_passes.max(1) as i32;
+                    let step_x = x / passes;
+                    let step_y = y / passes;
+                    let rem_x = x % passes;
+                    let rem_y = y % passes;
+                    for p in 0..passes {
+                        let cur_x = step_x + if p == passes - 1 { rem_x } else { 0 };
+                        let cur_y = step_y + if p == passes - 1 { rem_y } else { 0 };
+                        send_mouse_move_relative(cur_x, cur_y)?;
+                        if p + 1 < passes && step.vision_move_delay_ms > 0 {
+                            thread::sleep(std::time::Duration::from_millis(step.vision_move_delay_ms));
+                        }
+                    }
+                    return Ok(());
+                }
+                return send_mouse_move_relative(x, y);
             }
 
             MacroAction::MouseLeftClick => {
@@ -39473,7 +39602,10 @@ mod windows_overlay {
         };
         let (enabled, max_age) = {
             let state = HOOK_STATE.lock();
-            let Some(preset) = state.esp_presets.iter().find(|preset| preset.id == preset_id)
+            let Some(preset) = state
+                .esp_presets
+                .iter()
+                .find(|preset| preset.id == preset_id)
             else {
                 set_valid(false);
                 return;
@@ -39486,9 +39618,9 @@ mod windows_overlay {
             )
         };
         let snapshot = ESP_TARGET_SNAPSHOTS.lock().get(&preset_id).copied();
-        let Some(snapshot) = snapshot.filter(|snapshot| {
-            enabled && snapshot.sampled_at.elapsed() <= max_age
-        }) else {
+        let Some(snapshot) =
+            snapshot.filter(|snapshot| enabled && snapshot.sampled_at.elapsed() <= max_age)
+        else {
             set_valid(false);
             return;
         };
@@ -39505,6 +39637,90 @@ mod windows_overlay {
         set(&step.esp_on_screen_var, snapshot.on_screen as u8 as f64);
         set(&step.esp_in_front_var, snapshot.in_front as u8 as f64);
         set_valid(true);
+    }
+
+    fn execute_esp_3d_aim_lock(step: &crate::model::MacroStep) {
+        let Some(preset_id) = step.esp_preset_id else {
+            return;
+        };
+        let preset = {
+            let state = HOOK_STATE.lock();
+            state.esp_presets.iter().find(|p| p.id == preset_id).cloned()
+        };
+        let Some(preset) = preset else {
+            return;
+        };
+
+        let mut frame = EspReadFrame::default();
+        let Ok((target, camera, yaw, pitch)) = read_esp_inputs(&preset, &mut frame) else {
+            return;
+        };
+
+        let (screen_w, screen_h) = match esp_target_bounds(preset.target_window.as_str()) {
+            Some((_, _, w, h)) => (w as f32, h as f32),
+            None => (1920.0, 1080.0),
+        };
+        let aspect = (screen_w / screen_h.max(1.0)).clamp(0.1, 10.0);
+
+        let Some(projection) = crate::model::project_esp(&preset, target, camera, yaw, pitch, aspect) else {
+            return;
+        };
+
+        let half_w = screen_w * 0.5;
+        let half_h = screen_h * 0.5;
+
+        let (delta_px_x, delta_px_y) = if projection.in_front {
+            (projection.normalized_x * half_w, projection.normalized_y * half_h)
+        } else {
+            let dir = if projection.normalized_x >= 0.0 { 1.0 } else { -1.0 };
+            (dir * half_w * 1.5, 0.0)
+        };
+
+        let sens = (step.esp_aim_sens_scale * 1.0).clamp(0.01, 20.0) as f32;
+        let smooth_speed = (step.esp_aim_smooth_speed.clamp(0.01, 1.0) * 0.25) as f32;
+
+        let move_float_x = delta_px_x * sens * smooth_speed + (step.vision_move_offset_x as f32);
+        let move_float_y = delta_px_y * sens * smooth_speed + (step.vision_move_offset_y as f32);
+
+        let (move_float_x, move_float_y) = match step.vision_move_axis_lock {
+            crate::model::VisionMoveAxisLock::HorizontalOnly => (move_float_x, 0.0),
+            crate::model::VisionMoveAxisLock::VerticalOnly => (0.0, move_float_y),
+            crate::model::VisionMoveAxisLock::None => (move_float_x, move_float_y),
+        };
+
+        static SUBPIXEL_X: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+        static SUBPIXEL_Y: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+        let add_milli_x = (move_float_x * 1000.0) as i32;
+        let add_milli_y = (move_float_y * 1000.0) as i32;
+
+        let total_milli_x = SUBPIXEL_X.fetch_add(add_milli_x, std::sync::atomic::Ordering::Relaxed) + add_milli_x;
+        let total_milli_y = SUBPIXEL_Y.fetch_add(add_milli_y, std::sync::atomic::Ordering::Relaxed) + add_milli_y;
+
+        let send_x = total_milli_x / 1000;
+        let send_y = total_milli_y / 1000;
+
+        SUBPIXEL_X.fetch_sub(send_x * 1000, std::sync::atomic::Ordering::Relaxed);
+        SUBPIXEL_Y.fetch_sub(send_y * 1000, std::sync::atomic::Ordering::Relaxed);
+
+        if send_x != 0 || send_y != 0 {
+            let passes = (step.vision_move_passes.clamp(1, 10)) as i32;
+            let step_x = send_x / passes;
+            let step_y = send_y / passes;
+            let rem_x = send_x % passes;
+            let rem_y = send_y % passes;
+
+            for i in 0..passes {
+                let cur_x = step_x + if i == 0 { rem_x } else { 0 };
+                let cur_y = step_y + if i == 0 { rem_y } else { 0 };
+                if cur_x != 0 || cur_y != 0 {
+                    let _ = send_mouse_move_relative(cur_x, cur_y);
+                }
+                if passes > 1 && step.vision_move_delay_ms > 0 {
+                    thread::sleep(Duration::from_millis(step.vision_move_delay_ms.min(10)));
+                }
+            }
+        }
     }
 
     fn set_esp_preset_enabled(preset_id: u32, enabled: bool) {

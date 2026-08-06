@@ -114,6 +114,7 @@ pub enum MacroAction {
     EnableEspPreset,
     DisableEspPreset,
     ReadEspTarget,
+    Esp3DAimLock,
     FunnyMemeReply,
     AiResponse,
     JumpToStep,
@@ -422,9 +423,16 @@ pub struct MacroStep {
     pub esp_on_screen_var: String,
     #[serde(default)]
     pub esp_in_front_var: String,
+    #[serde(default = "default_esp_aim_smooth")]
+    pub esp_aim_smooth_speed: f64,
+    #[serde(default = "default_esp_aim_sens")]
+    pub esp_aim_sens_scale: f64,
     #[serde(default)]
     pub trigger_macro_group_id: Option<u32>,
 }
+
+fn default_esp_aim_smooth() -> f64 { 1.0 }
+fn default_esp_aim_sens() -> f64 { 1.0 }
 
 impl Default for MacroStep {
     fn default() -> Self {
@@ -534,6 +542,8 @@ impl Default for MacroStep {
             esp_valid_var: "valid".to_string(),
             esp_on_screen_var: "on_screen".to_string(),
             esp_in_front_var: "in_front".to_string(),
+            esp_aim_smooth_speed: 1.0,
+            esp_aim_sens_scale: 1.0,
             trigger_macro_group_id: None,
         }
     }

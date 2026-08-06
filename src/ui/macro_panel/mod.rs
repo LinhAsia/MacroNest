@@ -699,15 +699,20 @@ impl CrosshairApp {
                             );
                             ui.end_row();
 
-                            ui.label(Self::tr_lang(language, "Delay", "Delay"));
-                            *live_sync |= Self::render_temp_u64_input(
-                                ui,
-                                ui.id().with("vision-move-delay"),
-                                &mut step.vision_move_delay_ms,
-                                0,
-                                1000,
-                            );
-                            ui.end_row();
+                            if !matches!(
+                                step.action,
+                                MacroAction::MouseMoveAbsolute | MacroAction::MouseMoveRelative
+                            ) {
+                                ui.label(Self::tr_lang(language, "Delay", "Delay"));
+                                *live_sync |= Self::render_temp_u64_input(
+                                    ui,
+                                    ui.id().with("vision-move-delay"),
+                                    &mut step.vision_move_delay_ms,
+                                    0,
+                                    1000,
+                                );
+                                ui.end_row();
+                            }
                         });
                 }
 
@@ -9172,6 +9177,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
                                                     | MacroAction::ReadEspTarget
+                                                    | MacroAction::Esp3DAimLock
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -9183,6 +9189,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
                                                         | MacroAction::ReadEspTarget
+                                                        | MacroAction::Esp3DAimLock
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -11536,6 +11543,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
                                                     | MacroAction::ReadEspTarget
+                                                    | MacroAction::Esp3DAimLock
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -11547,6 +11555,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
                                                         | MacroAction::ReadEspTarget
+                                                        | MacroAction::Esp3DAimLock
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -15299,6 +15308,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
                                                     | MacroAction::ReadEspTarget
+                                                    | MacroAction::Esp3DAimLock
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -15415,6 +15425,33 @@ if supports_move_mouse || show_detection_tuning {
                                                         }
                                                     }
                                                 }
+                                                if matches!(
+                                                    step.action,
+                                                    MacroAction::MouseMoveAbsolute
+                                                        | MacroAction::MouseMoveRelative
+                                                ) {
+                                                    Self::render_vision_axis_lock_controls(
+                                                        ui,
+                                                        step,
+                                                        language,
+                                                        &mut live_sync,
+                                                    );
+                                                    Self::render_vision_move_mode_controls(
+                                                        ui,
+                                                        step,
+                                                        language,
+                                                        &mut live_sync,
+                                                    );
+                                                    Self::render_vision_runtime_tuning_dropdown(
+                                                        ui,
+                                                        step,
+                                                        language,
+                                                        true,
+                                                        false,
+                                                        false,
+                                                        &mut live_sync,
+                                                    );
+                                                }
                                             } else if step.action == MacroAction::PlayMousePathPreset {
                                                 if step.mouse_speed_expr.trim().is_empty() {
                                                     step.mouse_speed_expr =
@@ -15473,13 +15510,16 @@ if supports_move_mouse || show_detection_tuning {
                                                         response
                                                     })
                                                     .inner
-                                                    .on_hover_text(Self::tr_lang(language, "Only changes Smooth playback for this Mouse Path step. x1 = normal speed, x2 = 2x faster, x0.5 = half speed. Supports {var}.", "Only changes Smooth playback for this Mouse Path step. x1 = normal speed, x2 = 2x faster, x0.5 = half speed. Supports {var}.") )
-                                        .changed();
-                                } else if matches!(
+                                                    .changed();
+                                            } else if matches!(
                                                 step.action,
                                                 MacroAction::DrawGeometry
                                                     | MacroAction::ShowGeometryPreset
                                                     | MacroAction::HideGeometryPreset
+                                                    | MacroAction::EnableEspPreset
+                                                    | MacroAction::DisableEspPreset
+                                                    | MacroAction::ReadEspTarget
+                                                    | MacroAction::Esp3DAimLock
                                                     | MacroAction::StartAudioSensePreset
                                                     | MacroAction::StopAudioSense
                                             ) {
@@ -15491,6 +15531,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
                                                         | MacroAction::ReadEspTarget
+                                                        | MacroAction::Esp3DAimLock
                                                 ) {
                                                     Self::render_geometry_macro_step_editor(
                                                         ui,
@@ -17622,6 +17663,7 @@ if supports_move_mouse || show_detection_tuning {
             MacroAction::EnableEspPreset,
             MacroAction::DisableEspPreset,
             MacroAction::ReadEspTarget,
+            MacroAction::Esp3DAimLock,
         ]
     }
 
@@ -19892,27 +19934,55 @@ if supports_move_mouse || show_detection_tuning {
                 }
                 MacroAction::EnableEspPreset
                 | MacroAction::DisableEspPreset
-                | MacroAction::ReadEspTarget => {
-                    let selected = step
-                        .esp_preset_id
-                        .and_then(|id| {
-                            esp_preset_options
-                                .iter()
-                                .find(|preset| preset.0 == id)
-                                .map(|preset| preset.1.as_str())
-                        })
-                        .unwrap_or("Select ESP preset");
-                    ComboBox::from_id_salt((id_prefix, "esp-preset"))
-                        .width(180.0)
-                        .selected_text(selected)
-                        .show_ui(ui, |ui| {
-                            for (id, name) in esp_preset_options {
-                                *live_sync |= ui
-                                    .selectable_value(&mut step.esp_preset_id, Some(*id), name)
-                                    .changed();
+                | MacroAction::ReadEspTarget
+                | MacroAction::Esp3DAimLock => {
+                    ui.horizontal(|ui| {
+                        let selected = step
+                            .esp_preset_id
+                            .and_then(|id| {
+                                esp_preset_options
+                                    .iter()
+                                    .find(|preset| preset.0 == id)
+                                    .map(|preset| preset.1.as_str())
+                            })
+                            .unwrap_or("Select ESP preset");
+                        ComboBox::from_id_salt((id_prefix, "esp-preset"))
+                            .width(180.0)
+                            .selected_text(selected)
+                            .show_ui(ui, |ui| {
+                                for (id, name) in esp_preset_options {
+                                    *live_sync |= ui
+                                        .selectable_value(&mut step.esp_preset_id, Some(*id), name)
+                                        .changed();
+                                }
+                            });
+                        if step.action == MacroAction::Esp3DAimLock {
+                            ui.label("Smooth:");
+                            *live_sync |= ui
+                                .add(egui::DragValue::new(&mut step.esp_aim_smooth_speed).speed(0.05).range(0.05..=20.0))
+                                .on_hover_text("Aim smooth multiplier")
+                                .changed();
+
+                            ui.label("Sens:");
+                            *live_sync |= ui
+                                .add(egui::DragValue::new(&mut step.esp_aim_sens_scale).speed(0.05).range(0.05..=50.0))
+                                .on_hover_text("Sensitivity scale multiplier")
+                                .changed();
+                        }
+                        if step.action == MacroAction::ReadEspTarget {
+                            let collapse_icon = if step.geometry_collapsed { 0xe5cc } else { 0xe5cf };
+                            let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
+                            if ui
+                                .add_sized([18.0, 18.0], collapse_btn)
+                                .on_hover_text(if step.geometry_collapsed { "Expand variables" } else { "Collapse variables" })
+                                .clicked()
+                            {
+                                step.geometry_collapsed = !step.geometry_collapsed;
+                                *live_sync = true;
                             }
-                        });
-                    if step.action == MacroAction::ReadEspTarget {
+                        }
+                    });
+                    if step.action == MacroAction::ReadEspTarget && !step.geometry_collapsed {
                         egui::Grid::new((id_prefix, "esp-target-output-vars"))
                             .num_columns(4)
                             .spacing([4.0, 2.0])
@@ -20775,19 +20845,20 @@ if supports_move_mouse || show_detection_tuning {
             return;
         }
         let popup_id = response.id.with("sug_popup");
-        let below_space = ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0;
-        let above_space = response.rect.top() - ui.ctx().content_rect().top() - 8.0;
+        let top_min = (ui.ctx().content_rect().top() + 60.0).max(60.0);
+        let below_space = (ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0).max(0.0);
+        let above_space = (response.rect.top() - top_min - 8.0).max(0.0);
         let open_upward = above_space > below_space && above_space >= 120.0;
         let popup_position = if open_upward {
-            egui::pos2(response.rect.left(), response.rect.top() - 4.0)
+            egui::pos2(response.rect.left(), (response.rect.top() - 4.0).max(top_min))
         } else {
-            response.rect.left_bottom()
+            egui::pos2(response.rect.left(), response.rect.bottom().max(top_min))
         };
         let mut clicked_choice: Option<String> = None;
         let popup_max_height = if open_upward {
-            above_space.max(120.0)
+            above_space.max(80.0)
         } else {
-            below_space.max(120.0)
+            below_space.max(80.0)
         };
         let area_res = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
@@ -21020,19 +21091,20 @@ if supports_move_mouse || show_detection_tuning {
             return;
         }
         let popup_id = response.id.with("sug_popup_raw");
-        let below_space = ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0;
-        let above_space = response.rect.top() - ui.ctx().content_rect().top() - 8.0;
+        let top_min = (ui.ctx().content_rect().top() + 60.0).max(60.0);
+        let below_space = (ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0).max(0.0);
+        let above_space = (response.rect.top() - top_min - 8.0).max(0.0);
         let open_upward = above_space > below_space && above_space >= 120.0;
         let popup_position = if open_upward {
-            egui::pos2(response.rect.left(), response.rect.top() - 4.0)
+            egui::pos2(response.rect.left(), (response.rect.top() - 4.0).max(top_min))
         } else {
-            response.rect.left_bottom()
+            egui::pos2(response.rect.left(), response.rect.bottom().max(top_min))
         };
         let mut clicked_choice: Option<String> = None;
         let popup_max_height = if open_upward {
-            above_space.max(120.0)
+            above_space.max(80.0)
         } else {
-            below_space.max(120.0)
+            below_space.max(80.0)
         };
         let area_res = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
@@ -21135,10 +21207,8 @@ if supports_move_mouse || show_detection_tuning {
         let animated_height = ui
             .ctx()
             .animate_value_with_time(id.with("h"), target_height, 0.20);
-        let is_multiline = has_focus
-            && (multiline_on_focus
-                || (text.chars().count() > (expanded_width / 7.2) as usize)
-                || text.contains('\n'));
+        let text_has_newline = text.contains('\n');
+        let is_multiline = has_focus && multiline_on_focus;
         let text_edit = if is_multiline {
             let chars_per_line = ((expanded_width / 7.2) as usize).max(10);
             let mut estimated_rows = 0;
@@ -21198,39 +21268,59 @@ if supports_move_mouse || show_detection_tuning {
                 widget.bg_stroke = bg_stroke;
             }
         }
+        let prev_clip_rect = ui.clip_rect();
+        ui.set_clip_rect(textbox_rect.expand(2.0));
         let response = match highlight_mode {
-            TextHighlightMode::None => ui.put(textbox_rect, text_edit),
-            TextHighlightMode::VariableTokens => {
-                let mut layouter = |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
-                    let effective_wrap_width =
-                        Self::highlight_job_wrap_width(has_focus, multiline_on_focus, wrap_width);
-                    let text_style = egui::TextStyle::Body;
-                    let job = Self::interpolation_highlight_job(
-                        ui,
-                        string.as_str(),
-                        effective_wrap_width,
-                        text_style,
-                    );
-                    ui.fonts_mut(|fonts| fonts.layout_job(job))
-                };
-                ui.put(textbox_rect, text_edit.layouter(&mut layouter))
+            TextHighlightMode::None => {
+                if !is_multiline && text_has_newline {
+                    let mut layouter =
+                        |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
+                            let sanitized = string.as_str().replace('\n', " ");
+                            let mut job = egui::text::LayoutJob::default();
+                            job.wrap.max_width = wrap_width;
+                            let font_id = egui::TextStyle::Body.resolve(ui.style());
+                            let color = ui.visuals().text_color();
+                            job.append(
+                                &sanitized,
+                                0.0,
+                                egui::text::TextFormat::simple(font_id, color),
+                            );
+                            ui.fonts_mut(|fonts| fonts.layout_job(job))
+                        };
+                    ui.put(textbox_rect, text_edit.layouter(&mut layouter))
+                } else {
+                    ui.put(textbox_rect, text_edit)
+                }
             }
-            TextHighlightMode::Interpolations => {
-                let mut layouter = |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
-                    let effective_wrap_width =
-                        Self::highlight_job_wrap_width(has_focus, multiline_on_focus, wrap_width);
-                    let text_style = egui::TextStyle::Body;
-                    let job = Self::interpolation_highlight_job(
-                        ui,
-                        string.as_str(),
-                        effective_wrap_width,
-                        text_style,
-                    );
-                    ui.fonts_mut(|fonts| fonts.layout_job(job))
-                };
+            TextHighlightMode::VariableTokens | TextHighlightMode::Interpolations => {
+                let mut layouter =
+                    |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
+                        let effective_wrap_width = Self::highlight_job_wrap_width(
+                            has_focus,
+                            multiline_on_focus,
+                            wrap_width,
+                        );
+                        let text_style = egui::TextStyle::Body;
+                        let sanitized_str;
+                        let raw = string.as_str();
+                        let input_str = if !is_multiline && raw.contains('\n') {
+                            sanitized_str = raw.replace('\n', " ");
+                            &sanitized_str
+                        } else {
+                            raw
+                        };
+                        let job = Self::interpolation_highlight_job(
+                            ui,
+                            input_str,
+                            effective_wrap_width,
+                            text_style,
+                        );
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
                 ui.put(textbox_rect, text_edit.layouter(&mut layouter))
             }
         };
+        ui.set_clip_rect(prev_clip_rect);
         ui.visuals_mut().widgets.inactive = prev_inactive;
         ui.visuals_mut().widgets.hovered = prev_hovered;
         ui.visuals_mut().widgets.active = prev_active;
@@ -21244,6 +21334,72 @@ if supports_move_mouse || show_detection_tuning {
         {
             Self::show_text_edit_focus_help(ui, response.id, textbox_rect, help_text);
         }
+        if !multiline_on_focus && text_has_newline {
+            *text = text.replace(['\r', '\n'], " ");
+        }
+        let text_has_newline = text.contains('\n');
+
+        if now_focused && text_has_newline && multiline_on_focus {
+            let popup_id = id.with("multiline-floating-editor");
+            let screen_rect = ui.ctx().screen_rect();
+            let popup_width = 400.0f32.min(screen_rect.width() - 32.0);
+            let popup_height = 140.0f32;
+            let mut popup_pos = egui::pos2(
+                textbox_rect.min.x,
+                textbox_rect.max.y + 4.0,
+            );
+            if popup_pos.y + popup_height > screen_rect.max.y - 10.0 {
+                popup_pos.y = (textbox_rect.min.y - popup_height - 4.0).clamp(60.0, (screen_rect.max.y - popup_height - 10.0).max(60.0));
+            }
+            if popup_pos.x + popup_width > screen_rect.max.x - 10.0 {
+                popup_pos.x = (screen_rect.max.x - popup_width - 10.0).max(10.0);
+            }
+
+            egui::Area::new(popup_id)
+                .order(egui::Order::Foreground)
+                .fixed_pos(popup_pos)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style())
+                        .inner_margin(8.0)
+                        .corner_radius(6.0)
+                        .fill(egui::Color32::from_rgb(24, 26, 32))
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(86, 156, 224)))
+                        .show(ui, |ui| {
+                            ui.set_width(popup_width);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Editor (SVG / Multi-line)")
+                                        .small()
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(140, 200, 255)),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui.add(Button::new(Self::material_icon_text(0xe5cd, 14.0))).clicked() {
+                                            ui.memory_mut(|mem| mem.surrender_focus(id));
+                                        }
+                                    },
+                                );
+                            });
+                            ui.add_space(4.0);
+                            egui::ScrollArea::vertical()
+                                .max_height(popup_height - 32.0)
+                                .show(ui, |ui| {
+                                    let popup_edit_id = id.with("floating-multiline-textedit");
+                                    let popup_response = ui.add(
+                                        egui::TextEdit::multiline(text)
+                                            .desired_width(popup_width - 24.0)
+                                            .desired_rows(5)
+                                            .font(egui::TextStyle::Body)
+                                            .id(popup_edit_id),
+                                    );
+                                    Self::apply_vietnamese_input_static(&popup_response, text);
+                                });
+                        });
+                });
+        }
+
         Self::apply_vietnamese_input_static(&response, text);
         response
     }
