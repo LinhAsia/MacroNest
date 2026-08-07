@@ -12094,8 +12094,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         ),
                                                     );
                                                 } else {
-                                                    let copy_btn = Button::new(Self::tr_lang(language, "Copy", "Copy"))
-                                                        .min_size(egui::vec2(42.0, 20.0));
+                                                    let copy_btn = Button::new(Self::tr_lang(language, "Copy All", "Copy All"))
+                                                        .min_size(egui::vec2(54.0, 20.0));
                                                     if ui
                                                         .add(copy_btn)
                                                         .on_hover_text(Self::tr_lang(language, "Copy the selected steps in this preset.", "Copy the selected steps in this preset."))
@@ -17356,14 +17356,25 @@ if supports_move_mouse || show_detection_tuning {
                 });
 
                 columns[1].vertical(|ui| {
-                    ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Runtime Variables",
-                            "Runtime Variables",
-                        ))
-                        .strong(),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Runtime Variables",
+                                "Runtime Variables",
+                            ))
+                            .strong(),
+                        );
+                        if !vars_list.is_empty()
+                            && ui
+                                .button(Self::tr_lang(language, "Clear All", "Clear All"))
+                                .on_hover_text("Clear all active runtime variables")
+                                .clicked()
+                        {
+                            crate::overlay::RUNTIME_VARIABLES.lock().clear();
+                            crate::overlay::TEXT_VARIABLES.lock().clear();
+                        }
+                    });
                     ui.label(
                         RichText::new(Self::tr_lang(
                             language,
@@ -17380,10 +17391,11 @@ if supports_move_mouse || show_detection_tuning {
                             .max_height(300.0)
                             .show(ui, |ui| {
                                 egui::Grid::new("macro_vars_grid")
-                                    .num_columns(2)
+                                    .num_columns(3)
                                     .spacing([8.0, 6.0])
                                     .striped(true)
                                     .show(ui, |ui| {
+                                        let mut to_remove_var = None;
                                         for (name, value) in &vars_list {
                                             ui.label(
                                                 RichText::new(name)
@@ -17391,10 +17403,23 @@ if supports_move_mouse || show_detection_tuning {
                                                     .color(Color32::from_rgb(243, 156, 18)),
                                             );
                                             ui.add_sized(
-                                                [180.0, 20.0],
+                                                [160.0, 20.0],
                                                 egui::Label::new(RichText::new(value).monospace()),
                                             );
+                                            if ui
+                                                .button(Self::material_icon_text(0xe872, 14.0))
+                                                .on_hover_text(Self::tr_lang(
+                                                    language, "Delete", "Delete",
+                                                ))
+                                                .clicked()
+                                            {
+                                                to_remove_var = Some(name.clone());
+                                            }
                                             ui.end_row();
+                                        }
+                                        if let Some(var_name) = to_remove_var {
+                                            crate::overlay::RUNTIME_VARIABLES.lock().remove(&var_name);
+                                            crate::overlay::TEXT_VARIABLES.lock().remove(&var_name);
                                         }
                                     });
                             });
@@ -21189,13 +21214,13 @@ if supports_move_mouse || show_detection_tuning {
         // The widget itself is the source of truth. A separately cached focus bit can survive
         // after a preset/card is hidden and reopen a long editor at its expanded height.
         let has_focus = ui.memory(|mem| mem.has_focus(id));
+        let normal_height = normal_height.max(20.0);
+        let expanded_height = expanded_height.max(normal_height);
         let target_width = if has_focus {
             expanded_width
         } else {
             normal_width
         };
-        // ponytail: the caller owns the expanded height; content-driven growth can overlap the
-        // rest of a preset card. A dedicated editor can opt into a taller fixed height instead.
         let target_height = if has_focus {
             expanded_height
         } else {
@@ -21228,9 +21253,6 @@ if supports_move_mouse || show_detection_tuning {
                 .font(egui::TextStyle::Body)
                 .id(id)
         };
-        // Temporarily clear override_text_color so hint/placeholder text is properly dimmed.
-        // Preset cards set override_text_color for their content, which bleeds into TextEdit
-        // and makes hint text appear at full brightness instead of the dimmed weak_text_color.
         let prev_override = ui.visuals().override_text_color;
         ui.visuals_mut().override_text_color = None;
         let (rect, _) = ui.allocate_exact_size(
@@ -21249,7 +21271,7 @@ if supports_move_mouse || show_detection_tuning {
         let prev_interact_y = ui.spacing().interact_size.y;
         let prev_padding = ui.spacing().button_padding;
         ui.spacing_mut().interact_size.y = animated_height;
-        let font_size = 16.0;
+        let font_size = 14.0;
         ui.spacing_mut().button_padding.y = ((animated_height - font_size) / 2.0 - 0.5).max(0.0);
         let prev_inactive = ui.visuals().widgets.inactive;
         let prev_hovered = ui.visuals().widgets.hovered;
@@ -21269,7 +21291,7 @@ if supports_move_mouse || show_detection_tuning {
             }
         }
         let prev_clip_rect = ui.clip_rect();
-        ui.set_clip_rect(textbox_rect.expand(2.0));
+        ui.set_clip_rect(textbox_rect.expand(4.0).intersect(prev_clip_rect));
         let response = match highlight_mode {
             TextHighlightMode::None => {
                 if !is_multiline && text_has_newline {

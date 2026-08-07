@@ -121,8 +121,6 @@ pub struct EspPreset {
     pub target_audio_max_distance: f32,
     pub update_interval_ms: u32,
     pub motion_smoothing_ms: u32,
-    #[serde(default)]
-    pub smoothing_mode: EspSmoothingMode,
 }
 
 impl EspPreset {
@@ -204,7 +202,6 @@ impl EspPreset {
             target_audio_max_distance: 500.0,
             update_interval_ms: 33,
             motion_smoothing_ms: 40,
-            smoothing_mode: EspSmoothingMode::SoftInertial,
         }
     }
 

@@ -3915,6 +3915,8 @@ impl CrosshairApp {
             Self::collect_vars_from_step(&preset.press_stop_step, &mut vars);
         }
 
+        vars.retain(|var_name| !crate::overlay::is_builtin_property_name(var_name));
+
         let mut list: Vec<String> = vars.into_iter().collect();
         list.sort();
         list
@@ -14564,6 +14566,9 @@ impl eframe::App for CrosshairApp {
         }
         if self.startup_shell_frames_remaining > 0 {
             self.startup_shell_frames_remaining -= 1;
+            if self.startup_shell_frames_remaining == 0 {
+                crate::platform::trim_working_set();
+            }
             ctx.request_repaint();
         }
         if self.state.active_panel == AppPanel::Zoom {

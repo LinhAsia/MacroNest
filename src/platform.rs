@@ -765,6 +765,16 @@ mod windows_platform {
     fn powershell_single_quote(value: &str) -> String {
         format!("'{}'", value.replace('\'', "''"))
     }
+
+    pub fn trim_working_set() {
+        unsafe {
+            let _ = windows::Win32::System::Threading::SetProcessWorkingSetSize(
+                GetCurrentProcess(),
+                usize::MAX,
+                usize::MAX,
+            );
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -842,6 +852,8 @@ mod fallback {
     pub fn get_system_uptime() -> std::time::Duration {
         std::time::Duration::ZERO
     }
+
+    pub fn trim_working_set() {}
 }
 
 #[cfg(not(windows))]

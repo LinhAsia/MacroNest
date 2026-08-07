@@ -145,8 +145,8 @@ pub(crate) struct NetworkPanelState {
     frida_processes: Vec<crate::memory_debugger::debugger::ProcessInfo>,
     frida_pid: Option<u32>,
     frida_script: String,
-    frida_log: String,
-    frida_session: Option<crate::frida_injector::Session>,
+    pub(crate) frida_log: String,
+    pub(crate) frida_session: Option<crate::frida_injector::Session>,
 }
 
 impl NetworkPanelState {

@@ -737,11 +737,84 @@ mod windows_impl {
         })
     }
 
+    fn downscale_rgba(
+        src_rgba: &[u8],
+        src_w: usize,
+        src_h: usize,
+        dst_w: usize,
+        dst_h: usize,
+    ) -> Vec<u8> {
+        if src_w == dst_w && src_h == dst_h {
+            return src_rgba.to_vec();
+        }
+        let mut dst = vec![0u8; dst_w * dst_h * 4];
+        for y in 0..dst_h {
+            let src_y = (y * src_h) / dst_h;
+            for x in 0..dst_w {
+                let src_x = (x * src_w) / dst_w;
+                let src_idx = (src_y * src_w + src_x) * 4;
+                let dst_idx = (y * dst_w + x) * 4;
+                if src_idx + 3 < src_rgba.len() && dst_idx + 3 < dst.len() {
+                    dst[dst_idx..dst_idx + 4].copy_from_slice(&src_rgba[src_idx..src_idx + 4]);
+                }
+            }
+        }
+        dst
+    }
+
+    fn is_rgba_frame_blank(rgba: &[u8]) -> bool {
+        if rgba.is_empty() {
+            return true;
+        }
+        let mut non_zero_count = 0usize;
+        let sample_step = (rgba.len() / 400).max(4) & !3;
+        let mut i = 0;
+        while i + 3 < rgba.len() {
+            if rgba[i] > 10 || rgba[i + 1] > 10 || rgba[i + 2] > 10 {
+                non_zero_count += 1;
+                if non_zero_count > 5 {
+                    return false;
+                }
+            }
+            i += sample_step;
+        }
+        true
+    }
+
     unsafe fn capture_window_preview_from_hwnd(
         hwnd: HWND,
         max_dimension: u32,
         client_only: bool,
     ) -> Option<WindowPreviewFrame> {
+        let title = window_title(hwnd).unwrap_or_else(|| "Focused window".to_owned());
+
+        if let Some(wgc_frame) = capture_wgc_frame(hwnd) {
+            let scale = (max_dimension as f32 / wgc_frame.width as f32)
+                .min(max_dimension as f32 / wgc_frame.height as f32)
+                .min(1.0);
+            let capture_width = ((wgc_frame.width as f32 * scale).round() as usize).max(1);
+            let capture_height = ((wgc_frame.height as f32 * scale).round() as usize).max(1);
+            let scaled_rgba = downscale_rgba(
+                &wgc_frame.rgba,
+                wgc_frame.width,
+                wgc_frame.height,
+                capture_width,
+                capture_height,
+            );
+            if !is_rgba_frame_blank(&scaled_rgba) {
+                return Some(WindowPreviewFrame {
+                    title,
+                    screen_x: wgc_frame.screen_x,
+                    screen_y: wgc_frame.screen_y,
+                    logical_width: wgc_frame.width as i32,
+                    logical_height: wgc_frame.height as i32,
+                    width: capture_width,
+                    height: capture_height,
+                    rgba: scaled_rgba,
+                });
+            }
+        }
+
         let rect = if client_only {
             client_rect_on_screen(hwnd)?
         } else {
@@ -917,7 +990,7 @@ mod windows_impl {
             false
         };
 
-        let rgba = if copied {
+        let mut rgba = if copied {
             let len = (capture_width as usize) * (capture_height as usize) * 4;
             let pixels = std::slice::from_raw_parts(scaled_bits as *const u8, len);
             let mut rgba = vec![0u8; len];
@@ -932,8 +1005,6 @@ mod windows_impl {
             Vec::new()
         };
 
-        let title = window_title(hwnd).unwrap_or_else(|| "Focused window".to_owned());
-
         let _ = SelectObject(full_dc, full_old_obj);
         let _ = SelectObject(scaled_dc, scaled_old_obj);
         let _ = DeleteObject(HGDIOBJ(full_bitmap.0));
@@ -947,7 +1018,19 @@ mod windows_impl {
             let _ = ReleaseDC(Some(hwnd), window_dc);
         }
 
-        if !copied || rgba.is_empty() {
+        if is_rgba_frame_blank(&rgba) {
+            if let Some(desktop_frame) = capture_screen_region_from_desktop(rect.left, rect.top, screen_width, screen_height) {
+                rgba = downscale_rgba(
+                    &desktop_frame.rgba,
+                    desktop_frame.width,
+                    desktop_frame.height,
+                    capture_width as usize,
+                    capture_height as usize,
+                );
+            }
+        }
+
+        if rgba.is_empty() || is_rgba_frame_blank(&rgba) {
             return None;
         }
 

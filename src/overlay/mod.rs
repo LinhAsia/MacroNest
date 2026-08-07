@@ -25648,37 +25648,13 @@ mod windows_overlay {
         let bg_alpha = (display.background_opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
         let bytes_len = (width as usize) * (height as usize) * 4;
         let pixels = std::slice::from_raw_parts_mut(bits_ptr as *mut u8, bytes_len);
-        let radius = if display.rounded_background {
-            16.0
-        } else {
-            0.0
-        };
-        let bg_b = ((display.background_color.b as u32 * bg_alpha as u32) / 255) as u8;
-        let bg_g = ((display.background_color.g as u32 * bg_alpha as u32) / 255) as u8;
-        let bg_r = ((display.background_color.r as u32 * bg_alpha as u32) / 255) as u8;
         for py in 0..height {
             for px in 0..width {
                 let index = ((py as usize) * (width as usize) + (px as usize)) * 4;
-                let inside = rounded_rect_contains_point(
-                    px as f32 + 0.5,
-                    py as f32 + 0.5,
-                    0.0,
-                    0.0,
-                    width as f32,
-                    height as f32,
-                    radius,
-                );
-                if inside && bg_alpha > 0 {
-                    pixels[index] = bg_b;
-                    pixels[index + 1] = bg_g;
-                    pixels[index + 2] = bg_r;
-                    pixels[index + 3] = bg_alpha;
-                } else {
-                    pixels[index] = 0;
-                    pixels[index + 1] = 0;
-                    pixels[index + 2] = 0;
-                    pixels[index + 3] = 0;
-                }
+                pixels[index] = 255;
+                pixels[index + 1] = 255;
+                pixels[index + 2] = 255;
+                pixels[index + 3] = 255;
             }
         }
 
@@ -25703,27 +25679,9 @@ mod windows_overlay {
             PCWSTR(font_name.as_ptr()),
         );
         let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
-        if bg_alpha > 0 {
-            let _ = SetBkColor(
-                mem_dc,
-                COLORREF(
-                    ((display.background_color.b as u32) << 16)
-                        | ((display.background_color.g as u32) << 8)
-                        | (display.background_color.r as u32),
-                ),
-            );
-            let _ = SetBkMode(mem_dc, windows::Win32::Graphics::Gdi::OPAQUE);
-        } else {
-            let _ = SetBkMode(mem_dc, TRANSPARENT);
-        }
-        let _ = SetTextColor(
-            mem_dc,
-            COLORREF(
-                ((display.text_color.b as u32) << 16)
-                    | ((display.text_color.g as u32) << 8)
-                    | (display.text_color.r as u32),
-            ),
-        );
+        let _ = SetBkMode(mem_dc, TRANSPARENT);
+        let _ = SetTextColor(mem_dc, COLORREF(0x00000000));
+
         let content_left = 12;
         let content_top = 6;
         let content_right = width - 12;
@@ -25765,26 +25723,75 @@ mod windows_overlay {
             text_rect.bottom = content_bottom;
         }
         let _ = DrawTextW(mem_dc, &mut wide, &mut text_rect, draw_flags);
+
+        let bg_alpha = (display.background_opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
         let text_alpha = display.text_color.a.max(1);
+        let text_r = display.text_color.r as u32;
+        let text_g = display.text_color.g as u32;
+        let text_b = display.text_color.b as u32;
+        let bg_r = display.background_color.r as u32;
+        let bg_g = display.background_color.g as u32;
+        let bg_b = display.background_color.b as u32;
+        let radius = if display.rounded_background { 16.0 } else { 0.0 };
+
         for py in 0..height {
             for px in 0..width {
                 let index = ((py as usize) * (width as usize) + (px as usize)) * 4;
-                let chunk = &mut pixels[index..index + 4];
-                let looks_like_bg = chunk[0] == bg_b
-                    && chunk[1] == bg_g
-                    && chunk[2] == bg_r
-                    && chunk[3] == bg_alpha;
-                let alpha = if looks_like_bg {
-                    bg_alpha
-                } else if chunk[0] == 0 && chunk[1] == 0 && chunk[2] == 0 && chunk[3] == 0 {
-                    0
+                let inside = rounded_rect_contains_point(
+                    px as f32 + 0.5,
+                    py as f32 + 0.5,
+                    0.0,
+                    0.0,
+                    width as f32,
+                    height as f32,
+                    radius,
+                );
+                if !inside {
+                    pixels[index] = 0;
+                    pixels[index + 1] = 0;
+                    pixels[index + 2] = 0;
+                    pixels[index + 3] = 0;
+                    continue;
+                }
+
+                let b_val = pixels[index] as u32;
+                let g_val = pixels[index + 1] as u32;
+                let r_val = pixels[index + 2] as u32;
+                let lum = (r_val * 299 + g_val * 587 + b_val * 114) / 1000;
+                let mask = (255u32.saturating_sub(lum)) as u8;
+
+                if mask == 0 {
+                    if bg_alpha > 0 {
+                        pixels[index] = ((bg_b * bg_alpha as u32) / 255) as u8;
+                        pixels[index + 1] = ((bg_g * bg_alpha as u32) / 255) as u8;
+                        pixels[index + 2] = ((bg_r * bg_alpha as u32) / 255) as u8;
+                        pixels[index + 3] = bg_alpha;
+                    } else {
+                        pixels[index] = 0;
+                        pixels[index + 1] = 0;
+                        pixels[index + 2] = 0;
+                        pixels[index + 3] = 0;
+                    }
                 } else {
-                    text_alpha
-                };
-                chunk[3] = alpha;
-                chunk[0] = ((chunk[0] as u32 * alpha as u32) / 255) as u8;
-                chunk[1] = ((chunk[1] as u32 * alpha as u32) / 255) as u8;
-                chunk[2] = ((chunk[2] as u32 * alpha as u32) / 255) as u8;
+                    let t_a = (text_alpha as u32 * mask as u32) / 255;
+                    let b_a = bg_alpha as u32;
+                    let out_a = t_a + (b_a * (255 - t_a)) / 255;
+                    if out_a > 0 {
+                        let out_r = (text_r * t_a + bg_r * b_a * (255 - t_a) / 255) / out_a.max(1);
+                        let out_g = (text_g * t_a + bg_g * b_a * (255 - t_a) / 255) / out_a.max(1);
+                        let out_b = (text_b * t_a + bg_b * b_a * (255 - t_a) / 255) / out_a.max(1);
+
+                        pixels[index] = ((out_b * out_a) / 255) as u8;
+                        pixels[index + 1] = ((out_g * out_a) / 255) as u8;
+                        pixels[index + 2] = ((out_r * out_a) / 255) as u8;
+                        pixels[index + 3] = out_a as u8;
+                    } else {
+                        pixels[index] = 0;
+                        pixels[index + 1] = 0;
+                        pixels[index + 2] = 0;
+                        pixels[index + 3] = 0;
+                    }
+                }
             }
         }
 
@@ -26281,13 +26288,11 @@ mod windows_overlay {
                                 .and_modify(|animation| {
                                     animation.target = frame.shapes.clone();
                                     animation.smoothing_ms = frame.smoothing_ms;
-                                    animation.smoothing_mode = frame.smoothing_mode;
                                 })
                                 .or_insert_with(|| EspShapeAnimation {
                                     current: frame.shapes.clone(),
                                     target: frame.shapes,
                                     smoothing_ms: frame.smoothing_ms,
-                                    smoothing_mode: frame.smoothing_mode,
                                 });
                         }
                     }
@@ -26303,11 +26308,7 @@ mod windows_overlay {
                     let alpha = if animation.smoothing_ms == 0 {
                         1.0
                     } else {
-                        let rate = match animation.smoothing_mode {
-                            crate::model::EspSmoothingMode::SoftInertial => -3.0,
-                            crate::model::EspSmoothingMode::ResponsiveFrame => -24.0,
-                        };
-                        1.0 - (rate * elapsed_ms / animation.smoothing_ms.max(5) as f32).exp()
+                        1.0 - (-3.0 * elapsed_ms / animation.smoothing_ms.max(5) as f32).exp()
                     };
                     let next = interpolate_esp_shapes(
                         &animation.current,
@@ -26434,7 +26435,6 @@ mod windows_overlay {
                     frames.push(EspRenderPreset {
                         id: preset.id,
                         smoothing_ms: preset.motion_smoothing_ms,
-                        smoothing_mode: preset.smoothing_mode,
                         shapes,
                     });
                 }
@@ -26458,7 +26458,6 @@ mod windows_overlay {
     struct EspRenderPreset {
         id: u32,
         smoothing_ms: u32,
-        smoothing_mode: crate::model::EspSmoothingMode,
         shapes: Vec<GeometryRenderShape>,
     }
 
@@ -26497,7 +26496,6 @@ mod windows_overlay {
         current: Vec<GeometryRenderShape>,
         target: Vec<GeometryRenderShape>,
         smoothing_ms: u32,
-        smoothing_mode: crate::model::EspSmoothingMode,
     }
 
     fn interpolate_esp_shapes(

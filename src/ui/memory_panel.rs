@@ -14,7 +14,7 @@ use eframe::egui::{self, Button, Color32, Frame, RichText, Sense, vec2};
 use crate::{
     hotkey,
     model::{
-        HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod,
+        EspPreset, HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod,
         MemoryPointerEntry,
     },
     process_memory::{
@@ -580,6 +580,10 @@ pub(crate) struct MemoryPanelState {
     visible_scan_ranges: [Option<(usize, usize, Instant)>; 2],
     pending_write_checks: Vec<PendingWriteCheck>,
     freeze_worker: MemoryFreezeWorker,
+    pub(crate) dll_config: crate::dll_generator::DllProjectConfig,
+    pub(crate) show_dll_studio: bool,
+    pub(crate) dll_status_msg: String,
+    pub(crate) inject_dll_file_path: String,
 }
 
 impl Default for MemoryPanelState {
@@ -660,6 +664,10 @@ impl Default for MemoryPanelState {
             visible_scan_ranges: [None, None],
             pending_write_checks: Vec::new(),
             freeze_worker: MemoryFreezeWorker::default(),
+            dll_config: crate::dll_generator::DllProjectConfig::default(),
+            show_dll_studio: false,
+            dll_status_msg: String::new(),
+            inject_dll_file_path: String::new(),
         }
     }
 }
@@ -786,6 +794,12 @@ impl CrosshairApp {
                 {
                     self.memory_panel.saved_library_open = true;
                 }
+                if ui
+                    .button(self.tr("Auto DLL Studio", "Auto DLL Studio"))
+                    .clicked()
+                {
+                    self.memory_panel.show_dll_studio = true;
+                }
             });
         });
         ui.add_space(6.0);
@@ -892,6 +906,7 @@ impl CrosshairApp {
         self.render_disassembler_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_code_access_dialog(ui.ctx());
+        self.render_dll_studio_window(ui.ctx());
         self.sync_memory_freeze_targets();
     }
 
@@ -3246,6 +3261,391 @@ impl CrosshairApp {
                 .clamp(256, 4096)
                 .saturating_mul(1024 * 1024),
         }
+    }
+
+    fn render_dll_studio_window(&mut self, ctx: &egui::Context) {
+        if !self.memory_panel.show_dll_studio {
+            return;
+        }
+
+        let mut open = self.memory_panel.show_dll_studio;
+        let title = self.tr("Auto DLL Studio - Generator & Injector", "Auto DLL Studio - Trình Tạo & Tiêm DLL");
+        egui::Window::new(title)
+            .open(&mut open)
+            .default_size([740.0, 540.0])
+            .min_size([580.0, 420.0])
+            .resizable(true)
+            .collapsible(true)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Auto DLL Generator & Injector")
+                            .strong()
+                            .size(16.0)
+                            .color(egui::Color32::from_rgb(100, 200, 255)),
+                    );
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(self.tr(
+                            "Generate C++ DLL project or inject memory scripts without coding",
+                            "Tạo file DLL hoặc Inject script memory không cần C++",
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                });
+                ui.separator();
+
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    // Section 1: Project Settings
+                    ui.group(|ui| {
+                        ui.label(
+                            egui::RichText::new(self.tr(
+                                "1. Project Configuration",
+                                "1. Cấu hình Dự án (Project Config)",
+                            ))
+                            .strong(),
+                        );
+                        egui::Grid::new("dll-proj-grid")
+                            .num_columns(2)
+                            .spacing([10.0, 6.0])
+                            .show(ui, |ui| {
+                                ui.label(self.tr("Project Name:", "Tên DLL (Project Name):"));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.memory_panel.dll_config.project_name)
+                                        .desired_width(200.0),
+                                );
+                                ui.end_row();
+
+                                ui.label(self.tr("Target Process:", "Tiến trình Mục tiêu (Target Process):"));
+                                ui.horizontal(|ui| {
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.memory_panel.dll_config.target_process)
+                                            .desired_width(180.0),
+                                    );
+                                    if let Some(proc_name) = &self.memory_panel.process_selector.split('(').next() {
+                                        let clean_name = proc_name.trim().to_string();
+                                        if !clean_name.is_empty()
+                                            && ui.button(self.tr("Get Current Process", "Lấy Process Hiện tại")).clicked()
+                                        {
+                                            self.memory_panel.dll_config.target_process = clean_name;
+                                        }
+                                    }
+                                });
+                                ui.end_row();
+
+                                ui.label(self.tr("Debug Console Window:", "Cửa sổ Console Debug:"));
+                                let console_label = self.tr(
+                                    "AllocConsole (Show debug console log window)",
+                                    "AllocConsole (Hiện cửa sổ đen Debug log)",
+                                );
+                                ui.checkbox(
+                                    &mut self.memory_panel.dll_config.alloc_console_for_debug,
+                                    console_label,
+                                );
+                                ui.end_row();
+                            });
+                    });
+
+                    ui.add_space(8.0);
+
+                    // Section 2: Memory Entries Table
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(self.tr(
+                                    "2. RAM Address & Patch Config",
+                                    "2. Danh sách Địa chỉ RAM / Patch Config",
+                                ))
+                                .strong(),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui
+                                    .button(self.tr("+ Add New Address", "+ Thêm địa chỉ mới"))
+                                    .clicked()
+                                {
+                                    self.memory_panel
+                                        .dll_config
+                                        .entries
+                                        .push(crate::dll_generator::DllMemoryEntry::default());
+                                }
+                                if ui
+                                    .button(self.tr("Import Saved Addresses", "Import từ Địa chỉ Đã lưu"))
+                                    .clicked()
+                                {
+                                    let saved_list = self.memory_panel.saved.clone();
+                                    let count = saved_list.len();
+                                    for saved in &saved_list {
+                                        let addr_str = format!("0x{:X}", saved.address);
+                                        let val_str = saved
+                                            .current
+                                            .as_ref()
+                                            .map(|v| format_scan_value(*v, false))
+                                            .or_else(|| saved.current_text.clone())
+                                            .unwrap_or_else(|| "0".to_string());
+                                        let offsets_vec = saved
+                                            .pointer
+                                            .as_ref()
+                                            .map(|p| p.offsets.clone())
+                                            .unwrap_or_default();
+                                        let entry = crate::dll_generator::DllMemoryEntry {
+                                            enabled: true,
+                                            name: if saved.description.is_empty() {
+                                                format!("RAM_0x{:X}", saved.address)
+                                            } else {
+                                                saved.description.clone()
+                                            },
+                                            address: addr_str,
+                                            offsets: offsets_vec,
+                                            value_type: crate::dll_generator::DllValueType::Float,
+                                            value_to_write: val_str,
+                                            mode: crate::dll_generator::DllPatchMode::HotkeyToggle,
+                                            hotkey_vk: Some(0x70),
+                                        };
+                                        self.memory_panel.dll_config.entries.push(entry);
+                                    }
+                                    let msg_template = self.tr(
+                                        "Imported {} addresses from saved list!",
+                                        "Đã import {} địa chỉ từ danh sách đã lưu!",
+                                    );
+                                    self.memory_panel.dll_status_msg =
+                                        msg_template.replace("{}", &count.to_string());
+                                }
+                            });
+                        });
+                        ui.separator();
+
+                        let mut to_delete = None;
+                        let entries_len = self.memory_panel.dll_config.entries.len();
+
+                        if entries_len == 0 {
+                            ui.label(
+                                egui::RichText::new(self.tr(
+                                    "No RAM addresses added. Click '+ Add New Address' or 'Import Saved Addresses'.",
+                                    "Chưa có địa chỉ RAM nào. Hãy bấm '+ Thêm địa chỉ mới' hoặc 'Import từ Địa chỉ Đã lưu'.",
+                                ))
+                                .weak(),
+                            );
+                        }
+
+                        let is_vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+                        let tr_func = |en: &'static str, vi: &'static str| -> &'static str {
+                            if is_vietnamese { vi } else { en }
+                        };
+
+                        for (idx, entry) in self.memory_panel.dll_config.entries.iter_mut().enumerate() {
+                            ui.push_id(idx, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut entry.enabled, "");
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut entry.name)
+                                            .desired_width(120.0)
+                                            .hint_text(tr_func("Name", "Tên")),
+                                    );
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut entry.address)
+                                            .desired_width(110.0)
+                                            .hint_text(tr_func("Address 0x...", "Địa chỉ 0x...")),
+                                    );
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut entry.value_to_write)
+                                            .desired_width(70.0)
+                                            .hint_text(tr_func("Value", "Giá trị")),
+                                    );
+
+                                    egui::ComboBox::from_id_salt(format!("valtype-{}", idx))
+                                        .width(100.0)
+                                        .selected_text(entry.value_type.label())
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut entry.value_type,
+                                                crate::dll_generator::DllValueType::Float,
+                                                "Float (f32)",
+                                            );
+                                            ui.selectable_value(
+                                                &mut entry.value_type,
+                                                crate::dll_generator::DllValueType::Double,
+                                                "Double (f64)",
+                                            );
+                                            ui.selectable_value(
+                                                &mut entry.value_type,
+                                                crate::dll_generator::DllValueType::Int32,
+                                                "Int32 (i32)",
+                                            );
+                                            ui.selectable_value(
+                                                &mut entry.value_type,
+                                                crate::dll_generator::DllValueType::Int64,
+                                                "Int64 (i64)",
+                                            );
+                                            ui.selectable_value(
+                                                &mut entry.value_type,
+                                                crate::dll_generator::DllValueType::Bytes,
+                                                "Bytes (NOP)",
+                                            );
+                                        });
+
+                                    egui::ComboBox::from_id_salt(format!("mode-{}", idx))
+                                        .width(140.0)
+                                        .selected_text(entry.mode.label())
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut entry.mode,
+                                                crate::dll_generator::DllPatchMode::HotkeyToggle,
+                                                tr_func("Hotkey Toggle", "Phím tắt Toggle"),
+                                            );
+                                            ui.selectable_value(
+                                                &mut entry.mode,
+                                                crate::dll_generator::DllPatchMode::Freeze,
+                                                tr_func("Continuous Freeze", "Khóa liên tục"),
+                                            );
+                                            ui.selectable_value(
+                                                &mut entry.mode,
+                                                crate::dll_generator::DllPatchMode::WriteOnce,
+                                                tr_func("Write Once", "Ghi 1 lần"),
+                                            );
+                                            ui.selectable_value(
+                                                &mut entry.mode,
+                                                crate::dll_generator::DllPatchMode::NopInstruction,
+                                                tr_func("NOP Instruction", "NOP Instruction"),
+                                            );
+                                        });
+
+                                    if ui.button(tr_func("Delete", "Xóa")).clicked() {
+                                        to_delete = Some(idx);
+                                    }
+                                });
+                            });
+                        }
+
+                        if let Some(idx) = to_delete {
+                            self.memory_panel.dll_config.entries.remove(idx);
+                        }
+                    });
+
+                    ui.add_space(8.0);
+
+                    // Section 3: Action Buttons & Output
+                    ui.group(|ui| {
+                        ui.label(
+                            egui::RichText::new(self.tr("3. Export & Inject", "3. Xuất & Tiêm (Export & Inject)"))
+                                .strong(),
+                        );
+                        if !self.memory_panel.dll_status_msg.is_empty() {
+                            ui.label(
+                                egui::RichText::new(&self.memory_panel.dll_status_msg)
+                                    .color(egui::Color32::from_rgb(255, 215, 0)),
+                            );
+                        }
+
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button(self.tr(
+                                    "Export C++ Project & Frida Script",
+                                    "Xuất Dự án C++ & Frida Script",
+                                ))
+                                .clicked()
+                            {
+                                let export_dir =
+                                    std::path::PathBuf::from("exports").join(&self.memory_panel.dll_config.project_name);
+                                match crate::dll_generator::export_dll_project(
+                                    &self.memory_panel.dll_config,
+                                    &export_dir,
+                                ) {
+                                    Ok(path) => {
+                                        let prefix = self.tr(
+                                            "[OK] Project exported successfully to: ",
+                                            "[OK] Đã xuất thành công dự án vào: ",
+                                        );
+                                        self.memory_panel.dll_status_msg = format!("{}{}", prefix, path.display());
+                                    }
+                                    Err(err) => {
+                                        let prefix = self.tr("[Error] Export failed: ", "[Lỗi] Lỗi xuất dự án: ");
+                                        self.memory_panel.dll_status_msg = format!("{}{}", prefix, err);
+                                    }
+                                }
+                            }
+
+                            if ui
+                                .button(self.tr("Inject Frida Script Directly", "Inject Frida Script trực tiếp"))
+                                .clicked()
+                            {
+                                if let Some(pid) = self.memory_panel.process_pid {
+                                    let script =
+                                        crate::dll_generator::generate_frida_js_script(&self.memory_panel.dll_config);
+                                    let frida_helper = self.paths.frida_helper_exe.clone();
+                                    self.network_panel.frida_log.clear();
+                                    self.network_panel.frida_session = Some(crate::frida_injector::Session::attach(
+                                        frida_helper,
+                                        pid,
+                                        script,
+                                    ));
+                                    let prefix = self.tr(
+                                        "[OK] Frida Agent started for PID ",
+                                        "[OK] Đã khởi chạy Frida Agent thành công cho PID ",
+                                    );
+                                    self.memory_panel.dll_status_msg = format!("{}{}", prefix, pid);
+                                } else {
+                                    self.memory_panel.dll_status_msg = self
+                                        .tr(
+                                            "[!] Please select a Target Process in Memory Scanner first!",
+                                            "[!] Hãy chọn một Tiến trình (Process) trong Memory Scanner trước!",
+                                        )
+                                        .to_string();
+                                }
+                            }
+                        });
+
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr("DLL File Path:", "Đường dẫn file DLL:"));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.memory_panel.inject_dll_file_path)
+                                    .desired_width(260.0)
+                                    .hint_text("C:\\path\\to\\file.dll"),
+                            );
+                            if ui
+                                .button(self.tr("Inject DLL File into Process", "Inject DLL File vào Process"))
+                                .clicked()
+                            {
+                                if let Some(pid) = self.memory_panel.process_pid {
+                                    let path = std::path::PathBuf::from(&self.memory_panel.inject_dll_file_path);
+                                    if !path.exists() {
+                                        self.memory_panel.dll_status_msg = self
+                                            .tr("[Error] DLL file does not exist!", "[Lỗi] Tệp DLL không tồn tại!")
+                                            .to_string();
+                                    } else {
+                                        match crate::dll_generator::inject_dll_into_process(pid, &path) {
+                                            Ok(_) => {
+                                                let prefix = self.tr(
+                                                    "[OK] Injected DLL successfully into PID ",
+                                                    "[OK] Đã Inject DLL thành công vào PID ",
+                                                );
+                                                self.memory_panel.dll_status_msg = format!("{}{}", prefix, pid);
+                                            }
+                                            Err(err) => {
+                                                let prefix = self.tr(
+                                                    "[Error] Injection failed: ",
+                                                    "[Lỗi] Lỗi Inject DLL: ",
+                                                );
+                                                self.memory_panel.dll_status_msg = format!("{}{}", prefix, err);
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    self.memory_panel.dll_status_msg = self
+                                        .tr(
+                                            "[!] Please select a Target Process in Memory Scanner first!",
+                                            "[!] Hãy chọn một Tiến trình (Process) trong Memory Scanner trước!",
+                                        )
+                                        .to_string();
+                                }
+                            }
+                        });
+                    });
+                });
+            });
+
+        self.memory_panel.show_dll_studio = open;
     }
 
     fn render_saved_address_library(&mut self, ctx: &egui::Context) {
@@ -6260,6 +6660,7 @@ impl CrosshairApp {
         let mut browse = None;
         let mut refresh_values = false;
         let mut start_requested = false;
+        let mut apply_esp = None;
         if dialog.pinned {
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
@@ -6288,11 +6689,14 @@ impl CrosshairApp {
                     egui::CentralPanel::default()
                         .frame(Self::memory_popup_frame(ctx))
                         .show(ctx, |ui| {
-                            let result = Self::render_code_access_body(ui, &mut dialog);
+                            let result = Self::render_code_access_body(ui, &mut dialog, &self.state.esp_presets);
                             add = result.0;
                             browse = result.1;
                             refresh_values |= result.2;
                             start_requested |= result.3;
+                            if result.4.is_some() {
+                                apply_esp = result.4;
+                            }
                         });
                     Self::render_memory_popup_resize_handles(ctx);
                 },
@@ -6309,12 +6713,31 @@ impl CrosshairApp {
                     if ui.button("Pin").clicked() {
                         dialog.pinned = true;
                     }
-                    let result = Self::render_code_access_body(ui, &mut dialog);
+                    let result = Self::render_code_access_body(ui, &mut dialog, &self.state.esp_presets);
                     add = result.0;
                     browse = result.1;
                     refresh_values |= result.2;
                     start_requested |= result.3;
+                    if result.4.is_some() {
+                        apply_esp = result.4;
+                    }
                 });
+        }
+        if let Some((address, preset_id)) = apply_esp {
+            let addr_hex = format_prefixed_memory_address(address);
+            let addr_z = format_prefixed_memory_address(address.wrapping_add(4));
+            let addr_y = format_prefixed_memory_address(address.wrapping_add(8));
+            if let Some(target) = self
+                .state
+                .esp_presets
+                .iter_mut()
+                .find(|p| p.id == preset_id)
+            {
+                target.target_x = addr_hex;
+                target.target_z = addr_z;
+                target.target_y = addr_y;
+            }
+            self.persist_esp_presets();
         }
         if start_requested {
             self.restart_code_access_watch(&mut dialog);
@@ -6405,11 +6828,13 @@ impl CrosshairApp {
     fn render_code_access_body(
         ui: &mut egui::Ui,
         dialog: &mut CodeAccessDialog,
-    ) -> (Option<usize>, Option<usize>, bool, bool) {
+        esp_presets: &[EspPreset],
+    ) -> (Option<usize>, Option<usize>, bool, bool, Option<(usize, u32)>) {
         let mut add = None;
         let mut browse = None;
         let mut refresh_values = false;
         let mut start_requested = false;
+        let mut apply_esp = None;
         ui.add(egui::Label::new(&dialog.status).selectable(true));
         ui.horizontal_wrapped(|ui| {
             if ui.button("Refresh values").clicked() {
@@ -6595,6 +7020,23 @@ impl CrosshairApp {
                         browse = Some(*address);
                         ui.close();
                     }
+                    ui.menu_button("Apply to ESP Target (X, Z, Y)", |ui| {
+                        if esp_presets.is_empty() {
+                            ui.label("No ESP presets found");
+                        } else {
+                            for preset in esp_presets {
+                                let label = if preset.name.trim().is_empty() {
+                                    format!("ESP Preset #{}", preset.id)
+                                } else {
+                                    preset.name.clone()
+                                };
+                                if ui.button(&label).clicked() {
+                                    apply_esp = Some((*address, preset.id));
+                                    ui.close();
+                                }
+                            }
+                        }
+                    });
                 });
             }
         });
@@ -6606,7 +7048,7 @@ impl CrosshairApp {
                 ui.label("Interact with the game to capture addresses");
             });
         }
-        (add, browse, refresh_values, start_requested)
+        (add, browse, refresh_values, start_requested, apply_esp)
     }
 
     #[cfg(windows)]

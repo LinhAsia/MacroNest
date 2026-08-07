@@ -4,6 +4,7 @@ mod ai;
 mod app_icon;
 mod audio;
 mod audiosense;
+mod dll_generator;
 mod frida_injector;
 mod hotkey;
 mod lang;

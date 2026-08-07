@@ -465,9 +465,28 @@ pub(crate) fn resolve_variable_name(name: &str) -> String {
     }
 }
 
+pub(crate) fn is_builtin_property_name(token: &str) -> bool {
+    let trimmed = token.trim().to_lowercase();
+    if let Some((obj, prop)) = trimmed.split_once('.') {
+        matches!(
+            (obj.trim(), prop.trim()),
+            (
+                "system",
+                "date" | "time" | "year" | "month" | "day" | "hour" | "minute" | "second"
+            ) | ("mouse", "x" | "y" | "sensitivity")
+                | ("screen", "width" | "height")
+                | ("volume", "level")
+                | ("window", "title")
+                | ("clipboard", "text")
+        )
+    } else {
+        false
+    }
+}
+
 pub(crate) fn set_text_variable_value(target_var: &str, value: &str) {
     let target_name = resolve_variable_name(target_var);
-    if target_name.is_empty() {
+    if target_name.is_empty() || is_builtin_property_name(&target_name) {
         return;
     }
 
@@ -478,7 +497,7 @@ pub(crate) fn set_text_variable_value(target_var: &str, value: &str) {
 
 pub(crate) fn set_variable_value(target_var: &str, value: f64) {
     let target_name = resolve_variable_name(target_var);
-    if target_name.is_empty() {
+    if target_name.is_empty() || is_builtin_property_name(&target_name) {
         return;
     }
 
