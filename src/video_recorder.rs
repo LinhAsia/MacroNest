@@ -797,8 +797,12 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             "-hide_banner",
             "-loglevel",
             "error",
+            "-probesize",
+            "32k",
+            "-analyzeduration",
+            "0",
             "-thread_queue_size",
-            "256",
+            "512",
             "-rtbufsize",
             "100M",
             "-f",
@@ -818,6 +822,10 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             "-hide_banner",
             "-loglevel",
             "error",
+            "-probesize",
+            "32k",
+            "-analyzeduration",
+            "0",
             "-f",
             "lavfi",
             "-i",
@@ -837,6 +845,8 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         .args([
             "-g",
             &gop_size,
+            "-bf",
+            "0",
             "-rate_control",
             "quality",
             "-quality",
@@ -862,23 +872,23 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             return Err(format!("Could not start FFmpeg: {error}"));
         }
     };
-    let _ = audio_start.send(());
-    if let Some(signal) = recording_active_signal {
-        let output_check = output_path.clone();
-        thread::spawn(move || {
-            let start = Instant::now();
-            while start.elapsed() < Duration::from_millis(1500) {
-                if fs::metadata(&output_check)
-                    .map(|m| m.len() > 0)
-                    .unwrap_or(false)
-                {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(5));
+    let output_check = output_path.clone();
+    thread::spawn(move || {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_millis(2000) {
+            if fs::metadata(&output_check)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false)
+            {
+                break;
             }
+            thread::sleep(Duration::from_millis(2));
+        }
+        let _ = audio_start.send(());
+        if let Some(signal) = recording_active_signal {
             signal.store(true, Ordering::Release);
-        });
-    }
+        }
+    });
     let session_id = SESSION_ID.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
     *PROCESS.lock() = Some(RecordingProcess {
         child,
