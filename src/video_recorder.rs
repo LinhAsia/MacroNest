@@ -294,6 +294,7 @@ pub fn inspect_recorded_video_thumbnail(
     let file_size = fs::metadata(video_path)
         .map_err(|error| format!("Could not read video: {error}"))?
         .len();
+    let duration_seconds = probe_video_duration(ffmpeg_exe, video_path).unwrap_or(0.0);
     let output = Command::new(ffmpeg_exe)
         .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
         .args(["-hide_banner", "-loglevel", "error", "-ss", "0.500", "-i"])
@@ -302,29 +303,26 @@ pub fn inspect_recorded_video_thumbnail(
             "-frames:v",
             "1",
             "-vf",
-            "scale=320:-2",
+            "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2",
             "-f",
-            "image2pipe",
-            "-vcodec",
-            "png",
+            "rawvideo",
+            "-pix_fmt",
+            "rgba",
             "pipe:1",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
         .map_err(|error| format!("Could not create video thumbnail: {error}"))?;
-    if !output.status.success() || output.stdout.is_empty() {
+    if !output.status.success() || output.stdout.len() != 320 * 180 * 4 {
         return Err("FFmpeg could not extract a thumbnail from this video.".to_owned());
     }
-    let image = image::load_from_memory(&output.stdout)
-        .map_err(|error| format!("Could not decode video thumbnail: {error}"))?
-        .to_rgba8();
     Ok(VideoLibraryPreview {
-        duration_seconds: 0.0,
+        duration_seconds,
         file_size,
-        width: image.width(),
-        height: image.height(),
-        rgba: Some(image.into_raw()),
+        width: 320,
+        height: 180,
+        rgba: Some(output.stdout),
     })
 }
 
@@ -745,7 +743,24 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     fs::create_dir_all(&config.output_dir)
         .map_err(|error| format!("Could not create the video folder: {error}"))?;
 
-    let (source, border_rect) = capture_source(&config)?;
+    let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
+    let output_path = unique_output_path(&config.output_dir, &format!("MacroNest_{timestamp}"));
+    let audio_path = config.output_dir.join(format!(
+        ".macronest-video-audio-{}-{timestamp}.f32le",
+        std::process::id()
+    ));
+    let (audio_stop, audio_thread, audio_start) = start_system_audio_capture(&audio_path)?;
+
+    let (source, border_rect) = match capture_source(&config) {
+        Ok(res) => res,
+        Err(err) => {
+            audio_stop.store(true, Ordering::Release);
+            let _ = audio_start.send(());
+            let _ = audio_thread.join();
+            let _ = fs::remove_file(&audio_path);
+            return Err(err);
+        }
+    };
     let (region_border, recording_active_signal) = match border_rect {
         Some(rect) => {
             let (border, signal) = RegionBorder::start(rect, config.ui_language);
@@ -754,18 +769,19 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         None => (None, None),
     };
 
-    let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
-    let output_path = unique_output_path(&config.output_dir, &format!("MacroNest_{timestamp}"));
-    let audio_path = config.output_dir.join(format!(
-        ".macronest-video-audio-{}-{timestamp}.f32le",
-        std::process::id()
-    ));
     let log_path = config.output_dir.join(".macronest-video-recorder.log");
-    let log = File::create(&log_path)
-        .map_err(|error| format!("Could not create the recorder log: {error}"))?;
+    let log = match File::create(&log_path) {
+        Ok(file) => file,
+        Err(error) => {
+            audio_stop.store(true, Ordering::Release);
+            let _ = audio_start.send(());
+            let _ = audio_thread.join();
+            let _ = fs::remove_file(&audio_path);
+            return Err(format!("Could not create the recorder log: {error}"));
+        }
+    };
 
     let hardware_encoding = hardware_encoding_available(&config.ffmpeg_exe);
-    let (audio_stop, audio_thread, audio_start) = start_system_audio_capture(&audio_path)?;
     let mut command = Command::new(&config.ffmpeg_exe);
     command
         .creation_flags(CREATE_NO_WINDOW)
@@ -782,9 +798,9 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             "-loglevel",
             "error",
             "-thread_queue_size",
-            "1024",
-            "-use_wallclock_as_timestamps",
-            "1",
+            "256",
+            "-rtbufsize",
+            "100M",
             "-f",
             "gdigrab",
             "-draw_mouse",
@@ -816,8 +832,11 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     if hardware_encoding {
         command.args(["-hw_encoding", "1"]);
     }
+    let gop_size = config.fps.clamp(1, 240).to_string();
     command
         .args([
+            "-g",
+            &gop_size,
             "-rate_control",
             "quality",
             "-quality",
@@ -825,7 +844,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             "-scenario",
             "live_streaming",
             "-fps_mode",
-            "cfr",
+            "passthrough",
             "-avoid_negative_ts",
             "make_zero",
             "-movflags",
@@ -1014,56 +1033,55 @@ fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
         *cached = Some((signature, available));
         return available;
     }
-    let mut child = match Command::new(ffmpeg_exe)
-        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "quiet",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=size=64x64:rate=1",
-            "-frames:v",
-            "1",
-            "-vf",
-            "format=nv12",
-            "-c:v",
-            "h264_mf",
-            "-hw_encoding",
-            "1",
-            "-f",
-            "null",
-            "-",
-        ])
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(_) => {
-            cache_hardware_encoding(&cache_path, &signature, false);
-            *cached = Some((signature, false));
-            return false;
+    *cached = Some((signature.clone(), true));
+    let exe = ffmpeg_exe.to_path_buf();
+    thread::spawn(move || {
+        let mut available = false;
+        if let Ok(mut child) = Command::new(&exe)
+            .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "quiet",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=size=64x64:rate=1",
+                "-frames:v",
+                "1",
+                "-vf",
+                "format=nv12",
+                "-c:v",
+                "h264_mf",
+                "-hw_encoding",
+                "1",
+                "-f",
+                "null",
+                "-",
+            ])
+            .spawn()
+        {
+            let deadline = Instant::now() + Duration::from_millis(1500);
+            available = loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break status.success(),
+                    Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+                    Ok(None) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break false;
+                    }
+                    Err(_) => break false,
+                }
+            };
         }
-    };
-    let deadline = Instant::now() + Duration::from_millis(1500);
-    let available = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break false;
-            }
-            Err(_) => break false,
-        }
-    };
-    cache_hardware_encoding(&cache_path, &signature, available);
-    *cached = Some((signature, available));
-    available
+        cache_hardware_encoding(&cache_path, &signature, available);
+        *HARDWARE_ENCODING.lock() = Some((signature, available));
+    });
+    true
 }
 
 fn ffmpeg_signature(ffmpeg_exe: &Path) -> String {
