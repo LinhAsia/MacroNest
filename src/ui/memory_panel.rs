@@ -6294,6 +6294,29 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
+    fn extract_aob_bytes_from_details(details: &str) -> String {
+        for line in details.lines() {
+            if line.contains("<<") || line.contains("0x") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 && parts[0].starts_with("0x") {
+                    let mut bytes = Vec::new();
+                    for part in &parts[1..] {
+                        if part.len() == 2 && u8::from_str_radix(part, 16).is_ok() {
+                            bytes.push(*part);
+                        } else if !bytes.is_empty() {
+                            break;
+                        }
+                    }
+                    if !bytes.is_empty() {
+                        return bytes.join(" ");
+                    }
+                }
+            }
+        }
+        String::new()
+    }
+
+    #[cfg(windows)]
     fn render_instruction_watch_body(ui: &mut egui::Ui, dialog: &mut InstructionWatchDialog) -> bool {
         let mut clear_captured = false;
         let mut start_requested = false;
@@ -6312,6 +6335,20 @@ impl CrosshairApp {
                     .clicked()
                 {
                     dialog.pending_disassembler = dialog.selected;
+                }
+                if ui
+                    .add_enabled(dialog.selected.is_some(), Button::new("Copy Bytes (AOB)"))
+                    .clicked()
+                {
+                    if let Some(index) = dialog.selected {
+                        if let Some(hit) = dialog.hits.get(index) {
+                            let aob = Self::extract_aob_bytes_from_details(&hit.details);
+                            if !aob.is_empty() {
+                                ui.ctx().copy_text(aob.clone());
+                                dialog.status = format!("Copied AOB bytes: {aob}");
+                            }
+                        }
+                    }
                 }
                 if dialog.active.is_some() {
                     if ui.button("Stop").clicked() {
@@ -6340,11 +6377,14 @@ impl CrosshairApp {
             };
         }
         ui.separator();
-        let instruction_width = (ui.available_width() - 315.0).max(160.0);
+        let stt_width = 40.0;
+        let address_width = 170.0;
+        let hits_width = 95.0;
+        let instruction_width = (ui.available_width() - stt_width - address_width - hits_width - 24.0).max(140.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            Self::memory_table_cell(ui, 45.0, RichText::new("#").strong());
-            Self::memory_table_cell(ui, 170.0, RichText::new("Address").strong());
+            Self::memory_table_cell(ui, stt_width, RichText::new("#").strong());
+            Self::memory_table_cell(ui, address_width, RichText::new("Address").strong());
             Self::memory_table_cell(ui, instruction_width, RichText::new("Instruction").strong());
             let hits_label = match dialog.hits_sort {
                 1 => "Hits ▲",
@@ -6353,7 +6393,7 @@ impl CrosshairApp {
             };
             if ui
                 .add_sized(
-                    [100.0, 24.0],
+                    [hits_width, 24.0],
                     egui::Button::new(RichText::new(hits_label).strong()).frame(false),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -6381,16 +6421,16 @@ impl CrosshairApp {
                     let response = ui
                         .horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 0.0;
-                            let stt = Self::memory_view_cell(ui, 45.0, &(row_idx + 1).to_string());
+                            let stt = Self::memory_view_cell(ui, stt_width, &(row_idx + 1).to_string());
                             let address = Self::memory_view_cell(
                                 ui,
-                                170.0,
+                                address_width,
                                 &format_prefixed_memory_address(hit.address),
                             );
                             let instruction =
                                 Self::memory_view_cell(ui, instruction_width, &hit.instruction);
                             let count =
-                                Self::memory_view_cell(ui, 100.0, &format!("{} hit(s)", hit.count));
+                                Self::memory_view_cell(ui, hits_width, &format!("{} hit(s)", hit.count));
                             stt.union(address).union(instruction).union(count)
                         })
                         .inner
@@ -6422,6 +6462,17 @@ impl CrosshairApp {
                         context_code_add = Some(original_index);
                     }
                     response.context_menu(|ui| {
+                        let aob = Self::extract_aob_bytes_from_details(&hit.details);
+                        if !aob.is_empty() {
+                            if ui.button(format!("Copy Bytes (AOB): {aob}")).clicked() {
+                                ui.ctx().copy_text(aob);
+                                ui.close();
+                            }
+                        }
+                        if ui.button("Copy Address").clicked() {
+                            ui.ctx().copy_text(format_prefixed_memory_address(hit.address));
+                            ui.close();
+                        }
                         if ui.button("Copy instruction and details").clicked() {
                             ui.ctx().copy_text(format!(
                                 "{}  {}  {} hit(s)\n\n{}",
@@ -6450,21 +6501,22 @@ impl CrosshairApp {
             dialog.pending_disassembler = context_disassembler;
         }
         ui.separator();
-        egui::ScrollArea::both().show(ui, |ui| {
-            ui.add(
-                egui::Label::new(
-                    RichText::new(
-                        dialog
-                            .selected
-                            .and_then(|index| dialog.hits.get(index))
-                            .map(|hit| hit.details.as_str())
-                            .unwrap_or("Interact with the target process to capture instructions."),
-                    )
-                    .monospace(),
-                )
-                .selectable(true),
-            );
-        });
+        if let Some(index) = dialog.selected {
+            if let Some(hit) = dialog.hits.get(index) {
+                let mut details_str = hit.details.clone();
+                egui::ScrollArea::both()
+                    .id_salt("instruction-watch-details")
+                    .max_height(200.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut details_str)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY)
+                                .interactive(true),
+                        );
+                    });
+            }
+        }
         start_requested
     }
 
@@ -6497,16 +6549,28 @@ impl CrosshairApp {
                             .strong(),
                     );
                     ui.label(RichText::new(&dialog.status).weak());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Copy Bytes (AOB)").clicked() {
+                            if let Some((_, bytes, _)) = dialog.lines.iter().find(|(addr, _, _)| *addr == dialog.address) {
+                                ui.ctx().copy_text(bytes.clone());
+                            } else if let Some((_, bytes, _)) = dialog.lines.first() {
+                                ui.ctx().copy_text(bytes.clone());
+                            }
+                        }
+                        if ui.button("Copy Address").clicked() {
+                            ui.ctx().copy_text(format_prefixed_memory_address(dialog.address));
+                        }
+                    });
                 });
                 ui.separator();
+                let addr_w = 170.0;
+                let bytes_w = 190.0;
+                let opcode_w = (ui.available_width() - addr_w - bytes_w - 24.0).max(180.0);
                 ui.horizontal(|ui| {
-                    Self::memory_table_cell(ui, 180.0, RichText::new("Address").strong());
-                    Self::memory_table_cell(ui, 220.0, RichText::new("Bytes").strong());
-                    Self::memory_table_cell(
-                        ui,
-                        ui.available_width(),
-                        RichText::new("Opcode").strong(),
-                    );
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    Self::memory_table_cell(ui, addr_w, RichText::new("Address").strong());
+                    Self::memory_table_cell(ui, bytes_w, RichText::new("Bytes (AOB)").strong());
+                    Self::memory_table_cell(ui, opcode_w, RichText::new("Instruction").strong());
                 });
                 egui::ScrollArea::both()
                     .id_salt("memory-disassembly-lines")
@@ -6519,21 +6583,25 @@ impl CrosshairApp {
                                     ui.spacing_mut().item_spacing.x = 0.0;
                                     let address_response = Self::memory_view_cell(
                                         ui,
-                                        180.0,
+                                        addr_w,
                                         &format_prefixed_memory_address(*address),
                                     );
-                                    let bytes_response = Self::memory_view_cell(ui, 220.0, bytes);
-                                    let opcode_response = Self::memory_view_cell(
-                                        ui,
-                                        ui.available_width().max(260.0),
-                                        opcode,
-                                    );
+                                    let bytes_response = Self::memory_view_cell(ui, bytes_w, bytes);
+                                    let opcode_response = Self::memory_view_cell(ui, opcode_w, opcode);
                                     address_response
                                         .union(bytes_response)
                                         .union(opcode_response)
                                 })
                                 .inner;
                             response.context_menu(|ui| {
+                                if ui.button(format!("Copy Bytes (AOB): {bytes}")).clicked() {
+                                    ui.ctx().copy_text(bytes.clone());
+                                    ui.close();
+                                }
+                                if ui.button("Copy Address").clicked() {
+                                    ui.ctx().copy_text(format_prefixed_memory_address(*address));
+                                    ui.close();
+                                }
                                 if ui.button("Copy disassembly line").clicked() {
                                     ui.ctx().copy_text(format!(
                                         "{}\t{bytes}\t{opcode}",
@@ -6553,40 +6621,45 @@ impl CrosshairApp {
                         }
                     });
                 ui.separator();
-                ui.label(RichText::new("Memory around instruction").strong());
+                ui.label(RichText::new("Memory around instruction (Selectable Hex Dump)").strong());
                 if let Some(pid) = self.memory_panel.process_pid {
                     let base = dialog.address.saturating_sub(64);
                     match read_memory_bytes(pid, base, 256) {
                         Ok(bytes) => {
+                            let mut hex_lines = String::new();
+                            for (row, chunk) in bytes.chunks(16).enumerate() {
+                                let hex = chunk
+                                    .iter()
+                                    .map(|byte| format!("{byte:02X}"))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                let ascii = chunk
+                                    .iter()
+                                    .map(|byte| {
+                                        if byte.is_ascii_graphic() {
+                                            *byte as char
+                                        } else {
+                                            '.'
+                                        }
+                                    })
+                                    .collect::<String>();
+                                hex_lines.push_str(&format!(
+                                    "{}  {:<48}  {}\n",
+                                    format_prefixed_memory_address(base + row * 16),
+                                    hex,
+                                    ascii
+                                ));
+                            }
                             egui::ScrollArea::both()
                                 .id_salt("memory-disassembly-bytes")
+                                .max_height(160.0)
                                 .show(ui, |ui| {
-                                    for (row, chunk) in bytes.chunks(16).enumerate() {
-                                        let hex = chunk
-                                            .iter()
-                                            .map(|byte| format!("{byte:02X}"))
-                                            .collect::<Vec<_>>()
-                                            .join(" ");
-                                        let ascii = chunk
-                                            .iter()
-                                            .map(|byte| {
-                                                if byte.is_ascii_graphic() {
-                                                    *byte as char
-                                                } else {
-                                                    '.'
-                                                }
-                                            })
-                                            .collect::<String>();
-                                        ui.horizontal(|ui| {
-                                            Self::memory_view_cell(
-                                                ui,
-                                                180.0,
-                                                &format_prefixed_memory_address(base + row * 16),
-                                            );
-                                            Self::memory_view_cell(ui, 390.0, &hex);
-                                            Self::memory_view_cell(ui, 150.0, &ascii);
-                                        });
-                                    }
+                                    ui.add(
+                                        egui::TextEdit::multiline(&mut hex_lines)
+                                            .font(egui::TextStyle::Monospace)
+                                            .desired_width(f32::INFINITY)
+                                            .interactive(true),
+                                    );
                                 });
                         }
                         Err(error) => {
@@ -6952,11 +7025,14 @@ impl CrosshairApp {
             }
         });
         ui.separator();
-        let value_width = (ui.available_width() - 365.0).max(140.0);
+        let stt_width = 40.0;
+        let address_width = 170.0;
+        let hits_width = 95.0;
+        let value_width = (ui.available_width() - stt_width - address_width - hits_width - 24.0).max(140.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
-            Self::memory_table_cell(ui, 45.0, RichText::new("#").strong());
-            Self::memory_table_cell(ui, 190.0, RichText::new("Address").strong());
+            Self::memory_table_cell(ui, stt_width, RichText::new("#").strong());
+            Self::memory_table_cell(ui, address_width, RichText::new("Address").strong());
             let hits_label = match dialog.hits_sort {
                 1 => "Hits ▲",
                 2 => "Hits ▼",
@@ -6964,7 +7040,7 @@ impl CrosshairApp {
             };
             if ui
                 .add_sized(
-                    [100.0, 24.0],
+                    [hits_width, 24.0],
                     egui::Button::new(RichText::new(hits_label).strong()).frame(false),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -6988,13 +7064,13 @@ impl CrosshairApp {
                 let response = ui
                     .horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        let stt_response = Self::memory_view_cell(ui, 45.0, &(row_idx + 1).to_string());
+                        let stt_response = Self::memory_view_cell(ui, stt_width, &(row_idx + 1).to_string());
                         let address_response = Self::memory_view_cell(
                             ui,
-                            190.0,
+                            address_width,
                             &format_prefixed_memory_address(*address),
                         );
-                        let count_response = Self::memory_view_cell(ui, 100.0, &count.to_string());
+                        let count_response = Self::memory_view_cell(ui, hits_width, &count.to_string());
                         let value_response = Self::memory_view_cell(
                             ui,
                             value_width,
