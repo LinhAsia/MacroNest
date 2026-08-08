@@ -7516,7 +7516,8 @@ impl CrosshairApp {
             }
             return;
         }
-        egui::Window::new(title)
+        egui::Window::new(&title)
+            .id(egui::Id::new("memory-view-main"))
             .default_size(vec2(720.0, 430.0))
             .collapsible(false)
             .open(&mut open)
@@ -7888,14 +7889,23 @@ impl CrosshairApp {
         const W_DESC:  f32 = 340.0;
         const W_ADDRV: f32 = 280.0;
 
-        // Header
+        // Header \u2014 3 separate Grid cells (one per column)
         egui::Grid::new("struct-header")
             .min_col_width(0.0)
             .spacing([0.0, 0.0])
             .show(ui, |ui| {
+                // Cell 1: empty arrow column
                 ui.add_sized([W_BTN, 18.0], egui::Label::new(""));
-                ui.add_sized([W_DESC, 18.0], egui::Label::new(RichText::new("Offset - description").strong()));
-                ui.add_sized([W_ADDRV, 18.0], egui::Label::new(RichText::new("Address : Value").strong()));
+                // Cell 2: description header, left-aligned
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                    ui.set_min_width(W_DESC);
+                    ui.label(RichText::new("Offset - description").strong());
+                });
+                // Cell 3: address:value header, left-aligned
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                    ui.set_min_width(W_ADDRV);
+                    ui.label(RichText::new("Address : Value").strong());
+                });
                 ui.end_row();
             });
         ui.separator();
@@ -7909,6 +7919,14 @@ impl CrosshairApp {
         for element in &mut dialog.elements {
             let width = element.value_type.width(dialog.pointer_width);
             let Some(raw) = bytes.get(element.offset..element.offset.saturating_add(width)) else {
+                // Still need to advance all 3 columns so the grid stays consistent
+                ui.add_sized([W_BTN, 18.0], egui::Label::new(""));
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                    ui.add_sized([W_DESC, 18.0], egui::Label::new(""));
+                });
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                    ui.add_sized([W_ADDRV, 18.0], egui::Label::new(""));
+                });
                 ui.end_row();
                 continue;
             };
@@ -7971,42 +7989,46 @@ impl CrosshairApp {
                 }
             }
 
-            // Col 2: offset-description
-            let desc_resp = ui.add_sized(
-                [W_DESC, 18.0],
-                egui::Label::new(
-                    RichText::new(&description)
-                        .monospace()
-                        .size(12.5)
-                        .color(if is_ptr {
-                            Color32::from_rgb(100, 210, 140)
-                        } else {
-                            ui.visuals().text_color()
-                        }),
+            // Col 2: offset-description — left-aligned
+            let desc_resp = ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                ui.add_sized(
+                    [W_DESC, 18.0],
+                    egui::Label::new(
+                        RichText::new(&description)
+                            .monospace()
+                            .size(12.5)
+                            .color(if is_ptr {
+                                Color32::from_rgb(100, 210, 140)
+                            } else {
+                                ui.visuals().text_color()
+                            }),
+                    )
+                    .selectable(true)
+                    .truncate(),
                 )
-                .selectable(true)
-                .truncate(),
-            );
+            }).inner;
             // Chain hover text — result is the Response for context_menu
             let desc_resp = desc_resp.on_hover_text(&description);
 
-            // Col 3: address : value
+            // Col 3: address : value — left-aligned
             let av_text = format!("{} : {}", format_memory_address(element_address), value_str);
-            let av = ui.add_sized(
-                [W_ADDRV, 18.0],
-                egui::Label::new(
-                    RichText::new(&av_text)
-                        .monospace()
-                        .size(12.5)
-                        .color(if changed {
-                            Color32::from_rgb(255, 170, 70)
-                        } else {
-                            ui.visuals().text_color()
-                        }),
+            let av = ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                ui.add_sized(
+                    [W_ADDRV, 18.0],
+                    egui::Label::new(
+                        RichText::new(&av_text)
+                            .monospace()
+                            .size(12.5)
+                            .color(if changed {
+                                Color32::from_rgb(255, 170, 70)
+                            } else {
+                                ui.visuals().text_color()
+                            }),
+                    )
+                    .selectable(true)
+                    .truncate(),
                 )
-                .selectable(true)
-                .truncate(),
-            );
+            }).inner;
             if av.double_clicked() {
                 if is_ptr {
                     navigate_to = Some(pointed);
