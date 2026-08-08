@@ -8310,7 +8310,7 @@ impl CrosshairApp {
         self.memory_panel.fast_scan_alignment = alignment.to_string();
         let scan_options = if self.memory_panel.is_aob_scan {
             MemoryScanOptions {
-                writable: self.memory_panel.scan_writable,
+                writable: false,
                 executable: true,
                 copy_on_write: self.memory_panel.scan_copy_on_write,
                 active_memory_only: self.memory_panel.scan_active_memory_only,
