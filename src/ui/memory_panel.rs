@@ -2641,32 +2641,34 @@ impl CrosshairApp {
                                         Some(TextEncoding::Utf16) => "Text (UTF-16)",
                                         None => memory_type_label(saved.value_type),
                                     };
+                                    let (type_rect, type_cell_resp) = ui.allocate_exact_size(vec2(column_width, row_height), Sense::hover());
+                                    let mut type_cell = ui.new_child(
+                                        egui::UiBuilder::new()
+                                            .max_rect(type_rect)
+                                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                                    );
                                     let mut selected_type = saved.value_type;
-                                    let type_response = ui.allocate_ui_with_layout(
-                                        vec2(column_width, row_height),
-                                        egui::Layout::left_to_right(egui::Align::Center),
-                                        |ui| {
-                                            egui::ComboBox::from_id_salt(("saved-type-combo", index))
-                                                .selected_text(current_type_label)
-                                                .show_ui(ui, |ui| {
-                                                    let types = [
-                                                        (ScanValueType::I8, "Byte"),
-                                                        (ScanValueType::I16, "2 Bytes"),
-                                                        (ScanValueType::I32, "4 Bytes"),
-                                                        (ScanValueType::I64, "8 Bytes"),
-                                                        (ScanValueType::F32, "Float"),
-                                                        (ScanValueType::F64, "Double"),
-                                                    ];
-                                                    for (vtype, label) in types {
-                                                        if ui.selectable_value(&mut selected_type, vtype, label).clicked() {
-                                                            self.memory_panel.saved[index].value_type = vtype;
-                                                            self.memory_panel.saved[index].text_encoding = None;
-                                                            persist_pointer_changes = true;
-                                                        }
-                                                    }
-                                                }).response
-                                        },
-                                    ).inner;
+                                    let combo_resp = egui::ComboBox::from_id_salt(("saved-type-combo", index))
+                                        .selected_text(current_type_label)
+                                        .width((column_width - 8.0).max(40.0))
+                                        .show_ui(&mut type_cell, |ui| {
+                                            let types = [
+                                                (ScanValueType::I8, "Byte"),
+                                                (ScanValueType::I16, "2 Bytes"),
+                                                (ScanValueType::I32, "4 Bytes"),
+                                                (ScanValueType::I64, "8 Bytes"),
+                                                (ScanValueType::F32, "Float"),
+                                                (ScanValueType::F64, "Double"),
+                                            ];
+                                            for (vtype, label) in types {
+                                                if ui.selectable_value(&mut selected_type, vtype, label).clicked() {
+                                                    self.memory_panel.saved[index].value_type = vtype;
+                                                    self.memory_panel.saved[index].text_encoding = None;
+                                                    persist_pointer_changes = true;
+                                                }
+                                            }
+                                        }).response;
+                                    let type_response = type_cell_resp.union(combo_resp);
                                     row_hits.push(type_response);
                                     let value_response = Self::memory_label_cell(
                                         ui,
