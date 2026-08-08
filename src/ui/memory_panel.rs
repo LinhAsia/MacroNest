@@ -3109,8 +3109,14 @@ impl CrosshairApp {
                                             )
                                         },
                                         |spec| {
+                                            // If module-based, show "module+offset" instead of raw base (0)
+                                            let base_str = if let Some((module, offset)) = &spec.module {
+                                                format!("{}+{:X}", module, offset)
+                                            } else {
+                                                format_prefixed_memory_address(spec.base)
+                                            };
                                             (
-                                                format_prefixed_memory_address(spec.base),
+                                                base_str,
                                                 spec.offsets
                                                     .iter()
                                                     .map(|offset| format!("{:X}", offset))
@@ -3120,6 +3126,7 @@ impl CrosshairApp {
                                             )
                                         },
                                     );
+
                                 self.memory_panel.address_dialog = Some(AddressDialog {
                                     index,
                                     address,
@@ -8198,10 +8205,6 @@ impl CrosshairApp {
 
 
     fn apply_memory_address_dialog(&mut self, dialog: &AddressDialog) {
-        let Some(base) = parse_memory_address(&dialog.address) else {
-            self.memory_panel.status = "Invalid address".to_owned();
-            return;
-        };
         let pointer = if dialog.pointer {
             let offsets = dialog
                 .offsets
@@ -8213,19 +8216,60 @@ impl CrosshairApp {
                 self.memory_panel.status = "Invalid pointer offsets".to_owned();
                 return;
             };
-            Some(PointerSpec {
-                base,
-                module: None,
-                offsets,
-            })
+            // Try to parse as "module+offset" (e.g. "neox_engine.dll+8AEEFA0")
+            let addr_str = dialog.address.trim();
+            let module_spec = addr_str
+                .rsplit_once('+')
+                .filter(|(module, _)| {
+                    let m = module.trim();
+                    m.contains('.') && !m.starts_with("0x") && !m.starts_with("0X")
+                })
+                .and_then(|(module, offset)| {
+                    parse_hex_offset(offset.trim()).map(|off| (module.trim().to_owned(), off))
+                });
+
+            if let Some((module_name, module_offset)) = module_spec {
+                Some(PointerSpec {
+                    base: 0,
+                    module: Some((module_name, module_offset)),
+                    offsets,
+                })
+            } else {
+                let Some(base) = parse_memory_address(addr_str) else {
+                    self.memory_panel.status = "Invalid address".to_owned();
+                    return;
+                };
+                Some(PointerSpec {
+                    base,
+                    module: None,
+                    offsets,
+                })
+            }
         } else {
-            None
+            let Some(base) = parse_memory_address(dialog.address.trim()) else {
+                self.memory_panel.status = "Invalid address".to_owned();
+                return;
+            };
+            // Non-pointer: resolve to the raw address
+            if let Some(saved) = self.memory_panel.saved.get_mut(dialog.index) {
+                saved.address = base;
+                saved.pointer = None;
+                saved.frozen = None;
+            }
+            self.persist_memory_pointers();
+            return;
         };
-        let resolved = self
-            .memory_panel
-            .process_pid
-            .and_then(|pid| resolve_memory_address(pid, base, pointer.as_ref()).ok())
-            .unwrap_or(base);
+        let pid = self.memory_panel.process_pid;
+        let resolved = pid
+            .and_then(|pid| {
+                resolve_memory_address(
+                    pid,
+                    pointer.as_ref().map_or(0, |p| p.base),
+                    pointer.as_ref(),
+                )
+                .ok()
+            })
+            .unwrap_or_default();
         if let Some(saved) = self.memory_panel.saved.get_mut(dialog.index) {
             saved.address = resolved;
             saved.pointer = pointer;
@@ -8233,6 +8277,7 @@ impl CrosshairApp {
         }
         self.persist_memory_pointers();
     }
+
 
     fn start_stable_pointer_filter(&mut self, action: MemoryScanAction) -> bool {
         let Some(mut dialog) = self.memory_panel.stable_pointer_dialog.take() else {
