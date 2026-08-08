@@ -1103,6 +1103,128 @@ pub fn filter_text_scan_candidates(
     Ok(kept)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AobByte {
+    Exact(u8),
+    Any,
+}
+
+pub fn parse_aob_pattern(pattern_str: &str) -> Option<Vec<AobByte>> {
+    let mut bytes = Vec::new();
+    for token in pattern_str.split_whitespace() {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        if token == "?" || token == "??" {
+            bytes.push(AobByte::Any);
+        } else {
+            let byte = u8::from_str_radix(token, 16).ok()?;
+            bytes.push(AobByte::Exact(byte));
+        }
+    }
+    if bytes.is_empty() {
+        None
+    } else {
+        Some(bytes)
+    }
+}
+
+fn aob_bytes_equal(actual: &[u8], pattern: &[AobByte]) -> bool {
+    if actual.len() != pattern.len() {
+        return false;
+    }
+    actual.iter().zip(pattern.iter()).all(|(&b, &p)| match p {
+        AobByte::Exact(expected) => b == expected,
+        AobByte::Any => true,
+    })
+}
+
+pub fn scan_aob_memory_with_progress(
+    pid: u32,
+    pattern_str: &str,
+    result_limit: usize,
+    options: MemoryScanOptions,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<TextScanCandidate>> {
+    let pattern = parse_aob_pattern(pattern_str).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid AOB pattern format (e.g. F3 41 ?? 10 50 10)",
+        )
+    })?;
+    let process = ScanProcess::open(pid, false)?;
+    let mut found = Vec::new();
+    let mut buffer = Vec::new();
+    let overlap = pattern.len().saturating_sub(1);
+    'regions: for region in scan_regions_for(&process, options) {
+        let end = region.base.saturating_add(region.size);
+        let mut chunk_base = region.base;
+        while chunk_base < end {
+            let prefix = if chunk_base == region.base {
+                0
+            } else {
+                overlap.min(chunk_base - region.base)
+            };
+            let read_base = chunk_base - prefix;
+            let length = (end - read_base).min(SCAN_CHUNK_BYTES + prefix);
+            buffer.resize(length, 0);
+            if let Ok(count) = process.read(read_base, &mut buffer) {
+                total.fetch_add(count, Ordering::Relaxed);
+                let haystack = &buffer[..count];
+                if count < pattern.len() {
+                    chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
+                    continue;
+                }
+                let max_start = count.saturating_sub(pattern.len());
+                for offset in 0..=max_start {
+                    if offset < prefix || !aob_bytes_equal(&haystack[offset..offset + pattern.len()], &pattern) {
+                        continue;
+                    }
+                    found.push(TextScanCandidate {
+                        address: read_base + offset,
+                        previous: pattern_str.to_owned(),
+                        current: pattern_str.to_owned(),
+                    });
+                    if found.len() >= result_limit.max(1) {
+                        break 'regions;
+                    }
+                }
+            }
+            chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
+        }
+    }
+    Ok(found)
+}
+
+pub fn filter_aob_scan_candidates(
+    pid: u32,
+    candidates: Vec<TextScanCandidate>,
+    pattern_str: &str,
+) -> io::Result<Vec<TextScanCandidate>> {
+    let pattern = parse_aob_pattern(pattern_str).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid AOB pattern format",
+        )
+    })?;
+    let process = ScanProcess::open(pid, false)?;
+    let mut bytes = vec![0; pattern.len()];
+    let mut kept = Vec::new();
+    for candidate in candidates {
+        if process.read(candidate.address, &mut bytes).ok() == Some(pattern.len())
+            && aob_bytes_equal(&bytes, &pattern)
+        {
+            kept.push(TextScanCandidate {
+                address: candidate.address,
+                previous: candidate.current,
+                current: pattern_str.to_owned(),
+            });
+        }
+    }
+    Ok(kept)
+}
+
 fn encode_scan_text(
     text: &str,
     encoding: TextEncoding,

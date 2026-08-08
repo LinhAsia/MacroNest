@@ -21,8 +21,9 @@ use crate::{
         MemoryRegionInfo, MemoryScanOptions, PausedProcess, PointerMap, PointerPath,
         PointerScanLimits, ScanCandidate, ScanComparison, ScanValue, ScanValueType, TextEncoding,
         TextScanCandidate, ViewProjectionCandidate, capture_pointer_map_with_budget,
-        filter_scan_candidates, filter_text_scan_candidates, query_memory_region,
-        read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
+        filter_aob_scan_candidates, filter_scan_candidates, filter_text_scan_candidates,
+        query_memory_region, read_memory_bytes, read_scan_value, read_text_memory,
+        refresh_scan_candidates, scan_aob_memory_with_progress,
         scan_memory_range_with_progress, scan_pointer_paths_with_budget,
         scan_text_memory_with_progress, scan_view_projection_candidates, write_code_bytes,
         write_scan_value, write_text_memory,
@@ -512,6 +513,7 @@ pub(crate) struct MemoryPanelState {
     process_choices: Vec<ProcessInfo>,
     value_type: ScanValueType,
     text_encoding: Option<TextEncoding>,
+    is_aob_scan: bool,
     text_case_sensitive: bool,
     text_null_terminated: bool,
     value_input: String,
@@ -596,6 +598,7 @@ impl Default for MemoryPanelState {
             process_choices: Vec::new(),
             value_type: ScanValueType::I32,
             text_encoding: None,
+            is_aob_scan: false,
             text_case_sensitive: true,
             text_null_terminated: false,
             value_input: "0".to_owned(),
@@ -1394,10 +1397,14 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_id_salt("memory-value-type")
                         .width(110.0)
-                        .selected_text(match self.memory_panel.text_encoding {
-                            Some(TextEncoding::Utf8) => self.tr("Text (UTF-8)", "Text (UTF-8)"),
-                            Some(TextEncoding::Utf16) => self.tr("Text (UTF-16)", "Text (UTF-16)"),
-                            None => self.tr(memory_type_label(self.memory_panel.value_type), memory_type_label(self.memory_panel.value_type)),
+                        .selected_text(if self.memory_panel.is_aob_scan {
+                            self.tr("Array of Bytes (AOB)", "Array of Bytes (AOB)")
+                        } else {
+                            match self.memory_panel.text_encoding {
+                                Some(TextEncoding::Utf8) => self.tr("Text (UTF-8)", "Text (UTF-8)"),
+                                Some(TextEncoding::Utf16) => self.tr("Text (UTF-16)", "Text (UTF-16)"),
+                                None => self.tr(memory_type_label(self.memory_panel.value_type), memory_type_label(self.memory_panel.value_type)),
+                            }
                         })
                         .show_ui(ui, |ui| {
                             for value_type in [
@@ -1410,7 +1417,8 @@ impl CrosshairApp {
                             ] {
                                 if ui
                                     .selectable_label(
-                                        self.memory_panel.text_encoding.is_none()
+                                        !self.memory_panel.is_aob_scan
+                                            && self.memory_panel.text_encoding.is_none()
                                             && self.memory_panel.value_type == value_type,
                                         self.tr(memory_type_label(value_type), memory_type_label(value_type)),
                                     )
@@ -1418,6 +1426,7 @@ impl CrosshairApp {
                                 {
                                     self.memory_panel.value_type = value_type;
                                     self.memory_panel.text_encoding = None;
+                                    self.memory_panel.is_aob_scan = false;
                                     self.reset_memory_scan("Value type changed");
                                 }
                             }
@@ -1428,18 +1437,37 @@ impl CrosshairApp {
                             ] {
                                 if ui
                                     .selectable_label(
-                                        self.memory_panel.text_encoding == Some(encoding),
+                                        !self.memory_panel.is_aob_scan
+                                            && self.memory_panel.text_encoding == Some(encoding),
                                         self.tr(label, label),
                                     )
                                     .clicked()
                                 {
                                     self.memory_panel.text_encoding = Some(encoding);
+                                    self.memory_panel.is_aob_scan = false;
                                     self.memory_panel.hex = false;
                                     self.reset_memory_scan("Value type changed");
                                 }
                             }
+                            ui.separator();
+                            if ui
+                                .selectable_label(
+                                    self.memory_panel.is_aob_scan,
+                                    self.tr("Array of Bytes (AOB)", "Array of Bytes (AOB)"),
+                                )
+                                .clicked()
+                            {
+                                self.memory_panel.is_aob_scan = true;
+                                self.memory_panel.text_encoding = None;
+                                self.memory_panel.hex = true;
+                                self.reset_memory_scan("Value type changed");
+                            }
                         });
-                    let val_hint = self.tr("value", "value");
+                    let val_hint = if self.memory_panel.is_aob_scan {
+                        "F3 41 ?? 10 50 10"
+                    } else {
+                        self.tr("value", "value")
+                    };
                     let value_response = ui.add(
                         egui::TextEdit::singleline(&mut self.memory_panel.value_input)
                             .desired_width(120.0)
@@ -8190,6 +8218,7 @@ impl CrosshairApp {
         let case_sensitive = self.memory_panel.text_case_sensitive;
         let null_terminated = self.memory_panel.text_null_terminated;
         let pause_while_scanning = self.memory_panel.pause_while_scanning;
+        let is_aob = self.memory_panel.is_aob_scan;
         thread::spawn(move || {
             let _pause = if pause_while_scanning {
                 match PausedProcess::new(pid) {
@@ -8206,7 +8235,20 @@ impl CrosshairApp {
             } else {
                 None
             };
-            let result = if let Some(encoding) = text_encoding {
+            let result = if is_aob {
+                if action == MemoryScanAction::Exact && !text_candidates.is_empty() {
+                    filter_aob_scan_candidates(pid, text_candidates, &text)
+                } else {
+                    scan_aob_memory_with_progress(
+                        pid,
+                        &text,
+                        result_limit,
+                        scan_options,
+                        progress,
+                    )
+                }
+                .map(ScanJobCandidates::Text)
+            } else if let Some(encoding) = text_encoding {
                 if action == MemoryScanAction::Exact && !text_candidates.is_empty() {
                     filter_text_scan_candidates(
                         pid,
