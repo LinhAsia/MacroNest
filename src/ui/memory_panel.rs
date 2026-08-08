@@ -7883,18 +7883,33 @@ impl CrosshairApp {
     }
 
     fn render_structure_elements(ui: &mut egui::Ui, dialog: &mut MemoryViewDialog, bytes: &[u8], process_pid: Option<u32>) {
-        // CE-style header row
-        ui.horizontal(|ui| {
-            ui.add_space(22.0); // arrow button column
-            Self::memory_view_cell(ui, 340.0, "Offset - description");
-            Self::memory_view_cell(ui, 240.0, "Address : Value");
-        });
+        // CE-style column widths
+        const W_BTN:   f32 = 20.0;
+        const W_DESC:  f32 = 340.0;
+        const W_ADDRV: f32 = 280.0;
+
+        // Header
+        egui::Grid::new("struct-header")
+            .min_col_width(0.0)
+            .spacing([0.0, 0.0])
+            .show(ui, |ui| {
+                ui.add_sized([W_BTN, 18.0], egui::Label::new(""));
+                ui.add_sized([W_DESC, 18.0], egui::Label::new(RichText::new("Offset - description").strong()));
+                ui.add_sized([W_ADDRV, 18.0], egui::Label::new(RichText::new("Address : Value").strong()));
+                ui.end_row();
+            });
         ui.separator();
 
         let mut open_pointer_class = None;
+        egui::Grid::new("struct-elements")
+            .min_col_width(0.0)
+            .spacing([0.0, 1.0])
+            .striped(true)
+            .show(ui, |ui| {
         for element in &mut dialog.elements {
             let width = element.value_type.width(dialog.pointer_width);
             let Some(raw) = bytes.get(element.offset..element.offset.saturating_add(width)) else {
+                ui.end_row();
                 continue;
             };
             let changed = dialog
@@ -7905,7 +7920,7 @@ impl CrosshairApp {
             let mut add_request = None;
             let mut navigate_to = None;
 
-            // For Pointer fields: lazily detect RTTI class name
+            // Lazy RTTI detection for Pointer fields
             if element.value_type == StructureElementType::Pointer {
                 let pointed_addr = decode_pointer(raw).unwrap_or(0);
                 if pointed_addr != 0 && element.detected_class.is_none() {
@@ -7922,133 +7937,97 @@ impl CrosshairApp {
                 }
             }
 
-            // Build CE-style description: "XXXX - Pointer to instance of Foo" or "XXXX - 4 Bytes"
             let description = ce_element_description(element);
-
-            // Build CE-style value: "P->ADDR" for pointers, or numeric for others
             let value_str = if element.value_type == StructureElementType::Pointer {
                 let addr = decode_pointer(raw).unwrap_or(0);
                 if addr == 0 { "NULL".to_owned() } else { format!("P->{addr:X}") }
             } else {
                 format_structure_value(raw, element.value_type)
             };
+            let is_ptr = element.value_type == StructureElementType::Pointer;
+            let pointed = if is_ptr { decode_pointer(raw).unwrap_or(0) } else { 0 };
 
-            let row = ui.horizontal(|ui| {
-                // Arrow button — only for non-null pointers, navigates into that class
-                if element.value_type == StructureElementType::Pointer {
-                    let pointed = decode_pointer(raw).unwrap_or(0);
-                    let btn = ui.add_sized(
-                        [20.0, 18.0],
-                        egui::Button::new(
-                            RichText::new("▶")
-                                .small()
-                                .color(if pointed != 0 {
-                                    Color32::from_rgb(100, 200, 130)
-                                } else {
-                                    ui.visuals().weak_text_color()
-                                }),
-                        )
-                        .frame(false),
-                    );
-                    if btn.clicked() && pointed != 0 {
-                        navigate_to = Some(pointed);
-                    }
-                    btn.on_hover_text("Navigate into this structure");
+            // Col 1: arrow button
+            {
+                let (btn_text, btn_color) = if is_ptr && pointed != 0 {
+                    (">", Color32::from_rgb(100, 210, 140))
                 } else {
-                    ui.add_space(22.0);
+                    (" ", ui.visuals().weak_text_color())
+                };
+                let btn = ui.add_sized(
+                    [W_BTN, 18.0],
+                    egui::Button::new(RichText::new(btn_text).monospace().color(btn_color))
+                        .frame(false),
+                );
+                if btn.clicked() && is_ptr && pointed != 0 {
+                    navigate_to = Some(pointed);
                 }
-
-                // Offset-description column (editable name via right-click)
-                Self::memory_label_cell(
-                    ui,
-                    340.0,
-                    18.0,
-                    egui::Label::new(
-                        RichText::new(&description)
-                            .monospace()
-                            .color(if element.value_type == StructureElementType::Pointer {
-                                Color32::from_rgb(100, 200, 130)
-                            } else {
-                                ui.visuals().text_color()
-                            }),
-                    )
-                    .selectable(true),
-                );
-
-                // Address : Value column
-                let av = Self::memory_label_cell(
-                    ui,
-                    240.0,
-                    18.0,
-                    egui::Label::new(
-                        RichText::new(format!("{} : {}", format_memory_address(element_address), value_str))
-                            .monospace()
-                            .color(if changed {
-                                Color32::from_rgb(255, 170, 70)
-                            } else {
-                                ui.visuals().text_color()
-                            }),
-                    )
-                    .selectable(true),
-                );
-                if av.double_clicked() {
-                    if element.value_type == StructureElementType::Pointer {
-                        navigate_to = decode_pointer(raw);
+                if is_ptr {
+                    btn.on_hover_text(if pointed != 0 {
+                        "Navigate into pointed structure"
                     } else {
-                        add_request = Some((
-                            element_address,
-                            element.value_type.scan_type(dialog.pointer_width),
-                        ));
-                    }
+                        "NULL pointer"
+                    });
                 }
-            })
-            .response;
+            }
 
-            row.context_menu(|ui| {
-                // Rename field
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut element.name)
-                            .desired_width(140.0)
-                            .hint_text("field name"),
-                    );
-                });
-                ui.menu_button("Change type", |ui| {
-                    for (value_type, label) in StructureElementType::ALL {
-                        if ui
-                            .selectable_value(&mut element.value_type, value_type, label)
-                            .clicked()
-                        {
-                            element.detected_class = None; // reset cache on type change
-                            ui.close();
-                        }
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Offset:");
-                    ui.add(
-                        egui::DragValue::new(&mut element.offset)
-                            .hexadecimal(4, false, true)
-                            .speed(1),
-                    );
-                });
-                if ui.button("Add to address list").clicked() {
+            // Col 2: offset-description
+            let desc_resp = ui.add_sized(
+                [W_DESC, 18.0],
+                egui::Label::new(
+                    RichText::new(&description)
+                        .monospace()
+                        .size(12.5)
+                        .color(if is_ptr {
+                            Color32::from_rgb(100, 210, 140)
+                        } else {
+                            ui.visuals().text_color()
+                        }),
+                )
+                .selectable(true)
+                .truncate(),
+            );
+            // Chain hover text — result is the Response for context_menu
+            let desc_resp = desc_resp.on_hover_text(&description);
+
+            // Col 3: address : value
+            let av_text = format!("{} : {}", format_memory_address(element_address), value_str);
+            let av = ui.add_sized(
+                [W_ADDRV, 18.0],
+                egui::Label::new(
+                    RichText::new(&av_text)
+                        .monospace()
+                        .size(12.5)
+                        .color(if changed {
+                            Color32::from_rgb(255, 170, 70)
+                        } else {
+                            ui.visuals().text_color()
+                        }),
+                )
+                .selectable(true)
+                .truncate(),
+            );
+            if av.double_clicked() {
+                if is_ptr {
+                    navigate_to = Some(pointed);
+                } else {
                     add_request = Some((
                         element_address,
                         element.value_type.scan_type(dialog.pointer_width),
                     ));
-                    ui.close();
                 }
-            });
+            }
 
-            if add_request.is_some() {
-                dialog.pending_add = add_request;
-            }
-            if let Some(addr) = navigate_to {
-                open_pointer_class = Some(addr);
-            }
-        }
+            // Context menu on the whole row
+            desc_resp.context_menu(|ui| Self::structure_element_context_menu(ui, element, element_address, &mut add_request));
+            av.context_menu(|ui| Self::structure_element_context_menu(ui, element, element_address, &mut add_request));
+
+            if add_request.is_some() { dialog.pending_add = add_request; }
+            if let Some(addr) = navigate_to { open_pointer_class = Some(addr); }
+
+            ui.end_row();
+        } // for element
+        }); // Grid
 
         if let Some(address) = open_pointer_class.filter(|a| *a != 0) {
             let index = dialog
@@ -8067,8 +8046,50 @@ impl CrosshairApp {
             dialog.address = address;
             dialog.elements = dialog.classes[index].elements.clone();
             dialog.previous_bytes.clear();
-            dialog.class_detection_attempted = false;
             dialog.auto_dissected = false;
+        }
+    }
+
+    /// Context menu shared by description and value columns.
+    fn structure_element_context_menu(
+        ui: &mut egui::Ui,
+        element: &mut StructureElement,
+        element_address: usize,
+        add_request: &mut Option<(usize, ScanValueType)>,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label("Name:");
+            ui.add(
+                egui::TextEdit::singleline(&mut element.name)
+                    .desired_width(140.0)
+                    .hint_text("field name"),
+            );
+        });
+        ui.menu_button("Change type", |ui| {
+            for (value_type, label) in StructureElementType::ALL {
+                if ui
+                    .selectable_value(&mut element.value_type, value_type, label)
+                    .clicked()
+                {
+                    element.detected_class = None;
+                    ui.close();
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Offset:");
+            ui.add(
+                egui::DragValue::new(&mut element.offset)
+                    .hexadecimal(4, false, true)
+                    .speed(1),
+            );
+        });
+        if ui.button("Add to address list").clicked() {
+            *add_request = Some((
+                element_address,
+                element.value_type.scan_type(std::mem::size_of::<usize>()),
+            ));
+            ui.close();
         }
     }
 
