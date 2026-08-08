@@ -1110,8 +1110,9 @@ pub enum AobByte {
 }
 
 pub fn parse_aob_pattern(pattern_str: &str) -> Option<Vec<AobByte>> {
+    let sanitized = pattern_str.replace(['O', 'o'], "0");
     let mut bytes = Vec::new();
-    for token in pattern_str.split_whitespace() {
+    for token in sanitized.split_whitespace() {
         let token = token.trim();
         if token.is_empty() {
             continue;
@@ -1119,8 +1120,16 @@ pub fn parse_aob_pattern(pattern_str: &str) -> Option<Vec<AobByte>> {
         if token == "?" || token == "??" {
             bytes.push(AobByte::Any);
         } else {
-            let byte = u8::from_str_radix(token, 16).ok()?;
-            bytes.push(AobByte::Exact(byte));
+            let clean_token = if token.len() == 1 {
+                format!("0{token}")
+            } else {
+                token.to_string()
+            };
+            if let Ok(byte) = u8::from_str_radix(&clean_token, 16) {
+                bytes.push(AobByte::Exact(byte));
+            } else {
+                return None;
+            }
         }
     }
     if bytes.is_empty() {
