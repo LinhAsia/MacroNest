@@ -328,6 +328,8 @@ struct StructureElement {
     name: String,
     /// Cached RTTI class name for Pointer fields (None = not yet resolved, Some("") = not found)
     detected_class: Option<String>,
+    expanded: bool,
+    child_elements: Vec<StructureElement>,
 }
 
 #[derive(Clone)]
@@ -358,6 +360,8 @@ struct MemoryViewDialog {
     class_detection_attempted: bool,
     /// True once auto_structure_elements has run for this view
     auto_dissected: bool,
+    /// Navigation history stack (previous addresses)
+    history: Vec<usize>,
 }
 
 #[cfg(windows)]
@@ -2981,6 +2985,7 @@ impl CrosshairApp {
                                         class_detection_status: String::new(),
                                         class_detection_attempted: false,
                                         auto_dissected: false,
+                                        history: Vec::new(),
                                     });
                                     ui.close();
                                 }
@@ -3020,6 +3025,7 @@ impl CrosshairApp {
                                         class_detection_status: String::new(),
                                         class_detection_attempted: false,
                                         auto_dissected: false,
+                                         history: Vec::new(),
                                     });
                                     ui.close();
                                 }
@@ -6949,6 +6955,7 @@ impl CrosshairApp {
                 class_detection_status: String::new(),
                 class_detection_attempted: false,
                 auto_dissected: false,
+                history: Vec::new(),
             });
         }
         if open {
@@ -7553,11 +7560,42 @@ impl CrosshairApp {
         region: Option<MemoryRegionInfo>,
     ) {
         let Some(bytes) = bytes else {
-            ui.label(Self::tr_lang(
-                language,
-                "Unable to read this memory region",
-                "Không thể đọc vùng bộ nhớ này",
-            ));
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    if !dialog.history.is_empty() {
+                        if ui.button(Self::tr_lang(language, "◀ Back", "◀ Quay lại")).clicked() {
+                            if let Some(prev_addr) = dialog.history.pop() {
+                                dialog.address = prev_addr;
+                                if let Some(idx) = dialog.classes.iter().position(|c| c.address == prev_addr) {
+                                    dialog.selected_class = idx;
+                                    dialog.elements = dialog.classes[idx].elements.clone();
+                                }
+                                dialog.previous_bytes.clear();
+                                dialog.auto_dissected = false;
+                            }
+                        }
+                    }
+                    ui.label(
+                        RichText::new(format!(
+                            "{}: {}",
+                            Self::tr_lang(
+                                language,
+                                "Unable to read memory region",
+                                "Không thể đọc vùng bộ nhớ"
+                            ),
+                            format_prefixed_memory_address(dialog.address)
+                        ))
+                        .color(Color32::from_rgb(255, 100, 100)),
+                    );
+                });
+                if !dialog.class_detection_status.is_empty() {
+                    ui.label(
+                        RichText::new(&dialog.class_detection_status)
+                            .small()
+                            .color(Color32::from_rgb(255, 170, 70)),
+                    );
+                }
+            });
             return;
         };
         // Update byte change highlight map: compare new bytes with previous_bytes.
@@ -7657,6 +7695,19 @@ impl CrosshairApp {
                             }
                             ui.separator();
                             // Toolbar buttons in sidebar
+                            if !dialog.history.is_empty() {
+                                if ui.small_button(Self::tr_lang(language, "◀ Back", "◀ Quay lại")).clicked() {
+                                    if let Some(prev_addr) = dialog.history.pop() {
+                                        dialog.address = prev_addr;
+                                        if let Some(idx) = dialog.classes.iter().position(|c| c.address == prev_addr) {
+                                            dialog.selected_class = idx;
+                                            dialog.elements = dialog.classes[idx].elements.clone();
+                                        }
+                                        dialog.previous_bytes.clear();
+                                        dialog.auto_dissected = false;
+                                    }
+                                }
+                            }
                             if ui.small_button(Self::tr_lang(language, "Re-identify", "Nhận diện lại")).clicked() {
                                 identify_structure_class(process_pid, dialog);
                             }
@@ -7683,6 +7734,19 @@ impl CrosshairApp {
                             ui.set_min_height(available.y);
                             // CE-style header
                             ui.horizontal(|ui| {
+                                if !dialog.history.is_empty() {
+                                    if ui.button(Self::tr_lang(language, "◀ Back", "◀ Quay lại")).clicked() {
+                                        if let Some(prev_addr) = dialog.history.pop() {
+                                            dialog.address = prev_addr;
+                                            if let Some(idx) = dialog.classes.iter().position(|c| c.address == prev_addr) {
+                                                dialog.selected_class = idx;
+                                                dialog.elements = dialog.classes[idx].elements.clone();
+                                            }
+                                            dialog.previous_bytes.clear();
+                                            dialog.auto_dissected = false;
+                                        }
+                                    }
+                                }
                                 let class_name = dialog
                                     .classes
                                     .get(dialog.selected_class)
@@ -7909,7 +7973,7 @@ impl CrosshairApp {
             });
         ui.separator();
 
-        let mut open_pointer_class = None;
+        let mut open_pointer_class: Option<usize> = None;
         egui::Grid::new("struct-elements")
             .min_col_width(0.0)
             .spacing([0.0, 1.0])
@@ -7935,7 +7999,7 @@ impl CrosshairApp {
                 .is_some_and(|previous| previous != raw);
             let element_address = dialog.address.saturating_add(element.offset);
             let mut add_request = None;
-            let mut navigate_to = None;
+            let mut navigate_to: Option<usize> = None;
 
             // Lazy RTTI detection for Pointer fields
             if element.value_type == StructureElementType::Pointer {
@@ -7964,10 +8028,14 @@ impl CrosshairApp {
             let is_ptr = element.value_type == StructureElementType::Pointer;
             let pointed = if is_ptr { decode_pointer(raw).unwrap_or(0) } else { 0 };
 
-            // Col 1: arrow button
+            // Col 1: arrow button (inline expansion toggle)
             {
                 let (btn_text, btn_color) = if is_ptr && pointed != 0 {
-                    (">", Color32::from_rgb(100, 210, 140))
+                    if element.expanded {
+                        ("v", Color32::from_rgb(255, 200, 100))
+                    } else {
+                        (">", Color32::from_rgb(100, 210, 140))
+                    }
                 } else {
                     (" ", ui.visuals().weak_text_color())
                 };
@@ -7977,11 +8045,25 @@ impl CrosshairApp {
                         .frame(false),
                 );
                 if btn.clicked() && is_ptr && pointed != 0 {
-                    navigate_to = Some(pointed);
+                    if element.expanded {
+                        element.expanded = false;
+                    } else if let Some(pid) = process_pid {
+                        if let Ok(child_bytes) = read_memory_bytes(pid, pointed, 128) {
+                            if element.child_elements.is_empty() {
+                                element.child_elements = auto_structure_elements(&child_bytes, dialog.pointer_width);
+                            }
+                            element.expanded = true;
+                        } else {
+                            dialog.class_detection_status = format!(
+                                "Unreadable pointer: {}",
+                                format_prefixed_memory_address(pointed)
+                            );
+                        }
+                    }
                 }
                 if is_ptr {
                     btn.on_hover_text(if pointed != 0 {
-                        "Navigate into pointed structure"
+                        if element.expanded { "Collapse child structure" } else { "Expand child structure inline" }
                     } else {
                         "NULL pointer"
                     });
@@ -7989,9 +8071,6 @@ impl CrosshairApp {
             }
 
             // Col 2: offset-description — genuinely left-aligned
-            // IMPORTANT: do NOT use add_sized here — it internally uses centered_and_justified
-            // layout which overrides our left-to-right layout and centers text.
-            // Instead: set_min_width + set_max_width + ui.add(Label) directly.
             let desc_color = if is_ptr { Color32::from_rgb(100, 210, 140) } else { ui.visuals().text_color() };
             let desc_resp = ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
                 ui.set_min_width(W_DESC);
@@ -8027,9 +8106,16 @@ impl CrosshairApp {
                 )
             }).inner;
             if av.double_clicked() {
-                if is_ptr {
-                    navigate_to = Some(pointed);
-                } else {
+                if is_ptr && pointed != 0 {
+                    element.expanded = !element.expanded;
+                    if element.expanded && element.child_elements.is_empty() {
+                        if let Some(pid) = process_pid {
+                            if let Ok(child_bytes) = read_memory_bytes(pid, pointed, 128) {
+                                element.child_elements = auto_structure_elements(&child_bytes, dialog.pointer_width);
+                            }
+                        }
+                    }
+                } else if !is_ptr {
                     add_request = Some((
                         element_address,
                         element.value_type.scan_type(dialog.pointer_width),
@@ -8042,31 +8128,63 @@ impl CrosshairApp {
             av.context_menu(|ui| Self::structure_element_context_menu(ui, element, element_address, &mut add_request));
 
             if add_request.is_some() { dialog.pending_add = add_request; }
-            if let Some(addr) = navigate_to { open_pointer_class = Some(addr); }
 
             ui.end_row();
+
+            // Render inline expanded child elements if expanded
+            if is_ptr && element.expanded && pointed != 0 {
+                if let Some(pid) = process_pid {
+                    if let Ok(child_bytes) = read_memory_bytes(pid, pointed, 128) {
+                        for child in &mut element.child_elements {
+                            let child_w = child.value_type.width(dialog.pointer_width);
+                            let Some(c_raw) = child_bytes.get(child.offset..child.offset.saturating_add(child_w)) else {
+                                continue;
+                            };
+                            let child_addr = pointed.saturating_add(child.offset);
+                            let c_val_str = if child.value_type == StructureElementType::Pointer {
+                                let c_ptr = decode_pointer(c_raw).unwrap_or(0);
+                                if c_ptr == 0 { "NULL".to_owned() } else { format!("P->{c_ptr:X}") }
+                            } else {
+                                format_structure_value(c_raw, child.value_type)
+                            };
+
+                            // Indented child row
+                            ui.add_sized([W_BTN, 18.0], egui::Label::new(""));
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                ui.set_min_width(W_DESC);
+                                ui.set_max_width(W_DESC);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!("   ↳ +{:04X} - {}", child.offset, child.value_type.label()))
+                                            .monospace()
+                                            .size(11.5)
+                                            .color(Color32::from_rgb(180, 220, 255)),
+                                    )
+                                    .selectable(true)
+                                    .truncate(),
+                                );
+                            });
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                ui.set_min_width(W_ADDRV);
+                                ui.set_max_width(W_ADDRV);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!("{} : {}", format_memory_address(child_addr), c_val_str))
+                                            .monospace()
+                                            .size(11.5)
+                                            .color(ui.visuals().text_color()),
+                                    )
+                                    .selectable(true)
+                                    .truncate(),
+                                );
+                            });
+                            ui.end_row();
+                        }
+                    }
+                }
+            }
         } // for element
         }); // Grid
-
-        if let Some(address) = open_pointer_class.filter(|a| *a != 0) {
-            let index = dialog
-                .classes
-                .iter()
-                .position(|class| class.address == address)
-                .unwrap_or_else(|| {
-                    dialog.classes.push(StructureClass {
-                        name: format!("Class_{address:X}"),
-                        address,
-                        elements: default_structure_elements(),
-                    });
-                    dialog.classes.len() - 1
-                });
-            dialog.selected_class = index;
-            dialog.address = address;
-            dialog.elements = dialog.classes[index].elements.clone();
-            dialog.previous_bytes.clear();
-            dialog.auto_dissected = false;
-        }
     }
 
     /// Context menu shared by description and value columns.
@@ -8992,6 +9110,7 @@ impl CrosshairApp {
             class_detection_status: String::new(),
             class_detection_attempted: false,
             auto_dissected: false,
+            history: Vec::new(),
         });
     }
 
@@ -9594,6 +9713,8 @@ fn default_structure_elements() -> Vec<StructureElement> {
             value_type: StructureElementType::I32,
             name: format!("field_{offset:04X}"),
             detected_class: None,
+            expanded: false,
+            child_elements: Vec::new(),
         })
         .collect()
 }
@@ -9842,6 +9963,8 @@ fn auto_structure_elements(bytes: &[u8], pointer_width: usize) -> Vec<StructureE
                 value_type,
                 name: format!("field_{offset:04X}"),
                 detected_class: None,
+                expanded: false,
+                child_elements: Vec::new(),
             }
         })
         .collect()
