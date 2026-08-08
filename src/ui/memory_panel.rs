@@ -7658,118 +7658,86 @@ impl CrosshairApp {
                         active.elements = dialog.elements.clone();
                     }
                 }
-                let available = ui.available_size();
+                // Top Toolbar: single line layout without left sidebar
                 ui.horizontal(|ui| {
-                    // Left panel: class list (CE-style sidebar)
-                    ui.allocate_ui_with_layout(
-                        vec2(160.0, available.y),
-                        egui::Layout::top_down(egui::Align::LEFT),
-                        |ui| {
-                            ui.set_width(160.0);
-                            ui.set_min_height(available.y);
-                            ui.label(RichText::new("Structures").strong());
-                            let classes = dialog
-                                .classes
-                                .iter()
-                                .map(|class| class.name.clone())
-                                .collect::<Vec<_>>();
-                            for (index, name) in classes.into_iter().enumerate() {
-                                if ui
-                                    .selectable_label(dialog.selected_class == index, name)
-                                    .clicked()
-                                {
-                                    if let Some(active) =
-                                        dialog.classes.get_mut(dialog.selected_class)
-                                    {
-                                        active.address = dialog.address;
-                                        active.elements = dialog.elements.clone();
-                                    }
-                                    dialog.selected_class = index;
-                                    if let Some(class) = dialog.classes.get(index).cloned() {
-                                        dialog.address = class.address;
-                                        dialog.elements = class.elements;
-                                        dialog.previous_bytes.clear();
-                                        dialog.auto_dissected = false;
+                    if !dialog.history.is_empty() {
+                        if ui.small_button(Self::tr_lang(language, "◀ Back", "◀ Quay lại")).clicked() {
+                            if let Some(prev_addr) = dialog.history.pop() {
+                                dialog.address = prev_addr;
+                                if let Some(idx) = dialog.classes.iter().position(|c| c.address == prev_addr) {
+                                    dialog.selected_class = idx;
+                                    dialog.elements = dialog.classes[idx].elements.clone();
+                                }
+                                dialog.previous_bytes.clear();
+                                dialog.auto_dissected = false;
+                            }
+                        }
+                    }
+                    if dialog.classes.len() > 1 {
+                        let selected_name = dialog.classes.get(dialog.selected_class).map(|c| c.name.as_str()).unwrap_or("Class").to_owned();
+                        let class_list: Vec<(usize, String)> = dialog.classes.iter().enumerate().map(|(i, c)| (i, c.name.clone())).collect();
+                        let mut switch_to = None;
+                        egui::ComboBox::from_id_salt("struct-class-select")
+                            .selected_text(&selected_name)
+                            .show_ui(ui, |ui| {
+                                for (index, name) in &class_list {
+                                    if ui.selectable_label(dialog.selected_class == *index, name).clicked() {
+                                        switch_to = Some(*index);
                                     }
                                 }
-                            }
-                            ui.separator();
-                            // Toolbar buttons in sidebar
-                            if !dialog.history.is_empty() {
-                                if ui.small_button(Self::tr_lang(language, "◀ Back", "◀ Quay lại")).clicked() {
-                                    if let Some(prev_addr) = dialog.history.pop() {
-                                        dialog.address = prev_addr;
-                                        if let Some(idx) = dialog.classes.iter().position(|c| c.address == prev_addr) {
-                                            dialog.selected_class = idx;
-                                            dialog.elements = dialog.classes[idx].elements.clone();
-                                        }
-                                        dialog.previous_bytes.clear();
-                                        dialog.auto_dissected = false;
-                                    }
-                                }
-                            }
-                            if ui.small_button(Self::tr_lang(language, "Re-identify", "Nhận diện lại")).clicked() {
-                                identify_structure_class(process_pid, dialog);
-                            }
-                            if ui.small_button(Self::tr_lang(language, "Re-dissect", "Dissect lại")).clicked() {
-                                dialog.elements = auto_structure_elements(bytes, dialog.pointer_width);
-                                // reset cached class names since structure changed
-                                for el in &mut dialog.elements { el.detected_class = None; }
-                            }
-                            if !dialog.class_detection_status.is_empty() {
-                                ui.label(
-                                    RichText::new(&dialog.class_detection_status)
-                                        .small()
-                                        .color(ui.visuals().weak_text_color()),
-                                );
-                            }
-                        },
-                    );
-                    ui.separator();
-                    // Right panel: structure elements in CE-style layout
-                    ui.allocate_ui_with_layout(
-                        vec2((available.x - 170.0).max(360.0), available.y),
-                        egui::Layout::top_down(egui::Align::LEFT),
-                        |ui| {
-                            ui.set_min_height(available.y);
-                            // CE-style header
-                            ui.horizontal(|ui| {
-                                if !dialog.history.is_empty() {
-                                    if ui.button(Self::tr_lang(language, "◀ Back", "◀ Quay lại")).clicked() {
-                                        if let Some(prev_addr) = dialog.history.pop() {
-                                            dialog.address = prev_addr;
-                                            if let Some(idx) = dialog.classes.iter().position(|c| c.address == prev_addr) {
-                                                dialog.selected_class = idx;
-                                                dialog.elements = dialog.classes[idx].elements.clone();
-                                            }
-                                            dialog.previous_bytes.clear();
-                                            dialog.auto_dissected = false;
-                                        }
-                                    }
-                                }
-                                let class_name = dialog
-                                    .classes
-                                    .get(dialog.selected_class)
-                                    .map(|c| c.name.as_str())
-                                    .unwrap_or("unnamed structure");
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{class_name}   [{}-bit]",
-                                        dialog.pointer_width * 8
-                                    ))
-                                    .strong(),
-                                );
                             });
-                            egui::ScrollArea::both()
-                                .id_salt("structure-elements")
-                                .scroll_bar_visibility(
-                                    egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
-                                )
-                                .max_height(ui.available_height())
-                                .show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes, process_pid));
-                        },
-                    );
+                        if let Some(index) = switch_to {
+                            if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
+                                active.address = dialog.address;
+                                active.elements = dialog.elements.clone();
+                            }
+                            dialog.selected_class = index;
+                            if let Some(class) = dialog.classes.get(index).cloned() {
+                                dialog.address = class.address;
+                                dialog.elements = class.elements;
+                                dialog.previous_bytes.clear();
+                                dialog.auto_dissected = false;
+                            }
+                        }
+                    } else {
+                        let class_name = dialog
+                            .classes
+                            .get(dialog.selected_class)
+                            .map(|c| c.name.as_str())
+                            .unwrap_or("unnamed structure");
+                        ui.label(
+                            RichText::new(format!(
+                                "{class_name}   [{}-bit]",
+                                dialog.pointer_width * 8
+                            ))
+                            .strong(),
+                        );
+                    }
+
+                    ui.separator();
+                    if ui.small_button(Self::tr_lang(language, "Re-identify", "Nhận diện lại")).clicked() {
+                        identify_structure_class(process_pid, dialog);
+                    }
+                    if ui.small_button(Self::tr_lang(language, "Re-dissect", "Dissect lại")).clicked() {
+                        dialog.elements = auto_structure_elements(bytes, dialog.pointer_width);
+                        for el in &mut dialog.elements { el.detected_class = None; }
+                    }
+                    if !dialog.class_detection_status.is_empty() {
+                        ui.label(
+                            RichText::new(&dialog.class_detection_status)
+                                .small()
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    }
                 });
+                ui.separator();
+
+                // Main structure elements view full width
+                egui::ScrollArea::both()
+                    .id_salt("structure-elements")
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                    .max_height(ui.available_height())
+                    .show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes, process_pid));
                 if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
                     active.address = dialog.address;
                     active.elements = dialog.elements.clone();
