@@ -7472,11 +7472,10 @@ impl CrosshairApp {
                 .with_always_on_top();
             let mut unpin = false;
             ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of((
-                    "memory-tool-view",
-                    address,
-                    matches!(kind, MemoryViewKind::Structure),
-                )),
+                // ID must be stable — do NOT include `address` here or navigation
+                // will destroy and recreate the viewport on every jump.
+                egui::ViewportId::from_hash_of("memory-view-pinned-struct"),
+
                 builder,
                 |ctx, _| {
                     Self::constrain_memory_popup_to_monitor(ctx);
@@ -7989,41 +7988,39 @@ impl CrosshairApp {
                 }
             }
 
-            // Col 2: offset-description — left-aligned
+            // Col 2: offset-description — genuinely left-aligned
+            // IMPORTANT: do NOT use add_sized here — it internally uses centered_and_justified
+            // layout which overrides our left-to-right layout and centers text.
+            // Instead: set_min_width + set_max_width + ui.add(Label) directly.
+            let desc_color = if is_ptr { Color32::from_rgb(100, 210, 140) } else { ui.visuals().text_color() };
             let desc_resp = ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                ui.add_sized(
-                    [W_DESC, 18.0],
+                ui.set_min_width(W_DESC);
+                ui.set_max_width(W_DESC);
+                ui.add(
                     egui::Label::new(
                         RichText::new(&description)
                             .monospace()
                             .size(12.5)
-                            .color(if is_ptr {
-                                Color32::from_rgb(100, 210, 140)
-                            } else {
-                                ui.visuals().text_color()
-                            }),
+                            .color(desc_color),
                     )
                     .selectable(true)
                     .truncate(),
                 )
             }).inner;
-            // Chain hover text — result is the Response for context_menu
             let desc_resp = desc_resp.on_hover_text(&description);
 
-            // Col 3: address : value — left-aligned
+            // Col 3: address : value — genuinely left-aligned
             let av_text = format!("{} : {}", format_memory_address(element_address), value_str);
+            let av_color = if changed { Color32::from_rgb(255, 170, 70) } else { ui.visuals().text_color() };
             let av = ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                ui.add_sized(
-                    [W_ADDRV, 18.0],
+                ui.set_min_width(W_ADDRV);
+                ui.set_max_width(W_ADDRV);
+                ui.add(
                     egui::Label::new(
                         RichText::new(&av_text)
                             .monospace()
                             .size(12.5)
-                            .color(if changed {
-                                Color32::from_rgb(255, 170, 70)
-                            } else {
-                                ui.visuals().text_color()
-                            }),
+                            .color(av_color),
                     )
                     .selectable(true)
                     .truncate(),
