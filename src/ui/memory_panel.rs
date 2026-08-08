@@ -4513,9 +4513,9 @@ impl CrosshairApp {
                 .map(|map_b| {
                     // ponytail: search past the display limit before intersecting maps;
                     // otherwise different traversal order can hide every common path.
-                    let comparison_limit = limits.result_limit.saturating_mul(16).clamp(
+                    let comparison_limit = limits.result_limit.saturating_mul(64).clamp(
                         PointerScanLimits::MAX_RESULT_LIMIT,
-                        PointerScanLimits::MAX_RESULT_LIMIT.saturating_mul(4),
+                        PointerScanLimits::MAX_RESULT_LIMIT.saturating_mul(16),
                     );
                     let paths_a = map_a.paths_to(
                         target_a,

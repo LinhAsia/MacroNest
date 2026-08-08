@@ -510,15 +510,30 @@ fn find_pointer_paths(
                     .iter()
                     .find(|(_, base, size)| (*base..base.saturating_add(*size)).contains(&location))
                 {
-                    let mut offsets = reverse_offsets.clone();
-                    offsets.reverse();
-                    results.push(PointerPath {
-                        module: module.clone(),
-                        module_offset: location - *base,
-                        offsets,
-                    });
-                    if results.len() >= result_limit.max(1) {
-                        return results;
+                    let is_sys = {
+                        let lower = module.to_lowercase();
+                        lower.contains("ntdll")
+                            || lower.contains("kernel32")
+                            || lower.contains("kernelbase")
+                            || lower.contains("user32")
+                            || lower.contains("gdi32")
+                            || lower.contains("msvcrt")
+                            || lower.contains("ucrtbase")
+                            || lower.contains("comctl32")
+                            || lower.contains("imm32")
+                            || lower.contains("shell32")
+                    };
+                    if !is_sys {
+                        let mut offsets = reverse_offsets.clone();
+                        offsets.reverse();
+                        results.push(PointerPath {
+                            module: module.clone(),
+                            module_offset: location - *base,
+                            offsets,
+                        });
+                        if results.len() >= result_limit.max(1) {
+                            return results;
+                        }
                     }
                 }
                 if next.len() < max_frontier {
