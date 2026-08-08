@@ -356,6 +356,8 @@ struct MemoryViewDialog {
     selected_class: usize,
     class_detection_status: String,
     class_detection_attempted: bool,
+    /// True once auto_structure_elements has run for this view
+    auto_dissected: bool,
 }
 
 #[cfg(windows)]
@@ -2978,6 +2980,7 @@ impl CrosshairApp {
                                         selected_class: 0,
                                         class_detection_status: String::new(),
                                         class_detection_attempted: false,
+                                        auto_dissected: false,
                                     });
                                     ui.close();
                                 }
@@ -3016,6 +3019,7 @@ impl CrosshairApp {
                                         selected_class: 0,
                                         class_detection_status: String::new(),
                                         class_detection_attempted: false,
+                                        auto_dissected: false,
                                     });
                                     ui.close();
                                 }
@@ -6944,6 +6948,7 @@ impl CrosshairApp {
                 selected_class: 0,
                 class_detection_status: String::new(),
                 class_detection_attempted: false,
+                auto_dissected: false,
             });
         }
         if open {
@@ -7597,6 +7602,7 @@ impl CrosshairApp {
                 });
             }
             MemoryViewKind::Structure => {
+                // Auto-identify class on first open
                 if !dialog.class_detection_attempted {
                     dialog.class_detection_attempted = true;
                     let previous_address = dialog.address;
@@ -7606,15 +7612,24 @@ impl CrosshairApp {
                         return;
                     }
                 }
+                // Auto-dissect on first render (like CE — no button needed)
+                if !dialog.auto_dissected && !bytes.is_empty() {
+                    dialog.auto_dissected = true;
+                    dialog.elements = auto_structure_elements(bytes, dialog.pointer_width);
+                    if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
+                        active.elements = dialog.elements.clone();
+                    }
+                }
                 let available = ui.available_size();
                 ui.horizontal(|ui| {
+                    // Left panel: class list (CE-style sidebar)
                     ui.allocate_ui_with_layout(
-                        vec2(150.0, available.y),
+                        vec2(160.0, available.y),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            ui.set_width(150.0);
+                            ui.set_width(160.0);
                             ui.set_min_height(available.y);
-                            ui.label(RichText::new("Classes").strong());
+                            ui.label(RichText::new("Structures").strong());
                             let classes = dialog
                                 .classes
                                 .iter()
@@ -7636,41 +7651,20 @@ impl CrosshairApp {
                                         dialog.address = class.address;
                                         dialog.elements = class.elements;
                                         dialog.previous_bytes.clear();
+                                        dialog.auto_dissected = false;
                                     }
                                 }
                             }
-                        },
-                    );
-                    ui.separator();
-                    ui.allocate_ui_with_layout(
-                        vec2((available.x - 160.0).max(360.0), available.y),
-                        egui::Layout::top_down(egui::Align::LEFT),
-                        |ui| {
-                            ui.set_min_height(available.y);
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .button(Self::tr_lang(
-                                        language,
-                                        "Identify class",
-                                        "Nhận diện class",
-                                    ))
-                                    .clicked()
-                                {
-                                    identify_structure_class(process_pid, dialog);
-                                }
-                                if ui.button("Auto dissect").clicked() {
-                                    dialog.elements =
-                                        auto_structure_elements(bytes, dialog.pointer_width);
-                                }
-                                ui.label(format!("{}-bit pointers", dialog.pointer_width * 8));
-                                if let Some(class) = dialog.classes.get_mut(dialog.selected_class) {
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut class.name)
-                                            .desired_width(140.0)
-                                            .hint_text("Class name"),
-                                    );
-                                }
-                            });
+                            ui.separator();
+                            // Toolbar buttons in sidebar
+                            if ui.small_button(Self::tr_lang(language, "Re-identify", "Nhận diện lại")).clicked() {
+                                identify_structure_class(process_pid, dialog);
+                            }
+                            if ui.small_button(Self::tr_lang(language, "Re-dissect", "Dissect lại")).clicked() {
+                                dialog.elements = auto_structure_elements(bytes, dialog.pointer_width);
+                                // reset cached class names since structure changed
+                                for el in &mut dialog.elements { el.detected_class = None; }
+                            }
                             if !dialog.class_detection_status.is_empty() {
                                 ui.label(
                                     RichText::new(&dialog.class_detection_status)
@@ -7678,6 +7672,30 @@ impl CrosshairApp {
                                         .color(ui.visuals().weak_text_color()),
                                 );
                             }
+                        },
+                    );
+                    ui.separator();
+                    // Right panel: structure elements in CE-style layout
+                    ui.allocate_ui_with_layout(
+                        vec2((available.x - 170.0).max(360.0), available.y),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.set_min_height(available.y);
+                            // CE-style header
+                            ui.horizontal(|ui| {
+                                let class_name = dialog
+                                    .classes
+                                    .get(dialog.selected_class)
+                                    .map(|c| c.name.as_str())
+                                    .unwrap_or("unnamed structure");
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{class_name}   [{}-bit]",
+                                        dialog.pointer_width * 8
+                                    ))
+                                    .strong(),
+                                );
+                            });
                             egui::ScrollArea::both()
                                 .id_salt("structure-elements")
                                 .scroll_bar_visibility(
@@ -7865,14 +7883,14 @@ impl CrosshairApp {
     }
 
     fn render_structure_elements(ui: &mut egui::Ui, dialog: &mut MemoryViewDialog, bytes: &[u8], process_pid: Option<u32>) {
+        // CE-style header row
         ui.horizontal(|ui| {
-            Self::memory_view_cell(ui, 72.0, "Offset");
-            Self::memory_view_cell(ui, 110.0, "Type");
-            Self::memory_view_cell(ui, 140.0, "Field");
-            Self::memory_view_cell(ui, 152.0, "Address");
-            Self::memory_view_cell(ui, 220.0, "Value");
+            ui.add_space(22.0); // arrow button column
+            Self::memory_view_cell(ui, 340.0, "Offset - description");
+            Self::memory_view_cell(ui, 240.0, "Address : Value");
         });
         ui.separator();
+
         let mut open_pointer_class = None;
         for element in &mut dialog.elements {
             let width = element.value_type.width(dialog.pointer_width);
@@ -7885,97 +7903,154 @@ impl CrosshairApp {
                 .is_some_and(|previous| previous != raw);
             let element_address = dialog.address.saturating_add(element.offset);
             let mut add_request = None;
-            let row = ui
-                .horizontal(|ui| {
-                    Self::memory_view_cell(ui, 72.0, &format!("+{:04X}", element.offset));
-                    Self::memory_view_cell(ui, 110.0, element.value_type.label());
-                    ui.add_sized(
-                        [140.0, 18.0],
-                        egui::TextEdit::singleline(&mut element.name).hint_text("field"),
-                    );
-                    let address_response =
-                        Self::memory_view_cell(ui, 152.0, &format_memory_address(element_address));
+            let mut navigate_to = None;
 
-                    // For Pointer fields: lazily detect RTTI class name and show it
-                    let value_text = if element.value_type == StructureElementType::Pointer {
-                        let pointed_addr = decode_pointer(raw).unwrap_or(0);
-                        if pointed_addr != 0 {
-                            // Lazy RTTI detection: resolve on first encounter, cache result
-                            if element.detected_class.is_none() {
-                                #[cfg(windows)]
-                                if let Some(pid) = process_pid {
-                                    let class_name = detect_structure_identity(pid, pointed_addr, dialog.pointer_width)
-                                        .map(|id| id.name);
-                                    element.detected_class = Some(class_name.unwrap_or_default());
-                                }
-                                #[cfg(not(windows))]
-                                { element.detected_class = Some(String::new()); }
-                            }
-                            match element.detected_class.as_deref() {
-                                Some(name) if !name.is_empty() => {
-                                    format!("→ instance of {name}")
-                                }
-                                _ => format_structure_value(raw, element.value_type),
-                            }
-                        } else {
-                            "NULL".to_owned()
-                        }
-                    } else {
-                        format_structure_value(raw, element.value_type)
-                    };
+            // For Pointer fields: lazily detect RTTI class name
+            if element.value_type == StructureElementType::Pointer {
+                let pointed_addr = decode_pointer(raw).unwrap_or(0);
+                if pointed_addr != 0 && element.detected_class.is_none() {
+                    #[cfg(windows)]
+                    if let Some(pid) = process_pid {
+                        element.detected_class = Some(
+                            detect_structure_identity(pid, pointed_addr, dialog.pointer_width)
+                                .map(|id| id.name)
+                                .unwrap_or_default(),
+                        );
+                    }
+                    #[cfg(not(windows))]
+                    { element.detected_class = Some(String::new()); }
+                }
+            }
 
-                    Self::memory_label_cell(
-                        ui,
-                        220.0,
-                        18.0,
-                        egui::Label::new(
-                            RichText::new(value_text)
-                                .monospace()
-                                .color(if changed {
-                                    Color32::from_rgb(255, 170, 70)
+            // Build CE-style description: "XXXX - Pointer to instance of Foo" or "XXXX - 4 Bytes"
+            let description = ce_element_description(element);
+
+            // Build CE-style value: "P->ADDR" for pointers, or numeric for others
+            let value_str = if element.value_type == StructureElementType::Pointer {
+                let addr = decode_pointer(raw).unwrap_or(0);
+                if addr == 0 { "NULL".to_owned() } else { format!("P->{addr:X}") }
+            } else {
+                format_structure_value(raw, element.value_type)
+            };
+
+            let row = ui.horizontal(|ui| {
+                // Arrow button — only for non-null pointers, navigates into that class
+                if element.value_type == StructureElementType::Pointer {
+                    let pointed = decode_pointer(raw).unwrap_or(0);
+                    let btn = ui.add_sized(
+                        [20.0, 18.0],
+                        egui::Button::new(
+                            RichText::new("▶")
+                                .small()
+                                .color(if pointed != 0 {
+                                    Color32::from_rgb(100, 200, 130)
                                 } else {
-                                    ui.visuals().text_color()
+                                    ui.visuals().weak_text_color()
                                 }),
                         )
-                        .selectable(true),
+                        .frame(false),
                     );
-                    if address_response.double_clicked() {
-                        if element.value_type == StructureElementType::Pointer {
-                            open_pointer_class = decode_pointer(raw);
-                        } else {
-                            add_request = Some((
-                                element_address,
-                                element.value_type.scan_type(dialog.pointer_width),
-                            ));
-                        }
+                    if btn.clicked() && pointed != 0 {
+                        navigate_to = Some(pointed);
                     }
-                })
-                .response;
+                    btn.on_hover_text("Navigate into this structure");
+                } else {
+                    ui.add_space(22.0);
+                }
+
+                // Offset-description column (editable name via right-click)
+                Self::memory_label_cell(
+                    ui,
+                    340.0,
+                    18.0,
+                    egui::Label::new(
+                        RichText::new(&description)
+                            .monospace()
+                            .color(if element.value_type == StructureElementType::Pointer {
+                                Color32::from_rgb(100, 200, 130)
+                            } else {
+                                ui.visuals().text_color()
+                            }),
+                    )
+                    .selectable(true),
+                );
+
+                // Address : Value column
+                let av = Self::memory_label_cell(
+                    ui,
+                    240.0,
+                    18.0,
+                    egui::Label::new(
+                        RichText::new(format!("{} : {}", format_memory_address(element_address), value_str))
+                            .monospace()
+                            .color(if changed {
+                                Color32::from_rgb(255, 170, 70)
+                            } else {
+                                ui.visuals().text_color()
+                            }),
+                    )
+                    .selectable(true),
+                );
+                if av.double_clicked() {
+                    if element.value_type == StructureElementType::Pointer {
+                        navigate_to = decode_pointer(raw);
+                    } else {
+                        add_request = Some((
+                            element_address,
+                            element.value_type.scan_type(dialog.pointer_width),
+                        ));
+                    }
+                }
+            })
+            .response;
+
             row.context_menu(|ui| {
-                ui.menu_button("Change element", |ui| {
+                // Rename field
+                ui.horizontal(|ui| {
+                    ui.label("Name:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut element.name)
+                            .desired_width(140.0)
+                            .hint_text("field name"),
+                    );
+                });
+                ui.menu_button("Change type", |ui| {
                     for (value_type, label) in StructureElementType::ALL {
                         if ui
                             .selectable_value(&mut element.value_type, value_type, label)
                             .clicked()
                         {
+                            element.detected_class = None; // reset cache on type change
                             ui.close();
                         }
                     }
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Offset");
+                    ui.label("Offset:");
                     ui.add(
                         egui::DragValue::new(&mut element.offset)
                             .hexadecimal(4, false, true)
                             .speed(1),
                     );
                 });
+                if ui.button("Add to address list").clicked() {
+                    add_request = Some((
+                        element_address,
+                        element.value_type.scan_type(dialog.pointer_width),
+                    ));
+                    ui.close();
+                }
             });
+
             if add_request.is_some() {
                 dialog.pending_add = add_request;
             }
+            if let Some(addr) = navigate_to {
+                open_pointer_class = Some(addr);
+            }
         }
-        if let Some(address) = open_pointer_class.filter(|address| *address != 0) {
+
+        if let Some(address) = open_pointer_class.filter(|a| *a != 0) {
             let index = dialog
                 .classes
                 .iter()
@@ -7993,6 +8068,7 @@ impl CrosshairApp {
             dialog.elements = dialog.classes[index].elements.clone();
             dialog.previous_bytes.clear();
             dialog.class_detection_attempted = false;
+            dialog.auto_dissected = false;
         }
     }
 
@@ -8875,6 +8951,7 @@ impl CrosshairApp {
             selected_class: 0,
             class_detection_status: String::new(),
             class_detection_attempted: false,
+            auto_dissected: false,
         });
     }
 
@@ -9479,6 +9556,34 @@ fn default_structure_elements() -> Vec<StructureElement> {
             detected_class: None,
         })
         .collect()
+}
+
+/// CE-style description for a structure element row.
+/// e.g. "+0000 - Pointer to instance of CPlayer" or "+0008 - 4 Bytes" or "+000C - Float"
+fn ce_element_description(element: &StructureElement) -> String {
+    let type_desc = match element.value_type {
+        StructureElementType::Pointer => {
+            match element.detected_class.as_deref() {
+                Some(name) if !name.is_empty() => format!("Pointer to instance of {name}"),
+                _ => "Pointer".to_owned(),
+            }
+        }
+        StructureElementType::Byte => "Byte".to_owned(),
+        StructureElementType::I16 => "2 Bytes".to_owned(),
+        StructureElementType::I32 => "4 Bytes".to_owned(),
+        StructureElementType::I64 => "8 Bytes".to_owned(),
+        StructureElementType::Float => "Float".to_owned(),
+        StructureElementType::Double => "Double".to_owned(),
+    };
+    // Include user-set name if it's not the default generated name
+    let name_part = if !element.name.is_empty()
+        && element.name != format!("field_{:04X}", element.offset)
+    {
+        format!(" ({})", element.name)
+    } else {
+        String::new()
+    };
+    format!("+{:04X} - {type_desc}{name_part}", element.offset)
 }
 
 struct StructureIdentity {
