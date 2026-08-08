@@ -8013,19 +8013,12 @@ impl CrosshairApp {
                         .frame(false),
                 );
                 if btn.clicked() && is_ptr && pointed != 0 {
-                    if element.expanded {
-                        element.expanded = false;
-                    } else if let Some(pid) = process_pid {
-                        if let Ok(child_bytes) = read_memory_bytes(pid, pointed, 128) {
-                            if element.child_elements.is_empty() {
+                    element.expanded = !element.expanded;
+                    if element.expanded && element.child_elements.is_empty() {
+                        if let Some(pid) = process_pid {
+                            if let Ok(child_bytes) = read_memory_bytes(pid, pointed, 128) {
                                 element.child_elements = auto_structure_elements(&child_bytes, dialog.pointer_width);
                             }
-                            element.expanded = true;
-                        } else {
-                            dialog.class_detection_status = format!(
-                                "Unreadable pointer: {}",
-                                format_prefixed_memory_address(pointed)
-                            );
                         }
                     }
                 }
@@ -8101,8 +8094,13 @@ impl CrosshairApp {
 
             // Render inline expanded child elements if expanded
             if is_ptr && element.expanded && pointed != 0 {
+                let mut read_success = false;
                 if let Some(pid) = process_pid {
                     if let Ok(child_bytes) = read_memory_bytes(pid, pointed, 128) {
+                        read_success = true;
+                        if element.child_elements.is_empty() {
+                            element.child_elements = auto_structure_elements(&child_bytes, dialog.pointer_width);
+                        }
                         for child in &mut element.child_elements {
                             let child_w = child.value_type.width(dialog.pointer_width);
                             let Some(c_raw) = child_bytes.get(child.offset..child.offset.saturating_add(child_w)) else {
@@ -8149,6 +8147,29 @@ impl CrosshairApp {
                             ui.end_row();
                         }
                     }
+                }
+                if !read_success {
+                    ui.add_sized([W_BTN, 18.0], egui::Label::new(""));
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                        ui.set_min_width(W_DESC);
+                        ui.set_max_width(W_DESC);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("   ↳ Unable to read memory at {}", format_memory_address(pointed)))
+                                    .monospace()
+                                    .size(11.5)
+                                    .color(Color32::from_rgb(255, 140, 70)),
+                            )
+                            .selectable(true)
+                            .truncate(),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                        ui.set_min_width(W_ADDRV);
+                        ui.set_max_width(W_ADDRV);
+                        ui.add(egui::Label::new(""));
+                    });
+                    ui.end_row();
                 }
             }
         } // for element
@@ -9908,6 +9929,7 @@ fn demangle_msvc_type_name(decorated: &str) -> Option<String> {
 }
 
 fn auto_structure_elements(bytes: &[u8], pointer_width: usize) -> Vec<StructureElement> {
+    let max_user_address = if pointer_width == 8 { 0x7FFF_FFFF_FFFF } else { 0xFFFF_FFFF };
     let step = 4;
     (0..bytes.len())
         .step_by(step)
@@ -9916,7 +9938,7 @@ fn auto_structure_elements(bytes: &[u8], pointer_width: usize) -> Vec<StructureE
                 .get(offset..offset.saturating_add(pointer_width))
                 .and_then(decode_pointer);
             let value_type =
-                if pointer.is_some_and(|value| value >= 0x1_0000 && value % pointer_width == 0) {
+                if pointer.is_some_and(|value| value >= 0x1_0000 && value <= max_user_address && value % pointer_width == 0) {
                     StructureElementType::Pointer
                 } else if bytes.get(offset..offset + 4).is_some_and(|raw| {
                     let value = f32::from_le_bytes(raw.try_into().unwrap());
