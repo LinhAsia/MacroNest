@@ -561,6 +561,8 @@ pub(crate) struct MemoryPanelState {
     edit_value_input: String,
     edit_value_position: Option<egui::Pos2>,
     edit_description_index: Option<usize>,
+    edit_code_name_index: Option<usize>,
+    edit_code_name_input: String,
     address_dialog: Option<AddressDialog>,
     memory_view_dialog: Option<MemoryViewDialog>,
     #[cfg(windows)]
@@ -646,6 +648,8 @@ impl Default for MemoryPanelState {
             edit_value_input: String::new(),
             edit_value_position: None,
             edit_description_index: None,
+            edit_code_name_index: None,
+            edit_code_name_input: String::new(),
             address_dialog: None,
             memory_view_dialog: None,
             #[cfg(windows)]
@@ -3843,6 +3847,7 @@ impl CrosshairApp {
             ReplaceNop(usize),
             RestoreOriginal(usize),
             StartAccessWatch(usize),
+            Rename(usize),
             Delete(usize),
             ReplaceAll,
         }
@@ -3852,10 +3857,39 @@ impl CrosshairApp {
         egui::CentralPanel::default()
             .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
+                if let Some(edit_idx) = self.memory_panel.edit_code_name_index {
+                    if edit_idx < self.state.memory_code_list.len() {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Rename code:").strong());
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut self.memory_panel.edit_code_name_input)
+                                    .desired_width(260.0)
+                                    .hint_text("Enter name (e.g. camera_write / speed_hack)"),
+                            );
+                            let save_clicked = ui.button("Save").clicked();
+                            let enter_pressed = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if save_clicked || enter_pressed {
+                                if let Some(entry) = self.state.memory_code_list.get_mut(edit_idx) {
+                                    entry.name = self.memory_panel.edit_code_name_input.trim().to_owned();
+                                    self.persist();
+                                    crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
+                                }
+                                self.memory_panel.edit_code_name_index = None;
+                            }
+                            if ui.button("Cancel").clicked() {
+                                self.memory_panel.edit_code_name_index = None;
+                            }
+                        });
+                        ui.separator();
+                    } else {
+                        self.memory_panel.edit_code_name_index = None;
+                    }
+                }
+
                 ui.horizontal(|ui| {
                     Self::memory_view_cell(ui, 190.0, "Address / Module");
                     Self::memory_view_cell(ui, 310.0, "Name / Instruction");
-                    Self::memory_view_cell(ui, 150.0, "Action / Status");
+                    Self::memory_view_cell(ui, 180.0, "Action / Status");
                 });
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -3886,6 +3920,10 @@ impl CrosshairApp {
                                 if action_response.clicked() {
                                     pending_action = Some(CodeAction::StartAccessWatch(index));
                                 }
+                                let rename_response = ui.small_button("Rename");
+                                if rename_response.clicked() {
+                                    pending_action = Some(CodeAction::Rename(index));
+                                }
                                 let delete_response = ui.small_button("Del");
                                 if delete_response.clicked() {
                                     pending_action = Some(CodeAction::Delete(index));
@@ -3893,6 +3931,7 @@ impl CrosshairApp {
                                 address_response
                                     .union(instruction_response)
                                     .union(action_response)
+                                    .union(rename_response)
                                     .union(delete_response)
                             })
                             .inner;
@@ -3907,6 +3946,12 @@ impl CrosshairApp {
                             }
                             ui.separator();
                             let is_vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+
+                            let rename_label = if is_vietnamese { "Đổi tên mã này (Rename)" } else { "Rename code entry" };
+                            if ui.button(rename_label).clicked() {
+                                pending_action = Some(CodeAction::Rename(index));
+                                ui.close_menu();
+                            }
 
                             let disasm_label = if is_vietnamese {
                                 "Mở bộ gỡ mã (Disassembler) tại đây"
@@ -4008,6 +4053,12 @@ impl CrosshairApp {
             Some(CodeAction::StartAccessWatch(index)) => {
                 #[cfg(windows)]
                 self.open_code_access_watch(index);
+            }
+            Some(CodeAction::Rename(index)) => {
+                if let Some(entry) = self.state.memory_code_list.get(index) {
+                    self.memory_panel.edit_code_name_index = Some(index);
+                    self.memory_panel.edit_code_name_input = entry.name.clone();
+                }
             }
             Some(CodeAction::Delete(index)) => {
                 #[cfg(windows)]
@@ -6387,9 +6438,9 @@ impl CrosshairApp {
             Self::memory_table_cell(ui, address_width, RichText::new("Address").strong());
             Self::memory_table_cell(ui, instruction_width, RichText::new("Instruction").strong());
             let hits_label = match dialog.hits_sort {
-                1 => "Hits ▲",
-                2 => "Hits ▼",
-                _ => "Hits ⇅",
+                1 => "Hits (^)",
+                2 => "Hits (v)",
+                _ => "Hits",
             };
             if ui
                 .add_sized(
@@ -6397,7 +6448,7 @@ impl CrosshairApp {
                     egui::Button::new(RichText::new(hits_label).strong()).frame(false),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text("Click to cycle sort: Low to High ▲ -> High to Low ▼ -> Default ⇅")
+                .on_hover_text("Click to cycle sort: Low to High (^) -> High to Low (v) -> Default")
                 .clicked()
             {
                 dialog.hits_sort = (dialog.hits_sort + 1) % 3;
@@ -7034,9 +7085,9 @@ impl CrosshairApp {
             Self::memory_table_cell(ui, stt_width, RichText::new("#").strong());
             Self::memory_table_cell(ui, address_width, RichText::new("Address").strong());
             let hits_label = match dialog.hits_sort {
-                1 => "Hits ▲",
-                2 => "Hits ▼",
-                _ => "Hits ⇅",
+                1 => "Hits (^)",
+                2 => "Hits (v)",
+                _ => "Hits",
             };
             if ui
                 .add_sized(
@@ -7044,7 +7095,7 @@ impl CrosshairApp {
                     egui::Button::new(RichText::new(hits_label).strong()).frame(false),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text("Click to cycle sort: Low to High ▲ -> High to Low ▼ -> Default ⇅")
+                .on_hover_text("Click to cycle sort: Low to High (^) -> High to Low (v) -> Default")
                 .clicked()
             {
                 dialog.hits_sort = (dialog.hits_sort + 1) % 3;
@@ -8257,15 +8308,28 @@ impl CrosshairApp {
             .unwrap_or(value_type.width())
             .clamp(1, 4096);
         self.memory_panel.fast_scan_alignment = alignment.to_string();
-        let scan_options = MemoryScanOptions {
-            writable: self.memory_panel.scan_writable,
-            executable: self.memory_panel.scan_executable,
-            copy_on_write: self.memory_panel.scan_copy_on_write,
-            active_memory_only: self.memory_panel.scan_active_memory_only,
-            mem_private: self.memory_panel.scan_mem_private,
-            mem_image: self.memory_panel.scan_mem_image,
-            mem_mapped: self.memory_panel.scan_mem_mapped,
-            alignment: self.memory_panel.fast_scan.then_some(alignment),
+        let scan_options = if self.memory_panel.is_aob_scan {
+            MemoryScanOptions {
+                writable: self.memory_panel.scan_writable,
+                executable: true,
+                copy_on_write: self.memory_panel.scan_copy_on_write,
+                active_memory_only: self.memory_panel.scan_active_memory_only,
+                mem_private: self.memory_panel.scan_mem_private,
+                mem_image: true,
+                mem_mapped: self.memory_panel.scan_mem_mapped,
+                alignment: None,
+            }
+        } else {
+            MemoryScanOptions {
+                writable: self.memory_panel.scan_writable,
+                executable: self.memory_panel.scan_executable,
+                copy_on_write: self.memory_panel.scan_copy_on_write,
+                active_memory_only: self.memory_panel.scan_active_memory_only,
+                mem_private: self.memory_panel.scan_mem_private,
+                mem_image: self.memory_panel.scan_mem_image,
+                mem_mapped: self.memory_panel.scan_mem_mapped,
+                alignment: self.memory_panel.fast_scan.then_some(alignment),
+            }
         };
         let candidates = if action.comparison().is_some() && text_encoding.is_none() {
             std::mem::take(&mut self.memory_panel.candidates)
