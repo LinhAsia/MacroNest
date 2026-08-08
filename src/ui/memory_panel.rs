@@ -8131,7 +8131,13 @@ impl CrosshairApp {
         ) {
             None
         } else {
-            if text_encoding.is_some() {
+            if self.memory_panel.is_aob_scan {
+                if self.memory_panel.value_input.trim().is_empty() {
+                    self.memory_panel.status = "AOB pattern cannot be empty".to_owned();
+                    return;
+                }
+                None
+            } else if text_encoding.is_some() {
                 if self.memory_panel.value_input.is_empty() {
                     self.memory_panel.status = "Text cannot be empty".to_owned();
                     return;
