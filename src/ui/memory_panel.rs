@@ -326,6 +326,8 @@ struct StructureElement {
     offset: usize,
     value_type: StructureElementType,
     name: String,
+    /// Cached RTTI class name for Pointer fields (None = not yet resolved, Some("") = not found)
+    detected_class: Option<String>,
 }
 
 #[derive(Clone)]
@@ -7682,7 +7684,7 @@ impl CrosshairApp {
                                     egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
                                 )
                                 .max_height(ui.available_height())
-                                .show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes));
+                                .show(ui, |ui| Self::render_structure_elements(ui, dialog, bytes, process_pid));
                         },
                     );
                 });
@@ -7862,7 +7864,7 @@ impl CrosshairApp {
         }
     }
 
-    fn render_structure_elements(ui: &mut egui::Ui, dialog: &mut MemoryViewDialog, bytes: &[u8]) {
+    fn render_structure_elements(ui: &mut egui::Ui, dialog: &mut MemoryViewDialog, bytes: &[u8], process_pid: Option<u32>) {
         ui.horizontal(|ui| {
             Self::memory_view_cell(ui, 72.0, "Offset");
             Self::memory_view_cell(ui, 110.0, "Type");
@@ -7893,12 +7895,41 @@ impl CrosshairApp {
                     );
                     let address_response =
                         Self::memory_view_cell(ui, 152.0, &format_memory_address(element_address));
+
+                    // For Pointer fields: lazily detect RTTI class name and show it
+                    let value_text = if element.value_type == StructureElementType::Pointer {
+                        let pointed_addr = decode_pointer(raw).unwrap_or(0);
+                        if pointed_addr != 0 {
+                            // Lazy RTTI detection: resolve on first encounter, cache result
+                            if element.detected_class.is_none() {
+                                #[cfg(windows)]
+                                if let Some(pid) = process_pid {
+                                    let class_name = detect_structure_identity(pid, pointed_addr, dialog.pointer_width)
+                                        .map(|id| id.name);
+                                    element.detected_class = Some(class_name.unwrap_or_default());
+                                }
+                                #[cfg(not(windows))]
+                                { element.detected_class = Some(String::new()); }
+                            }
+                            match element.detected_class.as_deref() {
+                                Some(name) if !name.is_empty() => {
+                                    format!("→ instance of {name}")
+                                }
+                                _ => format_structure_value(raw, element.value_type),
+                            }
+                        } else {
+                            "NULL".to_owned()
+                        }
+                    } else {
+                        format_structure_value(raw, element.value_type)
+                    };
+
                     Self::memory_label_cell(
                         ui,
                         220.0,
                         18.0,
                         egui::Label::new(
-                            RichText::new(format_structure_value(raw, element.value_type))
+                            RichText::new(value_text)
                                 .monospace()
                                 .color(if changed {
                                     Color32::from_rgb(255, 170, 70)
@@ -9445,6 +9476,7 @@ fn default_structure_elements() -> Vec<StructureElement> {
             offset,
             value_type: StructureElementType::I32,
             name: format!("field_{offset:04X}"),
+            detected_class: None,
         })
         .collect()
 }
@@ -9664,6 +9696,7 @@ fn auto_structure_elements(bytes: &[u8], pointer_width: usize) -> Vec<StructureE
                 offset,
                 value_type,
                 name: format!("field_{offset:04X}"),
+                detected_class: None,
             }
         })
         .collect()
