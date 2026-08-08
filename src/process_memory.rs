@@ -987,14 +987,19 @@ pub fn scan_memory_range_with_progress(
             })
         })
         .collect::<Vec<_>>();
-    let mut completed = workers
+    let completed_buckets = workers
         .into_iter()
-        .filter_map(|worker| worker.join().ok()?.ok());
-    let mut found = completed.next().unwrap_or_default();
-    for mut bucket in completed {
-        found.append(&mut bucket);
+        .filter_map(|worker| worker.join().ok()?.ok())
+        .collect::<Vec<_>>();
+    let total_len: usize = completed_buckets.iter().map(|b| b.len()).sum();
+    let mut found = Vec::with_capacity(total_len.min(result_limit));
+    for bucket in completed_buckets {
+        if found.len() >= result_limit {
+            break;
+        }
+        let take = (result_limit - found.len()).min(bucket.len());
+        found.extend(bucket.into_iter().take(take));
     }
-    found.truncate(result_limit);
     Ok(found)
 }
 
@@ -1521,17 +1526,6 @@ fn scan_region_bucket(
 ) -> io::Result<Vec<ScanCandidate>> {
     let process = ScanProcess::open(pid, false)?;
     let mut found = Vec::new();
-    let expected = regions
-        .iter()
-        .map(|region| region.size / alignment)
-        .fold(0usize, usize::saturating_add)
-        .min(result_limit);
-    found.try_reserve_exact(expected).map_err(|_| {
-        io::Error::other(format!(
-            "not enough memory for {expected} scan results ({} bytes each)",
-            std::mem::size_of::<ScanCandidate>()
-        ))
-    })?;
     let mut buffer = Vec::new();
     'regions: for region in regions {
         let end = region.base.saturating_add(region.size);

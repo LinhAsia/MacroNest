@@ -5442,6 +5442,7 @@ impl CrosshairApp {
         let mut pending_open_ai_preset_id: Option<u32> = None;
         let mut pending_ocr_step_capture: Option<(u32, u32, usize)> = None;
         let mut pending_ocr_language_download: Option<String> = None;
+        let mut deferred_paste_groups_after: Option<u32> = None;
         let command_presets_snapshot = self.state.command_presets.clone();
         let macro_group_virtualization_margin = 480.0;
         let all_presets: Vec<(u32, String)> = self.state.macro_groups.iter().flat_map(|g| &g.presets).map(|p| (p.id, Self::format_macro_trigger_ui(language, p))).collect();
@@ -6010,7 +6011,7 @@ impl CrosshairApp {
                                     ))
                                     .clicked()
                                     {
-                                        paste_groups_after = Some(group.id);
+                                        deferred_paste_groups_after = Some(group.id);
                                     }
                                     if Self::sound_style_toggle_button(
                                         ui,
@@ -16680,9 +16681,6 @@ if supports_move_mouse || show_detection_tuning {
                     if let Some(group_id) = copy_group_to_clipboard {
                         self.copy_macro_group_to_clipboard(group_id);
                     }
-                    if let Some(group_id) = paste_groups_after {
-                        self.paste_macro_groups_after(group_id);
-                    }
                     if let Some(group_id) = import_group_after {
                         ui.ctx().data_mut(|data| {
                             data.insert_temp(egui::Id::new("pending_macro_group_share_import_after"), group_id);
@@ -16703,6 +16701,9 @@ if supports_move_mouse || show_detection_tuning {
         }
     }
 
+        if let Some(group_id) = deferred_paste_groups_after {
+            self.paste_macro_groups_after(group_id);
+        }
         if let Some(group_id) = add_preset_to_group {
             self.add_macro_preset_to_group(group_id);
             self.persist();
