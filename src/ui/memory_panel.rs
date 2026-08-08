@@ -2636,21 +2636,37 @@ impl CrosshairApp {
                                         .clone()
                                         .on_hover_cursor(egui::CursorIcon::Default);
                                     row_hits.push(address_response.clone());
-                                    let type_response = Self::memory_label_cell(
-                                        ui,
-                                        column_width,
-                                        row_height,
-                                        egui::Label::new(match saved.text_encoding {
-                                            Some(TextEncoding::Utf8) => "Text (UTF-8)",
-                                            Some(TextEncoding::Utf16) => "Text (UTF-16)",
-                                            None => memory_type_label(saved.value_type),
-                                        })
-                                        .selectable(false)
-                                        .truncate(),
-                                    );
-                                    type_response
-                                        .clone()
-                                        .on_hover_cursor(egui::CursorIcon::Default);
+                                    let current_type_label = match saved.text_encoding {
+                                        Some(TextEncoding::Utf8) => "Text (UTF-8)",
+                                        Some(TextEncoding::Utf16) => "Text (UTF-16)",
+                                        None => memory_type_label(saved.value_type),
+                                    };
+                                    let mut selected_type = saved.value_type;
+                                    let type_response = ui.allocate_ui_with_layout(
+                                        vec2(column_width, row_height),
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            egui::ComboBox::from_id_salt(("saved-type-combo", index))
+                                                .selected_text(current_type_label)
+                                                .show_ui(ui, |ui| {
+                                                    let types = [
+                                                        (ScanValueType::I8, "Byte"),
+                                                        (ScanValueType::I16, "2 Bytes"),
+                                                        (ScanValueType::I32, "4 Bytes"),
+                                                        (ScanValueType::I64, "8 Bytes"),
+                                                        (ScanValueType::F32, "Float"),
+                                                        (ScanValueType::F64, "Double"),
+                                                    ];
+                                                    for (vtype, label) in types {
+                                                        if ui.selectable_value(&mut selected_type, vtype, label).clicked() {
+                                                            self.memory_panel.saved[index].value_type = vtype;
+                                                            self.memory_panel.saved[index].text_encoding = None;
+                                                            persist_pointer_changes = true;
+                                                        }
+                                                    }
+                                                }).response
+                                        },
+                                    ).inner;
                                     row_hits.push(type_response);
                                     let value_response = Self::memory_label_cell(
                                         ui,
@@ -2828,6 +2844,28 @@ impl CrosshairApp {
                                     save_to_library = true;
                                     ui.close();
                                 }
+                                ui.menu_button(self.tr("Change type", "Đổi kiểu giá trị"), |ui| {
+                                    let types = [
+                                        (ScanValueType::I8, "Byte"),
+                                        (ScanValueType::I16, "2 Bytes"),
+                                        (ScanValueType::I32, "4 Bytes"),
+                                        (ScanValueType::I64, "8 Bytes"),
+                                        (ScanValueType::F32, "Float"),
+                                        (ScanValueType::F64, "Double"),
+                                    ];
+                                    for (vtype, label) in types {
+                                        if ui.button(label).clicked() {
+                                            for sel_idx in self.memory_panel.selected_saved.clone() {
+                                                if let Some(entry) = self.memory_panel.saved.get_mut(sel_idx) {
+                                                    entry.value_type = vtype;
+                                                    entry.text_encoding = None;
+                                                }
+                                            }
+                                            persist_pointer_changes = true;
+                                            ui.close();
+                                        }
+                                    }
+                                });
                                 if !single_target {
                                     ui.label(
                                         RichText::new(format!(
@@ -7722,6 +7760,40 @@ impl CrosshairApp {
                         dialog.elements = auto_structure_elements(bytes, dialog.pointer_width);
                         for el in &mut dialog.elements { el.detected_class = None; }
                     }
+
+                    ui.separator();
+                    ui.label(RichText::new("Base Address:").small().strong());
+                    if ui.small_button("▲ -0x100").on_hover_text("Dời địa chỉ gốc LÊN 0x100 (-256 bytes)").clicked() {
+                        dialog.address = dialog.address.saturating_sub(0x100);
+                        dialog.previous_bytes.clear();
+                        dialog.auto_dissected = false;
+                    }
+                    if ui.small_button("▲ -0x40").on_hover_text("Dời địa chỉ gốc LÊN 0x40 (-64 bytes)").clicked() {
+                        dialog.address = dialog.address.saturating_sub(0x40);
+                        dialog.previous_bytes.clear();
+                        dialog.auto_dissected = false;
+                    }
+                    if ui.small_button("▲ -0x10").on_hover_text("Dời địa chỉ gốc LÊN 0x10 (-16 bytes)").clicked() {
+                        dialog.address = dialog.address.saturating_sub(0x10);
+                        dialog.previous_bytes.clear();
+                        dialog.auto_dissected = false;
+                    }
+                    if ui.small_button("▼ +0x10").on_hover_text("Dời địa chỉ gốc XUỐNG 0x10 (+16 bytes)").clicked() {
+                        dialog.address = dialog.address.saturating_add(0x10);
+                        dialog.previous_bytes.clear();
+                        dialog.auto_dissected = false;
+                    }
+                    if ui.small_button("▼ +0x40").on_hover_text("Dời địa chỉ gốc XUỐNG 0x40 (+64 bytes)").clicked() {
+                        dialog.address = dialog.address.saturating_add(0x40);
+                        dialog.previous_bytes.clear();
+                        dialog.auto_dissected = false;
+                    }
+                    if ui.small_button("▼ +0x100").on_hover_text("Dời địa chỉ gốc XUỐNG 0x100 (+256 bytes)").clicked() {
+                        dialog.address = dialog.address.saturating_add(0x100);
+                        dialog.previous_bytes.clear();
+                        dialog.auto_dissected = false;
+                    }
+
                     if !dialog.class_detection_status.is_empty() {
                         ui.label(
                             RichText::new(&dialog.class_detection_status)
