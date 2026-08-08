@@ -8065,6 +8065,86 @@ impl CrosshairApp {
                         ui.label("Offsets");
                         ui.text_edit_singleline(&mut dialog.offsets);
                     });
+
+                    // Show resolution chain like Cheat Engine
+                    if let Some(pid) = self.memory_panel.process_pid {
+                        if let Some(base) = parse_memory_address(&dialog.address) {
+                            let offsets = dialog
+                                .offsets
+                                .split([',', ';', ' '])
+                                .filter(|part| !part.trim().is_empty())
+                                .map(parse_hex_offset)
+                                .collect::<Option<Vec<_>>>();
+                            if let Some(offsets) = offsets {
+                                ui.add_space(6.0);
+                                ui.separator();
+                                // Resolve step-by-step and show each intermediate address
+                                #[cfg(windows)]
+                                {
+                                    use crate::process_memory::read_scan_value;
+                                    let mut current = base;
+                                    let mut valid = true;
+                                    // Show base
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(format!("Base → {:X}", current))
+                                                .monospace()
+                                                .weak(),
+                                        );
+                                    });
+                                    for (i, &offset) in offsets.iter().enumerate() {
+                                        let is_last = i == offsets.len() - 1;
+                                        // Read pointer at current address
+                                        match read_scan_value(pid, current, crate::process_memory::ScanValueType::I64) {
+                                            Ok(crate::process_memory::ScanValue::I64(next)) => {
+                                                let deref = next as usize;
+                                                let result = deref.wrapping_add(offset);
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        RichText::new(format!(
+                                                            "[{:X}] + {:X} = {:X}{}",
+                                                            deref,
+                                                            offset,
+                                                            result,
+                                                            if is_last { " ← final" } else { "" }
+                                                        ))
+                                                        .monospace()
+                                                        .color(if is_last {
+                                                            Color32::from_rgb(100, 220, 130)
+                                                        } else {
+                                                            Color32::GRAY
+                                                        }),
+                                                    );
+                                                });
+                                                current = result;
+                                            }
+                                            Err(_) => {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "[{:X}] → cannot read",
+                                                        current
+                                                    ))
+                                                    .monospace()
+                                                    .color(Color32::from_rgb(220, 80, 80)),
+                                                );
+                                                valid = false;
+                                                break;
+                                            }
+                                            _ => unreachable!(),
+                                        }
+                                    }
+                                    if valid && offsets.is_empty() {
+                                        ui.label(
+                                            RichText::new(format!("→ {:X}", current))
+                                                .monospace()
+                                                .color(Color32::from_rgb(100, 220, 130)),
+                                        );
+                                    }
+                                }
+                                ui.separator();
+                            }
+                        }
+                    }
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
@@ -8085,8 +8165,11 @@ impl CrosshairApp {
         }
         if open {
             self.memory_panel.address_dialog = Some(dialog);
+            // Refresh the chain display every ~100ms
+            ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
+
 
     fn apply_memory_address_dialog(&mut self, dialog: &AddressDialog) {
         let Some(base) = parse_memory_address(&dialog.address) else {
