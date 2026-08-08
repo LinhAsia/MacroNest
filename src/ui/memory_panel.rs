@@ -8068,60 +8068,79 @@ impl CrosshairApp {
 
                     // Show resolution chain like Cheat Engine
                     if let Some(pid) = self.memory_panel.process_pid {
-                        if let Some(base) = parse_memory_address(&dialog.address) {
-                            let offsets = dialog
-                                .offsets
-                                .split([',', ';', ' '])
-                                .filter(|part| !part.trim().is_empty())
-                                .map(parse_hex_offset)
-                                .collect::<Option<Vec<_>>>();
-                            if let Some(offsets) = offsets {
-                                ui.add_space(6.0);
-                                ui.separator();
-                                // Resolve step-by-step and show each intermediate address
-                                #[cfg(windows)]
-                                {
-                                    use crate::process_memory::read_scan_value;
+                        // Get the actual pointer spec from the saved entry (has module info)
+                        let saved_spec = self
+                            .memory_panel
+                            .saved
+                            .get(dialog.index)
+                            .and_then(|e| e.pointer.clone());
+
+                        // Parse offsets from the text field (user may have edited them)
+                        let offsets = dialog
+                            .offsets
+                            .split([',', ';', ' '])
+                            .filter(|part| !part.trim().is_empty())
+                            .map(parse_hex_offset)
+                            .collect::<Option<Vec<_>>>();
+
+                        if let Some(offsets) = offsets {
+                            ui.add_space(6.0);
+                            ui.separator();
+                            #[cfg(windows)]
+                            {
+                                use crate::process_memory::read_scan_value;
+                                // Resolve the actual base address:
+                                // If saved spec has a module, resolve that; otherwise parse text field
+                                let resolved_base = saved_spec
+                                    .as_ref()
+                                    .and_then(|spec| spec.module.as_ref())
+                                    .and_then(|(module, offset)| {
+                                        resolve_module_offset(pid, module, *offset).ok()
+                                    })
+                                    .or_else(|| parse_memory_address(&dialog.address));
+
+                                if let Some(base) = resolved_base {
+                                    // Show the base label with module name if applicable
+                                    let base_label = if let Some(spec) = &saved_spec {
+                                        if let Some((module, offset)) = &spec.module {
+                                            format!("{} + {:X} → {:X}", module, offset, base)
+                                        } else {
+                                            format!("Base → {:X}", base)
+                                        }
+                                    } else {
+                                        format!("Base → {:X}", base)
+                                    };
+                                    ui.label(RichText::new(base_label).monospace().weak());
+
                                     let mut current = base;
                                     let mut valid = true;
-                                    // Show base
-                                    ui.horizontal(|ui| {
-                                        ui.label(
-                                            RichText::new(format!("Base → {:X}", current))
-                                                .monospace()
-                                                .weak(),
-                                        );
-                                    });
                                     for (i, &offset) in offsets.iter().enumerate() {
                                         let is_last = i == offsets.len() - 1;
-                                        // Read pointer at current address
                                         match read_scan_value(pid, current, crate::process_memory::ScanValueType::I64) {
                                             Ok(crate::process_memory::ScanValue::I64(next)) => {
                                                 let deref = next as usize;
                                                 let result = deref.wrapping_add(offset);
-                                                ui.horizontal(|ui| {
-                                                    ui.label(
-                                                        RichText::new(format!(
-                                                            "[{:X}] + {:X} = {:X}{}",
-                                                            deref,
-                                                            offset,
-                                                            result,
-                                                            if is_last { " ← final" } else { "" }
-                                                        ))
-                                                        .monospace()
-                                                        .color(if is_last {
-                                                            Color32::from_rgb(100, 220, 130)
-                                                        } else {
-                                                            Color32::GRAY
-                                                        }),
-                                                    );
-                                                });
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "[{:X}] + {:X} = {:X}{}",
+                                                        deref,
+                                                        offset,
+                                                        result,
+                                                        if is_last { "  ← final" } else { "" }
+                                                    ))
+                                                    .monospace()
+                                                    .color(if is_last {
+                                                        Color32::from_rgb(100, 220, 130)
+                                                    } else {
+                                                        Color32::GRAY
+                                                    }),
+                                                );
                                                 current = result;
                                             }
                                             Err(_) => {
                                                 ui.label(
                                                     RichText::new(format!(
-                                                        "[{:X}] → cannot read",
+                                                        "[{:X}]  cannot read memory",
                                                         current
                                                     ))
                                                     .monospace()
@@ -8140,11 +8159,18 @@ impl CrosshairApp {
                                                 .color(Color32::from_rgb(100, 220, 130)),
                                         );
                                     }
+                                } else {
+                                    ui.label(
+                                        RichText::new("Cannot resolve base address")
+                                            .monospace()
+                                            .color(Color32::from_rgb(220, 80, 80)),
+                                    );
                                 }
-                                ui.separator();
                             }
+                            ui.separator();
                         }
                     }
+
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
