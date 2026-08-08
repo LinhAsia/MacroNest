@@ -1503,7 +1503,7 @@ impl CrosshairApp {
                     if self.memory_panel.text_encoding.is_some() {
                         let case_label = self.tr("Case", "Case");
                         ui.checkbox(&mut self.memory_panel.text_case_sensitive, case_label);
-                    } else {
+                    } else if !self.memory_panel.is_aob_scan {
                         let hex_label = self.tr("Hex", "Hex");
                         ui.checkbox(&mut self.memory_panel.hex, hex_label);
                     }
