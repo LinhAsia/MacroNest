@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::HashSet,
     ffi::c_void,
     io,
     mem::{MaybeUninit, size_of},
@@ -200,6 +201,64 @@ pub struct PointerPath {
     pub module: String,
     pub module_offset: usize,
     pub offsets: Vec<usize>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PointerPathComparison {
+    pub exact: Vec<PointerPath>,
+    pub entity_roots: Vec<PointerPath>,
+}
+
+pub fn compare_pointer_paths(
+    paths_a: impl IntoIterator<Item = PointerPath>,
+    paths_b: impl IntoIterator<Item = PointerPath>,
+    entity_stride: usize,
+    result_limit: usize,
+) -> PointerPathComparison {
+    let paths_a = paths_a.into_iter().collect::<Vec<_>>();
+    let paths_b = paths_b.into_iter().collect::<HashSet<_>>();
+    let mut exact = Vec::new();
+    let mut seen_exact = HashSet::new();
+    for path in &paths_a {
+        if paths_b.contains(path) && seen_exact.insert(path.clone()) {
+            exact.push(path.clone());
+            if exact.len() == result_limit {
+                break;
+            }
+        }
+    }
+
+    let mut entity_roots = Vec::new();
+    if entity_stride > 0 {
+        let normalized_b = paths_b
+            .iter()
+            .filter_map(|path| normalized_entity_root(path, entity_stride))
+            .collect::<HashSet<_>>();
+        let mut seen_roots = HashSet::new();
+        for path in &paths_a {
+            let Some(root) = normalized_entity_root(path, entity_stride) else {
+                continue;
+            };
+            if normalized_b.contains(&root) && seen_roots.insert(root.clone()) {
+                entity_roots.push(root);
+                if entity_roots.len() == result_limit {
+                    break;
+                }
+            }
+        }
+    }
+
+    PointerPathComparison {
+        exact,
+        entity_roots,
+    }
+}
+
+fn normalized_entity_root(path: &PointerPath, entity_stride: usize) -> Option<PointerPath> {
+    let mut root = path.clone();
+    let last = root.offsets.last_mut()?;
+    *last %= entity_stride;
+    Some(root)
 }
 
 pub struct PointerMap {
@@ -1893,6 +1952,28 @@ unsafe extern "system" {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn pointer_map_comparison_keeps_entity_root_when_slot_changes() {
+        let path_a = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x20, 0x90],
+        };
+        let path_b = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x20, 0x120],
+        };
+
+        let comparison = compare_pointer_paths([path_a], [path_b], 0x48, 32);
+
+        assert!(comparison.exact.is_empty());
+        assert_eq!(comparison.entity_roots.len(), 1);
+        assert_eq!(comparison.entity_roots[0].offsets, vec![0x20, 0]);
+    }
+
     #[test]
     fn result_slots_are_claimed_per_chunk_without_exceeding_limit() {
         let total = AtomicUsize::new(0);
@@ -1920,8 +2001,6 @@ mod tests {
             ScanValue::I32(20)
         ));
     }
-
-    use super::*;
 
     #[test]
     fn reads_and_writes_double_in_current_process() {

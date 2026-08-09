@@ -19,11 +19,12 @@ use crate::{
     },
     process_memory::{
         MemoryRegionInfo, MemoryScanOptions, PausedProcess, PointerMap, PointerPath,
-        PointerScanLimits, ScanCandidate, ScanComparison, ScanValue, ScanValueType, TextEncoding,
-        TextScanCandidate, ViewProjectionCandidate, capture_pointer_map_with_budget,
-        filter_aob_scan_candidates, filter_scan_candidates, filter_text_scan_candidates,
-        query_memory_region, read_memory_bytes, read_scan_value, read_text_memory,
-        refresh_scan_candidates, scan_aob_memory_with_progress, scan_memory_range_with_progress,
+        PointerPathComparison, PointerScanLimits, ScanCandidate, ScanComparison, ScanValue,
+        ScanValueType, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
+        capture_pointer_map_with_budget, compare_pointer_paths, filter_aob_scan_candidates,
+        filter_scan_candidates, filter_text_scan_candidates, query_memory_region,
+        read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
+        scan_aob_memory_with_progress, scan_memory_range_with_progress,
         scan_pointer_paths_with_budget, scan_text_memory_with_progress,
         scan_view_projection_candidates, write_code_bytes, write_scan_value, write_text_memory,
     },
@@ -188,13 +189,13 @@ struct StablePointerDialog {
 
 enum DeepPointerJobResult {
     MapA(Result<PointerMap, String>),
-    Compared(Result<Vec<PointerPath>, String>),
+    Compared(Result<PointerPathComparison, String>),
 }
 
 struct DeepPointerDialog {
     map_a: Option<Arc<PointerMap>>,
     source_pid: u32,
-    source_address: usize,
+    source_addresses: Vec<usize>,
     value_type: ScanValueType,
     status: String,
     rx: Option<Receiver<DeepPointerJobResult>>,
@@ -211,6 +212,7 @@ struct DeepPointerDialog {
     entity_z_offset: i64,
     entity_stride: u32,
     entity_count: u32,
+    using_entity_roots: bool,
 }
 
 struct DeepPointerResolvedRow {
@@ -4521,6 +4523,15 @@ impl CrosshairApp {
             self.memory_panel.status = "Select a process".to_owned();
             return;
         };
+        let source_addresses = if self.memory_panel.selected_saved.len() > 1 {
+            self.memory_panel
+                .selected_saved
+                .iter()
+                .filter_map(|&idx| self.memory_panel.saved.get(idx).map(|entry| entry.address))
+                .collect::<Vec<_>>()
+        } else {
+            vec![saved.address]
+        };
         let modules = match process_modules(pid) {
             Ok(modules) => modules,
             Err(error) => {
@@ -4533,7 +4544,7 @@ impl CrosshairApp {
                     self.memory_panel.deep_pointer_dialog = Some(DeepPointerDialog {
                         map_a: None,
                         source_pid: pid,
-                        source_address: saved.address,
+                        source_addresses,
                         value_type: saved.value_type,
                         status,
                         rx: None,
@@ -4550,6 +4561,7 @@ impl CrosshairApp {
                         entity_z_offset: 8,
                         entity_stride: 0x48,
                         entity_count: 32,
+                        using_entity_roots: false,
                     });
                 }
                 return;
@@ -4560,11 +4572,19 @@ impl CrosshairApp {
         let limits = self.pointer_scan_limits();
         let worker_progress = Arc::clone(&progress);
         let (tx, rx) = mpsc::channel();
-        if let Some((map_a, target_a)) = self
+        if let Some((map_a, targets_a, entity_stride)) = self
             .memory_panel
             .deep_pointer_dialog
             .as_ref()
-            .and_then(|dialog| dialog.map_a.clone().map(|map| (map, dialog.source_address)))
+            .and_then(|dialog| {
+                dialog.map_a.clone().map(|map| {
+                    (
+                        map,
+                        dialog.source_addresses.clone(),
+                        dialog.entity_stride as usize,
+                    )
+                })
+            })
         {
             let targets: Vec<usize> = if self.memory_panel.selected_saved.len() > 1 {
                 self.memory_panel
@@ -4591,27 +4611,25 @@ impl CrosshairApp {
                         PointerScanLimits::MAX_RESULT_LIMIT,
                         PointerScanLimits::MAX_RESULT_LIMIT.saturating_mul(16),
                     );
-                    let paths_a = map_a.paths_to(
-                        target_a,
-                        limits.max_offset,
-                        limits.max_depth,
-                        comparison_limit,
-                    );
-                    let mut paths_b_set = HashSet::new();
-                    for target in targets {
-                        let paths_b = map_b.paths_to(
+                    let mut paths_a = HashSet::new();
+                    for target in targets_a {
+                        paths_a.extend(map_a.paths_to(
                             target,
                             limits.max_offset,
                             limits.max_depth,
                             comparison_limit,
-                        );
-                        paths_b_set.extend(paths_b);
+                        ));
                     }
-                    paths_a
-                        .into_iter()
-                        .filter(|path| paths_b_set.contains(path))
-                        .take(limits.result_limit)
-                        .collect()
+                    let mut paths_b = HashSet::new();
+                    for target in targets {
+                        paths_b.extend(map_b.paths_to(
+                            target,
+                            limits.max_offset,
+                            limits.max_depth,
+                            comparison_limit,
+                        ));
+                    }
+                    compare_pointer_paths(paths_a, paths_b, entity_stride, limits.result_limit)
                 })
                 .map_err(|error| error.to_string());
                 let _ = tx.send(DeepPointerJobResult::Compared(result));
@@ -4626,6 +4644,7 @@ impl CrosshairApp {
             dialog.resolved_rows.clear();
             dialog.selected.clear();
             dialog.selection_anchor = None;
+            dialog.using_entity_roots = false;
         } else {
             thread::spawn(move || {
                 let result = capture_pointer_map_with_budget(
@@ -4641,7 +4660,7 @@ impl CrosshairApp {
             self.memory_panel.deep_pointer_dialog = Some(DeepPointerDialog {
                 map_a: None,
                 source_pid: pid,
-                source_address: saved.address,
+                source_addresses,
                 value_type: saved.value_type,
                 status: "Capturing pointer map A...".to_owned(),
                 rx: Some(rx),
@@ -4658,6 +4677,7 @@ impl CrosshairApp {
                 entity_z_offset: 8,
                 entity_stride: 0x48,
                 entity_count: 32,
+                using_entity_roots: false,
             });
         }
     }
@@ -5665,15 +5685,33 @@ impl CrosshairApp {
                     dialog.map_a = Some(Arc::new(map));
                     dialog.status = "Map A ready. Restart the game, find the new target address, then right-click it and choose Compare with map A.".to_owned();
                 }
-                DeepPointerJobResult::Compared(Ok(paths)) => {
-                    dialog.candidates = paths;
+                DeepPointerJobResult::Compared(Ok(comparison)) => {
+                    let exact_count = comparison.exact.len();
+                    let entity_root_count = comparison.entity_roots.len();
+                    dialog.using_entity_roots = exact_count == 0 && entity_root_count > 0;
+                    dialog.candidates = if dialog.using_entity_roots {
+                        comparison.entity_roots
+                    } else {
+                        comparison.exact
+                    };
                     dialog.resolved_rows.clear();
                     dialog.selected.clear();
                     dialog.selection_anchor = None;
-                    dialog.status = format!(
-                        "Compared map A and map B: {} common pointer path(s).",
-                        dialog.candidates.len()
-                    );
+                    dialog.status = if dialog.using_entity_roots {
+                        format!(
+                            "No identical full path. Found {entity_root_count} stable entity-list root(s) after removing the changing slot offset (stride {}).",
+                            dialog.entity_stride
+                        )
+                    } else if exact_count == 0 {
+                        format!(
+                            "No identical pointer path or stable entity-list root found with stride {}. Verify the stride before comparing again.",
+                            dialog.entity_stride
+                        )
+                    } else {
+                        format!(
+                            "Compared map A and map B: {exact_count} identical pointer path(s)."
+                        )
+                    };
                 }
                 DeepPointerJobResult::MapA(Err(error))
                 | DeepPointerJobResult::Compared(Err(error)) => {
@@ -5752,66 +5790,83 @@ impl CrosshairApp {
                             ui.checkbox(&mut dialog.exe_only, "EXE only");
                         });
                         ui.group(|ui| {
-                            let selected_name = dialog
-                                .entity_preset_id
-                                .and_then(|id| {
-                                    self.state
-                                        .esp_presets
-                                        .iter()
-                                        .find(|preset| preset.id == id)
-                                })
-                                .map_or("Select ESP preset", |preset| preset.name.as_str());
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("Save as Entity List").strong());
-                                egui::ComboBox::from_id_salt("deep-pointer-entity-preset")
-                                    .selected_text(selected_name)
-                                    .width(150.0)
-                                    .show_ui(ui, |ui| {
-                                        for preset in &self.state.esp_presets {
-                                            ui.selectable_value(
-                                                &mut dialog.entity_preset_id,
-                                                Some(preset.id),
-                                                &preset.name,
-                                            );
-                                        }
-                                    });
-                                if ui
-                                    .add_enabled(
-                                        dialog.entity_preset_id.is_some()
-                                            && dialog.selected.len() == 1,
-                                        Button::new("Use selected root"),
-                                    )
-                                    .on_hover_text(
-                                        "Save the selected stable pointer as entity X.",
-                                    )
-                                    .clicked()
-                                {
-                                    use_entity_source = dialog.selected.iter().next().copied();
-                                }
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Y offset");
-                                ui.add(egui::DragValue::new(&mut dialog.entity_y_offset));
-                                ui.label("Z offset");
-                                ui.add(egui::DragValue::new(&mut dialog.entity_z_offset));
-                                ui.label("Stride");
+                                ui.label(RichText::new("Entity-list root matching").strong());
+                                ui.label("Stride (bytes)");
                                 ui.add(
                                     egui::DragValue::new(&mut dialog.entity_stride)
                                         .range(1..=0x10000),
                                 );
-                                ui.label("Count");
-                                ui.add(
-                                    egui::DragValue::new(&mut dialog.entity_count).range(1..=512),
-                                );
                             });
                             ui.label(
                                 RichText::new(
-                                    "Offsets and stride are bytes. Runtime reads stop at 512 slots.",
+                                    "Set this before Compare with map A. MacroNest will keep the common pointer root when only the entity slot changes by a stride multiple.",
                                 )
                                 .weak()
                                 .small(),
                             );
                         });
+                        if !dialog.candidates.is_empty() {
+                            ui.group(|ui| {
+                                let selected_name = dialog
+                                    .entity_preset_id
+                                    .and_then(|id| {
+                                        self.state
+                                            .esp_presets
+                                            .iter()
+                                            .find(|preset| preset.id == id)
+                                    })
+                                    .map_or("Select ESP preset", |preset| preset.name.as_str());
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new("Save found root as Entity List").strong(),
+                                    );
+                                    egui::ComboBox::from_id_salt("deep-pointer-entity-preset")
+                                        .selected_text(selected_name)
+                                        .width(150.0)
+                                        .show_ui(ui, |ui| {
+                                            for preset in &self.state.esp_presets {
+                                                ui.selectable_value(
+                                                    &mut dialog.entity_preset_id,
+                                                    Some(preset.id),
+                                                    &preset.name,
+                                                );
+                                            }
+                                        });
+                                    if ui
+                                        .add_enabled(
+                                            dialog.entity_preset_id.is_some()
+                                                && dialog.selected.len() == 1,
+                                            Button::new("Use selected root"),
+                                        )
+                                        .on_hover_text(
+                                            "Save the selected stable pointer as entity X.",
+                                        )
+                                        .clicked()
+                                    {
+                                        use_entity_source = dialog.selected.iter().next().copied();
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Y offset");
+                                    ui.add(egui::DragValue::new(&mut dialog.entity_y_offset));
+                                    ui.label("Z offset");
+                                    ui.add(egui::DragValue::new(&mut dialog.entity_z_offset));
+                                    ui.label("Count");
+                                    ui.add(
+                                        egui::DragValue::new(&mut dialog.entity_count)
+                                            .range(1..=512),
+                                    );
+                                });
+                                ui.label(
+                                    RichText::new(
+                                        "Offsets and stride are bytes. Runtime reads stop at 512 slots.",
+                                    )
+                                    .weak()
+                                    .small(),
+                                );
+                            });
+                        }
                         ui.separator();
                         const ROOT_WIDTH: f32 = 250.0;
                         const OFFSETS_WIDTH: f32 = 180.0;
