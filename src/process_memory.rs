@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ffi::c_void,
     io,
     mem::{MaybeUninit, size_of},
@@ -209,6 +209,16 @@ pub struct PointerPathComparison {
     pub entity_roots: Vec<PointerPath>,
 }
 
+const MAX_POINTER_PATH_DEPTH: usize = 8;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct EntityRootKey {
+    module_id: u32,
+    module_offset: usize,
+    depth: u8,
+    offsets: [usize; MAX_POINTER_PATH_DEPTH],
+}
+
 pub fn compare_pointer_paths(
     paths_a: impl IntoIterator<Item = PointerPath>,
     paths_b: impl IntoIterator<Item = PointerPath>,
@@ -228,25 +238,7 @@ pub fn compare_pointer_paths(
         }
     }
 
-    let mut entity_roots = Vec::new();
-    if entity_stride > 0 {
-        let normalized_b = paths_b
-            .iter()
-            .filter_map(|path| normalized_entity_root(path, entity_stride))
-            .collect::<HashSet<_>>();
-        let mut seen_roots = HashSet::new();
-        for path in &paths_a {
-            let Some(root) = normalized_entity_root(path, entity_stride) else {
-                continue;
-            };
-            if normalized_b.contains(&root) && seen_roots.insert(root.clone()) {
-                entity_roots.push(root);
-                if entity_roots.len() == result_limit {
-                    break;
-                }
-            }
-        }
-    }
+    let entity_roots = compare_entity_roots(&paths_a, &paths_b, entity_stride, result_limit);
 
     PointerPathComparison {
         exact,
@@ -254,11 +246,82 @@ pub fn compare_pointer_paths(
     }
 }
 
-fn normalized_entity_root(path: &PointerPath, entity_stride: usize) -> Option<PointerPath> {
-    let mut root = path.clone();
-    let last = root.offsets.last_mut()?;
-    *last %= entity_stride;
-    Some(root)
+fn compare_entity_roots(
+    paths_a: &[PointerPath],
+    paths_b: &HashSet<PointerPath>,
+    entity_stride: usize,
+    result_limit: usize,
+) -> Vec<PointerPath> {
+    if entity_stride == 0 || result_limit == 0 {
+        return Vec::new();
+    }
+
+    let mut module_ids = HashMap::<String, u32>::new();
+    for path in paths_a.iter().chain(paths_b.iter()) {
+        let next_id = module_ids.len() as u32;
+        module_ids.entry(path.module.clone()).or_insert(next_id);
+    }
+
+    let max_depth = paths_a
+        .iter()
+        .chain(paths_b.iter())
+        .map(|path| path.offsets.len())
+        .max()
+        .unwrap_or(0)
+        .min(MAX_POINTER_PATH_DEPTH);
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+
+    // ponytail: entity slots can appear at any pointer level, but only one slot
+    // is allowed to vary. This keeps comparison linear per depth and avoids the
+    // false roots produced by modulo-normalizing every structural offset.
+    for varying_index in 0..max_depth {
+        let normalized_b = paths_b
+            .iter()
+            .filter_map(|path| entity_root_key(path, varying_index, entity_stride, &module_ids))
+            .collect::<HashSet<_>>();
+
+        for path in paths_a {
+            if paths_b.contains(path) {
+                continue;
+            }
+            let Some(key) = entity_root_key(path, varying_index, entity_stride, &module_ids) else {
+                continue;
+            };
+            if !normalized_b.contains(&key) {
+                continue;
+            }
+            let mut root = path.clone();
+            root.offsets[varying_index] %= entity_stride;
+            if seen.insert(root.clone()) {
+                roots.push(root);
+                if roots.len() == result_limit {
+                    return roots;
+                }
+            }
+        }
+    }
+    roots
+}
+
+fn entity_root_key(
+    path: &PointerPath,
+    varying_index: usize,
+    entity_stride: usize,
+    module_ids: &HashMap<String, u32>,
+) -> Option<EntityRootKey> {
+    if path.offsets.len() > MAX_POINTER_PATH_DEPTH || varying_index >= path.offsets.len() {
+        return None;
+    }
+    let mut offsets = [0; MAX_POINTER_PATH_DEPTH];
+    offsets[..path.offsets.len()].copy_from_slice(&path.offsets);
+    offsets[varying_index] %= entity_stride;
+    Some(EntityRootKey {
+        module_id: *module_ids.get(&path.module)?,
+        module_offset: path.module_offset,
+        depth: path.offsets.len() as u8,
+        offsets,
+    })
 }
 
 pub struct PointerMap {
@@ -1972,6 +2035,45 @@ mod tests {
         assert!(comparison.exact.is_empty());
         assert_eq!(comparison.entity_roots.len(), 1);
         assert_eq!(comparison.entity_roots[0].offsets, vec![0x20, 0]);
+    }
+
+    #[test]
+    fn pointer_map_comparison_finds_entity_slot_at_intermediate_level() {
+        let path_a = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x20, 0x90, 0x18],
+        };
+        let path_b = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x20, 0x120, 0x18],
+        };
+
+        let comparison = compare_pointer_paths([path_a], [path_b], 0x48, 32);
+
+        assert!(comparison.exact.is_empty());
+        assert_eq!(comparison.entity_roots.len(), 1);
+        assert_eq!(comparison.entity_roots[0].offsets, vec![0x20, 0, 0x18]);
+    }
+
+    #[test]
+    fn pointer_map_comparison_rejects_multiple_changed_pointer_levels() {
+        let path_a = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x20, 0x90, 0x18],
+        };
+        let path_b = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x68, 0x120, 0x18],
+        };
+
+        let comparison = compare_pointer_paths([path_a], [path_b], 0x48, 32);
+
+        assert!(comparison.exact.is_empty());
+        assert!(comparison.entity_roots.is_empty());
     }
 
     #[test]
