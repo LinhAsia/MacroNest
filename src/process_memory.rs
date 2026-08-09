@@ -6,7 +6,7 @@ use std::{
     mem::{MaybeUninit, size_of},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -173,6 +173,51 @@ impl ScanValue {
 pub struct ScanCandidate {
     pub address: usize,
     current: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EntityPointerMatch {
+    pub location: usize,
+    pub entity_index: usize,
+    pub entity_base: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct EntityListCandidate {
+    pub address: usize,
+    pub end_address: usize,
+    pub pointer_matches: Vec<EntityPointerMatch>,
+    pub matched_entities: usize,
+    pub coverage: f32,
+    pub observed_stride: usize,
+    pub spacing_regularity: f32,
+    pub readable_pointers: usize,
+    pub plausible_xyz: usize,
+    pub confidence: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct EntityListScanResult {
+    pub candidates: Vec<EntityListCandidate>,
+    pub pointer_hits: usize,
+    pub cancelled: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct EntityListPreview {
+    pub slot_address: usize,
+    pub entity_base: Option<usize>,
+    pub matched_input: Option<usize>,
+    pub readable: bool,
+    pub xyz: Option<[f32; 3]>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EntityListValidation {
+    pub entries: Vec<EntityListPreview>,
+    pub matched_entities: usize,
+    pub readable_pointers: usize,
+    pub plausible_xyz: usize,
 }
 
 impl ScanCandidate {
@@ -469,6 +514,17 @@ pub fn capture_pointer_map_with_budget(
     max_bytes: usize,
     progress: Arc<AtomicUsize>,
 ) -> io::Result<PointerMap> {
+    capture_pointer_map_with_budget_cancel(pid, modules, pointer_width, max_bytes, progress, None)
+}
+
+fn capture_pointer_map_with_budget_cancel(
+    pid: u32,
+    modules: &[(String, usize, usize)],
+    pointer_width: usize,
+    max_bytes: usize,
+    progress: Arc<AtomicUsize>,
+    cancel: Option<&AtomicBool>,
+) -> io::Result<PointerMap> {
     if !matches!(pointer_width, 4 | 8) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -496,8 +552,14 @@ pub fn capture_pointer_map_with_budget(
     let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
     let mut remaining = max_bytes;
     'regions: for region in regions {
+        if cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire)) {
+            break;
+        }
         let region_size = region.size.min(remaining);
         for offset in (0..region_size).step_by(SCAN_CHUNK_BYTES) {
+            if cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire)) {
+                break 'regions;
+            }
             let address = region.base + offset;
             let wanted = (region_size - offset).min(SCAN_CHUNK_BYTES);
             remaining = remaining.saturating_sub(wanted);
@@ -569,6 +631,7 @@ impl PointerMap {
             max_offset,
             max_depth,
             result_limit,
+            false,
         )
     }
 }
@@ -607,14 +670,50 @@ pub fn scan_pointer_paths_with_budget(
     max_bytes: usize,
     progress: Arc<AtomicUsize>,
 ) -> io::Result<Vec<PointerPath>> {
-    let map = capture_pointer_map_with_budget(pid, modules, pointer_width, max_bytes, progress)?;
-    Ok(find_pointer_paths(
-        &map.pointers,
+    scan_pointer_paths_with_budget_options(
+        pid,
         target,
+        modules,
+        pointer_width,
+        max_offset,
+        max_depth,
+        result_limit,
+        max_bytes,
+        false,
+        progress,
+        Arc::new(AtomicBool::new(false)),
+    )
+}
+
+pub fn scan_pointer_paths_with_budget_options(
+    pid: u32,
+    target: usize,
+    modules: &[(String, usize, usize)],
+    pointer_width: usize,
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+    max_bytes: usize,
+    include_system_modules: bool,
+    progress: Arc<AtomicUsize>,
+    cancel: Arc<AtomicBool>,
+) -> io::Result<Vec<PointerPath>> {
+    let map = capture_pointer_map_with_budget_cancel(
+        pid,
+        modules,
+        pointer_width,
+        max_bytes,
+        progress,
+        Some(&cancel),
+    )?;
+    Ok(find_pointer_paths_to_any(
+        &map.pointers,
+        &[target],
         modules,
         max_offset,
         max_depth,
         result_limit,
+        include_system_modules,
     ))
 }
 
@@ -633,6 +732,7 @@ fn find_pointer_paths(
         max_offset,
         max_depth,
         result_limit,
+        false,
     )
 }
 
@@ -643,6 +743,7 @@ fn find_pointer_paths_to_any(
     max_offset: usize,
     max_depth: usize,
     result_limit: usize,
+    include_system_modules: bool,
 ) -> Vec<PointerPath> {
     let max_frontier = result_limit.saturating_mul(16).clamp(50_000, 1_000_000);
     let mut results = Vec::new();
@@ -673,13 +774,15 @@ fn find_pointer_paths_to_any(
                             || lower.contains("kernelbase")
                             || lower.contains("user32")
                             || lower.contains("gdi32")
+                            || lower.contains("msvcp")
                             || lower.contains("msvcrt")
                             || lower.contains("ucrtbase")
+                            || lower.contains("vcruntime")
                             || lower.contains("comctl32")
                             || lower.contains("imm32")
                             || lower.contains("shell32")
                     };
-                    if !is_sys {
+                    if include_system_modules || !is_sys {
                         let mut offsets = reverse_offsets.clone();
                         offsets.reverse();
                         results.push(PointerPath {
@@ -1066,6 +1169,344 @@ pub fn write_code_bytes(pid: u32, address: usize, bytes: &[u8]) -> io::Result<()
     }
 }
 
+pub fn scan_entity_lists_with_progress(
+    pid: u32,
+    entity_bases: &[usize],
+    pointer_width: usize,
+    max_gap: usize,
+    xyz_offsets: [usize; 3],
+    progress: Arc<AtomicUsize>,
+    total: Arc<AtomicUsize>,
+    cancel: Arc<AtomicBool>,
+) -> io::Result<EntityListScanResult> {
+    if !matches!(pointer_width, 4 | 8) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "pointer width must be 4 or 8 bytes",
+        ));
+    }
+    if entity_bases.len() < 3 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "at least three entity bases are required",
+        ));
+    }
+    if pointer_width == 4
+        && entity_bases
+            .iter()
+            .any(|&address| address > u32::MAX as usize)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "an entity address does not fit the 32-bit target process",
+        ));
+    }
+
+    let process = ScanProcess::open(pid, false)?;
+    let regions = pointer_scan_regions_for(&process);
+    total.store(
+        regions
+            .iter()
+            .map(|region| region.size)
+            .fold(0usize, usize::saturating_add),
+        Ordering::Release,
+    );
+    let targets = entity_bases
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, address)| (address, index))
+        .collect::<HashMap<_, _>>();
+    let mut target_first_bytes = [false; 256];
+    for &address in entity_bases {
+        target_first_bytes[address & 0xFF] = true;
+    }
+    let mut hits = Vec::new();
+    let mut buffer = Vec::new();
+    let overlap = pointer_width - 1;
+
+    'regions: for region in &regions {
+        let end = region.base.saturating_add(region.size);
+        let mut chunk_base = region.base;
+        while chunk_base < end {
+            if cancel.load(Ordering::Acquire) {
+                break 'regions;
+            }
+            let prefix = if chunk_base == region.base {
+                0
+            } else {
+                overlap.min(chunk_base - region.base)
+            };
+            let read_base = chunk_base - prefix;
+            let length = (end - read_base).min(SCAN_CHUNK_BYTES + prefix);
+            buffer.resize(length, 0);
+            let count = match process.read(read_base, &mut buffer) {
+                Ok(count) => count,
+                Err(_) => {
+                    progress.fetch_add(length.saturating_sub(prefix), Ordering::Relaxed);
+                    chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
+                    continue;
+                }
+            };
+            let haystack = &buffer[..count];
+            if count >= pointer_width {
+                for offset in prefix..=count - pointer_width {
+                    if offset & 0xFFFF == 0 && cancel.load(Ordering::Relaxed) {
+                        break 'regions;
+                    }
+                    if !target_first_bytes[haystack[offset] as usize] {
+                        continue;
+                    }
+                    let value = decode_native_pointer(&haystack[offset..], pointer_width);
+                    if let Some(&entity_index) = targets.get(&value) {
+                        hits.push(EntityPointerMatch {
+                            location: read_base + offset,
+                            entity_index,
+                            entity_base: value,
+                        });
+                    }
+                }
+            }
+            progress.fetch_add(count.saturating_sub(prefix), Ordering::Relaxed);
+            chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
+        }
+    }
+
+    hits.sort_unstable_by_key(|hit| hit.location);
+    hits.dedup_by_key(|hit| hit.location);
+    let readable_ranges = regions
+        .iter()
+        .map(|region| (region.base, region.base.saturating_add(region.size)))
+        .collect::<Vec<_>>();
+    let readable_entities = entity_bases
+        .iter()
+        .map(|&address| address_in_ranges(address, &readable_ranges))
+        .collect::<Vec<_>>();
+    let xyz = entity_bases
+        .iter()
+        .map(|&base| read_entity_xyz(&process, base, xyz_offsets))
+        .collect::<Vec<_>>();
+    let pointer_hits = hits.len();
+    let candidates = group_entity_pointer_hits(
+        &hits,
+        entity_bases.len(),
+        pointer_width,
+        max_gap.max(pointer_width),
+        &readable_entities,
+        &xyz,
+    );
+    Ok(EntityListScanResult {
+        candidates,
+        pointer_hits,
+        cancelled: cancel.load(Ordering::Acquire),
+    })
+}
+
+pub fn validate_entity_list(
+    pid: u32,
+    list_address: usize,
+    slot_count: usize,
+    pointer_width: usize,
+    entity_bases: &[usize],
+    xyz_offsets: [usize; 3],
+) -> io::Result<EntityListValidation> {
+    if !matches!(pointer_width, 4 | 8) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "pointer width must be 4 or 8 bytes",
+        ));
+    }
+    let process = ScanProcess::open(pid, false)?;
+    let regions = pointer_scan_regions_for(&process);
+    let readable_ranges = regions
+        .iter()
+        .map(|region| (region.base, region.base.saturating_add(region.size)))
+        .collect::<Vec<_>>();
+    let expected = entity_bases
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, address)| (address, index))
+        .collect::<HashMap<_, _>>();
+    // ponytail: preview is intentionally bounded; paging is the upgrade path for giant tables.
+    let slot_count = slot_count.clamp(1, 512);
+    let byte_count = slot_count.saturating_mul(pointer_width);
+    let mut bytes = vec![0; byte_count];
+    let read = process.read(list_address, &mut bytes)?;
+    let mut matched = HashSet::new();
+    let mut readable_pointers = 0;
+    let mut plausible_xyz = 0;
+    let mut entries = Vec::with_capacity(slot_count);
+    for slot in 0..slot_count {
+        let offset = slot * pointer_width;
+        if offset + pointer_width > read {
+            break;
+        }
+        let entity_base = decode_native_pointer(&bytes[offset..], pointer_width);
+        let entity_base = (entity_base != 0).then_some(entity_base);
+        let matched_input = entity_base.and_then(|address| expected.get(&address).copied());
+        if let Some(index) = matched_input {
+            matched.insert(index);
+        }
+        let readable =
+            entity_base.is_some_and(|address| address_in_ranges(address, &readable_ranges));
+        readable_pointers += usize::from(readable);
+        let xyz = entity_base.and_then(|address| read_entity_xyz(&process, address, xyz_offsets));
+        plausible_xyz += usize::from(xyz.is_some());
+        entries.push(EntityListPreview {
+            slot_address: list_address + offset,
+            entity_base,
+            matched_input,
+            readable,
+            xyz,
+        });
+    }
+    Ok(EntityListValidation {
+        entries,
+        matched_entities: matched.len(),
+        readable_pointers,
+        plausible_xyz,
+    })
+}
+
+fn decode_native_pointer(bytes: &[u8], pointer_width: usize) -> usize {
+    if pointer_width == 4 {
+        u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize
+    } else {
+        u64::from_le_bytes(bytes[..8].try_into().unwrap()) as usize
+    }
+}
+
+fn address_in_ranges(address: usize, ranges: &[(usize, usize)]) -> bool {
+    let index = ranges.partition_point(|(base, _)| *base <= address);
+    index > 0 && address < ranges[index - 1].1
+}
+
+fn read_entity_xyz(
+    process: &ScanProcess,
+    entity_base: usize,
+    offsets: [usize; 3],
+) -> Option<[f32; 3]> {
+    let mut xyz = [0.0; 3];
+    for (index, offset) in offsets.into_iter().enumerate() {
+        let mut bytes = [0; 4];
+        if process
+            .read(entity_base.checked_add(offset)?, &mut bytes)
+            .ok()?
+            != bytes.len()
+        {
+            return None;
+        }
+        let value = f32::from_le_bytes(bytes);
+        if !value.is_finite() || value.abs() > 10_000_000.0 || (value != 0.0 && value.abs() < 1e-20)
+        {
+            return None;
+        }
+        xyz[index] = value;
+    }
+    Some(xyz)
+}
+
+fn group_entity_pointer_hits(
+    hits: &[EntityPointerMatch],
+    entity_count: usize,
+    pointer_width: usize,
+    max_gap: usize,
+    readable_entities: &[bool],
+    xyz: &[Option<[f32; 3]>],
+) -> Vec<EntityListCandidate> {
+    let mut candidates = Vec::new();
+    let mut start = 0;
+    for end in 1..=hits.len() {
+        if end < hits.len() && hits[end].location - hits[end - 1].location <= max_gap {
+            continue;
+        }
+        let cluster = &hits[start..end];
+        start = end;
+        let matched = cluster
+            .iter()
+            .map(|hit| hit.entity_index)
+            .collect::<HashSet<_>>();
+        if matched.len() < 2 {
+            continue;
+        }
+        let deltas = cluster
+            .windows(2)
+            .filter_map(|pair| pair[1].location.checked_sub(pair[0].location))
+            .filter(|&delta| delta != 0)
+            .collect::<Vec<_>>();
+        let observed_stride = deltas
+            .iter()
+            .copied()
+            .reduce(greatest_common_divisor)
+            .unwrap_or(pointer_width);
+        let aligned = deltas
+            .iter()
+            .filter(|&&delta| delta % pointer_width == 0)
+            .count();
+        let mut frequencies = HashMap::new();
+        for &delta in &deltas {
+            *frequencies.entry(delta).or_insert(0usize) += 1;
+        }
+        let dominant = frequencies.values().copied().max().unwrap_or(1);
+        let denominator = deltas.len().max(1) as f32;
+        let spacing_regularity =
+            0.7 * aligned as f32 / denominator + 0.3 * dominant as f32 / denominator;
+        let readable_pointers = cluster
+            .iter()
+            .filter(|hit| {
+                readable_entities
+                    .get(hit.entity_index)
+                    .copied()
+                    .unwrap_or(false)
+            })
+            .count();
+        let plausible_xyz = matched
+            .iter()
+            .filter(|&&index| xyz.get(index).is_some_and(Option::is_some))
+            .count();
+        let coverage = matched.len() as f32 / entity_count.max(1) as f32;
+        let confidence = 100.0
+            * (0.15 * (matched.len() as f32 / 3.0).min(1.0)
+                + 0.35 * coverage
+                + 0.20 * spacing_regularity
+                + 0.15 * readable_pointers as f32 / cluster.len().max(1) as f32
+                + 0.15 * plausible_xyz as f32 / matched.len().max(1) as f32);
+        candidates.push(EntityListCandidate {
+            address: cluster[0].location,
+            end_address: cluster.last().unwrap().location,
+            pointer_matches: cluster.to_vec(),
+            matched_entities: matched.len(),
+            coverage,
+            observed_stride,
+            spacing_regularity,
+            readable_pointers,
+            plausible_xyz,
+            confidence,
+        });
+    }
+    candidates.sort_by(|left, right| {
+        right
+            .matched_entities
+            .cmp(&left.matched_entities)
+            .then_with(|| right.coverage.total_cmp(&left.coverage))
+            .then_with(|| right.spacing_regularity.total_cmp(&left.spacing_regularity))
+            .then_with(|| right.readable_pointers.cmp(&left.readable_pointers))
+            .then_with(|| right.plausible_xyz.cmp(&left.plausible_xyz))
+            .then_with(|| right.confidence.total_cmp(&left.confidence))
+            .then_with(|| left.address.cmp(&right.address))
+    });
+    candidates.truncate(512);
+    candidates
+}
+
+fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
+    while right != 0 {
+        (left, right) = (right, left % right);
+    }
+    left
+}
+
 pub fn scan_memory_with_progress(
     pid: u32,
     exact: Option<ScanValue>,
@@ -1303,11 +1744,7 @@ pub fn parse_aob_pattern(pattern_str: &str) -> Option<Vec<AobByte>> {
             }
         }
     }
-    if bytes.is_empty() {
-        None
-    } else {
-        Some(bytes)
-    }
+    if bytes.is_empty() { None } else { Some(bytes) }
 }
 
 fn aob_bytes_equal(actual: &[u8], pattern: &[AobByte]) -> bool {
@@ -1358,7 +1795,9 @@ pub fn scan_aob_memory_with_progress(
                 }
                 let max_start = count.saturating_sub(pattern.len());
                 for offset in 0..=max_start {
-                    if offset < prefix || !aob_bytes_equal(&haystack[offset..offset + pattern.len()], &pattern) {
+                    if offset < prefix
+                        || !aob_bytes_equal(&haystack[offset..offset + pattern.len()], &pattern)
+                    {
                         continue;
                     }
                     found.push(TextScanCandidate {
@@ -1382,12 +1821,8 @@ pub fn filter_aob_scan_candidates(
     candidates: Vec<TextScanCandidate>,
     pattern_str: &str,
 ) -> io::Result<Vec<TextScanCandidate>> {
-    let pattern = parse_aob_pattern(pattern_str).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid AOB pattern format",
-        )
-    })?;
+    let pattern = parse_aob_pattern(pattern_str)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid AOB pattern format"))?;
     let process = ScanProcess::open(pid, false)?;
     let mut bytes = vec![0; pattern.len()];
     let mut kept = Vec::new();
@@ -2050,6 +2485,53 @@ unsafe extern "system" {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn group_test_hits(locations: &[(usize, usize)], max_gap: usize) -> Vec<EntityListCandidate> {
+        let hits = locations
+            .iter()
+            .map(|&(location, entity_index)| EntityPointerMatch {
+                location,
+                entity_index,
+                entity_base: 0x5000 + entity_index * 0x100,
+            })
+            .collect::<Vec<_>>();
+        group_entity_pointer_hits(
+            &hits,
+            3,
+            8,
+            max_gap,
+            &[true; 3],
+            &[Some([1.0, 2.0, 3.0]); 3],
+        )
+    }
+
+    #[test]
+    fn entity_list_groups_three_contiguous_pointers() {
+        let candidates = group_test_hits(&[(0x1000, 0), (0x1008, 1), (0x1010, 2)], 0x20);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].matched_entities, 3);
+        assert_eq!(candidates[0].observed_stride, 8);
+        assert!(candidates[0].confidence > 95.0);
+    }
+
+    #[test]
+    fn entity_list_does_not_group_hits_outside_max_gap() {
+        let candidates = group_test_hits(&[(0x1000, 0), (0x1008, 1), (0x2000, 2)], 0x20);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].matched_entities, 2);
+        assert_eq!(candidates[0].end_address, 0x1008);
+    }
+
+    #[test]
+    fn entity_list_sparse_null_slot_keeps_one_candidate() {
+        let candidates = group_test_hits(&[(0x1000, 0), (0x1008, 1), (0x1018, 2)], 0x20);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].matched_entities, 3);
+        assert_eq!(candidates[0].observed_stride, 8);
+    }
 
     #[test]
     fn pointer_map_comparison_keeps_entity_root_when_slot_changes() {

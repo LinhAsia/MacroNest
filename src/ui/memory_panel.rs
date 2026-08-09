@@ -18,15 +18,17 @@ use crate::{
         MemoryDebuggerMethod, MemoryPointerEntry,
     },
     process_memory::{
-        MemoryRegionInfo, MemoryScanOptions, PausedProcess, PointerMap, PointerPath,
-        PointerPathComparison, PointerScanLimits, ScanCandidate, ScanComparison, ScanValue,
-        ScanValueType, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
-        capture_pointer_map_with_budget, compare_pointer_paths, filter_aob_scan_candidates,
-        filter_scan_candidates, filter_text_scan_candidates, query_memory_region,
-        read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
-        scan_aob_memory_with_progress, scan_memory_range_with_progress,
-        scan_pointer_paths_with_budget, scan_text_memory_with_progress,
-        scan_view_projection_candidates, write_code_bytes, write_scan_value, write_text_memory,
+        EntityListCandidate, EntityListScanResult, EntityListValidation, MemoryRegionInfo,
+        MemoryScanOptions, PausedProcess, PointerMap, PointerPath, PointerPathComparison,
+        PointerScanLimits, ScanCandidate, ScanComparison, ScanValue, ScanValueType, TextEncoding,
+        TextScanCandidate, ViewProjectionCandidate, capture_pointer_map_with_budget,
+        compare_pointer_paths, filter_aob_scan_candidates, filter_scan_candidates,
+        filter_text_scan_candidates, query_memory_region, read_memory_bytes, read_scan_value,
+        read_text_memory, refresh_scan_candidates, scan_aob_memory_with_progress,
+        scan_entity_lists_with_progress, scan_memory_range_with_progress,
+        scan_pointer_paths_with_budget, scan_pointer_paths_with_budget_options,
+        scan_text_memory_with_progress, scan_view_projection_candidates, validate_entity_list,
+        write_code_bytes, write_scan_value, write_text_memory,
     },
     window_list,
 };
@@ -274,6 +276,51 @@ struct CameraMatrixDialog {
     last_preview_refresh: Instant,
     stability_sample: Option<(Instant, HashMap<usize, [f32; 16]>)>,
     auto_pick_started: Option<Instant>,
+}
+
+struct EntityListJobResult {
+    pid: u32,
+    entity_bases: Vec<usize>,
+    pointer_width: usize,
+    result: Result<EntityListScanResult, String>,
+}
+
+struct EntityListRootJobResult {
+    pid: u32,
+    candidate_address: usize,
+    cancelled: bool,
+    result: Result<Vec<PointerPath>, String>,
+}
+
+struct EntityListDialog {
+    inputs: Vec<String>,
+    new_input: String,
+    inputs_are_x_fields: bool,
+    x_offset: String,
+    y_offset: String,
+    z_offset: String,
+    max_gap: String,
+    status: String,
+    candidates: Vec<EntityListCandidate>,
+    selected: HashSet<usize>,
+    selection_anchor: Option<usize>,
+    active_candidate: Option<usize>,
+    entity_bases: Vec<usize>,
+    pointer_width: usize,
+    rx: Option<Receiver<EntityListJobResult>>,
+    progress: Arc<AtomicUsize>,
+    total: Arc<AtomicUsize>,
+    cancel: Arc<AtomicBool>,
+    list_offset: isize,
+    preview: Option<EntityListValidation>,
+    last_preview_refresh: Instant,
+    root_rx: Option<Receiver<EntityListRootJobResult>>,
+    root_progress: Arc<AtomicUsize>,
+    root_cancel: Arc<AtomicBool>,
+    roots: Vec<PointerPath>,
+    selected_root: Option<usize>,
+    root_address: Option<usize>,
+    allow_system_roots: bool,
 }
 
 struct AddressDialog {
@@ -630,6 +677,7 @@ pub(crate) struct MemoryPanelState {
     stable_pointer_dialog: Option<StablePointerDialog>,
     deep_pointer_dialog: Option<DeepPointerDialog>,
     camera_matrix_dialog: Option<CameraMatrixDialog>,
+    entity_list_dialog: Option<EntityListDialog>,
     saved_library_open: bool,
     #[cfg(windows)]
     instruction_watch_dialog: Option<InstructionWatchDialog>,
@@ -717,6 +765,7 @@ impl Default for MemoryPanelState {
             stable_pointer_dialog: None,
             deep_pointer_dialog: None,
             camera_matrix_dialog: None,
+            entity_list_dialog: None,
             saved_library_open: false,
             #[cfg(windows)]
             instruction_watch_dialog: None,
@@ -835,6 +884,9 @@ impl CrosshairApp {
                 }
                 if ui.button("Find camera matrix").clicked() {
                     self.open_camera_matrix_dialog();
+                }
+                if ui.button("Find entity list").clicked() {
+                    self.open_entity_list_dialog();
                 }
                 if ui
                     .button(self.tr("Advanced options", "Advanced options"))
@@ -964,6 +1016,20 @@ impl CrosshairApp {
             Self::render_camera_matrix_dialog,
         ) {
             self.memory_panel.camera_matrix_dialog = None;
+        }
+        let entity_list_active = self.memory_panel.entity_list_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ui.ctx(),
+            "memory-entity-list-host",
+            "Find entity list",
+            entity_list_active,
+            Self::render_entity_list_dialog,
+        ) {
+            if let Some(dialog) = self.memory_panel.entity_list_dialog.as_mut() {
+                dialog.cancel.store(true, Ordering::Release);
+                dialog.root_cancel.store(true, Ordering::Release);
+            }
+            self.memory_panel.entity_list_dialog = None;
         }
         #[cfg(windows)]
         self.render_instruction_watch_dialog(ui.ctx());
@@ -4717,6 +4783,926 @@ impl CrosshairApp {
                 using_entity_roots: false,
             });
         }
+    }
+
+    fn open_entity_list_dialog(&mut self) {
+        let mut inputs = self
+            .memory_panel
+            .selected_saved
+            .iter()
+            .copied()
+            .filter_map(|index| self.memory_panel.saved.get(index))
+            .map(|saved| {
+                saved.pointer.as_ref().map_or_else(
+                    || format_prefixed_memory_address(saved.address),
+                    format_pointer_expression,
+                )
+            })
+            .collect::<Vec<_>>();
+        for index in self.memory_panel.selected_results.iter().copied() {
+            let address = self
+                .memory_panel
+                .candidates
+                .get(index)
+                .map(|candidate| candidate.address)
+                .or_else(|| {
+                    self.memory_panel
+                        .text_candidates
+                        .get(index)
+                        .map(|candidate| candidate.address)
+                });
+            if let Some(address) = address {
+                let expression = format_prefixed_memory_address(address);
+                if !inputs.contains(&expression) {
+                    inputs.push(expression);
+                }
+            }
+        }
+        inputs.resize(inputs.len().max(3), String::new());
+        self.memory_panel.entity_list_dialog = Some(EntityListDialog {
+            inputs,
+            new_input: String::new(),
+            inputs_are_x_fields: false,
+            x_offset: "0".to_owned(),
+            y_offset: "4".to_owned(),
+            z_offset: "8".to_owned(),
+            max_gap: "128".to_owned(),
+            status: "Add at least three entity bases, then search.".to_owned(),
+            candidates: Vec::new(),
+            selected: HashSet::new(),
+            selection_anchor: None,
+            active_candidate: None,
+            entity_bases: Vec::new(),
+            pointer_width: 8,
+            rx: None,
+            progress: Arc::new(AtomicUsize::new(0)),
+            total: Arc::new(AtomicUsize::new(0)),
+            cancel: Arc::new(AtomicBool::new(false)),
+            list_offset: 0,
+            preview: None,
+            last_preview_refresh: Instant::now() - Duration::from_secs(1),
+            root_rx: None,
+            root_progress: Arc::new(AtomicUsize::new(0)),
+            root_cancel: Arc::new(AtomicBool::new(false)),
+            roots: Vec::new(),
+            selected_root: None,
+            root_address: None,
+            allow_system_roots: false,
+        });
+    }
+
+    fn add_selected_entity_addresses(&self, dialog: &mut EntityListDialog) {
+        let mut expressions = self
+            .memory_panel
+            .selected_saved
+            .iter()
+            .copied()
+            .filter_map(|index| self.memory_panel.saved.get(index))
+            .map(|saved| {
+                saved.pointer.as_ref().map_or_else(
+                    || format_prefixed_memory_address(saved.address),
+                    format_pointer_expression,
+                )
+            })
+            .collect::<Vec<_>>();
+        expressions.extend(
+            self.memory_panel
+                .selected_results
+                .iter()
+                .filter_map(|&index| {
+                    self.memory_panel
+                        .candidates
+                        .get(index)
+                        .map(|candidate| candidate.address)
+                        .or_else(|| {
+                            self.memory_panel
+                                .text_candidates
+                                .get(index)
+                                .map(|candidate| candidate.address)
+                        })
+                        .map(format_prefixed_memory_address)
+                }),
+        );
+        for expression in expressions {
+            if !dialog.inputs.contains(&expression) {
+                if let Some(empty) = dialog
+                    .inputs
+                    .iter_mut()
+                    .find(|input| input.trim().is_empty())
+                {
+                    *empty = expression;
+                } else {
+                    dialog.inputs.push(expression);
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn start_entity_list_search(&self, dialog: &mut EntityListDialog) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select a process first.".to_owned();
+            return;
+        };
+        let pointer_width = match process_pointer_width(pid) {
+            Ok(width) => width,
+            Err(error) => {
+                dialog.status = format!("Unable to detect process architecture: {error}");
+                return;
+            }
+        };
+        let xyz_offsets = match parse_entity_xyz_offsets(dialog) {
+            Ok(offsets) => offsets,
+            Err(error) => {
+                dialog.status = error;
+                return;
+            }
+        };
+        let max_gap = match parse_memory_address(&dialog.max_gap) {
+            Some(value) if value >= pointer_width => value,
+            _ => {
+                dialog.status =
+                    format!("Max bytes between entries must be at least {pointer_width}.");
+                return;
+            }
+        };
+        let entity_bases = match resolve_entity_inputs(pid, dialog, pointer_width, xyz_offsets) {
+            Ok(addresses) => addresses,
+            Err(error) => {
+                dialog.status = error;
+                return;
+            }
+        };
+        if entity_bases.len() < 3 {
+            dialog.status =
+                "At least three unique, resolvable entity bases are required.".to_owned();
+            return;
+        }
+
+        dialog.cancel.store(true, Ordering::Release);
+        dialog.root_cancel.store(true, Ordering::Release);
+        dialog.root_rx = None;
+        dialog.cancel = Arc::new(AtomicBool::new(false));
+        dialog.progress = Arc::new(AtomicUsize::new(0));
+        dialog.total = Arc::new(AtomicUsize::new(0));
+        dialog.candidates.clear();
+        dialog.selected.clear();
+        dialog.active_candidate = None;
+        dialog.preview = None;
+        dialog.roots.clear();
+        dialog.selected_root = None;
+        dialog.root_address = None;
+        dialog.entity_bases = entity_bases.clone();
+        dialog.pointer_width = pointer_width;
+        dialog.status = format!(
+            "Searching readable memory for {} entity pointers...",
+            entity_bases.len()
+        );
+        let progress = Arc::clone(&dialog.progress);
+        let total = Arc::clone(&dialog.total);
+        let cancel = Arc::clone(&dialog.cancel);
+        let (tx, rx) = mpsc::channel();
+        dialog.rx = Some(rx);
+        thread::spawn(move || {
+            let result = scan_entity_lists_with_progress(
+                pid,
+                &entity_bases,
+                pointer_width,
+                max_gap,
+                xyz_offsets,
+                progress,
+                total,
+                cancel,
+            )
+            .map_err(|error| error.to_string());
+            let _ = tx.send(EntityListJobResult {
+                pid,
+                entity_bases,
+                pointer_width,
+                result,
+            });
+        });
+    }
+
+    #[cfg(not(windows))]
+    fn start_entity_list_search(&self, dialog: &mut EntityListDialog) {
+        dialog.status = "Entity-list search is available on Windows only.".to_owned();
+    }
+
+    fn poll_entity_list_jobs(&mut self) {
+        let Some(dialog) = self.memory_panel.entity_list_dialog.as_mut() else {
+            return;
+        };
+        if let Some(result) = dialog.rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            dialog.rx = None;
+            dialog.pointer_width = result.pointer_width;
+            dialog.entity_bases = result.entity_bases;
+            match result.result {
+                Ok(scan) => {
+                    let candidate_count = scan.candidates.len();
+                    dialog.candidates = scan.candidates;
+                    dialog.active_candidate = (candidate_count > 0).then_some(0);
+                    dialog.selected = dialog.active_candidate.into_iter().collect();
+                    dialog.status = if scan.cancelled {
+                        format!(
+                            "Stopped after {} pointer hits; {candidate_count} candidates ranked.",
+                            scan.pointer_hits
+                        )
+                    } else if candidate_count == 0 {
+                        "No pointer array/table found. Linked lists, ECS, handles and encrypted pointers are not supported yet.".to_owned()
+                    } else {
+                        format!(
+                            "Found {} pointer hits in {candidate_count} ranked candidates (PID {}).",
+                            scan.pointer_hits, result.pid
+                        )
+                    };
+                    dialog.last_preview_refresh = Instant::now() - Duration::from_secs(1);
+                }
+                Err(error) => dialog.status = format!("Entity-list search failed: {error}"),
+            }
+        }
+        if let Some(result) = dialog.root_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            dialog.root_rx = None;
+            if active_entity_candidate_address(dialog) != Some(result.candidate_address) {
+                dialog.status =
+                    "Discarded stable-root results for the previous candidate.".to_owned();
+                return;
+            }
+            match result.result {
+                Ok(mut roots) => {
+                    roots.sort_by_key(|path| entity_root_priority(&path.module));
+                    dialog.roots = roots;
+                    dialog.selected_root = (!dialog.roots.is_empty()).then_some(0);
+                    dialog.root_address = Some(result.candidate_address);
+                    dialog.status = if result.cancelled {
+                        format!(
+                            "Stable-root scan stopped; kept {} partial candidates.",
+                            dialog.roots.len()
+                        )
+                    } else if dialog.roots.is_empty() {
+                        "No stable module root found for this candidate.".to_owned()
+                    } else {
+                        format!(
+                            "Found {} stable-root candidates for PID {}.",
+                            dialog.roots.len(),
+                            result.pid
+                        )
+                    };
+                }
+                Err(error) => dialog.status = format!("Stable-root search failed: {error}"),
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn start_entity_list_root_search(&self, dialog: &mut EntityListDialog) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select a process first.".to_owned();
+            return;
+        };
+        let Some(address) = active_entity_candidate_address(dialog) else {
+            dialog.status = "Select one candidate first.".to_owned();
+            return;
+        };
+        let modules =
+            process_modules(pid).unwrap_or_else(|_| self.memory_panel.scan_modules.clone());
+        let mut direct = modules
+            .iter()
+            .filter(|(module, base, size)| {
+                (*base..base.saturating_add(*size)).contains(&address)
+                    && (dialog.allow_system_roots || !is_system_module(module))
+            })
+            .map(|(module, base, _)| PointerPath {
+                module: module.clone(),
+                module_offset: address - *base,
+                offsets: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+        if !direct.is_empty() {
+            direct.sort_by_key(|path| entity_root_priority(&path.module));
+            dialog.roots = direct;
+            dialog.selected_root = Some(0);
+            dialog.root_address = Some(address);
+            dialog.status = "Candidate is already inside a loaded module.".to_owned();
+            return;
+        }
+        dialog.root_progress = Arc::new(AtomicUsize::new(0));
+        dialog.root_cancel.store(true, Ordering::Release);
+        dialog.root_cancel = Arc::new(AtomicBool::new(false));
+        dialog.roots.clear();
+        dialog.selected_root = None;
+        dialog.root_address = None;
+        dialog.status = "Searching pointer paths to the candidate...".to_owned();
+        let progress = Arc::clone(&dialog.root_progress);
+        let cancel = Arc::clone(&dialog.root_cancel);
+        let pointer_width = dialog.pointer_width;
+        let allow_system = dialog.allow_system_roots;
+        let (tx, rx) = mpsc::channel();
+        dialog.root_rx = Some(rx);
+        thread::spawn(move || {
+            let limits = PointerScanLimits::SAFE;
+            let result = scan_pointer_paths_with_budget_options(
+                pid,
+                address,
+                &modules,
+                pointer_width,
+                limits.max_offset,
+                limits.max_depth,
+                limits.result_limit,
+                limits.max_bytes,
+                allow_system,
+                progress,
+                Arc::clone(&cancel),
+            )
+            .map_err(|error| error.to_string());
+            let _ = tx.send(EntityListRootJobResult {
+                pid,
+                candidate_address: address,
+                cancelled: cancel.load(Ordering::Acquire),
+                result,
+            });
+        });
+    }
+
+    #[cfg(not(windows))]
+    fn start_entity_list_root_search(&self, dialog: &mut EntityListDialog) {
+        dialog.status = "Stable-root search is available on Windows only.".to_owned();
+    }
+
+    fn refresh_entity_list_preview(&self, dialog: &mut EntityListDialog, validating: bool) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select a process first.".to_owned();
+            return;
+        };
+        let Some(candidate_index) = dialog.active_candidate else {
+            return;
+        };
+        let Some(candidate_span) = dialog.candidates.get(candidate_index).map(|candidate| {
+            let span = candidate.end_address.saturating_sub(candidate.address);
+            if dialog.list_offset < 0 {
+                span.saturating_add(dialog.list_offset.unsigned_abs())
+            } else {
+                span.saturating_sub(dialog.list_offset as usize)
+            }
+        }) else {
+            return;
+        };
+        let xyz_offsets = match parse_entity_xyz_offsets(dialog) {
+            Ok(offsets) => offsets,
+            Err(error) => {
+                dialog.status = error;
+                return;
+            }
+        };
+        #[cfg(windows)]
+        if validating {
+            match process_pointer_width(pid).and_then(|pointer_width| {
+                resolve_entity_inputs(pid, dialog, pointer_width, xyz_offsets)
+                    .map(|bases| (pointer_width, bases))
+                    .map_err(std::io::Error::other)
+            }) {
+                Ok((pointer_width, bases)) if bases.len() >= 3 => {
+                    dialog.pointer_width = pointer_width;
+                    dialog.entity_bases = bases;
+                }
+                Ok(_) => {
+                    dialog.status = "At least three unique entity bases are required.".to_owned();
+                    return;
+                }
+                Err(error) => {
+                    dialog.status = format!("Unable to resolve entity inputs: {error}");
+                    return;
+                }
+            }
+        }
+        #[cfg(windows)]
+        let address = match resolved_entity_candidate_address(pid, dialog) {
+            Ok(address) => address,
+            Err(error) => {
+                if validating {
+                    dialog.status = format!("Unable to resolve candidate: {error}");
+                }
+                return;
+            }
+        };
+        #[cfg(not(windows))]
+        let Some(address) = active_entity_candidate_address(dialog) else {
+            return;
+        };
+        let extra = parse_memory_address(&dialog.max_gap).unwrap_or(128);
+        let slots = candidate_span
+            .saturating_add(extra)
+            .div_ceil(dialog.pointer_width)
+            .saturating_add(1)
+            .clamp(16, 512);
+        match validate_entity_list(
+            pid,
+            address,
+            slots,
+            dialog.pointer_width,
+            &dialog.entity_bases,
+            xyz_offsets,
+        ) {
+            Ok(preview) => {
+                if validating {
+                    dialog.status = format!(
+                        "Validated PID {pid}: {}/{} input entities, {} readable pointers, {} plausible XYZ rows.",
+                        preview.matched_entities,
+                        dialog.entity_bases.len(),
+                        preview.readable_pointers,
+                        preview.plausible_xyz,
+                    );
+                }
+                dialog.preview = Some(preview);
+                dialog.last_preview_refresh = Instant::now();
+            }
+            Err(error) if validating => dialog.status = format!("Validation failed: {error}"),
+            Err(_) => {}
+        }
+    }
+
+    fn save_entity_list_candidate(&mut self, dialog: &mut EntityListDialog) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select a process first.".to_owned();
+            return;
+        };
+        #[cfg(windows)]
+        let candidate_address = match resolved_entity_candidate_address(pid, dialog) {
+            Ok(address) => address,
+            Err(error) => {
+                dialog.status = format!("Unable to resolve candidate: {error}");
+                return;
+            }
+        };
+        #[cfg(not(windows))]
+        let Some(candidate_address) = active_entity_candidate_address(dialog) else {
+            dialog.status = "Select a candidate first.".to_owned();
+            return;
+        };
+        let pointer = dialog
+            .selected_root
+            .filter(|_| dialog.root_address == Some(candidate_address))
+            .and_then(|index| dialog.roots.get(index))
+            .map(|path| PointerSpec {
+                base: 0,
+                module: Some((path.module.clone(), path.module_offset)),
+                offsets: path.offsets.clone(),
+            });
+        let address = pointer
+            .as_ref()
+            .and_then(|pointer| resolve_memory_address(pid, pointer.base, Some(pointer)).ok())
+            .unwrap_or(candidate_address);
+        let value_type = if dialog.pointer_width == 4 {
+            ScanValueType::I32
+        } else {
+            ScanValueType::I64
+        };
+        self.memory_panel.saved.push(SavedMemoryAddress {
+            address,
+            value_type,
+            current: read_scan_value(pid, address, value_type).ok(),
+            text_encoding: None,
+            text_byte_len: 0,
+            current_text: None,
+            description: "Entity list candidate".to_owned(),
+            pointer,
+            frozen: None,
+            saved_to_library: true,
+        });
+        self.persist_memory_pointers();
+        dialog.status = "Candidate saved to MEMORY addresses and library.".to_owned();
+    }
+
+    fn render_entity_list_dialog(&mut self, ctx: &egui::Context) {
+        self.poll_entity_list_jobs();
+        let Some(mut dialog) = self.memory_panel.entity_list_dialog.take() else {
+            return;
+        };
+        if dialog.rx.is_none()
+            && dialog.active_candidate.is_some()
+            && dialog.last_preview_refresh.elapsed() >= Duration::from_millis(500)
+        {
+            self.refresh_entity_list_preview(&mut dialog, false);
+        }
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Add selected addresses").clicked() {
+                        self.add_selected_entity_addresses(&mut dialog);
+                    }
+                    let input = ui.add(
+                        egui::TextEdit::singleline(&mut dialog.new_input)
+                            .desired_width(260.0)
+                            .hint_text("raw / module+offset / root [offsets]"),
+                    );
+                    if (ui.button("Add").clicked()
+                        || (input.lost_focus()
+                            && ui.input(|state| state.key_pressed(egui::Key::Enter))))
+                        && !dialog.new_input.trim().is_empty()
+                    {
+                        dialog.inputs.push(dialog.new_input.trim().to_owned());
+                        dialog.new_input.clear();
+                    }
+                    if ui.button("Clear").clicked() {
+                        dialog.inputs.clear();
+                        dialog.inputs.resize(3, String::new());
+                    }
+                });
+                let mut remove = None;
+                egui::ScrollArea::vertical()
+                    .max_height(112.0)
+                    .show(ui, |ui| {
+                        for (index, expression) in dialog.inputs.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.add_sized(
+                                    [28.0, 22.0],
+                                    egui::Label::new(format!("{}.", index + 1)),
+                                );
+                                ui.add_sized(
+                                    [ui.available_width() - 34.0, 22.0],
+                                    egui::TextEdit::singleline(expression),
+                                );
+                                if ui.small_button("X").clicked() {
+                                    remove = Some(index);
+                                }
+                            });
+                        }
+                    });
+                if let Some(index) = remove {
+                    dialog.inputs.remove(index);
+                }
+                ui.horizontal(|ui| {
+                    ui.checkbox(
+                        &mut dialog.inputs_are_x_fields,
+                        "Inputs are X field addresses",
+                    );
+                    for (label, value) in [
+                        ("X offset", &mut dialog.x_offset),
+                        ("Y", &mut dialog.y_offset),
+                        ("Z", &mut dialog.z_offset),
+                        ("Max bytes between entries", &mut dialog.max_gap),
+                    ] {
+                        ui.label(label);
+                        ui.add(egui::TextEdit::singleline(value).desired_width(62.0));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(dialog.rx.is_none(), Button::new("Search"))
+                        .clicked()
+                    {
+                        self.start_entity_list_search(&mut dialog);
+                    }
+                    if ui
+                        .add_enabled(
+                            dialog.rx.is_some() || dialog.root_rx.is_some(),
+                            Button::new("Stop"),
+                        )
+                        .clicked()
+                    {
+                        dialog.cancel.store(true, Ordering::Release);
+                        dialog.root_cancel.store(true, Ordering::Release);
+                        dialog.status = "Stopping after the current memory chunk...".to_owned();
+                    }
+                    if ui
+                        .add_enabled(dialog.active_candidate.is_some(), Button::new("Validate"))
+                        .clicked()
+                    {
+                        self.refresh_entity_list_preview(&mut dialog, true);
+                    }
+                    if ui
+                        .add_enabled(
+                            dialog.active_candidate.is_some() && dialog.root_rx.is_none(),
+                            Button::new("Find stable root"),
+                        )
+                        .clicked()
+                    {
+                        self.start_entity_list_root_search(&mut dialog);
+                    }
+                    if ui
+                        .add_enabled(
+                            dialog.active_candidate.is_some(),
+                            Button::new("Save candidate"),
+                        )
+                        .clicked()
+                    {
+                        self.save_entity_list_candidate(&mut dialog);
+                    }
+                    ui.checkbox(&mut dialog.allow_system_roots, "Allow system-module roots");
+                });
+                if dialog.rx.is_some() {
+                    let scanned = dialog.progress.load(Ordering::Relaxed);
+                    let total = dialog.total.load(Ordering::Acquire);
+                    let fraction = if total == 0 {
+                        0.0
+                    } else {
+                        scanned as f32 / total as f32
+                    };
+                    ui.add(
+                        egui::ProgressBar::new(fraction.clamp(0.0, 1.0))
+                            .show_percentage()
+                            .text(format!(
+                                "{} / {} MiB",
+                                scanned / 1_048_576,
+                                total / 1_048_576
+                            )),
+                    );
+                    ctx.request_repaint_after(Duration::from_millis(50));
+                }
+                if dialog.root_rx.is_some() {
+                    ui.label(format!(
+                        "Stable-root scan: {} MiB",
+                        dialog.root_progress.load(Ordering::Relaxed) / 1_048_576
+                    ));
+                    ctx.request_repaint_after(Duration::from_millis(100));
+                }
+                ui.label(
+                    RichText::new(&dialog.status)
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.label(
+                    RichText::new("Candidates are ranked evidence, not a guaranteed root.")
+                        .small()
+                        .color(ui.visuals().weak_text_color()),
+                );
+                ui.label(
+                    RichText::new(
+                        "Pointer-table stride is separate from entity field offsets. Arrays/tables only; no linked list, ECS or encrypted handles.",
+                    )
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+                );
+                ui.separator();
+
+                if !ctx.wants_keyboard_input()
+                    && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A))
+                {
+                    dialog.selected = (0..dialog.candidates.len()).collect();
+                }
+                if !ctx.wants_keyboard_input()
+                    && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::C))
+                {
+                    let text = dialog
+                        .selected
+                        .iter()
+                        .filter_map(|&index| dialog.candidates.get(index))
+                        .map(|candidate| format_prefixed_memory_address(candidate.address))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    if !text.is_empty() {
+                        ctx.copy_text(text);
+                    }
+                }
+
+                const ADDRESS: f32 = 132.0;
+                const MATCH: f32 = 68.0;
+                const COVERAGE: f32 = 70.0;
+                const LOCATIONS: f32 = 240.0;
+                const STRIDE: f32 = 62.0;
+                const VALID: f32 = 62.0;
+                const XYZ: f32 = 56.0;
+                const CONFIDENCE: f32 = 82.0;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    for (width, title) in [
+                        (ADDRESS, "Candidate"),
+                        (MATCH, "Match"),
+                        (COVERAGE, "Coverage"),
+                        (LOCATIONS, "Pointer locations"),
+                        (STRIDE, "Stride"),
+                        (VALID, "Valid"),
+                        (XYZ, "XYZ"),
+                        (CONFIDENCE, "Confidence"),
+                    ] {
+                        Self::memory_label_cell(
+                            ui,
+                            width,
+                            20.0,
+                            egui::Label::new(RichText::new(title).strong()).truncate(),
+                        );
+                    }
+                });
+                let row_height = 24.0;
+                egui::ScrollArea::both().max_height(190.0).show_rows(
+                    ui,
+                    row_height,
+                    dialog.candidates.len(),
+                    |ui, rows| {
+                        ui.set_min_width(
+                            ADDRESS
+                                + MATCH
+                                + COVERAGE
+                                + LOCATIONS
+                                + STRIDE
+                                + VALID
+                                + XYZ
+                                + CONFIDENCE,
+                        );
+                        for index in rows {
+                            let candidate = dialog.candidates[index].clone();
+                            let locations = candidate
+                                .pointer_matches
+                                .iter()
+                                .take(4)
+                                .map(|hit| format_memory_address(hit.location))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            let locations = if candidate.pointer_matches.len() > 4 {
+                                format!("{locations} +{}", candidate.pointer_matches.len() - 4)
+                            } else {
+                                locations
+                            };
+                            let row_rect = egui::Rect::from_min_size(
+                                ui.next_widget_position(),
+                                vec2(ui.available_width(), row_height),
+                            );
+                            let response = ui.interact(
+                                row_rect,
+                                ui.id().with(("entity-list-candidate", index)),
+                                Sense::click(),
+                            );
+                            if dialog.selected.contains(&index) {
+                                ui.painter().rect_filled(
+                                    row_rect,
+                                    2.0,
+                                    ui.visuals().selection.bg_fill.gamma_multiply(0.55),
+                                );
+                            }
+                            ui.allocate_ui_with_layout(
+                                row_rect.size(),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.spacing_mut().item_spacing.x = 0.0;
+                                    for (width, value) in [
+                                        (
+                                            ADDRESS,
+                                            format_prefixed_memory_address(candidate.address),
+                                        ),
+                                        (MATCH, candidate.matched_entities.to_string()),
+                                        (COVERAGE, format!("{:.0}%", candidate.coverage * 100.0)),
+                                        (LOCATIONS, locations),
+                                        (STRIDE, format!("0x{:X}", candidate.observed_stride)),
+                                        (VALID, candidate.readable_pointers.to_string()),
+                                        (XYZ, candidate.plausible_xyz.to_string()),
+                                        (CONFIDENCE, format!("{:.1}%", candidate.confidence)),
+                                    ] {
+                                        Self::memory_label_cell(
+                                            ui,
+                                            width,
+                                            row_height,
+                                            egui::Label::new(value).truncate(),
+                                        );
+                                    }
+                                },
+                            );
+                            if response.clicked() {
+                                let modifiers = ui.input(|input| input.modifiers);
+                                if modifiers.shift {
+                                    if let Some(anchor) = dialog.selection_anchor {
+                                        dialog.selected.clear();
+                                        dialog
+                                            .selected
+                                            .extend(anchor.min(index)..=anchor.max(index));
+                                    }
+                                } else if modifiers.command {
+                                    if !dialog.selected.insert(index) {
+                                        dialog.selected.remove(&index);
+                                    }
+                                    dialog.selection_anchor = Some(index);
+                                } else {
+                                    dialog.selected.clear();
+                                    dialog.selected.insert(index);
+                                    dialog.selection_anchor = Some(index);
+                                }
+                                dialog.active_candidate = Some(index);
+                                dialog.preview = None;
+                                dialog.last_preview_refresh =
+                                    Instant::now() - Duration::from_secs(1);
+                                dialog.roots.clear();
+                                dialog.selected_root = None;
+                                dialog.root_address = None;
+                            }
+                            response.context_menu(|ui| {
+                                if ui.button("Copy candidate address").clicked() {
+                                    ui.ctx().copy_text(format_prefixed_memory_address(
+                                        candidate.address,
+                                    ));
+                                    ui.close();
+                                }
+                                if ui.button("Copy pointer locations").clicked() {
+                                    ui.ctx().copy_text(
+                                        candidate
+                                            .pointer_matches
+                                            .iter()
+                                            .map(|hit| format_prefixed_memory_address(hit.location))
+                                            .collect::<Vec<_>>()
+                                            .join("\n"),
+                                    );
+                                    ui.close();
+                                }
+                            });
+                        }
+                    },
+                );
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("List offset");
+                    let old_offset = dialog.list_offset;
+                    if ui.small_button("-").clicked() {
+                        dialog.list_offset = dialog
+                            .list_offset
+                            .saturating_sub(dialog.pointer_width as isize);
+                    }
+                    ui.add(
+                        egui::DragValue::new(&mut dialog.list_offset)
+                            .speed(dialog.pointer_width as f64),
+                    );
+                    if ui.small_button("+").clicked() {
+                        dialog.list_offset = dialog
+                            .list_offset
+                            .saturating_add(dialog.pointer_width as isize);
+                    }
+                    if dialog.list_offset != old_offset {
+                        dialog.preview = None;
+                        dialog.last_preview_refresh = Instant::now() - Duration::from_secs(1);
+                        dialog.roots.clear();
+                        dialog.selected_root = None;
+                        dialog.root_address = None;
+                    }
+                    if let Some(address) = active_entity_candidate_address(&dialog) {
+                        ui.label(format!(
+                            "Adjusted: {}",
+                            format_prefixed_memory_address(address)
+                        ));
+                    }
+                });
+                if !dialog.roots.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.label("Stable root");
+                        egui::ComboBox::from_id_salt("entity-list-root")
+                            .width(430.0)
+                            .selected_text(
+                                dialog
+                                    .selected_root
+                                    .and_then(|index| dialog.roots.get(index))
+                                    .map(format_pointer_path)
+                                    .unwrap_or_else(|| "Select root".to_owned()),
+                            )
+                            .show_ui(ui, |ui| {
+                                for (index, root) in dialog.roots.iter().enumerate() {
+                                    ui.selectable_value(
+                                        &mut dialog.selected_root,
+                                        Some(index),
+                                        format_pointer_path(root),
+                                    );
+                                }
+                            });
+                    });
+                }
+                ui.label(RichText::new("Preview XYZ (null slots are kept)").strong());
+                if let Some(preview) = &dialog.preview {
+                    egui::ScrollArea::vertical().max_height(150.0).show_rows(
+                        ui,
+                        22.0,
+                        preview.entries.len(),
+                        |ui, rows| {
+                            for index in rows {
+                                let entry = &preview.entries[index];
+                                let entity = entry.entity_base.map_or_else(
+                                    || "NULL".to_owned(),
+                                    format_prefixed_memory_address,
+                                );
+                                let match_text = entry.matched_input.map_or_else(
+                                    || "-".to_owned(),
+                                    |index| format!("#{}", index + 1),
+                                );
+                                let xyz = entry.xyz.map_or_else(
+                                    || "-".to_owned(),
+                                    |xyz| format!("{:.3}, {:.3}, {:.3}", xyz[0], xyz[1], xyz[2]),
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.add_sized(
+                                        [126.0, 20.0],
+                                        egui::Label::new(format_prefixed_memory_address(
+                                            entry.slot_address,
+                                        )),
+                                    );
+                                    ui.add_sized([142.0, 20.0], egui::Label::new(entity));
+                                    ui.add_sized([42.0, 20.0], egui::Label::new(match_text));
+                                    ui.add_sized(
+                                        [48.0, 20.0],
+                                        egui::Label::new(if entry.readable { "read" } else { "-" }),
+                                    );
+                                    ui.add_sized([260.0, 20.0], egui::Label::new(xyz));
+                                });
+                            }
+                        },
+                    );
+                }
+            });
+        });
+        self.memory_panel.entity_list_dialog = Some(dialog);
     }
 
     fn open_camera_matrix_dialog(&mut self) {
@@ -10287,11 +11273,167 @@ fn memory_type_from_config(value_type: &str) -> Option<ScanValueType> {
     })
 }
 
+fn parse_entity_xyz_offsets(dialog: &EntityListDialog) -> Result<[usize; 3], String> {
+    Ok([
+        parse_hex_offset(&dialog.x_offset).ok_or_else(|| "Invalid X field offset.".to_owned())?,
+        parse_hex_offset(&dialog.y_offset).ok_or_else(|| "Invalid Y field offset.".to_owned())?,
+        parse_hex_offset(&dialog.z_offset).ok_or_else(|| "Invalid Z field offset.".to_owned())?,
+    ])
+}
+
+fn active_entity_candidate_address(dialog: &EntityListDialog) -> Option<usize> {
+    dialog
+        .active_candidate
+        .and_then(|index| dialog.candidates.get(index))
+        .and_then(|candidate| candidate.address.checked_add_signed(dialog.list_offset))
+}
+
+#[cfg(windows)]
+fn resolved_entity_candidate_address(pid: u32, dialog: &EntityListDialog) -> Result<usize, String> {
+    if let Some(path) = dialog
+        .selected_root
+        .and_then(|index| dialog.roots.get(index))
+    {
+        let pointer = PointerSpec {
+            base: 0,
+            module: Some((path.module.clone(), path.module_offset)),
+            offsets: path.offsets.clone(),
+        };
+        return resolve_memory_address(pid, 0, Some(&pointer)).map_err(|error| error.to_string());
+    }
+    active_entity_candidate_address(dialog).ok_or_else(|| "select a candidate first".to_owned())
+}
+
+#[cfg(windows)]
+fn resolve_entity_expression(
+    pid: u32,
+    expression: &str,
+    pointer_width: usize,
+) -> Result<usize, String> {
+    let expression = expression.trim();
+    let (root, offsets) = if let Some(open) = expression.rfind('[') {
+        let offsets = expression
+            .get(open + 1..)
+            .and_then(|text| text.strip_suffix(']'))
+            .ok_or_else(|| "pointer chain must end with ]".to_owned())?
+            .split([',', ';'])
+            .filter(|offset| !offset.trim().is_empty())
+            .map(|offset| {
+                parse_hex_offset(offset).ok_or_else(|| format!("invalid pointer offset: {offset}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        (expression[..open].trim(), offsets)
+    } else {
+        (expression, Vec::new())
+    };
+    let mut address = if let Some(address) = parse_memory_address(root) {
+        address
+    } else {
+        let (module, offset) = root
+            .rsplit_once('+')
+            .ok_or_else(|| "use raw, module+offset, or root [offsets]".to_owned())?;
+        let offset = parse_hex_offset(offset).ok_or_else(|| "invalid module offset".to_owned())?;
+        resolve_module_offset(pid, module.trim(), offset).map_err(|error| error.to_string())?
+    };
+    for offset in offsets {
+        let value_type = if pointer_width == 4 {
+            ScanValueType::I32
+        } else {
+            ScanValueType::I64
+        };
+        let pointer = match (pointer_width, read_scan_value(pid, address, value_type)) {
+            (4, Ok(ScanValue::I32(value))) => value as u32 as usize,
+            (8, Ok(ScanValue::I64(value))) => value as usize,
+            (_, Err(error)) => return Err(error.to_string()),
+            _ => return Err("unsupported pointer width".to_owned()),
+        };
+        address = pointer
+            .checked_add(offset)
+            .ok_or_else(|| "pointer chain overflow".to_owned())?;
+    }
+    Ok(address)
+}
+
+#[cfg(windows)]
+fn resolve_entity_inputs(
+    pid: u32,
+    dialog: &EntityListDialog,
+    pointer_width: usize,
+    xyz_offsets: [usize; 3],
+) -> Result<Vec<usize>, String> {
+    let mut entity_bases = Vec::new();
+    for (index, expression) in dialog.inputs.iter().enumerate() {
+        if expression.trim().is_empty() {
+            continue;
+        }
+        let mut address = resolve_entity_expression(pid, expression, pointer_width)
+            .map_err(|error| format!("Entity {}: {error}", index + 1))?;
+        if dialog.inputs_are_x_fields {
+            address = address
+                .checked_sub(xyz_offsets[0])
+                .ok_or_else(|| format!("Entity {} is below X offset.", index + 1))?;
+        }
+        if !entity_bases.contains(&address) {
+            entity_bases.push(address);
+        }
+    }
+    Ok(entity_bases)
+}
+
+fn is_system_module(module: &str) -> bool {
+    let module = module.to_ascii_lowercase();
+    [
+        "ntdll",
+        "kernel32",
+        "kernelbase",
+        "user32",
+        "gdi32",
+        "msvcp",
+        "msvcrt",
+        "ucrtbase",
+        "vcruntime",
+        "comctl32",
+        "imm32",
+        "shell32",
+    ]
+    .iter()
+    .any(|name| module.contains(name))
+}
+
+fn entity_root_priority(module: &str) -> u8 {
+    if module.to_ascii_lowercase().ends_with(".exe") {
+        0
+    } else if is_system_module(module) {
+        2
+    } else {
+        1
+    }
+}
+
+fn format_pointer_path(path: &PointerPath) -> String {
+    let root = format!("{}+{:X}", path.module, path.module_offset);
+    if path.offsets.is_empty() {
+        root
+    } else {
+        format!(
+            "{root} [{}]",
+            path.offsets
+                .iter()
+                .map(|offset| format!("{offset:X}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+}
+
 fn format_pointer_expression(pointer: &PointerSpec) -> String {
     let root = pointer.module.as_ref().map_or_else(
         || format_prefixed_memory_address(pointer.base),
         |(module, offset)| format!("{module}+{offset:X}"),
     );
+    if pointer.offsets.is_empty() {
+        return root;
+    }
     let offsets = pointer
         .offsets
         .iter()
@@ -11252,12 +12394,33 @@ fn resolve_memory_address(
         })?;
     #[cfg(not(windows))]
     let mut address = pointer.base;
+    #[cfg(windows)]
+    let pointer_width = process_pointer_width(pid)?;
+    #[cfg(not(windows))]
+    let pointer_width = std::mem::size_of::<usize>();
     for offset in &pointer.offsets {
-        let value = read_scan_value(pid, address, ScanValueType::I64)?;
-        let ScanValue::I64(next) = value else {
-            unreachable!();
+        let next = match (
+            pointer_width,
+            read_scan_value(
+                pid,
+                address,
+                if pointer_width == 4 {
+                    ScanValueType::I32
+                } else {
+                    ScanValueType::I64
+                },
+            )?,
+        ) {
+            (4, ScanValue::I32(next)) => next as u32 as usize,
+            (8, ScanValue::I64(next)) => next as usize,
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "unsupported pointer width",
+                ));
+            }
         };
-        address = (next as usize).checked_add(*offset).ok_or_else(|| {
+        address = next.checked_add(*offset).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "pointer overflow")
         })?;
     }
