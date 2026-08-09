@@ -435,6 +435,11 @@ struct CodeAccessDialog {
     save_tracked: bool,
     auto_stop_on_hit: bool,
     hits_sort: u8,
+    value_sort: u8,
+    value_search: String,
+    value_filter_enabled: bool,
+    value_filter_min: String,
+    value_filter_max: String,
 }
 
 struct ScanJobResult {
@@ -4335,6 +4340,11 @@ impl CrosshairApp {
                 save_tracked: false,
                 auto_stop_on_hit: false,
                 hits_sort: 0,
+                value_sort: 0,
+                value_search: String::new(),
+                value_filter_enabled: false,
+                value_filter_min: String::new(),
+                value_filter_max: String::new(),
             });
             return;
         }
@@ -4368,6 +4378,11 @@ impl CrosshairApp {
             save_tracked: false,
             auto_stop_on_hit: false,
             hits_sort: 0,
+            value_sort: 0,
+            value_search: String::new(),
+            value_filter_enabled: false,
+            value_filter_min: String::new(),
+            value_filter_max: String::new(),
         });
     }
 
@@ -7115,6 +7130,29 @@ impl CrosshairApp {
             refresh_values = true;
         }
         ui.horizontal_wrapped(|ui| {
+            ui.label("Search value");
+            ui.add(
+                egui::TextEdit::singleline(&mut dialog.value_search)
+                    .desired_width(150.0)
+                    .hint_text("contains, e.g. 4"),
+            );
+            ui.toggle_value(&mut dialog.value_filter_enabled, "Filter");
+            if dialog.value_filter_enabled {
+                ui.label("Between");
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.value_filter_min)
+                        .desired_width(90.0)
+                        .hint_text("min"),
+                );
+                ui.label("and");
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.value_filter_max)
+                        .desired_width(90.0)
+                        .hint_text("max"),
+                );
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
             ui.label("Tracked address");
             ui.add(
                 egui::TextEdit::singleline(&mut dialog.tracked_name)
@@ -7166,17 +7204,61 @@ impl CrosshairApp {
                 .clicked()
             {
                 dialog.hits_sort = (dialog.hits_sort + 1) % 3;
+                dialog.value_sort = 0;
             }
-            Self::memory_table_cell(ui, value_width, RichText::new("Current").strong());
+            let value_label = match dialog.value_sort {
+                1 => "Value (^)",
+                2 => "Value (v)",
+                _ => "Value",
+            };
+            if ui
+                .add_sized(
+                    [value_width, 24.0],
+                    egui::Button::new(RichText::new(value_label).strong()).frame(false),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text("Click to cycle sort: Low to High (^) -> High to Low (v) -> Default")
+                .clicked()
+            {
+                dialog.value_sort = (dialog.value_sort + 1) % 3;
+                dialog.hits_sort = 0;
+            }
         });
         let mut context_add = None;
         let mut display_addresses: Vec<(usize, &(usize, usize))> =
             dialog.addresses.iter().enumerate().collect();
+        let search = dialog.value_search.trim();
+        let filter_min = parse_code_access_number(&dialog.value_filter_min, dialog.value_type);
+        let filter_max = parse_code_access_number(&dialog.value_filter_max, dialog.value_type);
+        display_addresses.retain(|(_, (address, _))| {
+            let displayed = dialog.values.get(address).map_or("-", String::as_str);
+            if !search.is_empty() && !displayed.contains(search) {
+                return false;
+            }
+            if !dialog.value_filter_enabled || (filter_min.is_none() && filter_max.is_none()) {
+                return true;
+            }
+            let Some(value) = parse_code_access_number(displayed, dialog.value_type) else {
+                return false;
+            };
+            filter_min.is_none_or(|min| value >= min) && filter_max.is_none_or(|max| value <= max)
+        });
         match dialog.hits_sort {
             1 => display_addresses.sort_by_key(|(_, (_, count))| *count),
             2 => display_addresses.sort_by_key(|(_, (_, count))| std::cmp::Reverse(*count)),
             _ => {}
         }
+        if dialog.value_sort != 0 {
+            display_addresses.sort_by(|(_, (left, _)), (_, (right, _))| {
+                compare_code_access_values(
+                    dialog.values.get(left).map(String::as_str),
+                    dialog.values.get(right).map(String::as_str),
+                    dialog.value_type,
+                    dialog.value_sort == 2,
+                )
+            });
+        }
+        let has_visible_addresses = !display_addresses.is_empty();
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (row_idx, (original_index, (address, count))) in display_addresses.into_iter().enumerate() {
                 let response = ui
@@ -7268,6 +7350,10 @@ impl CrosshairApp {
         if dialog.addresses.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.label("Interact with the game to capture addresses");
+            });
+        } else if !has_visible_addresses {
+            ui.centered_and_justified(|ui| {
+                ui.label("No values match the current search/filter");
             });
         }
         (add, browse, refresh_values, start_requested, apply_esp)
@@ -9706,6 +9792,40 @@ fn parse_scan_value(text: &str, value_type: ScanValueType, hex: bool) -> Option<
     }
 }
 
+fn parse_code_access_number(text: &str, value_type: ScanValueType) -> Option<f64> {
+    let value = parse_scan_value(
+        text,
+        value_type,
+        text.trim_start().starts_with("0x") || text.trim_start().starts_with("0X"),
+    )?;
+    Some(match value {
+        ScanValue::I8(value) => value as f64,
+        ScanValue::I16(value) => value as f64,
+        ScanValue::I32(value) => value as f64,
+        ScanValue::F32(value) => value as f64,
+        ScanValue::I64(value) => value as f64,
+        ScanValue::F64(value) => value,
+    })
+}
+
+fn compare_code_access_values(
+    left: Option<&str>,
+    right: Option<&str>,
+    value_type: ScanValueType,
+    descending: bool,
+) -> std::cmp::Ordering {
+    match (
+        left.and_then(|value| parse_code_access_number(value, value_type)),
+        right.and_then(|value| parse_code_access_number(value, value_type)),
+    ) {
+        (Some(left), Some(right)) if descending => right.total_cmp(&left),
+        (Some(left), Some(right)) => left.total_cmp(&right),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
 fn scan_bounds_are_ordered(min: ScanValue, max: ScanValue) -> bool {
     macro_rules! ordered {
         ($variant:path) => {
@@ -10582,6 +10702,26 @@ mod tests {
         assert_eq!(
             parse_scan_value("443*8", ScanValueType::F64, false),
             Some(ScanValue::F64(3544.0))
+        );
+    }
+
+    #[test]
+    fn parses_and_orders_find_address_values() {
+        assert_eq!(
+            parse_code_access_number("-12.5", ScanValueType::F32),
+            Some(-12.5)
+        );
+        assert_eq!(
+            parse_code_access_number("0xFFFFFFFF", ScanValueType::I32),
+            Some(-1.0)
+        );
+        assert_eq!(
+            compare_code_access_values(Some("2"), Some("10"), ScanValueType::I32, false),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            compare_code_access_values(Some("2"), Some("10"), ScanValueType::I32, true),
+            std::cmp::Ordering::Greater
         );
     }
 
