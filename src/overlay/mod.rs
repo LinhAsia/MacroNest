@@ -25732,7 +25732,11 @@ mod windows_overlay {
         let bg_r = display.background_color.r as u32;
         let bg_g = display.background_color.g as u32;
         let bg_b = display.background_color.b as u32;
-        let radius = if display.rounded_background { 16.0 } else { 0.0 };
+        let radius = if display.rounded_background {
+            16.0
+        } else {
+            0.0
+        };
 
         for py in 0..height {
             for px in 0..width {
@@ -26692,7 +26696,10 @@ mod windows_overlay {
 
             // 2. Direct hex address (e.g. "0x2813B5CC928" or "0X2813B5CC928")
             if expr.starts_with("0x") || expr.starts_with("0X") {
-                if let Ok(addr) = usize::from_str_radix(expr.trim_start_matches("0x").trim_start_matches("0X"), 16) {
+                if let Ok(addr) = usize::from_str_radix(
+                    expr.trim_start_matches("0x").trim_start_matches("0X"),
+                    16,
+                ) {
                     let tag = esp_value_type_tag(value_type);
                     if let Some(value) = self.values.get(&(pid, addr, tag)) {
                         return Ok(*value);
@@ -26712,7 +26719,11 @@ mod windows_overlay {
             for (idx, ch) in expr.char_indices().rev() {
                 match ch {
                     ']' => bracket_depth += 1,
-                    '[' => if bracket_depth > 0 { bracket_depth -= 1; },
+                    '[' => {
+                        if bracket_depth > 0 {
+                            bracket_depth -= 1;
+                        }
+                    }
                     '+' | '-' | '*' | '/' if bracket_depth == 0 => {
                         let before = &expr[..idx];
                         let after = &expr[idx + ch.len_utf8()..];
@@ -26867,10 +26878,10 @@ mod windows_overlay {
         )
     }
 
-    fn read_esp_inputs(
+    fn read_esp_view_inputs(
         preset: &crate::model::EspPreset,
         frame: &mut EspReadFrame,
-    ) -> Result<([f32; 3], [f32; 3], f32, f32), String> {
+    ) -> Result<(u32, [f32; 3], f32, f32), String> {
         if preset.target_window.trim().is_empty() {
             return Err("select a running target window first".to_owned());
         }
@@ -26884,11 +26895,6 @@ mod windows_overlay {
                 .read_value(pid, expression, preset.value_type)
                 .map_err(|error| format!("{label}: {error}"))
         };
-        let target = [
-            read("Target X", &preset.target_x)?,
-            read("Target Y", &preset.target_y)?,
-            read("Target Z", &preset.target_z)?,
-        ];
         let camera = [
             read("Camera X", &preset.camera_x)?,
             read("Camera Y", &preset.camera_y)?,
@@ -26909,6 +26915,82 @@ mod windows_overlay {
                     .ok_or_else(|| "Camera direction pair is zero or invalid".to_owned())?
             }
         };
+        Ok((pid, camera, yaw, pitch))
+    }
+
+    fn read_esp_targets(
+        preset: &crate::model::EspPreset,
+        frame: &mut EspReadFrame,
+        pid: u32,
+    ) -> Result<Vec<[f32; 3]>, String> {
+        if !preset.entity_list_enabled {
+            let mut read = |label: &str, expression: &str| {
+                frame
+                    .read_value(pid, expression, preset.value_type)
+                    .map_err(|error| format!("{label}: {error}"))
+            };
+            return Ok(vec![[
+                read("Target X", &preset.target_x)?,
+                read("Target Y", &preset.target_y)?,
+                read("Target Z", &preset.target_z)?,
+            ]]);
+        }
+
+        let root_expression = preset.entity_root.trim();
+        if root_expression.is_empty() {
+            return Err("Entity root is empty".to_owned());
+        }
+        let (target_pid, root) = frame
+            .resolve_address(pid, root_expression, false)
+            .ok_or_else(|| "Entity root could not be resolved".to_owned())?;
+        let count = preset.entity_count.clamp(1, 512);
+        let stride = preset.entity_stride.max(1);
+        let mut targets = Vec::with_capacity(count.min(64) as usize);
+        for index in 0..count {
+            let Some(x_address) =
+                crate::model::entity_field_address(root, index, stride, preset.entity_x_offset)
+            else {
+                continue;
+            };
+            let Some(y_address) =
+                crate::model::entity_field_address(root, index, stride, preset.entity_y_offset)
+            else {
+                continue;
+            };
+            let Some(z_address) =
+                crate::model::entity_field_address(root, index, stride, preset.entity_z_offset)
+            else {
+                continue;
+            };
+            let Ok(x) = frame.read_numeric_value(target_pid, x_address, preset.value_type) else {
+                continue;
+            };
+            let Ok(y) = frame.read_numeric_value(target_pid, y_address, preset.value_type) else {
+                continue;
+            };
+            let Ok(z) = frame.read_numeric_value(target_pid, z_address, preset.value_type) else {
+                continue;
+            };
+            let target = [x, y, z];
+            if target.iter().all(|value| value.is_finite())
+                && target.iter().any(|value| value.abs() > f32::EPSILON)
+                && target.iter().all(|value| value.abs() < 1.0e9)
+            {
+                targets.push(target);
+            }
+        }
+        Ok(targets)
+    }
+
+    fn read_esp_inputs(
+        preset: &crate::model::EspPreset,
+        frame: &mut EspReadFrame,
+    ) -> Result<([f32; 3], [f32; 3], f32, f32), String> {
+        let (pid, camera, yaw, pitch) = read_esp_view_inputs(preset, frame)?;
+        let target = read_esp_targets(preset, frame, pid)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Entity List contains no readable position".to_owned())?;
         Ok((target, camera, yaw, pitch))
     }
 
@@ -26992,10 +27074,25 @@ mod windows_overlay {
         if width <= 0 || height <= 0 {
             return (Vec::new(), None);
         }
-        let Ok((target, camera, yaw, pitch)) = read_esp_inputs(preset, frame) else {
+        let Ok((pid, camera, yaw, pitch)) = read_esp_view_inputs(preset, frame) else {
             return (Vec::new(), None);
         };
+        let Ok(targets) = read_esp_targets(preset, frame, pid) else {
+            return (Vec::new(), None);
+        };
+        let nearest_target = targets.iter().copied().min_by(|left, right| {
+            let distance = |target: &[f32; 3]| {
+                let dx = target[0] - camera[0];
+                let dy = target[1] - camera[1];
+                let dz = target[2] - camera[2];
+                dx * dx + dy * dy + dz * dz
+            };
+            distance(left).total_cmp(&distance(right))
+        });
         if preset.target_audio_enabled && !preset.target_audio_path.trim().is_empty() {
+            let Some(target) = nearest_target else {
+                return (Vec::new(), None);
+            };
             let dx = target[0] - camera[0];
             let dy = target[1] - camera[1];
             let dz = target[2] - camera[2];
@@ -27008,6 +27105,51 @@ mod windows_overlay {
                 pan: crate::model::esp_spatial_audio_pan(preset, target, camera, yaw),
             });
         }
+        let mut shapes = Vec::new();
+        let mut best_snapshot = None;
+        for target in targets {
+            let (mut target_shapes, snapshot) = esp_shapes_for_target(
+                preset,
+                marker_asset,
+                target,
+                camera,
+                yaw,
+                pitch,
+                left,
+                top,
+                width,
+                height,
+            );
+            shapes.append(&mut target_shapes);
+            if let Some(snapshot) = snapshot {
+                let replace = best_snapshot
+                    .as_ref()
+                    .is_none_or(|current: &EspTargetSnapshot| {
+                        (snapshot.on_screen && !current.on_screen)
+                            || (snapshot.on_screen == current.on_screen
+                                && snapshot.distance < current.distance)
+                    });
+                if replace {
+                    best_snapshot = Some(snapshot);
+                }
+            }
+        }
+        (shapes, best_snapshot)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn esp_shapes_for_target(
+        preset: &crate::model::EspPreset,
+        marker_asset: Option<&Arc<str>>,
+        target: [f32; 3],
+        camera: [f32; 3],
+        yaw: f32,
+        pitch: f32,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+    ) -> (Vec<GeometryRenderShape>, Option<EspTargetSnapshot>) {
         let Some(projection) = crate::model::project_esp(
             preset,
             target,
@@ -34863,7 +35005,9 @@ mod windows_overlay {
                         let cur_y = step_y + if p == passes - 1 { rem_y } else { 0 };
                         send_mouse_move_relative(cur_x, cur_y)?;
                         if p + 1 < passes && step.vision_move_delay_ms > 0 {
-                            thread::sleep(std::time::Duration::from_millis(step.vision_move_delay_ms));
+                            thread::sleep(std::time::Duration::from_millis(
+                                step.vision_move_delay_ms,
+                            ));
                         }
                     }
                     return Ok(());
@@ -39651,7 +39795,11 @@ mod windows_overlay {
         };
         let preset = {
             let state = HOOK_STATE.lock();
-            state.esp_presets.iter().find(|p| p.id == preset_id).cloned()
+            state
+                .esp_presets
+                .iter()
+                .find(|p| p.id == preset_id)
+                .cloned()
         };
         let Some(preset) = preset else {
             return;
@@ -39668,7 +39816,9 @@ mod windows_overlay {
         };
         let aspect = (screen_w / screen_h.max(1.0)).clamp(0.1, 10.0);
 
-        let Some(projection) = crate::model::project_esp(&preset, target, camera, yaw, pitch, aspect) else {
+        let Some(projection) =
+            crate::model::project_esp(&preset, target, camera, yaw, pitch, aspect)
+        else {
             return;
         };
 
@@ -39676,9 +39826,16 @@ mod windows_overlay {
         let half_h = screen_h * 0.5;
 
         let (delta_px_x, delta_px_y) = if projection.in_front {
-            (projection.normalized_x * half_w, projection.normalized_y * half_h)
+            (
+                projection.normalized_x * half_w,
+                projection.normalized_y * half_h,
+            )
         } else {
-            let dir = if projection.normalized_x >= 0.0 { 1.0 } else { -1.0 };
+            let dir = if projection.normalized_x >= 0.0 {
+                1.0
+            } else {
+                -1.0
+            };
             (dir * half_w * 1.5, 0.0)
         };
 
@@ -39700,8 +39857,10 @@ mod windows_overlay {
         let add_milli_x = (move_float_x * 1000.0) as i32;
         let add_milli_y = (move_float_y * 1000.0) as i32;
 
-        let total_milli_x = SUBPIXEL_X.fetch_add(add_milli_x, std::sync::atomic::Ordering::Relaxed) + add_milli_x;
-        let total_milli_y = SUBPIXEL_Y.fetch_add(add_milli_y, std::sync::atomic::Ordering::Relaxed) + add_milli_y;
+        let total_milli_x =
+            SUBPIXEL_X.fetch_add(add_milli_x, std::sync::atomic::Ordering::Relaxed) + add_milli_x;
+        let total_milli_y =
+            SUBPIXEL_Y.fetch_add(add_milli_y, std::sync::atomic::Ordering::Relaxed) + add_milli_y;
 
         let send_x = total_milli_x / 1000;
         let send_y = total_milli_y / 1000;

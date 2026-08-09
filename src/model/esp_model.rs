@@ -51,6 +51,13 @@ pub struct EspPreset {
     pub target_x: String,
     pub target_y: String,
     pub target_z: String,
+    pub entity_list_enabled: bool,
+    pub entity_root: String,
+    pub entity_x_offset: i64,
+    pub entity_y_offset: i64,
+    pub entity_z_offset: i64,
+    pub entity_stride: u32,
+    pub entity_count: u32,
     pub camera_x: String,
     pub camera_y: String,
     pub camera_z: String,
@@ -134,6 +141,13 @@ impl EspPreset {
             target_x: String::new(),
             target_y: String::new(),
             target_z: String::new(),
+            entity_list_enabled: false,
+            entity_root: String::new(),
+            entity_x_offset: 0,
+            entity_y_offset: 4,
+            entity_z_offset: 8,
+            entity_stride: 0x48,
+            entity_count: 32,
             camera_x: String::new(),
             camera_y: String::new(),
             camera_z: String::new(),
@@ -214,6 +228,32 @@ impl EspPreset {
             return true;
         }
         false
+    }
+}
+
+pub(crate) fn entity_field_address(
+    root: usize,
+    index: u32,
+    stride: u32,
+    offset: i64,
+) -> Option<usize> {
+    let entity = root.checked_add((index as usize).checked_mul(stride as usize)?)?;
+    if offset >= 0 {
+        entity.checked_add(offset as usize)
+    } else {
+        entity.checked_sub(offset.unsigned_abs() as usize)
+    }
+}
+
+#[cfg(test)]
+mod entity_address_tests {
+    use super::entity_field_address;
+
+    #[test]
+    fn calculates_positive_and_negative_entity_fields() {
+        assert_eq!(entity_field_address(0x1000, 2, 0x48, 8), Some(0x1098));
+        assert_eq!(entity_field_address(0x1000, 1, 0x48, -8), Some(0x1040));
+        assert_eq!(entity_field_address(4, 0, 1, -8), None);
     }
 }
 
@@ -357,7 +397,11 @@ pub(crate) fn esp_calibration_sample(
     let dx = target[0] - camera[0];
     let dy = target[1] - camera[1];
     let dz = target[2] - camera[2];
-    let h_mult = if preset.height_scale.is_finite() && preset.height_scale != 0.0 { preset.height_scale } else { 1.0 };
+    let h_mult = if preset.height_scale.is_finite() && preset.height_scale != 0.0 {
+        preset.height_scale
+    } else {
+        1.0
+    };
     let (forward_a, forward_b, mut vertical) = match preset.horizontal_plane {
         EspHorizontalPlane::Xy => (dx, dy, (dz + preset.target_vertical_offset) * h_mult),
         EspHorizontalPlane::Xz => (dx, dz, (dy + preset.target_vertical_offset) * h_mult),
@@ -416,7 +460,11 @@ pub(crate) fn solve_esp_calibration(
     };
 
     let solve_pitch = |sign: f32| {
-        let sign = if current_invert_camera_pitch { -sign } else { sign };
+        let sign = if current_invert_camera_pitch {
+            -sign
+        } else {
+            sign
+        };
         let offset = samples
             .iter()
             .map(|sample| sample.bearing_pitch - sign * sample.camera_pitch)
@@ -473,7 +521,11 @@ pub(crate) fn project_esp(
     let dx = target[0] - camera[0];
     let dy = target[1] - camera[1];
     let dz = target[2] - camera[2];
-    let h_mult = if preset.height_scale.is_finite() && preset.height_scale != 0.0 { preset.height_scale } else { 1.0 };
+    let h_mult = if preset.height_scale.is_finite() && preset.height_scale != 0.0 {
+        preset.height_scale
+    } else {
+        1.0
+    };
     let (forward_a, forward_b, mut vertical) = match preset.horizontal_plane {
         EspHorizontalPlane::Xy => (dx, dy, (dz + preset.target_vertical_offset) * h_mult),
         EspHorizontalPlane::Xz => (dx, dz, (dy + preset.target_vertical_offset) * h_mult),

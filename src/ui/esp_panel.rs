@@ -126,10 +126,70 @@ impl CrosshairApp {
                                 }
                             });
                         ui.end_row();
+                        ui.label("Target source");
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(
+                                &mut preset.entity_list_enabled,
+                                false,
+                                "Single target",
+                            );
+                            ui.selectable_value(
+                                &mut preset.entity_list_enabled,
+                                true,
+                                "Entity list",
+                            );
+                        });
+                        ui.end_row();
+                        if preset.entity_list_enabled {
+                            ui.label("Entity root");
+                            ui.add(
+                                TextEdit::singleline(&mut preset.entity_root)
+                                    .desired_width(420.0)
+                                    .hint_text(
+                                        RichText::new(
+                                            "stable pointer to first entity X / @alias",
+                                        )
+                                        .color(ui.visuals().weak_text_color()),
+                                    ),
+                            );
+                            ui.end_row();
+                            ui.label("Entity layout");
+                            ui.horizontal(|ui| {
+                                ui.label("X");
+                                ui.add(DragValue::new(&mut preset.entity_x_offset));
+                                ui.label("Y");
+                                ui.add(DragValue::new(&mut preset.entity_y_offset));
+                                ui.label("Z");
+                                ui.add(DragValue::new(&mut preset.entity_z_offset));
+                                ui.label("Stride");
+                                ui.add(
+                                    DragValue::new(&mut preset.entity_stride)
+                                        .range(1..=0x10000),
+                                );
+                                ui.label("Count");
+                                ui.add(
+                                    DragValue::new(&mut preset.entity_count).range(1..=512),
+                                );
+                            });
+                            ui.end_row();
+                            ui.label("");
+                            ui.label(
+                                RichText::new(
+                                    "Offsets and stride are bytes. Runtime reads are capped at 512 slots.",
+                                )
+                                .weak(),
+                            );
+                            ui.end_row();
+                        } else {
+                            for (label, value) in [
+                                ("Target X", &mut preset.target_x),
+                                ("Target Y", &mut preset.target_y),
+                                ("Target Z", &mut preset.target_z),
+                            ] {
+                                memory_expression_row(ui, label, value);
+                            }
+                        }
                         for (label, value) in [
-                            ("Target X", &mut preset.target_x),
-                            ("Target Y", &mut preset.target_y),
-                            ("Target Z", &mut preset.target_z),
                             ("Camera X", &mut preset.camera_x),
                             ("Camera Y", &mut preset.camera_y),
                             ("Camera Z", &mut preset.camera_z),
