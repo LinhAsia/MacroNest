@@ -425,6 +425,8 @@ struct DisassemblerDialog {
     address: usize,
     lines: Vec<(usize, String, String)>,
     status: String,
+    navigation_step: String,
+    search: String,
 }
 
 #[cfg(windows)]
@@ -4213,6 +4215,8 @@ impl CrosshairApp {
             address,
             lines,
             status,
+            navigation_step: "10".to_owned(),
+            search: String::new(),
         });
     }
 
@@ -6578,11 +6582,15 @@ impl CrosshairApp {
                     address: hit.address,
                     lines,
                     status: "Ready".to_owned(),
+                    navigation_step: "10".to_owned(),
+                    search: String::new(),
                 },
                 Err(status) => DisassemblerDialog {
                     address: hit.address,
                     lines: Vec::new(),
                     status,
+                    navigation_step: "10".to_owned(),
+                    search: String::new(),
                 },
             });
         }
@@ -6896,6 +6904,8 @@ impl CrosshairApp {
         let mut nav_address = None;
         let mut open_watch = None;
         let mut add_code = None;
+        let mut navigation_step = dialog.navigation_step.clone();
+        let mut search = dialog.search.clone();
         egui::CentralPanel::default()
             .frame(Self::memory_popup_frame(ctx))
             .show(ctx, |ui| {
@@ -6907,6 +6917,25 @@ impl CrosshairApp {
                     );
                     ui.label(RichText::new(&dialog.status).weak());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Copy all").clicked() {
+                            ui.ctx().copy_text(
+                                dialog
+                                    .lines
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, (address, bytes, opcode))| {
+                                        format!(
+                                            "{}\t{}\t{}\t{}",
+                                            index + 1,
+                                            format_prefixed_memory_address(*address),
+                                            bytes,
+                                            opcode
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                            );
+                        }
                         if ui.button("Copy Bytes (AOB)").clicked() {
                             if let Some((_, bytes, _)) = dialog
                                 .lines
@@ -6922,51 +6951,84 @@ impl CrosshairApp {
                             ui.ctx()
                                 .copy_text(format_prefixed_memory_address(dialog.address));
                         }
-                        ui.separator();
-                        if ui
-                            .button("▼ Down (+0x40)")
-                            .on_hover_text("Xem mã máy phía dưới (+64 bytes)")
-                            .clicked()
-                        {
-                            nav_address = Some(dialog.address.saturating_add(0x40));
-                        }
-                        if ui
-                            .button("▲ Up (-0x40)")
-                            .on_hover_text("Xem mã máy phía trên (-64 bytes)")
-                            .clicked()
-                        {
-                            nav_address = Some(dialog.address.saturating_sub(0x40));
-                        }
                     });
                 });
+                ui.horizontal(|ui| {
+                    let step = parse_hex_offset(&navigation_step);
+                    if ui
+                        .add_enabled(step.is_some(), egui::Button::new("▲ Up"))
+                        .on_hover_text("Move upward by the entered hexadecimal byte count")
+                        .clicked()
+                    {
+                        nav_address = Some(dialog.address.saturating_sub(step.unwrap_or_default()));
+                    }
+                    ui.label("0x");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut navigation_step)
+                            .desired_width(52.0)
+                            .char_limit(12)
+                            .hint_text("10"),
+                    );
+                    if ui
+                        .add_enabled(step.is_some(), egui::Button::new("▼ Down"))
+                        .on_hover_text("Move downward by the entered hexadecimal byte count")
+                        .clicked()
+                    {
+                        nav_address = Some(dialog.address.saturating_add(step.unwrap_or_default()));
+                    }
+                    ui.separator();
+                    ui.label("Search");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut search)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("instruction, bytes, or address..."),
+                    );
+                });
                 ui.separator();
+                let number_w = 42.0;
                 let addr_w = 170.0;
                 let bytes_w = 190.0;
-                let opcode_w = (ui.available_width() - addr_w - bytes_w - 24.0).max(180.0);
+                let opcode_w =
+                    (ui.available_width() - number_w - addr_w - bytes_w - 24.0).max(180.0);
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
+                    Self::memory_table_cell(ui, number_w, RichText::new("#").strong());
                     Self::memory_table_cell(ui, addr_w, RichText::new("Address").strong());
                     Self::memory_table_cell(ui, bytes_w, RichText::new("Bytes (AOB)").strong());
                     Self::memory_table_cell(ui, opcode_w, RichText::new("Instruction").strong());
                 });
+                let normalized_search = search.trim().to_ascii_lowercase();
                 egui::ScrollArea::both()
                     .id_salt("memory-disassembly-lines")
                     .max_height((ui.available_height() * 0.62).max(160.0))
                     .show(ui, |ui| {
-                        for (address, bytes, opcode) in &dialog.lines {
+                        for (index, (address, bytes, opcode)) in dialog.lines.iter().enumerate() {
+                            let formatted_address = format_prefixed_memory_address(*address);
+                            if !normalized_search.is_empty()
+                                && !formatted_address
+                                    .to_ascii_lowercase()
+                                    .contains(&normalized_search)
+                                && !bytes.to_ascii_lowercase().contains(&normalized_search)
+                                && !opcode.to_ascii_lowercase().contains(&normalized_search)
+                            {
+                                continue;
+                            }
                             let selected = *address == dialog.address;
                             let response = ui
                                 .horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = 0.0;
-                                    let address_response = Self::memory_view_cell(
+                                    let number_response = Self::memory_view_cell(
                                         ui,
-                                        addr_w,
-                                        &format_prefixed_memory_address(*address),
+                                        number_w,
+                                        &(index + 1).to_string(),
                                     );
+                                    let address_response =
+                                        Self::memory_view_cell(ui, addr_w, &formatted_address);
                                     let bytes_response = Self::memory_view_cell(ui, bytes_w, bytes);
                                     let opcode_response =
                                         Self::memory_view_cell(ui, opcode_w, opcode);
-                                    address_response
+                                    number_response
+                                        .union(address_response)
                                         .union(bytes_response)
                                         .union(opcode_response)
                                 })
@@ -7061,6 +7123,10 @@ impl CrosshairApp {
                     }
                 }
             });
+        if let Some(dialog) = self.memory_panel.disassembler_dialog.as_mut() {
+            dialog.navigation_step = navigation_step;
+            dialog.search = search;
+        }
         if let Some((addr, inst, writes)) = add_code {
             self.add_instruction_to_code_list(addr, &inst, writes);
         }
