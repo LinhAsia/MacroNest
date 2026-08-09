@@ -6902,6 +6902,7 @@ impl CrosshairApp {
         let pid = self.memory_panel.process_pid;
         let arch = self.state.memory_debugger_architecture;
         let mut nav_address = None;
+        let mut selected_address = None;
         let mut open_watch = None;
         let mut add_code = None;
         let mut navigation_step = dialog.navigation_step.clone();
@@ -7033,6 +7034,9 @@ impl CrosshairApp {
                                         .union(opcode_response)
                                 })
                                 .inner;
+                            if response.clicked() {
+                                selected_address = Some(*address);
+                            }
                             response.context_menu(|ui| {
                                 if ui.button(format!("Copy Bytes (AOB): {bytes}")).clicked() {
                                     ui.ctx().copy_text(bytes.clone());
@@ -7108,8 +7112,9 @@ impl CrosshairApp {
                                 .show(ui, |ui| {
                                     ui.add(
                                         egui::TextEdit::multiline(&mut hex_lines)
-                                            .font(egui::TextStyle::Monospace)
+                                            .code_editor()
                                             .desired_width(f32::INFINITY)
+                                            .desired_rows(16)
                                             .interactive(true),
                                     );
                                 });
@@ -7126,6 +7131,9 @@ impl CrosshairApp {
         if let Some(dialog) = self.memory_panel.disassembler_dialog.as_mut() {
             dialog.navigation_step = navigation_step;
             dialog.search = search;
+            if let Some(address) = selected_address {
+                dialog.address = address;
+            }
         }
         if let Some((addr, inst, writes)) = add_code {
             self.add_instruction_to_code_list(addr, &inst, writes);
@@ -7143,10 +7151,28 @@ impl CrosshairApp {
         }
         if let Some(target_addr) = nav_address {
             if let Some(pid) = pid {
-                if let Ok(lines) = disassemble_from(pid, target_addr, arch, 128) {
-                    if let Some(d) = self.memory_panel.disassembler_dialog.as_mut() {
-                        d.address = target_addr;
+                let mut loaded = None;
+                let mut last_error = None;
+                'address: for backtrack in 0..=15 {
+                    let candidate = target_addr.saturating_sub(backtrack);
+                    for count in [128, 64, 32, 16, 1] {
+                        match disassemble_from(pid, candidate, arch, count) {
+                            Ok(lines) if !lines.is_empty() => {
+                                loaded = Some((candidate, lines));
+                                break 'address;
+                            }
+                            Ok(_) => {}
+                            Err(error) => last_error = Some(error.to_string()),
+                        }
+                    }
+                }
+                if let Some(d) = self.memory_panel.disassembler_dialog.as_mut() {
+                    if let Some((address, lines)) = loaded {
+                        d.address = address;
                         d.lines = lines;
+                        d.status = "Ready".to_string();
+                    } else if let Some(error) = last_error {
+                        d.status = format!("Unable to navigate: {error}");
                     }
                 }
             }
