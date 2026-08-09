@@ -552,9 +552,19 @@ impl PointerMap {
         max_depth: usize,
         result_limit: usize,
     ) -> Vec<PointerPath> {
-        find_pointer_paths(
+        self.paths_to_any(&[target], max_offset, max_depth, result_limit)
+    }
+
+    pub fn paths_to_any(
+        &self,
+        targets: &[usize],
+        max_offset: usize,
+        max_depth: usize,
+        result_limit: usize,
+    ) -> Vec<PointerPath> {
+        find_pointer_paths_to_any(
             &self.pointers,
-            target,
+            targets,
             &self.modules,
             max_offset,
             max_depth,
@@ -616,9 +626,33 @@ fn find_pointer_paths(
     max_depth: usize,
     result_limit: usize,
 ) -> Vec<PointerPath> {
+    find_pointer_paths_to_any(
+        pointers,
+        &[target],
+        modules,
+        max_offset,
+        max_depth,
+        result_limit,
+    )
+}
+
+fn find_pointer_paths_to_any(
+    pointers: &[(usize, usize)],
+    targets: &[usize],
+    modules: &[(String, usize, usize)],
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+) -> Vec<PointerPath> {
     let max_frontier = result_limit.saturating_mul(16).clamp(50_000, 1_000_000);
     let mut results = Vec::new();
-    let mut frontier = vec![(target, Vec::<usize>::new())];
+    let mut seen_targets = HashSet::new();
+    let mut frontier = targets
+        .iter()
+        .copied()
+        .filter(|target| seen_targets.insert(*target))
+        .map(|target| (target, Vec::<usize>::new()))
+        .collect::<Vec<_>>();
     for _ in 0..max_depth.max(1) {
         let mut next = Vec::new();
         for (node, suffix) in frontier {

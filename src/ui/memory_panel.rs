@@ -215,6 +215,37 @@ struct DeepPointerDialog {
     using_entity_roots: bool,
 }
 
+fn expand_entity_slot_targets(
+    targets: &[usize],
+    stride: usize,
+    slots_each_side: usize,
+) -> Vec<usize> {
+    let mut expanded = Vec::with_capacity(
+        targets
+            .len()
+            .saturating_mul(slots_each_side.saturating_mul(2).saturating_add(1)),
+    );
+    let mut seen = HashSet::new();
+    for &target in targets {
+        for slot in 0..=slots_each_side {
+            let delta = stride.saturating_mul(slot);
+            if let Some(address) = target.checked_sub(delta) {
+                if seen.insert(address) {
+                    expanded.push(address);
+                }
+            }
+            if slot != 0 {
+                if let Some(address) = target.checked_add(delta) {
+                    if seen.insert(address) {
+                        expanded.push(address);
+                    }
+                }
+            }
+        }
+    }
+    expanded
+}
+
 struct DeepPointerResolvedRow {
     address: Option<usize>,
     value: Option<ScanValue>,
@@ -4576,7 +4607,7 @@ impl CrosshairApp {
         let limits = self.pointer_scan_limits();
         let worker_progress = Arc::clone(&progress);
         let (tx, rx) = mpsc::channel();
-        if let Some((map_a, targets_a, entity_stride)) = self
+        if let Some((map_a, targets_a, entity_stride, entity_slots)) = self
             .memory_panel
             .deep_pointer_dialog
             .as_ref()
@@ -4586,6 +4617,7 @@ impl CrosshairApp {
                         map,
                         dialog.source_addresses.clone(),
                         dialog.entity_stride as usize,
+                        dialog.entity_count as usize,
                     )
                 })
             })
@@ -4615,24 +4647,25 @@ impl CrosshairApp {
                         PointerScanLimits::MAX_RESULT_LIMIT,
                         PointerScanLimits::MAX_RESULT_LIMIT.saturating_mul(16),
                     );
-                    let mut paths_a = HashSet::new();
-                    for target in targets_a {
-                        paths_a.extend(map_a.paths_to(
-                            target,
-                            limits.max_offset,
-                            limits.max_depth,
-                            comparison_limit,
-                        ));
-                    }
-                    let mut paths_b = HashSet::new();
-                    for target in targets {
-                        paths_b.extend(map_b.paths_to(
-                            target,
-                            limits.max_offset,
-                            limits.max_depth,
-                            comparison_limit,
-                        ));
-                    }
+                    // Entity instances can occupy a different slot after restart. Searching
+                    // only the selected field address means the shared list root is never
+                    // enumerated, so comparing paths afterward cannot recover it.
+                    let targets_a =
+                        expand_entity_slot_targets(&targets_a, entity_stride, entity_slots);
+                    let targets_b =
+                        expand_entity_slot_targets(&targets, entity_stride, entity_slots);
+                    let paths_a = map_a.paths_to_any(
+                        &targets_a,
+                        limits.max_offset,
+                        limits.max_depth,
+                        comparison_limit,
+                    );
+                    let paths_b = map_b.paths_to_any(
+                        &targets_b,
+                        limits.max_offset,
+                        limits.max_depth,
+                        comparison_limit,
+                    );
                     compare_pointer_paths(paths_a, paths_b, entity_stride, limits.result_limit)
                 })
                 .map_err(|error| error.to_string());
@@ -5801,10 +5834,15 @@ impl CrosshairApp {
                                     egui::DragValue::new(&mut dialog.entity_stride)
                                         .range(1..=0x10000),
                                 );
+                                ui.label("Slots each side");
+                                ui.add(
+                                    egui::DragValue::new(&mut dialog.entity_count)
+                                        .range(1..=512),
+                                );
                             });
                             ui.label(
                                 RichText::new(
-                                    "Set this before Compare with map A. MacroNest will keep the common pointer root when only the entity slot changes by a stride multiple.",
+                                    "Set these before Compare with map A. MacroNest searches nearby entity slots on both maps, then keeps their common stable root.",
                                 )
                                 .weak()
                                 .small(),
