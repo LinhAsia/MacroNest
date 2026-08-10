@@ -477,6 +477,10 @@ pub struct MemoryCodeEntry {
 pub struct MemoryPointerEntry {
     pub name: String,
     #[serde(default)]
+    pub group: String,
+    #[serde(default)]
+    pub hexadecimal: bool,
+    #[serde(default)]
     pub app_name: String,
     pub module: String,
     pub module_offset: usize,

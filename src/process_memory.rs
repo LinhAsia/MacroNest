@@ -1555,7 +1555,9 @@ pub fn scan_memory_range_with_progress(
     // ponytail: merging worker Vecs temporarily raises peak RAM, so only parallelize unknown
     // scans whose result storage remains modest; a chunked result store is the upgrade path.
     const MAX_PARALLEL_UNKNOWN_BYTES: usize = 512 * 1024 * 1024;
-    let estimated_result_bytes = slots.saturating_mul(std::mem::size_of::<ScanCandidate>());
+    let estimated_result_bytes = slots
+        .min(result_limit)
+        .saturating_mul(std::mem::size_of::<ScanCandidate>());
     let worker_count = if exact.is_none() && estimated_result_bytes > MAX_PARALLEL_UNKNOWN_BYTES {
         1
     } else {
@@ -1581,10 +1583,12 @@ pub fn scan_memory_range_with_progress(
         bucket_bytes = bucket_bytes.saturating_add(region.size);
         buckets[bucket_index].push(region);
     }
+    let claimed_results = Arc::new(AtomicUsize::new(0));
     let workers = buckets
         .into_iter()
         .map(|regions| {
-            let total = Arc::clone(&total);
+            let progress = Arc::clone(&total);
+            let claimed_results = Arc::clone(&claimed_results);
             thread::spawn(move || {
                 scan_region_bucket(
                     pid,
@@ -1594,7 +1598,8 @@ pub fn scan_memory_range_with_progress(
                     value_type,
                     alignment,
                     result_limit,
-                    total,
+                    claimed_results,
+                    progress,
                 )
             })
         })
@@ -1603,16 +1608,24 @@ pub fn scan_memory_range_with_progress(
         .into_iter()
         .filter_map(|worker| worker.join().ok()?.ok())
         .collect::<Vec<_>>();
-    let total_len: usize = completed_buckets.iter().map(|b| b.len()).sum();
-    let mut found = Vec::with_capacity(total_len.min(result_limit));
-    for bucket in completed_buckets {
+    Ok(merge_scan_buckets(completed_buckets, result_limit))
+}
+
+fn merge_scan_buckets(
+    completed_buckets: Vec<Vec<ScanCandidate>>,
+    result_limit: usize,
+) -> Vec<ScanCandidate> {
+    let mut buckets = completed_buckets.into_iter();
+    let mut found = buckets.next().unwrap_or_default();
+    found.truncate(result_limit);
+    for mut bucket in buckets {
         if found.len() >= result_limit {
             break;
         }
-        let take = (result_limit - found.len()).min(bucket.len());
-        found.extend(bucket.into_iter().take(take));
+        bucket.truncate(result_limit - found.len());
+        found.append(&mut bucket);
     }
-    Ok(found)
+    found
 }
 
 pub fn scan_text_memory_with_progress(
@@ -2259,7 +2272,8 @@ fn scan_region_bucket(
     value_type: ScanValueType,
     alignment: usize,
     result_limit: usize,
-    total: Arc<AtomicUsize>,
+    claimed_results: Arc<AtomicUsize>,
+    progress: Arc<AtomicUsize>,
 ) -> io::Result<Vec<ScanCandidate>> {
     let process = ScanProcess::open(pid, false)?;
     let mut found = Vec::new();
@@ -2271,6 +2285,7 @@ fn scan_region_bucket(
             let length = (end - chunk_base).min(SCAN_CHUNK_BYTES);
             buffer.resize(length, 0);
             if let Ok(count) = process.read(chunk_base, &mut buffer) {
+                progress.fetch_add(count, Ordering::Relaxed);
                 let width = value_type.width();
                 let step = alignment.max(1);
                 let chunk_start = found.len();
@@ -2289,7 +2304,8 @@ fn scan_region_bucket(
                 }
                 let chunk_matches = found.len() - chunk_start;
                 if chunk_matches > 0 {
-                    let allowed = claim_result_slots(&total, chunk_matches, result_limit);
+                    let allowed =
+                        claim_result_slots(&claimed_results, chunk_matches, result_limit);
                     found.truncate(chunk_start + allowed);
                     if allowed < chunk_matches {
                         break 'regions;
@@ -2503,6 +2519,22 @@ mod tests {
             &[true; 3],
             &[Some([1.0, 2.0, 3.0]); 3],
         )
+    }
+
+    #[test]
+    fn scan_bucket_merge_respects_limit() {
+        let candidate = |address| ScanCandidate::new(address, ScanValue::I32(address as i32));
+        let merged = merge_scan_buckets(
+            vec![
+                vec![candidate(1), candidate(2)],
+                vec![candidate(3), candidate(4)],
+            ],
+            3,
+        );
+        assert_eq!(
+            merged.iter().map(|item| item.address).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
     }
 
     #[test]

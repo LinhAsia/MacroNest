@@ -136,6 +136,8 @@ struct SavedMemoryAddress {
     text_byte_len: usize,
     current_text: Option<String>,
     description: String,
+    group: String,
+    hexadecimal: bool,
     pointer: Option<PointerSpec>,
     frozen: Option<ScanValue>,
     saved_to_library: bool,
@@ -328,8 +330,16 @@ struct AddressDialog {
     address: String,
     offsets: String,
     pointer: bool,
+    description: String,
+    value_type: ScanValueType,
+    hexadecimal: bool,
     position: egui::Pos2,
     rect: Option<egui::Rect>,
+}
+
+struct AddressGroupDialog {
+    name: String,
+    indices: Vec<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -496,6 +506,7 @@ struct InstructionWatchDialog {
     pending_disassembler: Option<usize>,
     auto_stop_on_hit: bool,
     hits_sort: u8,
+    instruction_sort: u8,
 }
 
 #[cfg(windows)]
@@ -635,6 +646,7 @@ pub(crate) struct MemoryPanelState {
     scan_mem_private: bool,
     scan_mem_image: bool,
     scan_mem_mapped: bool,
+    scan_scope_all: bool,
     fast_scan: bool,
     fast_scan_alignment: String,
     pause_while_scanning: bool,
@@ -649,6 +661,7 @@ pub(crate) struct MemoryPanelState {
     saved_selection_anchor: Option<usize>,
     saved_list_active: bool,
     last_saved_cell_click: Option<(usize, isize, Instant)>,
+    saved_address_sort: u8,
     manual_address: String,
     status: String,
     last_action: String,
@@ -669,6 +682,7 @@ pub(crate) struct MemoryPanelState {
     edit_code_name_index: Option<usize>,
     edit_code_name_input: String,
     address_dialog: Option<AddressDialog>,
+    address_group_dialog: Option<AddressGroupDialog>,
     memory_view_dialog: Option<MemoryViewDialog>,
     #[cfg(windows)]
     module_list_dialog: Option<ModuleListDialog>,
@@ -688,6 +702,7 @@ pub(crate) struct MemoryPanelState {
     last_refresh: Instant,
     last_saved_refresh: Instant,
     visible_scan_ranges: [Option<(usize, usize, Instant)>; 2],
+    last_scan_result_click: Option<(usize, bool, Instant)>,
     pending_write_checks: Vec<PendingWriteCheck>,
     freeze_worker: MemoryFreezeWorker,
     pub(crate) dll_config: crate::dll_generator::DllProjectConfig,
@@ -723,6 +738,7 @@ impl Default for MemoryPanelState {
             scan_mem_private: true,
             scan_mem_image: false,
             scan_mem_mapped: false,
+            scan_scope_all: false,
             fast_scan: true,
             fast_scan_alignment: "4".to_owned(),
             pause_while_scanning: false,
@@ -737,6 +753,7 @@ impl Default for MemoryPanelState {
             saved_selection_anchor: None,
             saved_list_active: false,
             last_saved_cell_click: None,
+            saved_address_sort: 0,
             manual_address: String::new(),
             status: "Ready".to_owned(),
             last_action: "Ready".to_owned(),
@@ -757,6 +774,7 @@ impl Default for MemoryPanelState {
             edit_code_name_index: None,
             edit_code_name_input: String::new(),
             address_dialog: None,
+            address_group_dialog: None,
             memory_view_dialog: None,
             #[cfg(windows)]
             module_list_dialog: None,
@@ -776,6 +794,7 @@ impl Default for MemoryPanelState {
             last_refresh: Instant::now(),
             last_saved_refresh: Instant::now(),
             visible_scan_ranges: [None, None],
+            last_scan_result_click: None,
             pending_write_checks: Vec::new(),
             freeze_worker: MemoryFreezeWorker::default(),
             dll_config: crate::dll_generator::DllProjectConfig::default(),
@@ -817,6 +836,7 @@ impl CrosshairApp {
             self.memory_panel.edit_value_position = None;
             self.memory_panel.edit_description_index = None;
             self.memory_panel.address_dialog = None;
+            self.memory_panel.address_group_dialog = None;
         }
         self.memory_panel.process_pid = pid;
         #[cfg(windows)]
@@ -954,6 +974,16 @@ impl CrosshairApp {
             Self::render_memory_address_dialog,
         ) {
             self.memory_panel.address_dialog = None;
+        }
+        let group_open = self.memory_panel.address_group_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ui.ctx(),
+            "memory-address-group-host",
+            "Add to new group",
+            group_open,
+            Self::render_memory_address_group_dialog,
+        ) {
+            self.memory_panel.address_group_dialog = None;
         }
         self.render_memory_view_dialog(ui.ctx());
         #[cfg(windows)]
@@ -1148,19 +1178,29 @@ impl CrosshairApp {
                 egui::CentralPanel::default()
                     .frame(Self::memory_popup_frame(ctx))
                     .show(ctx, |ui| {
-                        let count = if self.memory_panel.scanning {
-                            self.memory_panel
-                                .scan_progress
-                                .load(Ordering::Relaxed)
-                                .max(self.memory_panel.scan_input_count)
+                        let progress = if self.memory_panel.scanning {
+                            let scanned = self.memory_panel.scan_progress.load(Ordering::Relaxed);
+                            if scanned > 0 {
+                                format!("{:.1} MB scanned", scanned as f64 / 1_048_576.0)
+                            } else if self.memory_panel.scan_input_count > 0 {
+                                format!(
+                                    "{} address(es) to filter",
+                                    self.memory_panel.scan_input_count
+                                )
+                            } else {
+                                "Starting scan".to_owned()
+                            }
                         } else {
-                            self.memory_panel
-                                .candidates
-                                .len()
-                                .max(self.memory_panel.text_candidates.len())
+                            format!(
+                                "{} address(es)",
+                                self.memory_panel
+                                    .candidates
+                                    .len()
+                                    .max(self.memory_panel.text_candidates.len())
+                            )
                         };
                         ui.label(format!(
-                            "{}  •  {count} address(es){}",
+                            "{}  •  {progress}{}",
                             self.memory_panel.last_action,
                             if self.memory_panel.scanning {
                                 "  •  Loading…"
@@ -1715,26 +1755,55 @@ impl CrosshairApp {
                 let active_label = self.tr("Active memory only", "Active memory only");
                 let private_label = self.tr("Heap/Stack (MEM_PRIVATE)", "Bộ nhớ động (MEM_PRIVATE)");
                 let image_label = self.tr("DLLs / Mapped memory", "DLL & Mapped file");
+                ui.horizontal(|ui| {
+                    ui.label("Memory scan options");
+                    egui::ComboBox::from_id_salt("memory-scan-scope")
+                        .selected_text(if self.memory_panel.scan_scope_all { "All" } else { "Custom" })
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(self.memory_panel.scan_scope_all, "All").clicked() {
+                                self.memory_panel.scan_scope_all = true;
+                                self.memory_panel.scan_writable = false;
+                                self.memory_panel.scan_executable = true;
+                                self.memory_panel.scan_copy_on_write = true;
+                                self.memory_panel.scan_active_memory_only = false;
+                                self.memory_panel.scan_mem_private = true;
+                                self.memory_panel.scan_mem_image = true;
+                                self.memory_panel.scan_mem_mapped = true;
+                            }
+                            if ui.selectable_label(!self.memory_panel.scan_scope_all, "Custom").clicked() {
+                                self.memory_panel.scan_scope_all = false;
+                            }
+                        });
+                });
+                let mut scope_changed = false;
                 ui.columns(2, |columns| {
-                    columns[0].checkbox(&mut self.memory_panel.scan_writable, writable_label);
-                    columns[1].checkbox(&mut self.memory_panel.scan_executable, executable_label);
-                    columns[0].checkbox(
+                    scope_changed |= columns[0]
+                        .checkbox(&mut self.memory_panel.scan_writable, writable_label)
+                        .changed();
+                    scope_changed |= columns[1]
+                        .checkbox(&mut self.memory_panel.scan_executable, executable_label)
+                        .changed();
+                    scope_changed |= columns[0].checkbox(
                         &mut self.memory_panel.scan_copy_on_write,
                         copy_label,
-                    );
-                    columns[1].checkbox(
+                    ).changed();
+                    scope_changed |= columns[1].checkbox(
                         &mut self.memory_panel.scan_active_memory_only,
                         active_label,
-                    );
-                    columns[0].checkbox(
+                    ).changed();
+                    scope_changed |= columns[0].checkbox(
                         &mut self.memory_panel.scan_mem_private,
                         private_label,
-                    );
-                    columns[1].checkbox(
+                    ).changed();
+                    scope_changed |= columns[1].checkbox(
                         &mut self.memory_panel.scan_mem_image,
                         image_label,
-                    );
+                    ).changed();
                 });
+                if scope_changed {
+                    self.memory_panel.scan_scope_all = false;
+                    self.memory_panel.scan_mem_mapped = self.memory_panel.scan_mem_image;
+                }
                 ui.horizontal(|ui| {
                     let fast_scan_label = self.tr("Fast scan", "Fast scan");
                     ui.checkbox(&mut self.memory_panel.fast_scan, fast_scan_label);
@@ -2055,6 +2124,26 @@ impl CrosshairApp {
                 }
             });
         });
+        let manual_double_clicked = ui.input(|input| {
+            input.pointer.button_pressed(egui::PointerButton::Primary)
+                && input
+                    .pointer
+                    .interact_pos()
+                    .is_some_and(|position| full_row_rect.contains(position))
+        }) && {
+            let now = Instant::now();
+            let double = self
+                .memory_panel
+                .last_scan_result_click
+                .is_some_and(|(last_index, last_pinned, last_click)| {
+                    last_index == index
+                        && last_pinned == pinned
+                        && now.duration_since(last_click) <= Duration::from_millis(500)
+                });
+            self.memory_panel.last_scan_result_click =
+                (!double).then_some((index, pinned, now));
+            double
+        };
         response.context_menu(|ui| {
             let label = if marked {
                 "Remove not-relevant mark"
@@ -2086,7 +2175,7 @@ impl CrosshairApp {
                 ui.close();
             }
         });
-        if response.double_clicked() {
+        if manual_double_clicked || response.double_clicked() {
             self.memory_panel.selected_results.clear();
             self.memory_panel.selected_results.insert(index);
             self.add_selected_memory_results();
@@ -2650,13 +2739,14 @@ impl CrosshairApp {
                 }
                 let stt_width = 36.0;
                 let header_column_width = ((ui.available_width() - stt_width - 21.0) / 4.0).max(70.0);
+                let mut sort_address = false;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     Self::memory_table_cell(ui, stt_width, RichText::new("#").strong());
                     Self::memory_table_cell(
                         ui,
                         header_column_width,
-                        RichText::new(self.tr("Address", "Address")).strong(),
+                        RichText::new(self.tr("Description", "Description")).strong(),
                     );
                     Self::memory_table_cell(
                         ui,
@@ -2668,12 +2758,26 @@ impl CrosshairApp {
                         header_column_width,
                         RichText::new(self.tr("Value", "Value")).strong(),
                     );
-                    Self::memory_table_cell(
+                    let sort_marker = match self.memory_panel.saved_address_sort {
+                        1 => " ▲",
+                        2 => " ▼",
+                        _ => "",
+                    };
+                    sort_address = Self::memory_label_cell(
                         ui,
                         header_column_width,
-                        RichText::new(self.tr("Description", "Description")).strong(),
-                    );
+                        18.0,
+                        egui::Label::new(
+                            RichText::new(format!("Address{sort_marker}")).strong(),
+                        )
+                        .sense(Sense::click()),
+                    )
+                    .on_hover_text("Sort by address")
+                    .clicked();
                 });
+                if sort_address {
+                    self.sort_saved_addresses();
+                }
                 ui.separator();
                 let row_height = 26.0;
                 let count = self.memory_panel.saved.len();
@@ -2683,11 +2787,18 @@ impl CrosshairApp {
                     .max_height(ui.available_height())
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
+                        let mut previous_group = String::new();
                         for index in 0..count {
                             if index >= self.memory_panel.saved.len() {
                                 continue;
                             }
                             let saved = self.memory_panel.saved[index].clone();
+                            if !saved.group.is_empty() && saved.group != previous_group {
+                                ui.add_space(3.0);
+                                ui.label(RichText::new(format!("▼ {}", saved.group)).strong());
+                                ui.separator();
+                            }
+                            previous_group = saved.group.clone();
                             let selected = self.memory_panel.selected_saved.contains(&index);
                             let mut open_address = false;
                             let mut edit_value = false;
@@ -2738,18 +2849,42 @@ impl CrosshairApp {
                                             .sense(Sense::hover()),
                                     );
                                     row_hits.push(stt_response);
-                                    let address_response = Self::memory_label_cell(
-                                        ui,
-                                        column_width,
-                                        row_height,
-                                        egui::Label::new(format_memory_address(saved.address))
-                                            .selectable(false)
-                                            .sense(Sense::hover()),
-                                    );
-                                    address_response
-                                        .clone()
-                                        .on_hover_cursor(egui::CursorIcon::Default);
-                                    row_hits.push(address_response.clone());
+                                    if self.memory_panel.edit_description_index == Some(index) {
+                                        let description_response = ui.add_sized(
+                                            [column_width, row_height],
+                                            egui::TextEdit::singleline(
+                                                &mut self.memory_panel.saved[index].description,
+                                            ),
+                                        );
+                                        description_response.request_focus();
+                                        row_hits.push(description_response.clone());
+                                        if description_response.clicked_elsewhere()
+                                            || (description_response.has_focus()
+                                                && ui.input(|input| {
+                                                    input.key_pressed(egui::Key::Enter)
+                                                        || input.key_pressed(egui::Key::Escape)
+                                                }))
+                                        {
+                                            self.memory_panel.edit_description_index = None;
+                                            persist_pointer_changes = true;
+                                        }
+                                    } else {
+                                        let description = if saved.description.is_empty() {
+                                            RichText::new("description").weak()
+                                        } else {
+                                            RichText::new(&saved.description)
+                                        };
+                                        let description_response = Self::memory_label_cell(
+                                            ui,
+                                            column_width,
+                                            row_height,
+                                            egui::Label::new(description)
+                                                .selectable(false)
+                                                .truncate()
+                                                .sense(Sense::hover()),
+                                        );
+                                        row_hits.push(description_response);
+                                    }
                                     let current_type_label = match saved.text_encoding {
                                         Some(TextEncoding::Utf8) => "Text (UTF-8)",
                                         Some(TextEncoding::Utf16) => "Text (UTF-16)",
@@ -2794,10 +2929,7 @@ impl CrosshairApp {
                                                 .clone()
                                                 .or_else(|| {
                                                     saved.current.map(|value| {
-                                                        format_scan_value(
-                                                            value,
-                                                            self.memory_panel.hex,
-                                                        )
+                                                        format_scan_value(value, saved.hexadecimal)
                                                     })
                                                 })
                                                 .unwrap_or_else(|| "?".to_owned()),
@@ -2809,45 +2941,15 @@ impl CrosshairApp {
                                         .clone()
                                         .on_hover_cursor(egui::CursorIcon::Default);
                                     row_hits.push(value_response.clone());
-                                    if self.memory_panel.edit_description_index == Some(index) {
-                                        let description_response = ui.add_sized(
-                                            [column_width, row_height],
-                                            egui::TextEdit::singleline(
-                                                &mut self.memory_panel.saved[index].description,
-                                            ),
-                                        );
-                                        description_response.request_focus();
-                                        row_hits.push(description_response.clone());
-                                        if description_response.clicked_elsewhere()
-                                            || (description_response.has_focus()
-                                                && ui.input(|input| {
-                                                    input.key_pressed(egui::Key::Enter)
-                                                        || input.key_pressed(egui::Key::Escape)
-                                                }))
-                                        {
-                                            self.memory_panel.edit_description_index = None;
-                                            persist_pointer_changes = true;
-                                        }
-                                    } else {
-                                        let description = if saved.description.is_empty() {
-                                            RichText::new("description").weak()
-                                        } else {
-                                            RichText::new(&saved.description)
-                                        };
-                                        let description_response = Self::memory_label_cell(
-                                            ui,
-                                            column_width,
-                                            row_height,
-                                            egui::Label::new(description)
-                                                .selectable(false)
-                                                .truncate()
-                                                .sense(Sense::hover()),
-                                        );
-                                        description_response
-                                            .clone()
-                                            .on_hover_cursor(egui::CursorIcon::Default);
-                                        row_hits.push(description_response.clone());
-                                    }
+                                    let address_response = Self::memory_label_cell(
+                                        ui,
+                                        column_width,
+                                        row_height,
+                                        egui::Label::new(format_memory_address(saved.address))
+                                            .selectable(false)
+                                            .sense(Sense::hover()),
+                                    );
+                                    row_hits.push(address_response);
                                     let mut frozen = saved.frozen.is_some();
                                     let frozen_response = ui
                                         .add_enabled_ui(saved.text_encoding.is_none(), |ui| {
@@ -2876,7 +2978,7 @@ impl CrosshairApp {
                             }) && let Some(pointer) = ui.ctx().pointer_latest_pos()
                                 && full_row_rect.contains(pointer)
                             {
-                                let column = ((pointer.x - full_row_rect.left() - 3.0)
+                                let column = ((pointer.x - full_row_rect.left() - 3.0 - stt_width)
                                     / column_width)
                                     .floor() as isize;
                                 let now = Instant::now();
@@ -2893,9 +2995,9 @@ impl CrosshairApp {
                                     (!double_clicked).then_some((index, column, now));
                                 if double_clicked {
                                     match column {
-                                        0 => open_address = true,
+                                        0 => self.memory_panel.edit_description_index = Some(index),
                                         2 => edit_value = true,
-                                        3 => self.memory_panel.edit_description_index = Some(index),
+                                        3 => open_address = true,
                                         _ => {}
                                     }
                                 }
@@ -2992,6 +3094,27 @@ impl CrosshairApp {
                                         .weak()
                                         .small(),
                                     );
+                                }
+                                if ui
+                                    .add_enabled(
+                                        selected_count > 0,
+                                        Button::new("Add to new group"),
+                                    )
+                                    .clicked()
+                                {
+                                    let mut indices = self
+                                        .memory_panel
+                                        .selected_saved
+                                        .iter()
+                                        .copied()
+                                        .collect::<Vec<_>>();
+                                    indices.sort_unstable();
+                                    self.memory_panel.address_group_dialog =
+                                        Some(AddressGroupDialog {
+                                            name: String::new(),
+                                            indices,
+                                        });
+                                    ui.close();
                                 }
                                 if ui
                                     .add_enabled(
@@ -3329,6 +3452,9 @@ impl CrosshairApp {
                                     address,
                                     offsets,
                                     pointer,
+                                    description: saved.description.clone(),
+                                    value_type: saved.value_type,
+                                    hexadecimal: saved.hexadecimal,
                                     position: ui
                                         .ctx()
                                         .pointer_latest_pos()
@@ -4024,6 +4150,8 @@ impl CrosshairApp {
                 text_byte_len: 0,
                 current_text: None,
                 description: entry.name,
+                group: entry.group,
+                hexadecimal: entry.hexadecimal,
                 pointer,
                 frozen: None,
                 saved_to_library: false,
@@ -5264,7 +5392,9 @@ impl CrosshairApp {
             text_encoding: None,
             text_byte_len: 0,
             current_text: None,
-            description: "Entity list candidate".to_owned(),
+                description: "Entity list candidate".to_owned(),
+                group: String::new(),
+                hexadecimal: false,
             pointer,
             frozen: None,
             saved_to_library: true,
@@ -6245,6 +6375,8 @@ impl CrosshairApp {
                             text_byte_len: 0,
                             current_text: None,
                             description: "View-projection matrix (16 floats)".to_owned(),
+                            group: String::new(),
+                            hexadecimal: false,
                             pointer: None,
                             frozen: None,
                             saved_to_library: false,
@@ -7190,6 +7322,8 @@ impl CrosshairApp {
                         text_byte_len: 0,
                         current_text: None,
                         description: format!("{}+{:X}", path.module, path.module_offset),
+                        group: String::new(),
+                        hexadecimal: false,
                         pointer: Some(pointer),
                         frozen: None,
                         saved_to_library: false,
@@ -7375,6 +7509,8 @@ impl CrosshairApp {
             text_byte_len: 0,
             current_text: None,
             description: desc.clone(),
+            group: String::new(),
+            hexadecimal: false,
             pointer: Some(pointer),
             frozen: None,
             saved_to_library: save_to_library,
@@ -7437,6 +7573,7 @@ impl CrosshairApp {
             pending_disassembler: None,
             auto_stop_on_hit: false,
             hits_sort: 0,
+            instruction_sort: 0,
         });
     }
 
@@ -7763,7 +7900,25 @@ impl CrosshairApp {
             ui.spacing_mut().item_spacing.x = 0.0;
             Self::memory_table_cell(ui, stt_width, RichText::new("#").strong());
             Self::memory_table_cell(ui, address_width, RichText::new("Address").strong());
-            Self::memory_table_cell(ui, instruction_width, RichText::new("Instruction").strong());
+            let instruction_label = match dialog.instruction_sort {
+                1 => "Instruction (A-Z)",
+                2 => "Instruction (Z-A)",
+                _ => "Instruction",
+            };
+            if ui
+                .add_sized(
+                    [instruction_width, 24.0],
+                    egui::Button::new(RichText::new(instruction_label).strong()).frame(false),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(
+                    "Click to cycle sort: instruction A-Z -> instruction Z-A -> capture order",
+                )
+                .clicked()
+            {
+                dialog.instruction_sort = (dialog.instruction_sort + 1) % 3;
+                dialog.hits_sort = 0;
+            }
             let hits_label = match dialog.hits_sort {
                 1 => "Hits (^)",
                 2 => "Hits (v)",
@@ -7779,6 +7934,7 @@ impl CrosshairApp {
                 .clicked()
             {
                 dialog.hits_sort = (dialog.hits_sort + 1) % 3;
+                dialog.instruction_sort = 0;
             }
         });
         let list_height = (ui.available_height() * 0.45).clamp(140.0, 300.0);
@@ -7786,9 +7942,15 @@ impl CrosshairApp {
         let mut context_disassembler = None;
         let mut display_hits: Vec<(usize, &InstructionHit)> =
             dialog.hits.iter().enumerate().collect();
-        match dialog.hits_sort {
-            1 => display_hits.sort_by_key(|(_, hit)| hit.count),
-            2 => display_hits.sort_by_key(|(_, hit)| std::cmp::Reverse(hit.count)),
+        match (dialog.instruction_sort, dialog.hits_sort) {
+            (1, _) => display_hits.sort_by_cached_key(|(_, hit)| {
+                (hit.instruction.to_ascii_lowercase(), hit.address)
+            }),
+            (2, _) => display_hits.sort_by_cached_key(|(_, hit)| {
+                std::cmp::Reverse((hit.instruction.to_ascii_lowercase(), hit.address))
+            }),
+            (_, 1) => display_hits.sort_by_key(|(_, hit)| hit.count),
+            (_, 2) => display_hits.sort_by_key(|(_, hit)| std::cmp::Reverse(hit.count)),
             _ => {}
         }
         egui::ScrollArea::vertical()
@@ -8822,6 +8984,8 @@ impl CrosshairApp {
             text_byte_len: 0,
             current_text: None,
             description: String::new(),
+            group: String::new(),
+            hexadecimal: false,
             pointer: None,
             frozen: None,
             saved_to_library: false,
@@ -8876,6 +9040,8 @@ impl CrosshairApp {
         let signature_saved = tracked_signature.is_some();
         let entry = MemoryPointerEntry {
             name: name.clone(),
+            group: String::new(),
+            hexadecimal: false,
             app_name,
             module: String::new(),
             module_offset: 0,
@@ -10029,6 +10195,8 @@ impl CrosshairApp {
             text_byte_len: 0,
             current_text: None,
             description: String::new(),
+            group: String::new(),
+            hexadecimal: false,
             pointer: None,
             frozen: None,
             saved_to_library: false,
@@ -10105,8 +10273,27 @@ impl CrosshairApp {
                 ui.checkbox(&mut dialog.pointer, "Pointer (x64)");
                 ui.horizontal(|ui| {
                     ui.label(if dialog.pointer { "Base" } else { "Address" });
-                    ui.text_edit_singleline(&mut dialog.address);
+                    let response = ui.text_edit_singleline(&mut dialog.address);
+                    if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                        save = true;
+                    }
                 });
+                ui.horizontal(|ui| {
+                    ui.label("Description");
+                    ui.text_edit_singleline(&mut dialog.description);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Type");
+                    egui::ComboBox::from_id_salt("change-address-type")
+                        .selected_text(memory_type_label(dialog.value_type))
+                        .show_ui(ui, |ui| {
+                            for (value_type, label) in memory_value_types() {
+                                ui.selectable_value(&mut dialog.value_type, value_type, label);
+                            }
+                        });
+                });
+                ui.checkbox(&mut dialog.hexadecimal, "Hexadecimal")
+                    .on_hover_text("Display this value as hexadecimal; the stored type is unchanged");
                 if dialog.pointer {
                     ui.horizontal(|ui| {
                         ui.label("Offsets");
@@ -10210,6 +10397,27 @@ impl CrosshairApp {
                                                 .color(Color32::from_rgb(100, 220, 130)),
                                         );
                                     }
+                                    if valid {
+                                        match read_scan_value(pid, current, dialog.value_type) {
+                                            Ok(value) => {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "Value: {}",
+                                                        format_scan_value(value, dialog.hexadecimal)
+                                                    ))
+                                                    .monospace()
+                                                    .color(Color32::from_rgb(100, 220, 130)),
+                                                );
+                                            }
+                                            Err(_) => {
+                                                ui.label(
+                                                    RichText::new("Value: cannot read memory")
+                                                        .monospace()
+                                                        .color(Color32::from_rgb(220, 80, 80)),
+                                                );
+                                            }
+                                        }
+                                    }
                                 } else {
                                     ui.label(
                                         RichText::new("Cannot resolve base address")
@@ -10221,6 +10429,21 @@ impl CrosshairApp {
                             ui.separator();
                         }
                     }
+                }
+                if !dialog.pointer
+                    && let Some(pid) = self.memory_panel.process_pid
+                    && let Some(address) = parse_address_edit(
+                        self.memory_panel
+                            .saved
+                            .get(dialog.index)
+                            .map_or(0, |saved| saved.address),
+                        &dialog.address,
+                    )
+                {
+                    let preview = read_scan_value(pid, address, dialog.value_type)
+                        .map(|value| format_scan_value(value, dialog.hexadecimal))
+                        .unwrap_or_else(|_| "cannot read memory".to_owned());
+                    ui.label(RichText::new(format!("Value: {preview}")).monospace());
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
@@ -10246,7 +10469,95 @@ impl CrosshairApp {
         }
     }
 
+    fn render_memory_address_group_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.memory_panel.address_group_dialog.take() else {
+            return;
+        };
+        let mut keep_open = true;
+        egui::CentralPanel::default()
+            .frame(Self::memory_popup_frame(ctx))
+            .show(ctx, |ui| {
+                ui.label("Group name");
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut dialog.name)
+                        .desired_width(ui.available_width()),
+                );
+                response.request_focus();
+                let submit = response.lost_focus()
+                    && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                ui.horizontal(|ui| {
+                    if (ui.button("Add").clicked() || submit) && !dialog.name.trim().is_empty() {
+                        self.add_saved_addresses_to_group(&dialog.indices, dialog.name.trim());
+                        keep_open = false;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        keep_open = false;
+                    }
+                });
+            });
+        if keep_open {
+            self.memory_panel.address_group_dialog = Some(dialog);
+        }
+    }
+
+    fn add_saved_addresses_to_group(&mut self, indices: &[usize], name: &str) {
+        let selected = indices.iter().copied().collect::<HashSet<_>>();
+        let insert_at = indices.iter().copied().min().unwrap_or(self.memory_panel.saved.len());
+        let mut grouped = Vec::with_capacity(selected.len());
+        let mut remaining = Vec::with_capacity(self.memory_panel.saved.len() - selected.len());
+        for (index, mut entry) in self.memory_panel.saved.drain(..).enumerate() {
+            if selected.contains(&index) {
+                entry.group = name.to_owned();
+                grouped.push(entry);
+            } else {
+                remaining.push(entry);
+            }
+        }
+        let insert_at = insert_at.min(remaining.len());
+        remaining.splice(insert_at..insert_at, grouped);
+        self.memory_panel.saved = remaining;
+        self.memory_panel.selected_saved =
+            (insert_at..insert_at + selected.len()).collect::<HashSet<_>>();
+        self.memory_panel.saved_selection_anchor = Some(insert_at);
+        self.persist_memory_pointers();
+    }
+
+    fn sort_saved_addresses(&mut self) {
+        self.memory_panel.saved_address_sort = match self.memory_panel.saved_address_sort {
+            1 => 2,
+            _ => 1,
+        };
+        let descending = self.memory_panel.saved_address_sort == 2;
+        let selected = self.memory_panel.selected_saved.clone();
+        let mut rows = self
+            .memory_panel
+            .saved
+            .drain(..)
+            .enumerate()
+            .collect::<Vec<_>>();
+        rows.sort_by_key(|(_, entry)| entry.address);
+        if descending {
+            rows.reverse();
+        }
+        self.memory_panel.selected_saved = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(new_index, (old_index, _))| {
+                selected.contains(old_index).then_some(new_index)
+            })
+            .collect();
+        self.memory_panel.saved = rows.into_iter().map(|(_, entry)| entry).collect();
+        self.memory_panel.saved_selection_anchor =
+            self.memory_panel.selected_saved.iter().copied().min();
+    }
+
     fn apply_memory_address_dialog(&mut self, dialog: &AddressDialog) {
+        if let Some(saved) = self.memory_panel.saved.get_mut(dialog.index) {
+            saved.description = dialog.description.clone();
+            saved.value_type = dialog.value_type;
+            saved.text_encoding = None;
+            saved.hexadecimal = dialog.hexadecimal;
+        }
         let pointer = if dialog.pointer {
             let offsets = dialog
                 .offsets
@@ -10288,7 +10599,10 @@ impl CrosshairApp {
                 })
             }
         } else {
-            let Some(base) = parse_memory_address(dialog.address.trim()) else {
+            let Some(base) = parse_address_edit(
+                self.memory_panel.saved.get(dialog.index).map_or(0, |saved| saved.address),
+                dialog.address.trim(),
+            ) else {
                 self.memory_panel.status = "Invalid address".to_owned();
                 return;
             };
@@ -10769,6 +11083,8 @@ impl CrosshairApp {
                         Some(TextEncoding::Utf16) => "Text (UTF-16)".to_owned(),
                         _ => "Text (UTF-8)".to_owned(),
                     },
+                    group: String::new(),
+                    hexadecimal: false,
                     pointer: None,
                     frozen: None,
                     saved_to_library: false,
@@ -10793,6 +11109,8 @@ impl CrosshairApp {
                 text_byte_len: 0,
                 current_text: None,
                 description: String::new(),
+                group: String::new(),
+                hexadecimal: false,
                 pointer: None,
                 frozen: None,
                 saved_to_library: false,
@@ -10841,6 +11159,8 @@ impl CrosshairApp {
             text_byte_len: 0,
             current_text: None,
             description,
+            group: String::new(),
+            hexadecimal: false,
             pointer,
             frozen: None,
             saved_to_library: false,
@@ -11257,6 +11577,8 @@ impl CrosshairApp {
                 .unwrap_or_else(|| "Unknown application".to_owned());
             let entry = MemoryPointerEntry {
                 name: saved.description.clone(),
+                group: saved.group.clone(),
+                hexadecimal: saved.hexadecimal,
                 app_name,
                 module: module_pointer.map_or_else(String::new, |(_, root)| root.0.clone()),
                 module_offset: module_pointer.map_or(0, |(_, root)| root.1),
@@ -11297,6 +11619,17 @@ fn memory_type_label(value_type: ScanValueType) -> &'static str {
         ScanValueType::I64 => "8 Bytes",
         ScanValueType::F64 => "Double",
     }
+}
+
+fn memory_value_types() -> [(ScanValueType, &'static str); 6] {
+    [
+        (ScanValueType::I8, "Byte"),
+        (ScanValueType::I16, "2 Bytes"),
+        (ScanValueType::I32, "4 Bytes"),
+        (ScanValueType::I64, "8 Bytes"),
+        (ScanValueType::F32, "Float"),
+        (ScanValueType::F64, "Double"),
+    ]
 }
 
 fn memory_type_config(value_type: ScanValueType) -> &'static str {
@@ -11642,6 +11975,8 @@ fn format_scan_value(value: ScanValue, hex: bool) -> String {
         ScanValue::I16(value) if hex => format!("0x{:04X}", value as u16),
         ScanValue::I32(value) if hex => format!("0x{:08X}", value as u32),
         ScanValue::I64(value) if hex => format!("0x{:016X}", value as u64),
+        ScanValue::F32(value) if hex => format!("0x{:08X}", value.to_bits()),
+        ScanValue::F64(value) if hex => format!("0x{:016X}", value.to_bits()),
         ScanValue::I8(value) => value.to_string(),
         ScanValue::I16(value) => value.to_string(),
         ScanValue::I32(value) => value.to_string(),
@@ -12235,6 +12570,14 @@ fn parse_memory_address(text: &str) -> Option<usize> {
     Some(address)
 }
 
+fn parse_address_edit(current: usize, text: &str) -> Option<usize> {
+    let text = text.trim();
+    if text.starts_with(['+', '-']) {
+        return parse_memory_address(&format!("0x{current:X}{text}"));
+    }
+    parse_memory_address(text)
+}
+
 fn parse_pointer_expression(text: &str) -> Option<(String, usize, Vec<usize>)> {
     let text = text.trim();
     let offsets_start = text.rfind('[')?;
@@ -12534,6 +12877,9 @@ mod tests {
         assert_eq!(parse_memory_address("0x1000"), Some(4096));
         assert_eq!(parse_memory_address("7FF6_ABCD"), Some(0x7FF6_ABCD));
         assert_eq!(parse_memory_address("0x1000+10-8"), Some(0x1008));
+        assert_eq!(parse_address_edit(0x2000, "-1040"), Some(0x0FC0));
+        assert_eq!(parse_address_edit(0x2000, "+18"), Some(0x2018));
+        assert_eq!(parse_address_edit(0x1000, "0x3000-10"), Some(0x2FF0));
         assert_eq!(parse_signed_hex_offset("C"), Some(12));
         assert_eq!(parse_signed_hex_offset("-0x10"), Some(-16));
         assert_eq!(parse_hex_offset("48"), Some(0x48));
