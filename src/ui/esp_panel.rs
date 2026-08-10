@@ -142,45 +142,48 @@ impl CrosshairApp {
                         ui.end_row();
                         if preset.entity_list_enabled {
                             ui.label("Entity root");
-                            ui.add(
-                                TextEdit::singleline(&mut preset.entity_root)
-                                    .desired_width(420.0)
-                                    .hint_text(
-                                        RichText::new(
-                                            "stable pointer to first entity X / @alias",
-                                        )
-                                        .color(ui.visuals().weak_text_color()),
-                                    ),
-                            );
-                            ui.end_row();
-                            ui.label("Root slot");
                             ui.horizontal(|ui| {
+                                ui.add(
+                                    TextEdit::singleline(&mut preset.entity_root)
+                                        .desired_width(360.0)
+                                        .hint_text(
+                                            RichText::new(
+                                                "stable pointer to first entity X / @alias",
+                                            )
+                                            .color(ui.visuals().weak_text_color()),
+                                        ),
+                                );
+                                let raw_root = crate::model::shift_raw_entity_root(
+                                    &preset.entity_root,
+                                    preset.entity_stride,
+                                    0,
+                                )
+                                .is_some();
                                 if ui
-                                    .small_button("▲")
-                                    .on_hover_text("Move root to the previous slot (-Stride)")
+                                    .add_enabled(raw_root, egui::Button::new("▲"))
+                                    .on_hover_text("Replace the raw root address with root - Stride")
                                     .clicked()
                                 {
-                                    preset.entity_root_slot =
-                                        preset.entity_root_slot.saturating_sub(1);
+                                    if let Some(root) = crate::model::shift_raw_entity_root(
+                                        &preset.entity_root,
+                                        preset.entity_stride,
+                                        -1,
+                                    ) {
+                                        preset.entity_root = root;
+                                    }
                                 }
-                                ui.label(format!(
-                                    "{:+} ({} bytes)",
-                                    preset.entity_root_slot,
-                                    i64::from(preset.entity_root_slot)
-                                        * i64::from(preset.entity_stride)
-                                ));
                                 if ui
-                                    .small_button("▼")
-                                    .on_hover_text("Move root to the next slot (+Stride)")
+                                    .add_enabled(raw_root, egui::Button::new("▼"))
+                                    .on_hover_text("Replace the raw root address with root + Stride")
                                     .clicked()
                                 {
-                                    preset.entity_root_slot =
-                                        preset.entity_root_slot.saturating_add(1);
-                                }
-                                if preset.entity_root_slot != 0
-                                    && ui.small_button("Reset").clicked()
-                                {
-                                    preset.entity_root_slot = 0;
+                                    if let Some(root) = crate::model::shift_raw_entity_root(
+                                        &preset.entity_root,
+                                        preset.entity_stride,
+                                        1,
+                                    ) {
+                                        preset.entity_root = root;
+                                    }
                                 }
                             });
                             ui.end_row();

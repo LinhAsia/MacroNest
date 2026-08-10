@@ -26945,8 +26945,6 @@ mod windows_overlay {
             .ok_or_else(|| "Entity root could not be resolved".to_owned())?;
         let count = preset.entity_count.clamp(1, 512);
         let stride = preset.entity_stride.max(1);
-        let root = crate::model::shifted_entity_root(root, stride, preset.entity_root_slot)
-            .ok_or_else(|| "Entity root slot shift overflowed the address range".to_owned())?;
         let mut targets = Vec::with_capacity(count.min(64) as usize);
         for index in 0..count {
             let Some(x_address) =

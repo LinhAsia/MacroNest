@@ -3159,7 +3159,7 @@ impl CrosshairApp {
                                         auto_dissected: false,
                                         history: Vec::new(),
                                         structure_back_step: "10".to_owned(),
-                                        structure_forward_step: "200".to_owned(),
+                                        structure_forward_step: "C".to_owned(),
                                         selected_structure_address: None,
                                     });
                                     ui.close();
@@ -8420,7 +8420,7 @@ impl CrosshairApp {
                 auto_dissected: false,
                 history: Vec::new(),
                 structure_back_step: "10".to_owned(),
-                structure_forward_step: "200".to_owned(),
+                structure_forward_step: "C".to_owned(),
                 selected_structure_address: None,
             });
         }

@@ -58,7 +58,6 @@ pub struct EspPreset {
     pub entity_z_offset: i64,
     pub entity_stride: u32,
     pub entity_count: u32,
-    pub entity_root_slot: i32,
     pub entity_aabb_center: bool,
     pub entity_aabb_pair_offset: i64,
     pub camera_x: String,
@@ -151,7 +150,6 @@ impl EspPreset {
             entity_z_offset: 8,
             entity_stride: 0x48,
             entity_count: 32,
-            entity_root_slot: 0,
             entity_aabb_center: false,
             entity_aabb_pair_offset: 0x0C,
             camera_x: String::new(),
@@ -255,14 +253,24 @@ pub(crate) fn aabb_center_component(first: f32, second: f32) -> f32 {
     first + (second - first) * 0.5
 }
 
-pub(crate) fn shifted_entity_root(root: usize, stride: u32, slot: i32) -> Option<usize> {
-    let offset = i64::from(stride).checked_mul(i64::from(slot))?;
-    entity_field_address(root, 0, 1, offset)
+pub(crate) fn shift_raw_entity_root(text: &str, stride: u32, slots: i32) -> Option<String> {
+    let text = text.trim();
+    let digits = text
+        .strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .unwrap_or(text);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let address = usize::from_str_radix(digits, 16).ok()?;
+    let offset = i64::from(stride).checked_mul(i64::from(slots))?;
+    let address = entity_field_address(address, 0, 1, offset)?;
+    Some(format!("0x{address:X}"))
 }
 
 #[cfg(test)]
 mod entity_address_tests {
-    use super::{aabb_center_component, entity_field_address, shifted_entity_root};
+    use super::{aabb_center_component, entity_field_address, shift_raw_entity_root};
 
     #[test]
     fn calculates_positive_and_negative_entity_fields() {
@@ -278,10 +286,16 @@ mod entity_address_tests {
     }
 
     #[test]
-    fn shifts_entity_root_by_whole_strides() {
-        assert_eq!(shifted_entity_root(0x1000, 0x18, 2), Some(0x1030));
-        assert_eq!(shifted_entity_root(0x1000, 0x18, -2), Some(0x0FD0));
-        assert_eq!(shifted_entity_root(0x10, 0x18, -1), None);
+    fn shifts_raw_entity_root_text_by_whole_strides() {
+        assert_eq!(
+            shift_raw_entity_root("0x1000", 0x18, 2).as_deref(),
+            Some("0x1030")
+        );
+        assert_eq!(
+            shift_raw_entity_root("1000", 0x18, -2).as_deref(),
+            Some("0xFD0")
+        );
+        assert_eq!(shift_raw_entity_root("game.exe+1000", 0x18, 1), None);
     }
 }
 
