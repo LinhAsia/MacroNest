@@ -31707,16 +31707,26 @@ mod windows_overlay {
     fn parse_memory_address(text: &str) -> Option<usize> {
         let address_text = interpolate_variables(text);
         let address_text = address_text.trim().replace('_', "");
-        address_text
+        if let Some(hex) = address_text
             .strip_prefix("0x")
             .or_else(|| address_text.strip_prefix("0X"))
-            .and_then(|hex| usize::from_str_radix(hex, 16).ok())
-            .or_else(|| address_text.parse::<usize>().ok())
-            .or_else(|| {
-                let value = evaluate_math_expression_f64(&address_text);
-                (value.is_finite() && value >= 0.0 && value <= usize::MAX as f64)
-                    .then_some(value as usize)
-            })
+        {
+            return usize::from_str_radix(hex, 16).ok();
+        }
+        if address_text
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+            && address_text
+                .chars()
+                .any(|character| character.is_ascii_alphabetic())
+        {
+            return usize::from_str_radix(&address_text, 16).ok();
+        }
+        address_text.parse::<usize>().ok().or_else(|| {
+            let value = evaluate_math_expression_f64(&address_text);
+            (value.is_finite() && value >= 0.0 && value <= usize::MAX as f64)
+                .then_some(value as usize)
+        })
     }
 
     struct MacroMemoryProcessInfo {
@@ -32667,6 +32677,13 @@ mod windows_overlay {
                 Some(vec![0x494, 0x140])
             );
             assert_eq!(parse_pointer_offsets("0x20, 8"), Some(vec![0x20, 0x8]));
+        }
+
+        #[test]
+        fn parses_unprefixed_hex_memory_address_for_macro_and_esp() {
+            assert_eq!(parse_memory_address("215DF862E18"), Some(0x215DF862E18));
+            assert_eq!(parse_memory_address("215df862e18"), Some(0x215DF862E18));
+            assert_eq!(parse_memory_address("4096"), Some(4096));
         }
 
         #[test]
