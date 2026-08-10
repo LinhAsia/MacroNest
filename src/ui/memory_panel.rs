@@ -9468,7 +9468,20 @@ impl CrosshairApp {
                     } else {
                         format_memory_address(row_address)
                     };
-                    Self::memory_view_cell(ui, address_width, &shown_address);
+                    let address_cell =
+                        Self::memory_view_cell(ui, address_width, &shown_address)
+                            .on_hover_text("Double-click or right-click to copy this address");
+                    if address_cell.double_clicked() {
+                        ui.ctx()
+                            .copy_text(format_prefixed_memory_address(row_address));
+                    }
+                    address_cell.context_menu(|ui| {
+                        if ui.button("Copy address").clicked() {
+                            ui.ctx()
+                                .copy_text(format_prefixed_memory_address(row_address));
+                            ui.close();
+                        }
+                    });
                     for (column, value) in chunk.chunks(unit).take(columns).enumerate() {
                         let text = (value.len() == unit)
                             .then(|| format_memory_display(value, dialog.display_type))

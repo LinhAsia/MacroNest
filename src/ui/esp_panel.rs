@@ -141,11 +141,14 @@ impl CrosshairApp {
                         });
                         ui.end_row();
                         if preset.entity_list_enabled {
+                            let root_step = *preset
+                                .entity_root_step
+                                .get_or_insert(preset.entity_stride.max(1));
                             ui.label("Entity root");
                             ui.horizontal(|ui| {
                                 ui.add(
                                     TextEdit::singleline(&mut preset.entity_root)
-                                        .desired_width(360.0)
+                                        .desired_width(280.0)
                                         .hint_text(
                                             RichText::new(
                                                 "stable pointer to first entity X / @alias",
@@ -155,18 +158,18 @@ impl CrosshairApp {
                                 );
                                 let raw_root = crate::model::shift_raw_entity_root(
                                     &preset.entity_root,
-                                    preset.entity_stride,
+                                    root_step,
                                     0,
                                 )
                                 .is_some();
                                 if ui
                                     .add_enabled(raw_root, egui::Button::new("▲"))
-                                    .on_hover_text("Replace the raw root address with root - Stride")
+                                    .on_hover_text("Replace the raw root address with root - Step")
                                     .clicked()
                                 {
                                     if let Some(root) = crate::model::shift_raw_entity_root(
                                         &preset.entity_root,
-                                        preset.entity_stride,
+                                        root_step,
                                         -1,
                                     ) {
                                         preset.entity_root = root;
@@ -174,16 +177,23 @@ impl CrosshairApp {
                                 }
                                 if ui
                                     .add_enabled(raw_root, egui::Button::new("▼"))
-                                    .on_hover_text("Replace the raw root address with root + Stride")
+                                    .on_hover_text("Replace the raw root address with root + Step")
                                     .clicked()
                                 {
                                     if let Some(root) = crate::model::shift_raw_entity_root(
                                         &preset.entity_root,
-                                        preset.entity_stride,
+                                        root_step,
                                         1,
                                     ) {
                                         preset.entity_root = root;
                                     }
+                                }
+                                ui.label("Step");
+                                if let Some(step) = preset.entity_root_step.as_mut() {
+                                    ui.add(DragValue::new(step).range(1..=0x10000))
+                                        .on_hover_text(
+                                            "Raw-address navigation step in bytes; defaults to Stride.",
+                                        );
                                 }
                             });
                             ui.end_row();
