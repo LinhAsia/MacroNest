@@ -409,7 +409,7 @@ impl CrosshairApp {
                                 let btn_label = if is_copied {
                                     Self::tr_lang(language, "Copied!", "")
                                 } else {
-                                    Self::tr_lang(language, "Copy folder", "")
+                                    Self::tr_lang(language, "Copy data only", "")
                                 };
 
                                 if is_copied {
@@ -417,14 +417,15 @@ impl CrosshairApp {
                                 }
 
                                 if Self::settings_action_button(ui, btn_label).clicked() {
-                                    if let Err(e) =
-                                        crate::platform::copy_folder_to_clipboard(&self.paths.root)
-                                    {
+                                    let result = self.paths.user_data_paths().and_then(|paths| {
+                                        crate::platform::copy_paths_to_clipboard(&paths)
+                                    });
+                                    if let Err(e) = result {
                                         self.status = format!("Failed to copy folder: {e}");
                                     } else {
                                         self.status = Self::tr_lang(
                                             language,
-                                            "Folder copied to clipboard.",
+                                            "User data copied to clipboard (tools excluded).",
                                             "",
                                         )
                                         .to_owned();

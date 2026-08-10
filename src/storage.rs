@@ -131,6 +131,18 @@ impl AppPaths {
         Ok(())
     }
 
+    pub fn user_data_paths(&self) -> Result<Vec<PathBuf>> {
+        let mut paths = Vec::new();
+        for entry in fs::read_dir(&self.root)? {
+            let path = entry?.path();
+            if path != self.bin_dir && path != self.ocr_dir {
+                paths.push(path);
+            }
+        }
+        paths.sort();
+        Ok(paths)
+    }
+
     pub fn vision_template_file_for(&self, preset_id: u32) -> PathBuf {
         self.vision_dir.join(format!("preset-{preset_id}.png"))
     }

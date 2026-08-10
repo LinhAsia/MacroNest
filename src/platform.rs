@@ -2,7 +2,7 @@
 mod windows_platform {
     use std::{
         env,
-        path::Path,
+        path::{Path, PathBuf},
         process::{Command, Output},
         sync::{Mutex, OnceLock},
         time::{Duration, Instant},
@@ -690,24 +690,42 @@ mod windows_platform {
     }
 
     pub fn copy_folder_to_clipboard(path: &Path) -> Result<()> {
-        if !path.exists() {
-            bail!("Folder does not exist: {}", path.display());
+        copy_paths_to_clipboard(&[path.to_path_buf()])
+    }
+
+    pub fn copy_paths_to_clipboard(paths: &[PathBuf]) -> Result<()> {
+        if paths.is_empty() {
+            bail!("No files or folders to copy");
+        }
+        for path in paths {
+            if !path.exists() {
+                bail!("Path does not exist: {}", path.display());
+            }
         }
 
-        let path_str = path.to_string_lossy().to_string();
-        let path_wide = widestring(&path_str);
+        let text = paths
+            .iter()
+            .map(|path| path.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        let text_wide = widestring(&text);
+        let mut file_list = Vec::new();
+        for path in paths {
+            file_list.extend(widestring(path.to_string_lossy().as_ref()));
+        }
+        file_list.push(0);
 
         unsafe {
             OpenClipboard(None)?;
             let _ = EmptyClipboard();
 
             // 1. Set text clipboard format (CF_UNICODETEXT = 13)
-            let text_bytes = path_wide.len() * 2;
+            let text_bytes = text_wide.len() * 2;
             if let Ok(h_text) = GlobalAlloc(GHND, text_bytes) {
                 let p_text = GlobalLock(h_text);
                 if !p_text.is_null() {
                     std::ptr::copy_nonoverlapping(
-                        path_wide.as_ptr() as *const u8,
+                        text_wide.as_ptr() as *const u8,
                         p_text as *mut u8,
                         text_bytes,
                     );
@@ -717,9 +735,6 @@ mod windows_platform {
             }
 
             // 2. Set file drop clipboard format (CF_HDROP = 15)
-            let mut file_list = path_wide.clone();
-            file_list.push(0); // double-null terminator
-
             let dropfiles_size = std::mem::size_of::<DROPFILES>();
             let total_size = dropfiles_size + file_list.len() * 2;
 
@@ -836,6 +851,10 @@ mod fallback {
     }
 
     pub fn copy_folder_to_clipboard(_path: &std::path::Path) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn copy_paths_to_clipboard(_paths: &[std::path::PathBuf]) -> Result<()> {
         Ok(())
     }
 
