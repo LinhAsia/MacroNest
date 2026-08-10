@@ -943,8 +943,8 @@ impl CrosshairApp {
 
         let available = ui.available_size();
         let gap = 8.0;
-        // ponytail: clamp upper height so control panel (which requires ~380px) and scan results stay strictly equal and bounded
-        let upper_height = (available.y * 0.52).clamp(380.0, (available.y - 160.0).max(380.0));
+        // ponytail: match exact natural height of scan controls so Scan Results fills 100% equally without unaligned gaps or warping on app resize
+        let upper_height = if self.memory_panel.between_open { 465.0 } else { 435.0 };
         let left_width = ((available.x - gap) * 0.58).max(360.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
