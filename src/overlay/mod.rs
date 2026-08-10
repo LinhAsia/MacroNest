@@ -26962,13 +26962,31 @@ mod windows_overlay {
             else {
                 continue;
             };
-            let Ok(x) = frame.read_numeric_value(target_pid, x_address, preset.value_type) else {
+            let mut read_component = |address: usize| -> Option<f32> {
+                let first = frame
+                    .read_numeric_value(target_pid, address, preset.value_type)
+                    .ok()?;
+                if !preset.entity_aabb_center {
+                    return Some(first);
+                }
+                let second_address = crate::model::entity_field_address(
+                    address,
+                    0,
+                    1,
+                    preset.entity_aabb_pair_offset,
+                )?;
+                let second = frame
+                    .read_numeric_value(target_pid, second_address, preset.value_type)
+                    .ok()?;
+                Some(crate::model::aabb_center_component(first, second))
+            };
+            let Some(x) = read_component(x_address) else {
                 continue;
             };
-            let Ok(y) = frame.read_numeric_value(target_pid, y_address, preset.value_type) else {
+            let Some(y) = read_component(y_address) else {
                 continue;
             };
-            let Ok(z) = frame.read_numeric_value(target_pid, z_address, preset.value_type) else {
+            let Some(z) = read_component(z_address) else {
                 continue;
             };
             let target = [x, y, z];

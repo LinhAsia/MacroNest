@@ -58,6 +58,8 @@ pub struct EspPreset {
     pub entity_z_offset: i64,
     pub entity_stride: u32,
     pub entity_count: u32,
+    pub entity_aabb_center: bool,
+    pub entity_aabb_pair_offset: i64,
     pub camera_x: String,
     pub camera_y: String,
     pub camera_z: String,
@@ -148,6 +150,8 @@ impl EspPreset {
             entity_z_offset: 8,
             entity_stride: 0x48,
             entity_count: 32,
+            entity_aabb_center: false,
+            entity_aabb_pair_offset: 0x0C,
             camera_x: String::new(),
             camera_y: String::new(),
             camera_z: String::new(),
@@ -245,15 +249,25 @@ pub(crate) fn entity_field_address(
     }
 }
 
+pub(crate) fn aabb_center_component(first: f32, second: f32) -> f32 {
+    first + (second - first) * 0.5
+}
+
 #[cfg(test)]
 mod entity_address_tests {
-    use super::entity_field_address;
+    use super::{aabb_center_component, entity_field_address};
 
     #[test]
     fn calculates_positive_and_negative_entity_fields() {
         assert_eq!(entity_field_address(0x1000, 2, 0x48, 8), Some(0x1098));
         assert_eq!(entity_field_address(0x1000, 1, 0x48, -8), Some(0x1040));
         assert_eq!(entity_field_address(4, 0, 1, -8), None);
+    }
+
+    #[test]
+    fn calculates_aabb_center_component() {
+        assert_eq!(aabb_center_component(184.0, 194.0), 189.0);
+        assert_eq!(aabb_center_component(-8.0, 2.0), -3.0);
     }
 }
 

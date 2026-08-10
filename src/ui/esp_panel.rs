@@ -180,6 +180,23 @@ impl CrosshairApp {
                                 .weak(),
                             );
                             ui.end_row();
+                            ui.label("");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut preset.entity_aabb_center, "AABB center");
+                                if preset.entity_aabb_center {
+                                    ui.label("Pair delta");
+                                    ui.add(
+                                        DragValue::new(&mut preset.entity_aabb_pair_offset)
+                                            .range(-0x10000..=0x10000),
+                                    );
+                                    ui.label("bytes");
+                                }
+                            })
+                            .response
+                            .on_hover_text(
+                                "Average each X/Y/Z field with the matching field at this signed byte delta.",
+                            );
+                            ui.end_row();
                         } else {
                             for (label, value) in [
                                 ("Target X", &mut preset.target_x),
