@@ -131,7 +131,7 @@ impl AppPaths {
         Ok(())
     }
 
-    pub fn user_data_paths(&self) -> Result<Vec<PathBuf>> {
+    fn user_data_paths(&self) -> Result<Vec<PathBuf>> {
         let mut paths = Vec::new();
         for entry in fs::read_dir(&self.root)? {
             let path = entry?.path();
@@ -141,6 +141,26 @@ impl AppPaths {
         }
         paths.sort();
         Ok(paths)
+    }
+
+    pub fn prepare_user_data_copy(&self) -> Result<PathBuf> {
+        let temp_root = env::temp_dir();
+        let destination = temp_root.join("MacroNest data");
+        if destination.parent() != Some(temp_root.as_path()) {
+            anyhow::bail!("Invalid temporary data-copy path");
+        }
+        if destination.exists() {
+            fs::remove_dir_all(&destination)
+                .with_context(|| format!("Failed to refresh {}", destination.display()))?;
+        }
+        fs::create_dir(&destination)?;
+        for source in self.user_data_paths()? {
+            let name = source
+                .file_name()
+                .context("App data entry has no file name")?;
+            stage_user_data_path(&source, &destination.join(name))?;
+        }
+        Ok(destination)
     }
 
     pub fn vision_template_file_for(&self, preset_id: u32) -> PathBuf {
@@ -770,6 +790,29 @@ impl AppPaths {
         }
         let _ = fs::remove_dir_all(&legacy_vision_dir);
     }
+}
+
+fn stage_user_data_path(source: &Path, destination: &Path) -> Result<()> {
+    if source.is_dir() {
+        fs::create_dir(destination)?;
+        for entry in fs::read_dir(source)? {
+            let source = entry?.path();
+            let name = source
+                .file_name()
+                .context("App data entry has no file name")?;
+            stage_user_data_path(&source, &destination.join(name))?;
+        }
+        return Ok(());
+    }
+    if fs::hard_link(source, destination).is_err() {
+        fs::copy(source, destination).with_context(|| {
+            format!(
+                "Failed to stage app data file {}",
+                source.to_string_lossy()
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn state_snapshot_for_save(state: &AppState) -> AppState {

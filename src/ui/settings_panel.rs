@@ -417,9 +417,12 @@ impl CrosshairApp {
                                 }
 
                                 if Self::settings_action_button(ui, btn_label).clicked() {
-                                    let result = self.paths.user_data_paths().and_then(|paths| {
-                                        crate::platform::copy_paths_to_clipboard(&paths)
-                                    });
+                                    let result = self
+                                        .paths
+                                        .prepare_user_data_copy()
+                                        .and_then(|path| {
+                                            crate::platform::copy_folder_to_clipboard(&path)
+                                        });
                                     if let Err(e) = result {
                                         self.status = format!("Failed to copy folder: {e}");
                                     } else {
