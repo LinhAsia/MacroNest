@@ -943,7 +943,8 @@ impl CrosshairApp {
 
         let available = ui.available_size();
         let gap = 8.0;
-        let upper_height = (available.y * 0.57).clamp(280.0, (available.y - 170.0).max(280.0));
+        // ponytail: clamp upper height so control panel (which requires ~380px) and scan results stay strictly equal and bounded
+        let upper_height = (available.y * 0.52).clamp(380.0, (available.y - 160.0).max(380.0));
         let left_width = ((available.x - gap) * 0.58).max(360.0);
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
@@ -3492,7 +3493,8 @@ impl CrosshairApp {
                         }
                     });
                 if self.memory_panel.saved.is_empty() {
-                    ui.centered_and_justified(|ui| {
+                    ui.add_space(20.0);
+                    ui.vertical_centered(|ui| {
                         ui.label(
                             RichText::new(self.tr("No saved addresses", "No saved addresses"))
                                 .weak(),
