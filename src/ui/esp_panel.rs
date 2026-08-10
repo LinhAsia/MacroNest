@@ -642,6 +642,14 @@ impl CrosshairApp {
                             ui.label("Reference distance");
                             ui.add(DragValue::new(&mut preset.distance_reference).speed(1.0).range(0.01..=1_000_000.0))
                                 .on_hover_text("At this world distance, the marker uses its configured base size.");
+                            ui.label("Strength");
+                            ui.add(
+                                DragValue::new(&mut preset.distance_scale_strength_percent)
+                                    .speed(1.0)
+                                    .range(0.0..=100.0)
+                                    .suffix("%"),
+                            )
+                            .on_hover_text("100% uses full inverse-distance scaling; lower values make size changes gentler.");
                             ui.label("Size offset");
                             ui.add(DragValue::new(&mut preset.marker_size_offset_percent).speed(1.0).range(-95.0..=1000.0).suffix("%"));
                         });

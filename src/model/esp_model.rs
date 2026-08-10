@@ -106,6 +106,7 @@ pub struct EspPreset {
     pub text_opacity: f32,
     pub scale_with_distance: bool,
     pub distance_reference: f32,
+    pub distance_scale_strength_percent: f32,
     pub marker_size_offset_percent: f32,
     pub marker_billboard_3d: bool,
     pub marker_offset_x: f32,
@@ -191,6 +192,7 @@ impl EspPreset {
             text_opacity: 1.0,
             scale_with_distance: false,
             distance_reference: 100.0,
+            distance_scale_strength_percent: 100.0,
             marker_size_offset_percent: 0.0,
             marker_billboard_3d: false,
             marker_offset_x: 0.0,
@@ -308,7 +310,13 @@ impl Default for EspPreset {
 pub fn esp_marker_scale(preset: &EspPreset, distance: f32) -> f32 {
     let size_offset = 1.0 + preset.marker_size_offset_percent / 100.0;
     let perspective = if preset.scale_with_distance || preset.marker_billboard_3d {
-        preset.distance_reference.max(0.01) / distance.max(0.01)
+        let ratio = preset.distance_reference.max(0.01) / distance.max(0.01);
+        let strength = if preset.distance_scale_strength_percent.is_finite() {
+            preset.distance_scale_strength_percent.clamp(0.0, 100.0) / 100.0
+        } else {
+            1.0
+        };
+        ratio.powf(strength)
     } else {
         1.0
     };
@@ -704,6 +712,10 @@ mod tests {
 
         preset.marker_size_offset_percent = 25.0;
         assert!((esp_marker_scale(&preset, 100.0) - 1.25).abs() < f32::EPSILON);
+
+        preset.marker_size_offset_percent = 0.0;
+        preset.distance_scale_strength_percent = 50.0;
+        assert!((esp_marker_scale(&preset, 400.0) - 0.5).abs() < f32::EPSILON);
     }
 
     #[test]
