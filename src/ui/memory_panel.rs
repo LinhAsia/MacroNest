@@ -966,16 +966,7 @@ impl CrosshairApp {
             |ui| self.render_saved_memory_addresses(ui),
         );
 
-        let address_open = self.memory_panel.address_dialog.is_some();
-        if !self.render_detached_memory_popup(
-            ui.ctx(),
-            "memory-change-address-host",
-            "Change address",
-            address_open,
-            Self::render_memory_address_dialog,
-        ) {
-            self.memory_panel.address_dialog = None;
-        }
+        self.render_memory_address_dialog(ui.ctx());
         let group_open = self.memory_panel.address_group_dialog.is_some();
         if !self.render_detached_memory_popup(
             ui.ctx(),
@@ -10269,8 +10260,13 @@ impl CrosshairApp {
         let mut open = true;
         let mut save = false;
         let mut cancel = false;
-        let window = egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
+        let title = self.tr("Change address / Pointer", "Thay đổi địa chỉ / Pointer");
+        let window = egui::Window::new(title)
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .resizable(true)
+            .collapsible(false)
+            .default_width(340.0)
             .show(ctx, |ui| {
                 ui.checkbox(&mut dialog.pointer, "Pointer (x64)");
                 ui.horizontal(|ui| {
@@ -10456,7 +10452,7 @@ impl CrosshairApp {
                     }
                 });
             });
-        dialog.rect = Some(window.response.rect);
+        dialog.rect = window.as_ref().map(|w| w.response.rect);
         if save {
             self.apply_memory_address_dialog(&dialog);
             open = false;
