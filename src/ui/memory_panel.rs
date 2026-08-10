@@ -966,6 +966,18 @@ impl CrosshairApp {
             |ui| self.render_saved_memory_addresses(ui),
         );
 
+        if self.memory_panel.address_dialog.is_some() {
+            let screen_rect = ui.ctx().input(|i| i.screen_rect());
+            let modal = egui::Area::new(egui::Id::new("address-dialog-backdrop"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(screen_rect.min)
+                .show(ui.ctx(), |ui| {
+                    ui.allocate_response(screen_rect.size(), egui::Sense::click())
+                });
+            if modal.inner.clicked() {
+                self.memory_panel.address_dialog = None;
+            }
+        }
         self.render_memory_address_dialog(ui.ctx());
         let group_open = self.memory_panel.address_group_dialog.is_some();
         if !self.render_detached_memory_popup(
@@ -11338,7 +11350,7 @@ impl CrosshairApp {
         };
         let mut commit = false;
         let mut cancel = false;
-        egui::Area::new(egui::Id::new("saved-memory-value-editor"))
+        let area_response = egui::Area::new(egui::Id::new("saved-memory-value-editor"))
             .order(egui::Order::Foreground)
             .fixed_pos(position)
             .show(ctx, |ui| {
@@ -11364,6 +11376,14 @@ impl CrosshairApp {
                     cancel |= ui.input(|input| input.key_pressed(egui::Key::Escape));
                 });
             });
+        let popup_rect = area_response.response.rect.expand(4.0);
+        if ctx.input(|input| input.pointer.any_pressed()) {
+            if let Some(pointer) = ctx.pointer_latest_pos() {
+                if !popup_rect.contains(pointer) {
+                    cancel = true;
+                }
+            }
+        }
         if commit {
             self.commit_saved_memory_value(index);
         } else if cancel {
