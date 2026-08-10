@@ -590,29 +590,32 @@ pub(crate) fn project_esp(
     }
     yaw += preset.yaw_offset_degrees.to_radians();
     pitch += preset.pitch_offset_degrees.to_radians();
-    let mut yaw_delta = forward_b.atan2(forward_a) - yaw;
-    yaw_delta = wrap_angle(yaw_delta);
-    let mut pitch_delta = vertical.atan2(horizontal_distance) - pitch;
+    let (sin_yaw, cos_yaw) = yaw.sin_cos();
+    let camera_forward = forward_a * cos_yaw + forward_b * sin_yaw;
+    let mut camera_right = -forward_a * sin_yaw + forward_b * cos_yaw;
+    let (sin_pitch, cos_pitch) = pitch.sin_cos();
+    let camera_depth = camera_forward * cos_pitch + vertical * sin_pitch;
+    let mut camera_up = vertical * cos_pitch - camera_forward * sin_pitch;
     if preset.invert_yaw {
-        yaw_delta = -yaw_delta;
+        camera_right = -camera_right;
     }
     if preset.invert_pitch {
-        pitch_delta = -pitch_delta;
+        camera_up = -camera_up;
     }
     let half_fov_x = (preset.horizontal_fov.clamp(1.0, 179.0).to_radians() * 0.5).max(0.001);
     let half_fov_y = (half_fov_x.tan() / aspect.max(0.01)).atan();
-    let x = yaw_delta.tan() / half_fov_x.tan();
-    let y = pitch_delta.tan() / half_fov_y.tan();
+    let x = camera_right / (camera_depth * half_fov_x.tan());
+    let y = camera_up / (camera_depth * half_fov_y.tan());
     if !x.is_finite() || !y.is_finite() || !distance.is_finite() {
         return None;
     }
-    let in_front = yaw_delta.abs() < std::f32::consts::FRAC_PI_2;
+    let in_front = camera_depth > f32::EPSILON;
     Some(EspProjection {
         normalized_x: x,
         normalized_y: y,
         distance,
         in_front,
-        on_screen: in_front && yaw_delta.abs() < half_fov_x && pitch_delta.abs() < half_fov_y,
+        on_screen: in_front && x.abs() < 1.0 && y.abs() < 1.0,
     })
 }
 
@@ -754,6 +757,31 @@ mod tests {
         )
         .unwrap();
         assert!(projected.0.abs() < 0.001 && projected.1.abs() < 0.001);
+    }
+
+    #[test]
+    fn horizontal_camera_strafe_does_not_move_target_vertically() {
+        let preset = EspPreset::default();
+        let stationary = project_esp_normalized(
+            &preset,
+            [10.0, 0.0, 2.0],
+            [0.0, 0.0, 0.0],
+            0.0,
+            0.0,
+            16.0 / 9.0,
+        )
+        .unwrap();
+        let strafed = project_esp_normalized(
+            &preset,
+            [10.0, 0.0, 2.0],
+            [0.0, -2.0, 0.0],
+            0.0,
+            0.0,
+            16.0 / 9.0,
+        )
+        .unwrap();
+        assert!((stationary.1 - strafed.1).abs() < 0.001);
+        assert!((stationary.0 - strafed.0).abs() > 0.01);
     }
 
     #[test]
