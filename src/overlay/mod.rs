@@ -398,6 +398,18 @@ mod windows_overlay {
     }
     static ESP_TARGET_SNAPSHOTS: Lazy<Mutex<HashMap<u32, EspTargetSnapshot>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
+    #[derive(Clone, Copy)]
+    struct EspDebugBoxHit {
+        min_x: i32,
+        min_y: i32,
+        max_x: i32,
+        max_y: i32,
+        address: usize,
+    }
+    static ESP_DEBUG_BOX_HITS: Lazy<Mutex<Vec<EspDebugBoxHit>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
+    static ESP_DEBUG_CLICK_TOAST: Lazy<Mutex<Option<(Instant, String)>>> =
+        Lazy::new(|| Mutex::new(None));
     static ACTIVE_BIN_PIN_STOP: Lazy<Mutex<Option<Arc<AtomicBool>>>> =
         Lazy::new(|| Mutex::new(None));
     static ACTIVE_BIN_PIN_THREAD: Lazy<Mutex<Option<thread::JoinHandle<()>>>> =
@@ -5152,6 +5164,24 @@ mod windows_overlay {
 
             record_mouse_event(message, &info);
             record_macro_mouse_event(message, &info);
+            if message == WM_LBUTTONDOWN {
+                let pt_x = info.pt.x;
+                let pt_y = info.pt.y;
+                let hits = ESP_DEBUG_BOX_HITS.lock();
+                if let Some(hit) = hits
+                    .iter()
+                    .find(|h| pt_x >= h.min_x && pt_x <= h.max_x && pt_y >= h.min_y && pt_y <= h.max_y)
+                {
+                    let addr = hit.address;
+                    let text = format!("0x{addr:X}");
+                    if let Ok(mut clipboard) = Clipboard::new() {
+                        let _ = clipboard.set_text(text.clone());
+                    }
+                    *ESP_DEBUG_CLICK_TOAST.lock() =
+                        Some((Instant::now(), format!("Copied {text} to Clipboard")));
+                    wake_command_queue();
+                }
+            }
             let active_mouse_path_draw_capture = HOOK_STATE.lock().mouse_path_draw_capture.clone();
             if let Some(draw_capture) = active_mouse_path_draw_capture {
                 match message {
@@ -26926,18 +26956,21 @@ mod windows_overlay {
         preset: &crate::model::EspPreset,
         frame: &mut EspReadFrame,
         pid: u32,
-    ) -> Result<Vec<[f32; 3]>, String> {
+    ) -> Result<Vec<([f32; 3], usize)>, String> {
         if !preset.entity_list_enabled {
             let mut read = |label: &str, expression: &str| {
                 frame
                     .read_value(pid, expression, preset.value_type)
                     .map_err(|error| format!("{label}: {error}"))
             };
-            return Ok(vec![[
-                read("Target X", &preset.target_x)?,
-                read("Target Y", &preset.target_y)?,
-                read("Target Z", &preset.target_z)?,
-            ]]);
+            return Ok(vec![(
+                [
+                    read("Target X", &preset.target_x)?,
+                    read("Target Y", &preset.target_y)?,
+                    read("Target Z", &preset.target_z)?,
+                ],
+                0,
+            )]);
         }
 
         let root_expression = preset.entity_root.trim();
@@ -26951,6 +26984,7 @@ mod windows_overlay {
         let stride = preset.entity_stride.max(1);
         let mut targets = Vec::with_capacity(count.min(64) as usize);
         for index in 0..count {
+            let entity_address = root + (index as usize) * (stride as usize);
             let Some(x_address) =
                 crate::model::entity_field_address(root, index, stride, preset.entity_x_offset)
             else {
@@ -26998,7 +27032,7 @@ mod windows_overlay {
                 && target.iter().any(|value| value.abs() > f32::EPSILON)
                 && target.iter().all(|value| value.abs() < 1.0e9)
             {
-                targets.push(target);
+                targets.push((target, entity_address));
             }
         }
         Ok(targets)
@@ -27009,7 +27043,7 @@ mod windows_overlay {
         frame: &mut EspReadFrame,
     ) -> Result<([f32; 3], [f32; 3], f32, f32), String> {
         let (pid, camera, yaw, pitch) = read_esp_view_inputs(preset, frame)?;
-        let target = read_esp_targets(preset, frame, pid)?
+        let (target, _) = read_esp_targets(preset, frame, pid)?
             .into_iter()
             .next()
             .ok_or_else(|| "Entity List contains no readable position".to_owned())?;
@@ -27102,7 +27136,7 @@ mod windows_overlay {
         let Ok(targets) = read_esp_targets(preset, frame, pid) else {
             return (Vec::new(), None);
         };
-        let nearest_target = targets.iter().copied().min_by(|left, right| {
+        let nearest_target = targets.iter().map(|(t, _)| *t).min_by(|left, right| {
             let distance = |target: &[f32; 3]| {
                 let dx = target[0] - camera[0];
                 let dy = target[1] - camera[1];
@@ -27129,11 +27163,15 @@ mod windows_overlay {
         }
         let mut shapes = Vec::new();
         let mut best_snapshot = None;
-        for target in targets {
+        if preset.debug_mode {
+            ESP_DEBUG_BOX_HITS.lock().clear();
+        }
+        for (target, entity_address) in targets {
             let (mut target_shapes, snapshot) = esp_shapes_for_target(
                 preset,
                 marker_asset,
                 target,
+                entity_address,
                 camera,
                 yaw,
                 pitch,
@@ -27164,6 +27202,7 @@ mod windows_overlay {
         preset: &crate::model::EspPreset,
         marker_asset: Option<&Arc<str>>,
         target: [f32; 3],
+        entity_address: usize,
         camera: [f32; 3],
         yaw: f32,
         pitch: f32,
@@ -27259,13 +27298,12 @@ mod windows_overlay {
                         (x + half_width, y + half_height),
                         (x - half_width, y + half_height),
                     ];
+                    let box_min_x = x - half_width - thickness;
+                    let box_min_y = y - half_height - thickness;
+                    let box_max_x = x + half_width + thickness;
+                    let box_max_y = y + half_height + thickness;
                     shapes.push(GeometryRenderShape {
-                        bounds: (
-                            x - half_width - thickness,
-                            y - half_height - thickness,
-                            x + half_width + thickness,
-                            y + half_height + thickness,
-                        ),
+                        bounds: (box_min_x, box_min_y, box_max_x, box_max_y),
                         draw: GeometryRenderDraw::Polygon {
                             points,
                             stroke: color,
@@ -27273,6 +27311,37 @@ mod windows_overlay {
                             thickness,
                         },
                     });
+
+                    if preset.debug_mode {
+                        ESP_DEBUG_BOX_HITS.lock().push(EspDebugBoxHit {
+                            min_x: box_min_x,
+                            min_y: box_min_y,
+                            max_x: box_max_x,
+                            max_y: box_max_y,
+                            address: entity_address,
+                        });
+
+                        let debug_text = if entity_address != 0 {
+                            format!(
+                                "0x{entity_address:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
+                                target[0], target[1], target[2]
+                            )
+                        } else {
+                            format!("X:{:.1} Y:{:.1} Z:{:.1}", target[0], target[1], target[2])
+                        };
+                        let text_y = box_min_y - 28;
+                        shapes.push(GeometryRenderShape {
+                            bounds: geometry_label_bounds(x, text_y, 12, &debug_text, 0.0),
+                            draw: GeometryRenderDraw::Label(GeometryRenderText {
+                                x,
+                                y: text_y,
+                                font_size: 12,
+                                color: [255, 230, 0, 255],
+                                rotation_deg: 0.0,
+                                text: debug_text,
+                            }),
+                        });
+                    }
                 }
             },
             crate::model::EspMarkerSource::Text => {

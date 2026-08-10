@@ -677,6 +677,8 @@ impl CrosshairApp {
                             }
                             ui.checkbox(&mut preset.show_tracer, "Tracer");
                             ui.checkbox(&mut preset.show_distance, "Distance");
+                            ui.checkbox(&mut preset.debug_mode, "Debug Mode")
+                                .on_hover_text("Clicking any Box marker displays its memory address & X Y Z coordinates and copies the address to clipboard.");
                             ui.label("Update");
                             ui.add(DragValue::new(&mut preset.update_interval_ms).speed(1.0).range(1..=1000).suffix(" ms"));
                             let mut smooth_enabled = preset.motion_smoothing_ms > 0;
