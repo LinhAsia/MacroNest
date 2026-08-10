@@ -25880,6 +25880,8 @@ mod windows_overlay {
             Some(&blend),
             ULW_ALPHA,
         );
+        let _ = SelectObject(mem_dc, old_font);
+        let _ = DeleteObject(HGDIOBJ(font.0));
         let _ = SelectObject(mem_dc, old_bitmap);
         let _ = DeleteObject(HGDIOBJ(bitmap.0));
         let _ = DeleteDC(mem_dc);
@@ -31094,10 +31096,14 @@ mod windows_overlay {
     }
 
     fn cooperative_zero_delay_loop_yield(delay_ms: u64, last_yield: &mut Instant) {
-        if delay_ms == 0 && last_yield.elapsed() >= Duration::from_millis(1) {
-            // ponytail: sleep for 1ms every 1ms to prevent tight 0ms infinite loops from hogging 100% CPU and deadlocking UI thread queues
-            thread::sleep(Duration::from_millis(1));
-            *last_yield = Instant::now();
+        if delay_ms == 0 {
+            if last_yield.elapsed() >= Duration::from_millis(10) {
+                // ponytail: yield 1ms every 10ms to keep macro execution super fast while ensuring Windows UI queue doesn't deadlock
+                thread::sleep(Duration::from_millis(1));
+                *last_yield = Instant::now();
+            } else {
+                std::hint::spin_loop();
+            }
         }
     }
 
@@ -33997,17 +34003,16 @@ mod windows_overlay {
     }
 
     fn show_hud_preset(owner_preset_id: u32, step: &MacroStep) -> Result<()> {
-        let preset_id = step
-            .key
-            .trim()
-            .parse::<u32>()
-            .context("Toolbox preset id is invalid")?;
+        let key_trim = step.key.trim();
         let preset = {
             let hook_state = HOOK_STATE.lock();
             hook_state
                 .hud_presets
                 .iter()
-                .find(|preset| preset.id == preset_id)
+                .find(|preset| {
+                    key_trim.parse::<u32>().map_or(false, |id| preset.id == id)
+                        || preset.name.eq_ignore_ascii_case(key_trim)
+                })
                 .cloned()
         }
         .context("Toolbox preset was not found")?;
