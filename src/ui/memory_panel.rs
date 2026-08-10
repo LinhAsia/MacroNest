@@ -3159,7 +3159,7 @@ impl CrosshairApp {
                                         auto_dissected: false,
                                         history: Vec::new(),
                                         structure_back_step: "10".to_owned(),
-                                        structure_forward_step: "10".to_owned(),
+                                        structure_forward_step: "200".to_owned(),
                                         selected_structure_address: None,
                                     });
                                     ui.close();
@@ -8420,7 +8420,7 @@ impl CrosshairApp {
                 auto_dissected: false,
                 history: Vec::new(),
                 structure_back_step: "10".to_owned(),
-                structure_forward_step: "10".to_owned(),
+                structure_forward_step: "200".to_owned(),
                 selected_structure_address: None,
             });
         }
@@ -9176,6 +9176,42 @@ impl CrosshairApp {
             ui.ctx().request_repaint();
         }
         if matches!(dialog.kind, MemoryViewKind::Bytes) {
+            let step = parse_hex_offset(&dialog.structure_forward_step);
+            let mut next_address = None;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Address:").small().strong());
+                ui.label(
+                    RichText::new(format_prefixed_memory_address(dialog.address)).monospace(),
+                );
+                if ui
+                    .add_enabled(step.is_some(), egui::Button::new("-"))
+                    .on_hover_text("Move to a lower address by the hexadecimal step")
+                    .clicked()
+                {
+                    next_address = Some(dialog.address.saturating_sub(step.unwrap()));
+                }
+                ui.label("0x");
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.structure_forward_step)
+                        .desired_width(64.0)
+                        .char_limit(12)
+                        .hint_text("200"),
+                )
+                .on_hover_text("Move step in hex, for example 18, 98, or 200");
+                if ui
+                    .add_enabled(step.is_some(), egui::Button::new("+"))
+                    .on_hover_text("Move to a higher address by the hexadecimal step")
+                    .clicked()
+                {
+                    next_address = Some(dialog.address.saturating_add(step.unwrap()));
+                }
+            });
+            if let Some(address) = next_address {
+                dialog.address = address;
+                dialog.previous_bytes.clear();
+                dialog.byte_change_times.clear();
+                return;
+            }
             if let Some(region) = region {
                 ui.label(
                     RichText::new(format!(
