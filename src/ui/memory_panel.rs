@@ -1089,8 +1089,8 @@ impl CrosshairApp {
         let mut open = true;
         let builder = egui::ViewportBuilder::default()
             .with_title(title)
-            .with_position(egui::pos2(0.0, 0.0))
-            .with_inner_size(vec2(760.0, 560.0))
+            .with_position(egui::pos2(40.0, 40.0))
+            .with_inner_size(vec2(860.0, 620.0))
             .with_min_inner_size(vec2(480.0, 280.0))
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
@@ -5419,8 +5419,10 @@ impl CrosshairApp {
         {
             self.refresh_entity_list_preview(&mut dialog, false);
         }
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
+        egui::CentralPanel::default()
+            .frame(Self::memory_popup_frame(ctx))
+            .show(ctx, |ui| {
+            egui::ScrollArea::vertical().id_salt("entity-list-outer-scroll").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("Add selected addresses").clicked() {
                         self.add_selected_entity_addresses(&mut dialog);
@@ -5445,6 +5447,7 @@ impl CrosshairApp {
                 });
                 let mut remove = None;
                 egui::ScrollArea::vertical()
+                    .id_salt("entity-list-inputs-scroll")
                     .max_height(112.0)
                     .show(ui, |ui| {
                         for (index, expression) in dialog.inputs.iter_mut().enumerate() {
@@ -5797,7 +5800,7 @@ impl CrosshairApp {
                 }
                 ui.label(RichText::new("Preview XYZ (null slots are kept)").strong());
                 if let Some(preview) = &dialog.preview {
-                    egui::ScrollArea::vertical().max_height(150.0).show_rows(
+                    egui::ScrollArea::vertical().id_salt("entity-list-preview-scroll").max_height(150.0).show_rows(
                         ui,
                         22.0,
                         preview.entries.len(),
@@ -6314,39 +6317,17 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     ui.label("Game viewport");
                     persist_camera_inputs |= ui.add(
-                        egui::TextEdit::singleline(&mut dialog.viewport_width).desired_width(70.0),
+                        egui::TextEdit::singleline(&mut dialog.viewport_width).desired_width(60.0),
                     ).changed();
                     ui.label("×");
                     persist_camera_inputs |= ui.add(
-                        egui::TextEdit::singleline(&mut dialog.viewport_height).desired_width(70.0),
+                        egui::TextEdit::singleline(&mut dialog.viewport_height).desired_width(60.0),
                     ).changed();
                     if ui
                         .add_enabled(dialog.rx.is_none(), Button::new("Start scan"))
                         .clicked()
                     {
                         self.start_camera_matrix_scan(&mut dialog);
-                    }
-                    if ui
-                        .add_enabled(
-                            !dialog.candidates.is_empty()
-                                && dialog.rx.is_none()
-                                && dialog.stability_sample.is_none(),
-                            Button::new("Remove motion while still"),
-                        )
-                        .clicked()
-                    {
-                        self.start_camera_stability_filter(&mut dialog);
-                    }
-                    if ui
-                        .add_enabled(
-                            !dialog.candidates.is_empty()
-                                && dialog.rx.is_none()
-                                && dialog.stability_sample.is_none(),
-                            Button::new("Filter after rotation"),
-                        )
-                        .clicked()
-                    {
-                        self.filter_rotated_camera_matrices(&mut dialog);
                     }
                     if ui
                         .add_enabled(
@@ -6386,6 +6367,30 @@ impl CrosshairApp {
                             frozen: None,
                             saved_to_library: false,
                         });
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !dialog.candidates.is_empty()
+                                && dialog.rx.is_none()
+                                && dialog.stability_sample.is_none(),
+                            Button::new("Remove motion while still"),
+                        )
+                        .clicked()
+                    {
+                        self.start_camera_stability_filter(&mut dialog);
+                    }
+                    if ui
+                        .add_enabled(
+                            !dialog.candidates.is_empty()
+                                && dialog.rx.is_none()
+                                && dialog.stability_sample.is_none(),
+                            Button::new("Filter after rotation"),
+                        )
+                        .clicked()
+                    {
+                        self.filter_rotated_camera_matrices(&mut dialog);
                     }
                 });
                 ui.label(RichText::new(&dialog.status).small().weak());
