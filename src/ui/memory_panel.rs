@@ -969,12 +969,23 @@ impl CrosshairApp {
         if self.memory_panel.address_dialog.is_some() {
             let screen_rect = ui.ctx().input(|i| i.screen_rect());
             let modal = egui::Area::new(egui::Id::new("address-dialog-backdrop"))
-                .order(egui::Order::Foreground)
+                .order(egui::Order::Middle)
                 .fixed_pos(screen_rect.min)
                 .show(ui.ctx(), |ui| {
                     ui.allocate_response(screen_rect.size(), egui::Sense::click())
                 });
-            if modal.inner.clicked() {
+            let clicked_outside = modal.inner.clicked()
+                && self
+                    .memory_panel
+                    .address_dialog
+                    .as_ref()
+                    .and_then(|d| d.rect)
+                    .is_some_and(|rect| {
+                        ui.ctx()
+                            .pointer_latest_pos()
+                            .is_some_and(|pos| !rect.contains(pos))
+                    });
+            if clicked_outside {
                 self.memory_panel.address_dialog = None;
             }
         }
@@ -10280,6 +10291,7 @@ impl CrosshairApp {
         let title = self.tr("Change address / Pointer", "Thay đổi địa chỉ / Pointer");
         let window = egui::Window::new(title)
             .open(&mut open)
+            .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .resizable(true)
             .collapsible(false)
@@ -12626,9 +12638,10 @@ fn parse_memory_address_term(text: &str) -> Option<usize> {
         .or_else(|| text.strip_prefix("0X"))
         .map_or_else(
             || {
-                if text
-                    .chars()
-                    .any(|character| character.is_ascii_alphabetic())
+                if text.len() >= 8
+                    || text
+                        .chars()
+                        .any(|character| character.is_ascii_alphabetic())
                 {
                     (text, 16)
                 } else {
@@ -12637,7 +12650,9 @@ fn parse_memory_address_term(text: &str) -> Option<usize> {
             },
             |digits| (digits, 16),
         );
-    usize::from_str_radix(digits, radix).ok()
+    usize::from_str_radix(digits, radix)
+        .ok()
+        .or_else(|| usize::from_str_radix(text, 16).ok())
 }
 
 fn format_memory_address(address: usize) -> String {
@@ -12898,6 +12913,7 @@ mod tests {
     fn parses_decimal_and_hex_addresses() {
         assert_eq!(parse_memory_address("4096"), Some(4096));
         assert_eq!(parse_memory_address("0x1000"), Some(4096));
+        assert_eq!(parse_memory_address("20385101704"), Some(0x20385101704));
         assert_eq!(parse_memory_address("7FF6_ABCD"), Some(0x7FF6_ABCD));
         assert_eq!(parse_memory_address("0x1000+10-8"), Some(0x1008));
         assert_eq!(parse_address_edit(0x2000, "-1040"), Some(0x0FC0));

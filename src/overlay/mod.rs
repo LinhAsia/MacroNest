@@ -31095,9 +31095,8 @@ mod windows_overlay {
 
     fn cooperative_zero_delay_loop_yield(delay_ms: u64, last_yield: &mut Instant) {
         if delay_ms == 0 && last_yield.elapsed() >= Duration::from_millis(1) {
-            // ponytail: keep 0 ms as "no requested wait". Yield only after a worker has
-            // consumed a time slice; unlike sleep(1 ms), this does not delay every iteration.
-            thread::yield_now();
+            // ponytail: sleep for 1ms every 1ms to prevent tight 0ms infinite loops from hogging 100% CPU and deadlocking UI thread queues
+            thread::sleep(Duration::from_millis(1));
             *last_yield = Instant::now();
         }
     }
@@ -31734,16 +31733,23 @@ mod windows_overlay {
         if address_text
             .chars()
             .all(|character| character.is_ascii_hexdigit())
-            && address_text
-                .chars()
-                .any(|character| character.is_ascii_alphabetic())
         {
-            return usize::from_str_radix(&address_text, 16).ok();
+            if address_text.len() >= 8
+                || address_text
+                    .chars()
+                    .any(|character| character.is_ascii_alphabetic())
+            {
+                if let Ok(addr) = usize::from_str_radix(&address_text, 16) {
+                    return Some(addr);
+                }
+            }
         }
         address_text.parse::<usize>().ok().or_else(|| {
-            let value = evaluate_math_expression_f64(&address_text);
-            (value.is_finite() && value >= 0.0 && value <= usize::MAX as f64)
-                .then_some(value as usize)
+            usize::from_str_radix(&address_text, 16).ok().or_else(|| {
+                let value = evaluate_math_expression_f64(&address_text);
+                (value.is_finite() && value >= 0.0 && value <= usize::MAX as f64)
+                    .then_some(value as usize)
+            })
         })
     }
 
@@ -32701,6 +32707,7 @@ mod windows_overlay {
         fn parses_unprefixed_hex_memory_address_for_macro_and_esp() {
             assert_eq!(parse_memory_address("215DF862E18"), Some(0x215DF862E18));
             assert_eq!(parse_memory_address("215df862e18"), Some(0x215DF862E18));
+            assert_eq!(parse_memory_address("20385101704"), Some(0x20385101704));
             assert_eq!(parse_memory_address("4096"), Some(4096));
         }
 
@@ -34123,7 +34130,21 @@ mod windows_overlay {
             show_legacy_hud_text(owner_preset_id, step);
         }
 
-        send_overlay_command(OverlayCommand::RefreshHud);
+        thread_local! {
+            static LAST_HUD_REFRESH: std::cell::RefCell<Option<Instant>> = const { std::cell::RefCell::new(None) };
+        }
+        let should_notify = LAST_HUD_REFRESH.with(|last| {
+            let mut guard = last.borrow_mut();
+            if guard.is_none() || guard.unwrap().elapsed() >= Duration::from_millis(16) {
+                *guard = Some(Instant::now());
+                true
+            } else {
+                false
+            }
+        });
+        if should_notify {
+            send_overlay_command(OverlayCommand::RefreshHud);
+        }
     }
 
     pub(crate) fn hide_hud_now() {
