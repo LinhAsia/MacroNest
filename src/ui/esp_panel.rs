@@ -153,6 +153,37 @@ impl CrosshairApp {
                                     ),
                             );
                             ui.end_row();
+                            ui.label("Root slot");
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .small_button("▲")
+                                    .on_hover_text("Move root to the previous slot (-Stride)")
+                                    .clicked()
+                                {
+                                    preset.entity_root_slot =
+                                        preset.entity_root_slot.saturating_sub(1);
+                                }
+                                ui.label(format!(
+                                    "{:+} ({} bytes)",
+                                    preset.entity_root_slot,
+                                    i64::from(preset.entity_root_slot)
+                                        * i64::from(preset.entity_stride)
+                                ));
+                                if ui
+                                    .small_button("▼")
+                                    .on_hover_text("Move root to the next slot (+Stride)")
+                                    .clicked()
+                                {
+                                    preset.entity_root_slot =
+                                        preset.entity_root_slot.saturating_add(1);
+                                }
+                                if preset.entity_root_slot != 0
+                                    && ui.small_button("Reset").clicked()
+                                {
+                                    preset.entity_root_slot = 0;
+                                }
+                            });
+                            ui.end_row();
                             ui.label("Entity layout");
                             ui.horizontal(|ui| {
                                 ui.label("X");

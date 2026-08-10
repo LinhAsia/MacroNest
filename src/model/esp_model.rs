@@ -58,6 +58,7 @@ pub struct EspPreset {
     pub entity_z_offset: i64,
     pub entity_stride: u32,
     pub entity_count: u32,
+    pub entity_root_slot: i32,
     pub entity_aabb_center: bool,
     pub entity_aabb_pair_offset: i64,
     pub camera_x: String,
@@ -150,6 +151,7 @@ impl EspPreset {
             entity_z_offset: 8,
             entity_stride: 0x48,
             entity_count: 32,
+            entity_root_slot: 0,
             entity_aabb_center: false,
             entity_aabb_pair_offset: 0x0C,
             camera_x: String::new(),
@@ -253,9 +255,14 @@ pub(crate) fn aabb_center_component(first: f32, second: f32) -> f32 {
     first + (second - first) * 0.5
 }
 
+pub(crate) fn shifted_entity_root(root: usize, stride: u32, slot: i32) -> Option<usize> {
+    let offset = i64::from(stride).checked_mul(i64::from(slot))?;
+    entity_field_address(root, 0, 1, offset)
+}
+
 #[cfg(test)]
 mod entity_address_tests {
-    use super::{aabb_center_component, entity_field_address};
+    use super::{aabb_center_component, entity_field_address, shifted_entity_root};
 
     #[test]
     fn calculates_positive_and_negative_entity_fields() {
@@ -268,6 +275,13 @@ mod entity_address_tests {
     fn calculates_aabb_center_component() {
         assert_eq!(aabb_center_component(184.0, 194.0), 189.0);
         assert_eq!(aabb_center_component(-8.0, 2.0), -3.0);
+    }
+
+    #[test]
+    fn shifts_entity_root_by_whole_strides() {
+        assert_eq!(shifted_entity_root(0x1000, 0x18, 2), Some(0x1030));
+        assert_eq!(shifted_entity_root(0x1000, 0x18, -2), Some(0x0FD0));
+        assert_eq!(shifted_entity_root(0x10, 0x18, -1), None);
     }
 }
 
