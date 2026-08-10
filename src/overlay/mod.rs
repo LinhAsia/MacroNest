@@ -323,6 +323,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(HashSet::new()));
     pub(crate) static HUD_DISPLAY: Lazy<Mutex<Option<HudDisplayState>>> =
         Lazy::new(|| Mutex::new(None));
+    pub(crate) static HUD_MAP: Lazy<Mutex<HashMap<String, HudDisplayState>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
     static HUD_PREVIEW_DISPLAY: Lazy<Mutex<Option<HudDisplayState>>> =
         Lazy::new(|| Mutex::new(None));
     static MOUSE_RECORDING: Lazy<Mutex<Option<MouseRecordingSession>>> =
@@ -34036,7 +34038,7 @@ mod windows_overlay {
         } else {
             None
         };
-        *HUD_DISPLAY.lock() = Some(HudDisplayState {
+        let state = HudDisplayState {
             owner_preset_id: Some(owner_preset_id),
             preset_id: Some(preset.id),
             text,
@@ -34054,7 +34056,9 @@ mod windows_overlay {
             height: ((preset.height.max(1)) as f32 * scale_y).round().max(1.0) as i32,
             auto_hide_on_owner_completion: false,
             expires_at,
-        });
+        };
+        HUD_MAP.lock().insert(preset.id.to_string(), state.clone());
+        *HUD_DISPLAY.lock() = Some(state);
         Ok(())
     }
 
@@ -34102,7 +34106,7 @@ mod windows_overlay {
         let scale_y = screen_height as f32 / 1080.0;
         let width = ((preset.width.max(1)) as f32 * scale_x).round().max(1.0) as i32;
         let height = ((preset.height.max(1)) as f32 * scale_y).round().max(1.0) as i32;
-        *HUD_DISPLAY.lock() = Some(HudDisplayState {
+        let state = HudDisplayState {
             owner_preset_id: Some(owner_preset_id),
             preset_id: None,
             text,
@@ -34127,7 +34131,10 @@ mod windows_overlay {
                     None
                 }
             },
-        });
+        };
+        let key = format!("legacy_{owner_preset_id}_{}", step.key.trim());
+        HUD_MAP.lock().insert(key, state.clone());
+        *HUD_DISPLAY.lock() = Some(state);
     }
 
     fn trigger_hud_display(owner_preset_id: u32, step: &MacroStep) {
@@ -34154,6 +34161,7 @@ mod windows_overlay {
 
     pub(crate) fn hide_hud_now() {
         *HUD_DISPLAY.lock() = None;
+        HUD_MAP.lock().clear();
         *HUD_PREVIEW_DISPLAY.lock() = None;
         send_overlay_command(OverlayCommand::PreviewHudPreset(Vec::new()));
     }
