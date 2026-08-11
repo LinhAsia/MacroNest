@@ -854,7 +854,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             "-scenario",
             "live_streaming",
             "-fps_mode",
-            "passthrough",
+            "cfr",
             "-avoid_negative_ts",
             "make_zero",
             "-movflags",
@@ -1078,7 +1078,9 @@ fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
             available = loop {
                 match child.try_wait() {
                     Ok(Some(status)) => break status.success(),
-                    Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+                    Ok(None) if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(20))
+                    }
                     Ok(None) => {
                         let _ = child.kill();
                         let _ = child.wait();
@@ -1282,6 +1284,8 @@ fn mux_system_audio(ffmpeg_exe: &Path, audio_path: &Path, video_path: &Path) -> 
             "-b:a",
             "192k",
             "-shortest",
+            "-avoid_negative_ts",
+            "make_zero",
             "-movflags",
             "+faststart",
         ])
