@@ -7053,6 +7053,7 @@ impl CrosshairApp {
             self.video_library_playback.is_some() || self.video_library_playback_path.is_some();
         self.video_library_playback = None;
         self.video_library_playback_path = None;
+        self.video_library_preloaded_playback = None;
         if was_playing {
             audio::stop_video_audio_preview();
         }
@@ -7379,6 +7380,12 @@ impl CrosshairApp {
             }
         }
         if !self.video_library_open {
+            if self.video_library_playback.is_some()
+                || self.video_library_preloaded_playback.is_some()
+                || self.video_library_playback_path.is_some()
+            {
+                self.stop_video_library_playback();
+            }
             return;
         }
 

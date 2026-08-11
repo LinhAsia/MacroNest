@@ -119,6 +119,7 @@ pub struct VideoPlaybackSession {
     finished: Arc<AtomicBool>,
     play: Arc<AtomicBool>,
     ready: Arc<AtomicBool>,
+    child: Arc<Mutex<Option<Child>>>,
 }
 
 impl VideoPlaybackSession {
@@ -132,6 +133,10 @@ impl VideoPlaybackSession {
 
     pub fn stop(&self) {
         self.stop.store(true, Ordering::Release);
+        if let Some(mut child) = self.child.lock().take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 
     pub fn play(&self) {
@@ -363,6 +368,8 @@ fn start_video_library_playback_inner(
     let finished = Arc::new(AtomicBool::new(false));
     let play = Arc::new(AtomicBool::new(play_immediately));
     let ready = Arc::new(AtomicBool::new(false));
+    let child_holder = Arc::new(Mutex::new(None));
+    let worker_child = child_holder.clone();
     let worker_stop = stop.clone();
     let worker_finished = finished.clone();
     let worker_play = play.clone();
@@ -404,12 +411,16 @@ fn start_video_library_playback_inner(
                 .stdout
                 .take()
                 .ok_or_else(|| "FFmpeg playback output was unavailable.".to_owned())?;
+            *worker_child.lock() = Some(child);
             let mut frame = vec![0_u8; LIBRARY_PLAYBACK_WIDTH * LIBRARY_PLAYBACK_HEIGHT * 4];
             let mut frame_index = 0_u64;
             let mut started_at = None;
             loop {
                 if worker_stop.load(Ordering::Acquire) {
-                    let _ = child.kill();
+                    if let Some(mut child) = worker_child.lock().take() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
                     break;
                 }
                 match stdout.read_exact(&mut frame) {
@@ -426,12 +437,18 @@ fn start_video_library_playback_inner(
                         })
                         .is_err()
                     {
-                        let _ = child.kill();
+                        if let Some(mut child) = worker_child.lock().take() {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                        }
                         break;
                     }
                     while !worker_play.load(Ordering::Acquire) {
                         if worker_stop.load(Ordering::Acquire) {
-                            let _ = child.kill();
+                            if let Some(mut child) = worker_child.lock().take() {
+                                let _ = child.kill();
+                                let _ = child.wait();
+                            }
                             return Ok(());
                         }
                         thread::sleep(Duration::from_millis(2));
@@ -452,12 +469,17 @@ fn start_video_library_playback_inner(
                         + frame_index as f64 / LIBRARY_PLAYBACK_FPS as f64,
                 };
                 if sender.send(event).is_err() {
-                    let _ = child.kill();
+                    if let Some(mut child) = worker_child.lock().take() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
                     break;
                 }
                 frame_index += 1;
             }
-            let _ = child.wait();
+            if let Some(mut child) = worker_child.lock().take() {
+                let _ = child.wait();
+            }
             Ok(())
         })();
         let _ = sender.send(match result {
@@ -472,6 +494,7 @@ fn start_video_library_playback_inner(
         finished,
         play,
         ready,
+        child: child_holder,
     })
 }
 
