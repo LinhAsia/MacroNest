@@ -15171,29 +15171,39 @@ if supports_move_mouse || show_detection_tuning {
                                                 } else if matches!(step.action, MacroAction::StartVisionSearch
                                                          | MacroAction::ScanVisionOnce
                                                          | MacroAction::StopVision | MacroAction::StopVisionWait) {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = selected_id
-                                                        .and_then(|id| {
-                                                            self.state
-                                                                .vision_presets
-                                                                .iter()
-                                                                .find(|p| p.id == id)
-                                                                .map(|p| p.name.clone())
-                                                        })
-                                                        .unwrap_or_else(|| {
-                                                            if step.key.trim().is_empty() {
-                                                                Self::tr_lang(language, "Select vision", "Select vision")
-                                                                .to_owned()
-                                                            } else {
-                                                                format!("ID: {}", step.key)
-                                                            }
-                                                        });
+                                                    let is_manual = step.key.trim().eq_ignore_ascii_case("manual");
+                                                    let selected_id = if is_manual { None } else { step.key.trim().parse::<u32>().ok() };
+                                                    let selected_label = if is_manual {
+                                                        Self::tr_lang(language, "Manual Mode", "Th\u{1ee7} c\u{00f4}ng").to_owned()
+                                                    } else {
+                                                        selected_id
+                                                            .and_then(|id| {
+                                                                self.state
+                                                                    .vision_presets
+                                                                    .iter()
+                                                                    .find(|p| p.id == id)
+                                                                    .map(|p| p.name.clone())
+                                                            })
+                                                            .unwrap_or_else(|| {
+                                                                if step.key.trim().is_empty() {
+                                                                    Self::tr_lang(language, "Select vision", "Select vision")
+                                                                    .to_owned()
+                                                                } else {
+                                                                    format!("ID: {}", step.key)
+                                                                }
+                                                            })
+                                                    };
                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "vision-preset-step"))
-    .width(146.0)
+    .width(130.0)
 
     .selected_text(selected_label)
 
     .show_ui(ui, |ui| {
+        if ui.selectable_label(is_manual, Self::tr_lang(language, "Manual Mode", "Th\u{1ee7} c\u{00f4}ng")).clicked() {
+            step.key = "manual".to_owned();
+            live_sync = true;
+        }
+        ui.separator();
 
                     let (image_presets, color_presets, pixel_presets): (Vec<_>, Vec<_>, Vec<_>) = self.state.vision_presets.iter().fold(
                         (Vec::new(), Vec::new(), Vec::new()),
@@ -15243,6 +15253,30 @@ if supports_move_mouse || show_detection_tuning {
                         }
                     }
     });
+
+                                                     if is_manual {
+                                                         ui.add_space(2.0);
+                                                         ui.label(Self::tr_lang(language, "Tol:", "Tol:"));
+                                                         let resp = ui.add(egui::DragValue::new(&mut step.vision_color_tolerance).range(0..=100));
+                                                         live_sync |= resp.changed();
+                                                         if ui.button(Self::material_icon_text(0xe161, 14.0))
+                                                             .on_hover_text(Self::tr_lang(language, "Save as Vision Preset", "L\u{01b0}u th\u{00e0}nh Vision Preset"))
+                                                             .clicked()
+                                                         {
+                                                             let next_id = self.state.vision_presets.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+                                                             let mut new_p = crate::model::VisionPreset::default();
+                                                             new_p.id = next_id;
+                                                             new_p.name = format!("Vision Preset #{}", next_id);
+                                                             new_p.color_tolerance = step.vision_color_tolerance;
+                                                             new_p.use_color_matching = true;
+                                                             if let Some(c) = Self::parse_rgb_color(&step.if_target_color) {
+                                                                 new_p.target_color = Some(crate::model::RgbaColor { r: c.r(), g: c.g(), b: c.b(), a: c.a() });
+                                                             }
+                                                             self.state.vision_presets.push(new_p);
+                                                             step.key = next_id.to_string();
+                                                             live_sync = true;
+                                                         }
+                                                     }
 
                                                      let selected_preset = selected_id.and_then(|id| {
                                                          self.state.vision_presets.iter().find(|p| p.id == id)
