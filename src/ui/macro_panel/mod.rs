@@ -15063,6 +15063,26 @@ if supports_move_mouse || show_detection_tuning {
                                                               &mut cancel_active_capture,
                                                                 false,
                                                             );
+                                                            if if_start_needs_end {
+                                                                ui.colored_label(
+                                                                    Color32::from_rgb(255, 196, 80),
+                                                                    Self::tr_lang(
+                                                                        language,
+                                                                        "IfEnd is required",
+                                                                        "Cần có IfEnd",
+                                                                    ),
+                                                                );
+                                                                if ui
+                                                                    .button(Self::tr_lang(
+                                                                        language,
+                                                                        "+ Add IfEnd at end",
+                                                                        "+ Thêm IfEnd ở cuối",
+                                                                    ))
+                                                                    .clicked()
+                                                                {
+                                                                    append_missing_if_end = Some(preset.id);
+                                                                }
+                                                            }
                                                         });
                                             if step.action != previous_action
                                                 && matches!(step.action, MacroAction::ScanVisionOnce)
