@@ -701,15 +701,20 @@ impl CrosshairApp {
         live_sync: &mut bool,
     ) {
         let active_preset_id = step.key.trim().parse::<u32>().ok();
-        let mut is_manual = step.key.trim().eq_ignore_ascii_case("manual")
-            || step.key.trim() == "0"
-            || step.key.trim().is_empty()
-            || (active_preset_id.is_some()
-                && vision_presets.iter().find(|p| Some(p.id) == active_preset_id).map_or(false, |p| p.name.starts_with("Manual Vision #")));
+        let is_manual_current = match step.key.trim() {
+            "preset_none" => false,
+            k if k.parse::<u32>().is_ok() => {
+                let pid = k.parse::<u32>().unwrap();
+                vision_presets.iter().find(|p| p.id == pid).map_or(false, |p| p.name.starts_with("Manual Vision #"))
+            },
+            _ => true,
+        };
+
+        let mut is_manual = is_manual_current;
 
         if ui.checkbox(&mut is_manual, Self::tr_lang(language, "Manual", "Th\u{00f9} c\u{00f4}ng")).changed() {
             if is_manual {
-                if active_preset_id.is_none() || !vision_presets.iter().any(|p| Some(p.id) == active_preset_id) {
+                if active_preset_id.is_none() || !vision_presets.iter().any(|p| Some(p.id) == active_preset_id && p.name.starts_with("Manual Vision #")) {
                     let next_id = vision_presets.iter().map(|p| p.id).max().unwrap_or(0) + 1;
                     let mut new_p = crate::model::VisionPreset::default();
                     new_p.id = next_id;
@@ -723,7 +728,11 @@ impl CrosshairApp {
                     step.key = next_id.to_string();
                 }
             } else {
-                step.key = "".to_owned();
+                if let Some(first_opt) = image_search_preset_options.first() {
+                    step.key = first_opt.0.to_string();
+                } else {
+                    step.key = "preset_none".to_string();
+                }
             }
             *live_sync = true;
         }
@@ -20577,9 +20586,10 @@ if supports_move_mouse || show_detection_tuning {
                                 }
                                 *live_sync = true;
                             }
-                            if !is_manual {
+                            let is_manual_now = step.audio_sense_preset_id.is_none();
+                            if !is_manual_now {
                                 if step.audio_sense_preset_id.is_none() {
-                                    step.audio_sense_preset_id = preset_options.first().map(|(id, _)| *id);
+                                    step.audio_sense_preset_id = preset_options.first().map(|(id, _)| *id).or(Some(0));
                                     *live_sync = true;
                                 }
                                 Self::render_audio_sense_preset_selector(
@@ -20691,7 +20701,7 @@ if supports_move_mouse || show_detection_tuning {
                                 }
                             }
                         });
-                        if is_manual && !step.audio_sense_collapsed {
+                        if step.audio_sense_preset_id.is_none() && !step.audio_sense_collapsed {
                             ui.add_space(4.0);
                             Self::render_audio_sense_pitch_custom_step(
                                 ui,
