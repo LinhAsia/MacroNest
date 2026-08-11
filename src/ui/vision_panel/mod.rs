@@ -1168,7 +1168,7 @@ impl CrosshairApp {
         self.paths.vision_template_file_for(preset_id)
     }
 
-    fn set_vision_preset_single_pixel_region(
+    pub(crate) fn set_vision_preset_single_pixel_region(
         preset: &mut VisionPreset,
         screen_x: Option<i32>,
         screen_y: Option<i32>,
@@ -1179,7 +1179,7 @@ impl CrosshairApp {
         preset.search_region_height = Some(1);
     }
 
-    fn clear_vision_preset_search_region(preset: &mut VisionPreset) {
+    pub(crate) fn clear_vision_preset_search_region(preset: &mut VisionPreset) {
         preset.search_region_screen_x = None;
         preset.search_region_screen_y = None;
         preset.search_region_width = None;
