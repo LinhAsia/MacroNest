@@ -44,7 +44,7 @@ mod windows_platform {
         core::{PCWSTR, w},
     };
 
-    const MUTEX_NAME: &str = "Global\\CrosshairOverlaySingleInstance_v2";
+    const MUTEX_NAME: &str = "Local\\MacroNestSingleInstance_v3";
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     static INTERCEPTION_DRIVER_INSTALLED_CACHE: OnceLock<Mutex<Option<(Instant, bool)>>> =
         OnceLock::new();
