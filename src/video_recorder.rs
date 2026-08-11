@@ -781,7 +781,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         }
     };
 
-    let hardware_encoding = hardware_encoding_available(&config.ffmpeg_exe);
+    let gop_size = config.fps.clamp(1, 240).to_string();
     let mut command = Command::new(&config.ffmpeg_exe);
     command
         .creation_flags(CREATE_NO_WINDOW)
@@ -797,14 +797,10 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             "-hide_banner",
             "-loglevel",
             "error",
-            "-probesize",
-            "32k",
-            "-analyzeduration",
-            "0",
             "-thread_queue_size",
-            "512",
+            "1024",
             "-rtbufsize",
-            "100M",
+            "512M",
             "-f",
             "gdigrab",
             "-draw_mouse",
@@ -815,52 +811,63 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 command.arg(k).arg(v);
             }
         }
-        command.args(["-vf", "format=nv12", "-an", "-c:v", "h264_mf"]);
-    } else {
         command.args([
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-probesize",
-            "32k",
-            "-analyzeduration",
-            "0",
-            "-f",
-            "lavfi",
-            "-i",
-            &source,
             "-vf",
-            "hwdownload,format=bgra,format=nv12",
+            "format=yuv420p",
             "-an",
             "-c:v",
-            "h264_mf",
-        ]);
-    }
-    if hardware_encoding {
-        command.args(["-hw_encoding", "1"]);
-    }
-    let gop_size = config.fps.clamp(1, 240).to_string();
-    command
-        .args([
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-crf",
+            "20",
             "-g",
             &gop_size,
             "-bf",
             "0",
-            "-rate_control",
-            "quality",
-            "-quality",
-            "90",
-            "-scenario",
-            "live_streaming",
             "-fps_mode",
             "cfr",
             "-avoid_negative_ts",
             "make_zero",
             "-movflags",
             "+faststart",
-        ])
-        .arg(&output_path);
+        ]);
+    } else {
+        command.args([
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            &source,
+            "-vf",
+            "hwdownload,format=bgra,format=yuv420p",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-crf",
+            "20",
+            "-g",
+            &gop_size,
+            "-bf",
+            "0",
+            "-fps_mode",
+            "cfr",
+            "-avoid_negative_ts",
+            "make_zero",
+            "-movflags",
+            "+faststart",
+        ]);
+    }
+    command.arg(&output_path);
 
     let child = match command.spawn() {
         Ok(child) => child,
