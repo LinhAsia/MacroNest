@@ -6683,7 +6683,7 @@ impl CrosshairApp {
                                             }
                                             let paste_btn = ui.add_enabled(
                                                 self.macro_preset_clipboard.is_some(),
-                                                Button::new("📥")
+                                                Button::new(Self::material_icon_text(0xe14d, 18.0))
                                                     .min_size(egui::vec2(36.0, 24.0)),
                                             )
                                             .on_hover_text(Self::tr_lang(
@@ -6712,7 +6712,7 @@ impl CrosshairApp {
                                             };
 
                                             let copy_btn = ui.add(
-                                                Button::new("📋")
+                                                Button::new(Self::material_icon_text(0xe14f, 18.0))
                                                     .min_size(egui::vec2(36.0, 24.0))
                                                     .fill(copy_fill)
                                                     .stroke(egui::Stroke::new(1.0, copy_stroke)),
@@ -12165,7 +12165,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         ),
                                                     );
                                                 } else {
-                                                    let copy_btn = Button::new("📋")
+                                                    let copy_btn = Button::new(Self::material_icon_text(0xe14f, 18.0))
                                                         .min_size(egui::vec2(36.0, 24.0));
                                                     if ui
                                                         .add(copy_btn)
@@ -15900,7 +15900,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     ui.visuals().widgets.inactive.bg_stroke.color
                                                 };
                                                 let copy_btn = ui.add(
-                                                    Button::new("📋")
+                                                    Button::new(Self::material_icon_text(0xe14f, 18.0))
                                                         .min_size(vec2(36.0, 24.0))
                                                         .fill(copy_fill)
                                                         .stroke(egui::Stroke::new(1.0, copy_stroke)),
