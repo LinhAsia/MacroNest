@@ -5983,39 +5983,64 @@ impl CrosshairApp {
                                         group.enabled = !group.enabled;
                                         live_sync = true;
                                     }
+                                    let copy_group_feedback_active =
+                                        Self::is_copy_feedback_active(
+                                            self.macro_group_clipboard_feedback_until,
+                                        ) && self.macro_group_clipboard_feedback
+                                            == Some(super::MacroGroupClipboardFeedback::Copy);
+                                     let copy_fill = if copy_group_feedback_active {
+                                         Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                     } else {
+                                         ui.visuals().widgets.inactive.bg_fill
+                                     };
+                                     let copy_stroke = if copy_group_feedback_active {
+                                         Color32::from_rgb(126, 224, 182)
+                                     } else {
+                                         ui.visuals().widgets.inactive.bg_stroke.color
+                                     };
+                                     if Self::with_emphasized_button_hover(ui, |ui| {
+                                         ui.add_sized(
+                                             [36.0, 24.0],
+                                             Button::new("📋")
+                                                 .fill(copy_fill)
+                                                 .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                         )
+                                     })
+                                     .on_hover_text(Self::tr_lang(
+                                         language,
+                                         if copy_group_feedback_active { "Copied!" } else { "Copy this macro group" },
+                                         if copy_group_feedback_active { "Đã copy!" } else { "Sao chép nhóm macro này" },
+                                     ))
+                                     .clicked()
+                                     {
+                                         copy_group_to_clipboard = Some(group.id);
+                                         self.macro_group_clipboard_feedback = Some(super::MacroGroupClipboardFeedback::Copy);
+                                         self.macro_group_clipboard_feedback_until =
+                                             Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
+                                         self.status = Self::tr_lang(
+                                             language,
+                                             "Copied macro group to clipboard.",
+                                             "Đã sao chép nhóm macro vào bộ nhớ tạm.",
+                                         ).to_owned();
+                                     }
+                                     if Self::with_emphasized_button_hover(ui, |ui| {
+                                         ui.add_enabled(
+                                             !self.macro_group_clipboard.is_empty(),
+                                             Button::new("📥")
+                                                 .min_size(egui::vec2(36.0, 24.0)),
+                                         )
+                                     })
+                                     .on_hover_text(Self::tr_lang(
+                                         language,
+                                         "Paste macro group after this one",
+                                         "Dán nhóm macro vào sau nhóm này",
+                                     ))
+                                     .clicked()
+                                     {
+                                         deferred_paste_groups_after = Some(group.id);
+                                     }
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_group = Some(group.id);
-                                    }
-                                    if Self::with_emphasized_button_hover(ui, |ui| {
-                                        ui.add_sized(
-                                            [24.0, 24.0],
-                                            Button::new(Self::material_icon_text(0xe14d, 17.0)),
-                                        )
-                                    })
-                                    .on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Copy this macro group",
-                                        "Copy this macro group",
-                                    ))
-                                    .clicked()
-                                    {
-                                        copy_group_to_clipboard = Some(group.id);
-                                    }
-                                    if Self::with_emphasized_button_hover(ui, |ui| {
-                                        ui.add_enabled(
-                                            !self.macro_group_clipboard.is_empty(),
-                                            Button::new(Self::material_icon_text(0xe14f, 17.0))
-                                                .min_size(egui::vec2(24.0, 24.0)),
-                                        )
-                                    })
-                                    .on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Paste macro group after this one",
-                                        "Paste macro group after this one",
-                                    ))
-                                    .clicked()
-                                    {
-                                        deferred_paste_groups_after = Some(group.id);
                                     }
                                     if Self::sound_style_toggle_button(
                                         ui,
@@ -6657,78 +6682,78 @@ impl CrosshairApp {
                                                 remove_preset = Some(preset.id);
                                             }
                                             let paste_btn = ui.add_enabled(
-                                                 self.macro_preset_clipboard.is_some(),
-                                                 Button::new(Self::material_icon_text(0xe14e, 16.0))
-                                                     .min_size(egui::vec2(28.0, 24.0)),
-                                             )
-                                             .on_hover_text(Self::tr_lang(
-                                                 language,
-                                                 "Paste preset from clipboard into this group",
-                                                 "Paste preset from clipboard into this group",
-                                             ));
-                                             if paste_btn.clicked() {
-                                                 paste_preset_to_group = Some(group.id);
-                                             }
+                                                self.macro_preset_clipboard.is_some(),
+                                                Button::new("📥")
+                                                    .min_size(egui::vec2(36.0, 24.0)),
+                                            )
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                "Paste preset from clipboard into this group",
+                                                "Dán preset từ bộ nhớ tạm vào nhóm này",
+                                            ));
+                                            if paste_btn.clicked() {
+                                                paste_preset_to_group = Some(group.id);
+                                            }
 
-                                             let preset_copy_feedback_active =
-                                                 self.macro_preset_copy_feedback_target == Some(preset.id)
-                                                     && Self::is_copy_feedback_active(
-                                                         self.macro_preset_copy_feedback_until,
-                                                     );
-                                             let copy_fill = if preset_copy_feedback_active {
-                                                 Color32::from_rgba_premultiplied(72, 156, 116, 140)
-                                             } else {
-                                                 ui.visuals().widgets.inactive.bg_fill
-                                             };
-                                             let copy_stroke = if preset_copy_feedback_active {
-                                                 Color32::from_rgb(126, 224, 182)
-                                             } else {
-                                                 ui.visuals().widgets.inactive.bg_stroke.color
-                                             };
+                                            let preset_copy_feedback_active =
+                                                self.macro_preset_copy_feedback_target == Some(preset.id)
+                                                    && Self::is_copy_feedback_active(
+                                                        self.macro_preset_copy_feedback_until,
+                                                    );
+                                            let copy_fill = if preset_copy_feedback_active {
+                                                Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                            } else {
+                                                ui.visuals().widgets.inactive.bg_fill
+                                            };
+                                            let copy_stroke = if preset_copy_feedback_active {
+                                                Color32::from_rgb(126, 224, 182)
+                                            } else {
+                                                ui.visuals().widgets.inactive.bg_stroke.color
+                                            };
 
-                                             let copy_btn = ui.add(
-                                                 Button::new(Self::material_icon_text(0xe14d, 16.0))
-                                                     .min_size(egui::vec2(28.0, 24.0))
-                                                     .fill(copy_fill)
-                                                     .stroke(egui::Stroke::new(1.0, copy_stroke)),
-                                             )
-                                             .on_hover_text(Self::tr_lang(
-                                                 language,
-                                                 if preset_copy_feedback_active {
-                                                     "Copied!"
-                                                 } else {
-                                                     "Copy preset"
-                                                 },
-                                                 if preset_copy_feedback_active {
-                                                     "Đã copy!"
-                                                 } else {
-                                                     "Copy preset"
-                                                 },
-                                             ));
-                                             if copy_btn.clicked() {
-                                                 self.macro_preset_clipboard = Some(preset.clone());
-                                                 self.macro_preset_copy_feedback_target = Some(preset.id);
-                                                 self.macro_preset_copy_feedback_until =
-                                                     Some(Instant::now() + Duration::from_millis(1500));
-                                                 self.status = Self::tr_lang(
-                                                     language,
-                                                     "Copied macro preset to clipboard.",
-                                                     "Đã sao chép preset macro vào bộ nhớ tạm.",
-                                                 )
-                                                 .to_owned();
-                                             }
-                                             if self.show_share_buttons {
-                                                 let preset_export_feedback =
-                                                     self.macro_preset_export_feedback_target
-                                                         == Some(preset.id)
-                                                         && Self::is_copy_feedback_active(
-                                                          self.macro_preset_export_feedback_until,
-                                                      );
-                                              let preset_export_label = if preset_export_feedback {
-                                                  Self::tr_lang(language, "Copied", "Copied")
-                                              } else {
-                                                  Self::tr_lang(language, "Exp", "Exp")
-                                              };
+                                            let copy_btn = ui.add(
+                                                Button::new("📋")
+                                                    .min_size(egui::vec2(36.0, 24.0))
+                                                    .fill(copy_fill)
+                                                    .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                            )
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                if preset_copy_feedback_active {
+                                                    "Copied!"
+                                                } else {
+                                                    "Copy preset"
+                                                },
+                                                if preset_copy_feedback_active {
+                                                    "Đã copy!"
+                                                } else {
+                                                    "Copy preset"
+                                                },
+                                            ));
+                                            if copy_btn.clicked() {
+                                                self.macro_preset_clipboard = Some(preset.clone());
+                                                self.macro_preset_copy_feedback_target = Some(preset.id);
+                                                self.macro_preset_copy_feedback_until =
+                                                    Some(Instant::now() + Duration::from_millis(1500));
+                                                self.status = Self::tr_lang(
+                                                    language,
+                                                    "Copied macro preset to clipboard.",
+                                                    "Đã sao chép preset macro vào bộ nhớ tạm.",
+                                                )
+                                                .to_owned();
+                                            }
+                                            if self.show_share_buttons {
+                                                let preset_export_feedback =
+                                                    self.macro_preset_export_feedback_target
+                                                        == Some(preset.id)
+                                                        && Self::is_copy_feedback_active(
+                                                            self.macro_preset_export_feedback_until,
+                                                        );
+                                                let preset_export_label = if preset_export_feedback {
+                                                    Self::tr_lang(language, "Copied", "Copied")
+                                                } else {
+                                                    Self::tr_lang(language, "Exp", "Exp")
+                                                };
                                               let preset_export_button = ui.add_sized(
                                                   [60.0, 24.0],
                                                   Button::new(preset_export_label).fill(if preset_export_feedback {
@@ -12132,20 +12157,16 @@ if supports_move_mouse || show_detection_tuning {
                                             if has_selected_steps {
                                                 if selected_copy_feedback_active {
                                                     ui.add_sized(
-                                                        [56.0, 20.0],
+                                                        [36.0, 24.0],
                                                         egui::Label::new(
-                                                            RichText::new(Self::tr_lang(
-                                                                language,
-                                                                "Copied",
-                                                                "Copied",
-                                                            ))
+                                                            RichText::new("✓")
                                                             .color(Color32::from_rgb(126, 224, 182))
                                                             .strong(),
                                                         ),
                                                     );
                                                 } else {
-                                                    let copy_btn = Button::new(Self::tr_lang(language, "Copy All", "Copy All"))
-                                                        .min_size(egui::vec2(54.0, 20.0));
+                                                    let copy_btn = Button::new("📋")
+                                                        .min_size(egui::vec2(36.0, 24.0));
                                                     if ui
                                                         .add(copy_btn)
                                                         .on_hover_text(Self::tr_lang(language, "Copy the selected steps in this preset.", "Copy the selected steps in this preset."))
@@ -15879,8 +15900,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     ui.visuals().widgets.inactive.bg_stroke.color
                                                 };
                                                 let copy_btn = ui.add(
-                                                    Button::new(Self::material_icon_text(0xe14d, 14.0))
-                                                        .min_size(vec2(24.0, 18.0))
+                                                    Button::new("📋")
+                                                        .min_size(vec2(36.0, 24.0))
                                                         .fill(copy_fill)
                                                         .stroke(egui::Stroke::new(1.0, copy_stroke)),
                                                 )
@@ -15894,7 +15915,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     if copy_feedback_active {
                                                         "Đã copy!"
                                                     } else {
-                                                        "Copy bước này"
+                                                        "Sao chép bước này"
                                                     },
                                                 ));
                                                 if copy_btn.clicked() {
