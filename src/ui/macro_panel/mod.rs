@@ -634,7 +634,7 @@ impl CrosshairApp {
             let color = v_preset.target_color.map(|c| egui::Color32::from_rgb(c.r, c.g, c.b)).unwrap_or(egui::Color32::GRAY);
             let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
             ui.painter().rect_filled(rect, 2.0, color);
-            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::GRAY));
+            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::GRAY), egui::StrokeKind::Outside);
         }
 
         ui.add_space(2.0);
@@ -651,7 +651,7 @@ impl CrosshairApp {
             .on_hover_text(pick_area_tooltip)
             .clicked()
         {
-            *pending_vision_capture = Some((v_preset.id, crate::ui::VisionCaptureMode::RegionSelect));
+            *pending_vision_capture = Some((v_preset.id, crate::ui::VisionCaptureMode::SearchRegion));
         }
 
         if has_area {
@@ -696,7 +696,7 @@ impl CrosshairApp {
         step_id: impl std::fmt::Display,
         step: &mut MacroStep,
         vision_presets: &mut Vec<crate::model::VisionPreset>,
-        image_search_preset_options: &[(Option<u32>, String)],
+        image_search_preset_options: &[(u32, String)],
         pending_vision_capture: &mut Option<(u32, crate::ui::VisionCaptureMode)>,
         live_sync: &mut bool,
     ) {
@@ -8255,7 +8255,7 @@ impl CrosshairApp {
                                                         language,
                                                         group.id,
                                                         preset.id,
-                                                        step_index,
+                                                        0,
                                                         step,
                                                         &mut self.state.vision_presets,
                                                         &image_search_preset_options,
@@ -10564,7 +10564,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         language,
                                                         group.id,
                                                         preset.id,
-                                                        step_index,
+                                                        0,
                                                         step,
                                                         &mut self.state.vision_presets,
                                                         &image_search_preset_options,
