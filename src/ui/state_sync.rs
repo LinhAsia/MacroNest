@@ -481,6 +481,12 @@ impl CrosshairApp {
         self.startup_cjk_font_check_pending = true;
         self.startup_shell_frames_remaining = self.startup_shell_frames_remaining.max(3);
         configure_theme(ctx, self.state.ui_theme);
+        if !self.startup_hide_to_tray_pending {
+            self.startup_show_pending = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         ctx.request_repaint();
     }
 
