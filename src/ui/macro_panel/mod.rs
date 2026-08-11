@@ -4422,7 +4422,7 @@ impl CrosshairApp {
             if Self::with_emphasized_button_hover(ui, |ui| {
                 ui.add_enabled(
                     paste_enabled,
-                    Button::new(Self::material_icon_text(0xe14f, 18.0))
+                    Button::new(Self::material_icon_text(0xe14d, 18.0))
                         .min_size(egui::vec2(28.0, 28.0))
                         .fill(paste_fill)
                         .stroke(egui::Stroke::new(1.0, paste_stroke)),
@@ -4470,7 +4470,7 @@ impl CrosshairApp {
             if Self::with_emphasized_button_hover(ui, |ui| {
                 ui.add_enabled(
                     copy_enabled,
-                    Button::new(Self::material_icon_text(0xe14d, 18.0))
+                    Button::new(Self::material_icon_text(0xe14f, 18.0))
                         .min_size(egui::vec2(28.0, 28.0))
                         .fill(copy_fill)
                         .stroke(egui::Stroke::new(1.0, copy_stroke)),
@@ -12509,6 +12509,19 @@ if supports_move_mouse || show_detection_tuning {
                                                 .add_sized(
                                                     STEP_TOOLBAR_BUTTON,
                                                     Button::new(Self::material_icon_text(
+                                                        0xe872,
+                                                        STEP_TOOLBAR_ICON_MEDIUM,
+                                                    )),
+                                                )
+                                                .on_hover_text(Self::tr_lang(language, "Remove this step", "Remove this step"))
+                                                .clicked()
+                                            {
+                                                remove_step = Some((preset.id, step_index));
+                                            }
+                                            if child_ui
+                                                .add_sized(
+                                                    STEP_TOOLBAR_BUTTON,
+                                                    Button::new(Self::material_icon_text(
                                                         0xe145,
                                                         STEP_TOOLBAR_ICON_MEDIUM,
                                                     )),
@@ -12611,19 +12624,6 @@ if supports_move_mouse || show_detection_tuning {
                                                 if toggle_changed {
                                                     step.enabled = new_enabled;
                                                     live_sync = true;
-                                                }
-                                                if ui
-                                                    .add_sized(
-                                                        STEP_TOOLBAR_BUTTON,
-                                                        Button::new(Self::material_icon_text(
-                                                            0xe872,
-                                                            STEP_TOOLBAR_ICON_MEDIUM,
-                                                        )),
-                                                    )
-                                                    .on_hover_text(Self::tr_lang(language, "Remove this step", "Remove this step"))
-                                                    .clicked()
-                                                {
-                                                    remove_step = Some((preset.id, step_index));
                                                 }
                                                 let drag_handle = ui
                                                     .add_sized(
