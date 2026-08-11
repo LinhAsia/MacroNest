@@ -12612,6 +12612,19 @@ if supports_move_mouse || show_detection_tuning {
                                                     step.enabled = new_enabled;
                                                     live_sync = true;
                                                 }
+                                                if ui
+                                                    .add_sized(
+                                                        STEP_TOOLBAR_BUTTON,
+                                                        Button::new(Self::material_icon_text(
+                                                            0xe872,
+                                                            STEP_TOOLBAR_ICON_MEDIUM,
+                                                        )),
+                                                    )
+                                                    .on_hover_text(Self::tr_lang(language, "Remove this step", "Remove this step"))
+                                                    .clicked()
+                                                {
+                                                    remove_step = Some((preset.id, step_index));
+                                                }
                                                 let drag_handle = ui
                                                     .add_sized(
                                                         STEP_TOOLBAR_BUTTON,
