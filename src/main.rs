@@ -510,7 +510,7 @@ fn main() -> Result<()> {
         .with_title(&app_title)
         .with_inner_size([1180.0, 780.0])
         .with_min_inner_size([1180.0, 780.0])
-        .with_visible(false)
+        .with_visible(!start_hidden_to_tray)
         .with_decorations(false)
         .with_transparent(true);
     if let Ok(icon) = app_icon::icon_data_from_ico_file(&paths.icon_file) {
