@@ -7605,19 +7605,28 @@ impl CrosshairApp {
     fn render_video_library(&mut self, ctx: &egui::Context) {
         while let Ok((path, result)) = self.video_library_thumbnail_rx.try_recv() {
             self.video_library_thumbnail_jobs.remove(&path);
-            if let Ok(preview) = result
-                && let Some(rgba) = preview.rgba
-            {
-                let texture = ctx.load_texture(
-                    format!("video-library-thumbnail-{}", path.display()),
+            let texture = match result {
+                Ok(preview) if preview.rgba.is_some() => {
+                    let rgba = preview.rgba.unwrap();
+                    ctx.load_texture(
+                        format!("video-library-thumbnail-{}", path.display()),
+                        ColorImage::from_rgba_unmultiplied(
+                            [preview.width as usize, preview.height as usize],
+                            &rgba,
+                        ),
+                        TextureOptions::LINEAR,
+                    )
+                }
+                _ => ctx.load_texture(
+                    format!("video-library-thumbnail-fallback-{}", path.display()),
                     ColorImage::from_rgba_unmultiplied(
-                        [preview.width as usize, preview.height as usize],
-                        &rgba,
+                        [320, 180],
+                        &vec![40, 40, 45, 255].repeat(320 * 180),
                     ),
                     TextureOptions::LINEAR,
-                );
-                self.video_library_thumbnails.insert(path, texture);
-            }
+                ),
+            };
+            self.video_library_thumbnails.insert(path, texture);
         }
         let mut playback_finished = false;
         let mut playback_reached_end = false;

@@ -300,9 +300,10 @@ pub fn inspect_recorded_video_thumbnail(
         .map_err(|error| format!("Could not read video: {error}"))?
         .len();
     let duration_seconds = probe_video_duration(ffmpeg_exe, video_path).unwrap_or(0.0);
-    let output = Command::new(ffmpeg_exe)
+    let seek_time = if duration_seconds > 0.3 { "0.100" } else { "0.000" };
+    let mut output = Command::new(ffmpeg_exe)
         .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
-        .args(["-hide_banner", "-loglevel", "error", "-ss", "0.500", "-i"])
+        .args(["-hide_banner", "-loglevel", "error", "-ss", seek_time, "-i"])
         .arg(video_path)
         .args([
             "-frames:v",
@@ -319,15 +320,45 @@ pub fn inspect_recorded_video_thumbnail(
         .stderr(Stdio::null())
         .output()
         .map_err(|error| format!("Could not create video thumbnail: {error}"))?;
-    if !output.status.success() || output.stdout.len() != 320 * 180 * 4 {
-        return Err("FFmpeg could not extract a thumbnail from this video.".to_owned());
+
+    if (!output.status.success() || output.stdout.len() != 320 * 180 * 4) && seek_time != "0.000" {
+        if let Ok(retry) = Command::new(ffmpeg_exe)
+            .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+            .args(["-hide_banner", "-loglevel", "error", "-ss", "0.000", "-i"])
+            .arg(video_path)
+            .args([
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "pipe:1",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        {
+            if retry.status.success() && retry.stdout.len() == 320 * 180 * 4 {
+                output = retry;
+            }
+        }
     }
+
+    let rgba = if output.status.success() && output.stdout.len() == 320 * 180 * 4 {
+        Some(output.stdout)
+    } else {
+        None
+    };
+
     Ok(VideoLibraryPreview {
         duration_seconds,
         file_size,
         width: 320,
         height: 180,
-        rgba: Some(output.stdout),
+        rgba,
     })
 }
 
