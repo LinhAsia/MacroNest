@@ -626,8 +626,8 @@ fn export_trim(
     let output_path = unique_output_path(output_dir, &format!("{stem}_{suffix}"));
     let mut command = Command::new(ffmpeg_exe);
     command
-        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
-        .args(["-y", "-hide_banner", "-loglevel", "error", "-ss"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-threads", "0", "-ss"])
         .arg(format!("{:.3}", start_seconds.max(0.0)))
         .args(["-i"])
         .arg(input_path)
@@ -641,7 +641,7 @@ fn export_trim(
         ]);
     if let Some(target_size_mb) = target_size_mb {
         command.args([
-            "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-b:a", "96k",
+            "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "96k",
         ]);
         let target_kbps = ((target_size_mb as f64 * 8192.0 / duration) - 96.0)
             .round()

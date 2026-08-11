@@ -8492,7 +8492,6 @@ impl CrosshairApp {
             }
         }
         while self.video_library_playback.is_none()
-            && self.video_library_preloaded_playback.is_none()
             && self.video_library_thumbnail_jobs.len() < 3
         {
             let Some(path) = videos.iter().find(|path| {
