@@ -6675,7 +6675,7 @@ impl CrosshairApp {
                                     }
                                     ui.allocate_ui_with_layout(
                                         vec2(right_width, 0.0),
-                                        egui::Layout::right_to_left(egui::Align::TOP),
+                                        egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
                                             if Self::sound_style_remove_button(ui).clicked() {
@@ -15040,6 +15040,12 @@ if supports_move_mouse || show_detection_tuning {
                                                                          step.extra_conditions.push(ExtraCondition::default());
                                                                          live_sync = true;
                                                                      }
+                                                                      if if_start_needs_end {
+                                                                          ui.colored_label(Color32::from_rgb(255, 196, 80), Self::tr_lang(language, "IfEnd is required", "Cần có IfEnd"));
+                                                                          if ui.button(Self::tr_lang(language, "+ Add IfEnd at end", "+ Thêm IfEnd ở cuối")).clicked() {
+                                                                              append_missing_if_end = Some(preset.id);
+                                                                          }
+                                                                      }
                                                                 });
                                                               Self::render_extra_conditions(
                                                               ui,
@@ -15063,26 +15069,6 @@ if supports_move_mouse || show_detection_tuning {
                                                               &mut cancel_active_capture,
                                                                 false,
                                                             );
-                                                            if if_start_needs_end {
-                                                                ui.colored_label(
-                                                                    Color32::from_rgb(255, 196, 80),
-                                                                    Self::tr_lang(
-                                                                        language,
-                                                                        "IfEnd is required",
-                                                                        "Cần có IfEnd",
-                                                                    ),
-                                                                );
-                                                                if ui
-                                                                    .button(Self::tr_lang(
-                                                                        language,
-                                                                        "+ Add IfEnd at end",
-                                                                        "+ Thêm IfEnd ở cuối",
-                                                                    ))
-                                                                    .clicked()
-                                                                {
-                                                                    append_missing_if_end = Some(preset.id);
-                                                                }
-                                                            }
                                                         });
                                             if step.action != previous_action
                                                 && matches!(step.action, MacroAction::ScanVisionOnce)
@@ -15884,66 +15870,64 @@ if supports_move_mouse || show_detection_tuning {
                                                         ));
                                                     live_sync |= response.changed();
                                                 }
-                                                // Trailing spacers placed after buttons to align columns with other rows having X/Y coords
+                                                // Trailing spacers to align key steps with mouse steps that have X/Y columns
                                                 let trailing_spacer_width =
                                                     if self.macro_folders_panel_open { 32.0 } else { 44.0 };
                                                 ui.add_sized([trailing_spacer_width, 20.0], egui::Label::new(""));
                                                 ui.add_sized([trailing_spacer_width, 20.0], egui::Label::new(""));
-                                                let paste_btn = ui.add_enabled(
-                                                    !self.macro_step_clipboard.is_empty(),
-                                                    Button::new(Self::material_icon_text(0xe14e, 14.0))
-                                                        .min_size(vec2(24.0, 18.0)),
-                                                )
-                                                .on_hover_text(Self::tr_lang(
-                                                    language,
-                                                    "Paste copied step(s) below this step.",
-                                                    "Paste copied step(s) below this step.",
-                                                ));
-                                                if paste_btn.clicked() {
-                                                    paste_step_after =
-                                                        Some((group.id, preset.id, step_index));
-                                                }
-                                                let copy_feedback_active =
-                                                    self.macro_step_copy_feedback_target
-                                                        == Some((group.id, preset.id, step_index))
-                                                        && Self::is_copy_feedback_active(
-                                                            self.macro_step_copy_feedback_until,
-                                                        );
-                                                let copy_fill = if copy_feedback_active {
-                                                    Color32::from_rgba_premultiplied(72, 156, 116, 140)
-                                                } else {
-                                                    ui.visuals().widgets.inactive.bg_fill
-                                                };
-                                                let copy_stroke = if copy_feedback_active {
-                                                    Color32::from_rgb(126, 224, 182)
-                                                } else {
-                                                    ui.visuals().widgets.inactive.bg_stroke.color
-                                                };
-                                                let copy_btn = ui.add(
-                                                    Button::new(Self::material_icon_text(0xe14f, 18.0))
-                                                        .min_size(vec2(36.0, 24.0))
-                                                        .fill(copy_fill)
-                                                        .stroke(egui::Stroke::new(1.0, copy_stroke)),
-                                                )
-                                                .on_hover_text(Self::tr_lang(
-                                                    language,
-                                                    if copy_feedback_active {
-                                                        "Copied!"
-                                                    } else {
-                                                        "Copy this step"
-                                                    },
-                                                    if copy_feedback_active {
-                                                        "Đã copy!"
-                                                    } else {
-                                                        "Sao chép bước này"
-                                                    },
-                                                ));
-                                                if copy_btn.clicked() {
-                                                    copy_single_step =
-                                                        Some((group.id, preset.id, step_index));
-                                                }
+                                            }
+                                            let paste_btn = ui.add_enabled(
+                                                !self.macro_step_clipboard.is_empty(),
+                                                Button::new(Self::material_icon_text(0xe14e, 14.0))
+                                                    .min_size(vec2(24.0, 18.0)),
+                                            )
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                "Paste copied step(s) below this step.",
+                                                "Paste copied step(s) below this step.",
+                                            ));
+                                            if paste_btn.clicked() {
+                                                paste_step_after =
+                                                    Some((group.id, preset.id, step_index));
+                                            }
+                                            let copy_feedback_active =
+                                                self.macro_step_copy_feedback_target
+                                                    == Some((group.id, preset.id, step_index))
+                                                    && Self::is_copy_feedback_active(
+                                                        self.macro_step_copy_feedback_until,
+                                                    );
+                                            let copy_fill = if copy_feedback_active {
+                                                Color32::from_rgba_premultiplied(72, 156, 116, 140)
                                             } else {
-                                                ui.add_sized([28.0, 20.0], egui::Label::new(""));
+                                                ui.visuals().widgets.inactive.bg_fill
+                                            };
+                                            let copy_stroke = if copy_feedback_active {
+                                                Color32::from_rgb(126, 224, 182)
+                                            } else {
+                                                ui.visuals().widgets.inactive.bg_stroke.color
+                                            };
+                                            let copy_btn = ui.add(
+                                                Button::new(Self::material_icon_text(0xe14f, 18.0))
+                                                    .min_size(vec2(36.0, 24.0))
+                                                    .fill(copy_fill)
+                                                    .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                            )
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                if copy_feedback_active {
+                                                    "Copied!"
+                                                } else {
+                                                    "Copy this step"
+                                                },
+                                                if copy_feedback_active {
+                                                    "Đã copy!"
+                                                } else {
+                                                    "Sao chép bước này"
+                                                },
+                                            ));
+                                            if copy_btn.clicked() {
+                                                copy_single_step =
+                                                    Some((group.id, preset.id, step_index));
                                             }
                                             let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
