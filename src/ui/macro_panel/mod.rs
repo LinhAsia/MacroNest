@@ -13702,68 +13702,98 @@ if supports_move_mouse || show_detection_tuning {
                                                          | MacroAction::ScanVisionOnce
                                                          | MacroAction::StopVision
                                                 ) {
-                                                    let selected_id = step.key.trim().parse::<u32>().ok();
-                                                    let selected_label = Self::option_label_by_id(
-                                                        &image_search_preset_options,
-                                                        selected_id,
-                                                        "Select image search preset",
-                                                        language,
-                                                    );
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "image-search-preset-step"))
-    .width(146.0)
-
-    .selected_text(selected_label)
-
-    .show_ui(ui, |ui| {
-
-                    let (image_presets, color_presets, pixel_presets): (Vec<_>, Vec<_>, Vec<_>) = self.state.vision_presets.iter().fold(
-                        (Vec::new(), Vec::new(), Vec::new()),
-                        |(mut img, mut col, mut pix), p| {
-                            if p.is_pixel_counter {
-                                pix.push(p);
-                            } else if p.use_color_matching {
-                                col.push(p);
-                            } else {
-                                img.push(p);
-                            }
-                            (img, col, pix)
-                        }
-                    );
-                    if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
-                        ui.separator();
-                        for p in &image_presets {
-                            if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
-                            }
-                        }
-                    }
-                    if !color_presets.is_empty() {
-                        if !image_presets.is_empty() {
-                            ui.add_space(4.0);
-                        }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
-                        ui.separator();
-                        for p in &color_presets {
-                            if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
-                            }
-                        }
-                    }
-                    let show_pixel_counter = step.action == MacroAction::ScanVisionOnce;
-                    if show_pixel_counter && !pixel_presets.is_empty() {
-                        if !image_presets.is_empty() || !color_presets.is_empty() {
-                            ui.add_space(4.0);
-                        }
-                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), Self::tr_lang(language, "Pixel Counter", "\u{0110}\u{1ebf}m pixel"));
-                        ui.separator();
-                        for p in &pixel_presets {
-                            if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
-                            }
-                        }
-                    }
-    });
+                                                    let mut is_manual = step.key.trim().eq_ignore_ascii_case("manual");
+                                                    if ui.checkbox(&mut is_manual, Self::tr_lang(language, "Manual", "Th\u{1ee7} c\u{00f4}ng")).changed() {
+                                                        if is_manual {
+                                                            step.key = "manual".to_owned();
+                                                        } else {
+                                                            step.key = "".to_owned();
+                                                        }
+                                                        live_sync = true;
+                                                    }
+                                                    let selected_id = if is_manual { None } else { step.key.trim().parse::<u32>().ok() };
+                                                    if is_manual {
+                                                        ui.add_space(2.0);
+                                                        ui.label(Self::tr_lang(language, "Tol:", "Tol:"));
+                                                        let resp = ui.add(egui::DragValue::new(&mut step.vision_color_tolerance).range(0..=100));
+                                                        live_sync |= resp.changed();
+                                                        if ui.button(Self::material_icon_text(0xe161, 14.0))
+                                                            .on_hover_text(Self::tr_lang(language, "Save as Vision Preset", "L\u{01b0}u th\u{00e0}nh Vision Preset"))
+                                                            .clicked()
+                                                        {
+                                                            let next_id = self.state.vision_presets.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+                                                            let mut new_p = crate::model::VisionPreset::default();
+                                                            new_p.id = next_id;
+                                                            new_p.name = format!("Vision Preset #{}", next_id);
+                                                            new_p.color_tolerance = step.vision_color_tolerance;
+                                                            new_p.use_color_matching = true;
+                                                            if let Some(c) = Self::parse_rgb_color(&step.if_target_color) {
+                                                                new_p.target_color = Some(crate::model::RgbaColor { r: c.r(), g: c.g(), b: c.b(), a: c.a() });
+                                                            }
+                                                            self.state.vision_presets.push(new_p);
+                                                            step.key = next_id.to_string();
+                                                            live_sync = true;
+                                                        }
+                                                    } else {
+                                                        let selected_label = Self::option_label_by_id(
+                                                            &image_search_preset_options,
+                                                            selected_id,
+                                                            "Select image search preset",
+                                                            language,
+                                                        );
+                                                        egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "image-search-preset-step"))
+                                                            .width(146.0)
+                                                            .selected_text(selected_label)
+                                                            .show_ui(ui, |ui| {
+                                                                let (image_presets, color_presets, pixel_presets): (Vec<_>, Vec<_>, Vec<_>) = self.state.vision_presets.iter().fold(
+                                                                    (Vec::new(), Vec::new(), Vec::new()),
+                                                                    |(mut img, mut col, mut pix), p| {
+                                                                        if p.is_pixel_counter {
+                                                                            pix.push(p);
+                                                                        } else if p.use_color_matching {
+                                                                            col.push(p);
+                                                                        } else {
+                                                                            img.push(p);
+                                                                        }
+                                                                        (img, col, pix)
+                                                                    }
+                                                                );
+                                                                if !image_presets.is_empty() {
+                                                                    ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
+                                                                    ui.separator();
+                                                                    for p in &image_presets {
+                                                                        if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
+                                                                            Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                if !color_presets.is_empty() {
+                                                                    if !image_presets.is_empty() {
+                                                                        ui.add_space(4.0);
+                                                                    }
+                                                                    ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
+                                                                    ui.separator();
+                                                                    for p in &color_presets {
+                                                                        if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
+                                                                            Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                let show_pixel_counter = step.action == MacroAction::ScanVisionOnce;
+                                                                if show_pixel_counter && !pixel_presets.is_empty() {
+                                                                    if !image_presets.is_empty() || !color_presets.is_empty() {
+                                                                        ui.add_space(4.0);
+                                                                    }
+                                                                    ui.colored_label(egui::Color32::from_rgb(255, 165, 0), Self::tr_lang(language, "Pixel Counter", "\u{0110}\u{1ebf}m pixel"));
+                                                                    ui.separator();
+                                                                    for p in &pixel_presets {
+                                                                        if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
+                                                                            Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
+                                                                        }
+                                                                    }
+                                                                }
+                                                            });
+                                                    }
 
                                                      let selected_vision_preset = Self::vision_preset_by_id(
                                                         &self.state.vision_presets,
@@ -15549,27 +15579,36 @@ if supports_move_mouse || show_detection_tuning {
                                                     MacroAction::MouseMoveAbsolute
                                                         | MacroAction::MouseMoveRelative
                                                 ) {
-                                                    Self::render_vision_axis_lock_controls(
-                                                        ui,
-                                                        step,
-                                                        language,
-                                                        &mut live_sync,
-                                                    );
-                                                    Self::render_vision_move_mode_controls(
-                                                        ui,
-                                                        step,
-                                                        language,
-                                                        &mut live_sync,
-                                                    );
-                                                    Self::render_vision_runtime_tuning_dropdown(
-                                                        ui,
-                                                        step,
-                                                        language,
-                                                        true,
-                                                        false,
-                                                        false,
-                                                        &mut live_sync,
-                                                    );
+                                                    ui.add_space(2.0);
+                                                    live_sync |= ui
+                                                        .checkbox(
+                                                            &mut step.advance_settings,
+                                                            Self::tr_lang(language, "Advance", "N\u{00e2}ng cao"),
+                                                        )
+                                                        .changed();
+                                                    if step.advance_settings {
+                                                        Self::render_vision_axis_lock_controls(
+                                                            ui,
+                                                            step,
+                                                            language,
+                                                            &mut live_sync,
+                                                        );
+                                                        Self::render_vision_move_mode_controls(
+                                                            ui,
+                                                            step,
+                                                            language,
+                                                            &mut live_sync,
+                                                        );
+                                                        Self::render_vision_runtime_tuning_dropdown(
+                                                            ui,
+                                                            step,
+                                                            language,
+                                                            true,
+                                                            false,
+                                                            false,
+                                                            &mut live_sync,
+                                                        );
+                                                    }
                                                 }
                                             } else if step.action == MacroAction::PlayMousePathPreset {
                                                 if step.mouse_speed_expr.trim().is_empty() {
@@ -20427,7 +20466,7 @@ if supports_move_mouse || show_detection_tuning {
                                     step.audio_sense_preset_id = None;
                                     step.audio_sense_spec.kind = AudioSensePresetKind::Pitch;
                                 } else {
-                                    step.audio_sense_preset_id = preset_options.first().map(|(id, _)| *id);
+                                    step.audio_sense_preset_id = preset_options.first().map(|(id, _)| *id).or(Some(0));
                                 }
                                 *live_sync = true;
                             }

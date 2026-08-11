@@ -247,6 +247,8 @@ pub struct MacroStep {
     pub duration_override_ms: u64,
     #[serde(default)]
     pub duration_expr: String,
+    #[serde(default)]
+    pub advance_settings: bool,
     pub smooth_mouse_path: bool,
     #[serde(default)]
     pub mouse_speed_expr: String,
@@ -457,6 +459,7 @@ impl Default for MacroStep {
             timed_override: false,
             duration_override_ms: 1500,
             duration_expr: String::new(),
+            advance_settings: false,
             smooth_mouse_path: false,
             mouse_speed_expr: String::new(),
             mouse_speed_percent: 100,
