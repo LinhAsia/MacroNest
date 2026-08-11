@@ -103,21 +103,27 @@ pub fn generate_c_source(config: &DllProjectConfig) -> String {
     source.push_str("#include <string>\n\n");
 
     source.push_str("// Helper: Resolve pointer chain inside target process memory space\n");
-    source.push_str("uintptr_t ResolvePointer(uintptr_t base_addr, const std::vector<size_t>& offsets) {\n");
+    source.push_str(
+        "uintptr_t ResolvePointer(uintptr_t base_addr, const std::vector<size_t>& offsets) {\n",
+    );
     source.push_str("    uintptr_t addr = base_addr;\n");
     source.push_str("    for (size_t i = 0; i < offsets.size(); ++i) {\n");
-    source.push_str("        if (!addr || IsBadReadPtr((void*)addr, sizeof(uintptr_t))) return 0;\n");
+    source
+        .push_str("        if (!addr || IsBadReadPtr((void*)addr, sizeof(uintptr_t))) return 0;\n");
     source.push_str("        addr = *(uintptr_t*)addr + offsets[i];\n");
     source.push_str("    }\n");
     source.push_str("    return addr;\n");
     source.push_str("}\n\n");
 
     source.push_str("// Helper: Patch memory bytes (e.g. NOP instruction)\n");
-    source.push_str("bool PatchMemory(uintptr_t address, const std::vector<unsigned char>& bytes) {\n");
+    source.push_str(
+        "bool PatchMemory(uintptr_t address, const std::vector<unsigned char>& bytes) {\n",
+    );
     source.push_str("    DWORD old_protect;\n");
     source.push_str("    if (!VirtualProtect((void*)address, bytes.size(), PAGE_EXECUTE_READWRITE, &old_protect)) return false;\n");
     source.push_str("    memcpy((void*)address, bytes.data(), bytes.size());\n");
-    source.push_str("    VirtualProtect((void*)address, bytes.size(), old_protect, &old_protect);\n");
+    source
+        .push_str("    VirtualProtect((void*)address, bytes.size(), old_protect, &old_protect);\n");
     source.push_str("    return true;\n");
     source.push_str("}\n\n");
 
@@ -125,7 +131,9 @@ pub fn generate_c_source(config: &DllProjectConfig) -> String {
     if config.alloc_console_for_debug {
         source.push_str("    AllocConsole();\n");
         source.push_str("    FILE* f; freopen_s(&f, \"CONOUT$\", \"w\", stdout);\n");
-        source.push_str("    std::cout << \"[MacroNest DLL] Injected successfully into target process!\\n\";\n");
+        source.push_str(
+            "    std::cout << \"[MacroNest DLL] Injected successfully into target process!\\n\";\n",
+        );
     }
 
     // Output entry states
@@ -133,14 +141,8 @@ pub fn generate_c_source(config: &DllProjectConfig) -> String {
         if !entry.enabled {
             continue;
         }
-        source.push_str(&format!(
-            "    bool state_entry_{} = false;\n",
-            idx
-        ));
-        source.push_str(&format!(
-            "    bool last_key_{} = false;\n",
-            idx
-        ));
+        source.push_str(&format!("    bool state_entry_{} = false;\n", idx));
+        source.push_str(&format!("    bool last_key_{} = false;\n", idx));
     }
 
     source.push_str("\n    while (true) {\n");
@@ -150,10 +152,7 @@ pub fn generate_c_source(config: &DllProjectConfig) -> String {
             continue;
         }
         let vk_code = entry.hotkey_vk.unwrap_or(0x70 + idx as u32);
-        source.push_str(&format!(
-            "        // Entry {}: {}\n",
-            idx, entry.name
-        ));
+        source.push_str(&format!("        // Entry {}: {}\n", idx, entry.name));
 
         // Hotkey check
         source.push_str(&format!(
@@ -268,7 +267,9 @@ pub fn generate_c_source(config: &DllProjectConfig) -> String {
     source.push_str("    return 0;\n");
     source.push_str("}\n\n");
 
-    source.push_str("BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {\n");
+    source.push_str(
+        "BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {\n",
+    );
     source.push_str("    if (ul_reason_for_call == DLL_PROCESS_ATTACH) {\n");
     source.push_str("        DisableThreadLibraryCalls(hModule);\n");
     source.push_str("        CreateThread(NULL, 0, MainThread, NULL, 0, NULL);\n");
@@ -295,13 +296,8 @@ pub fn generate_frida_js_script(config: &DllProjectConfig) -> String {
         if !entry.enabled {
             continue;
         }
-        script.push_str(&format!(
-            "// Entry {}: {}\n",
-            idx, entry.name
-        ));
-        script.push_str(&format!(
-            "try {{\n"
-        ));
+        script.push_str(&format!("// Entry {}: {}\n", idx, entry.name));
+        script.push_str(&format!("try {{\n"));
         script.push_str(&format!(
             "    const targetAddr_{} = ptr('{}');\n",
             idx, entry.address
@@ -429,7 +425,7 @@ pub fn inject_dll_into_process(pid: u32, dll_path: &Path) -> Result<()> {
         Foundation::{CloseHandle, HANDLE},
         System::{
             Diagnostics::Debug::WriteProcessMemory,
-            LibraryLoader::{GetProcAddress, GetModuleHandleA},
+            LibraryLoader::{GetModuleHandleA, GetProcAddress},
             Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, VirtualAllocEx},
             Threading::{
                 CreateRemoteThread, OpenProcess, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION,
@@ -456,7 +452,10 @@ pub fn inject_dll_into_process(pid: u32, dll_path: &Path) -> Result<()> {
         );
 
         if process_handle.is_null() {
-            bail!("Failed to open process PID {} (Access Denied or Invalid PID)", pid);
+            bail!(
+                "Failed to open process PID {} (Access Denied or Invalid PID)",
+                pid
+            );
         }
 
         let alloc_addr = VirtualAllocEx(
@@ -495,7 +494,8 @@ pub fn inject_dll_into_process(pid: u32, dll_path: &Path) -> Result<()> {
             bail!("Failed to get kernel32.dll module handle");
         }
 
-        let load_library_addr = GetProcAddress(kernel32_mod, load_library_name.as_ptr() as *const u8);
+        let load_library_addr =
+            GetProcAddress(kernel32_mod, load_library_name.as_ptr() as *const u8);
         if load_library_addr.is_none() {
             CloseHandle(process_handle);
             bail!("Failed to get LoadLibraryW address");

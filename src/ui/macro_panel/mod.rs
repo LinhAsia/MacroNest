@@ -4770,6 +4770,9 @@ impl CrosshairApp {
         if Self::is_copy_feedback_active(self.macro_group_export_feedback_until)
             || Self::is_copy_feedback_active(self.macro_preset_export_feedback_until)
             || Self::is_copy_feedback_active(self.macro_step_export_feedback_until)
+            || Self::is_copy_feedback_active(self.macro_preset_copy_feedback_until)
+            || Self::is_copy_feedback_active(self.macro_step_copy_feedback_until)
+            || Self::is_copy_feedback_active(self.macro_selected_steps_copy_feedback_until)
         {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(16));
@@ -5739,6 +5742,7 @@ impl CrosshairApp {
                     let mut remove_step = None;
                     let mut insert_step_after = None;
                     let mut append_missing_loop_end = None;
+                    let mut append_missing_if_end = None;
                     let mut move_step_to: Option<(u32, Vec<usize>, usize)> = None;
                     let mut remove_preset = None;
                     let mut pending_step_selection = None;
@@ -6652,21 +6656,66 @@ impl CrosshairApp {
                                             if Self::sound_style_remove_button(ui).clicked() {
                                                 remove_preset = Some(preset.id);
                                             }
-                                            let paste_response = ui.add_enabled_ui(self.macro_preset_clipboard.is_some(), |ui| {
-                                                ui.add_sized([60.0, 24.0], Button::new(Self::tr_lang(language, "Paste", "Paste")))
-                                            }).inner;
-                                            if paste_response.clicked() {
-                                                paste_preset_to_group = Some(group.id);
-                                            }
-                                            if Self::sized_button(
-                                                 ui,
-                                                 60.0,
-                                                 Self::tr_lang(language, "Copy", "Copy"),
+                                            let paste_btn = ui.add_enabled(
+                                                 self.macro_preset_clipboard.is_some(),
+                                                 Button::new(Self::material_icon_text(0xe14e, 16.0))
+                                                     .min_size(egui::vec2(28.0, 24.0)),
                                              )
-                                             .clicked()
-                                             {
+                                             .on_hover_text(Self::tr_lang(
+                                                 language,
+                                                 "Paste preset from clipboard into this group",
+                                                 "Paste preset from clipboard into this group",
+                                             ));
+                                             if paste_btn.clicked() {
+                                                 paste_preset_to_group = Some(group.id);
+                                             }
+
+                                             let preset_copy_feedback_active =
+                                                 self.macro_preset_copy_feedback_target == Some(preset.id)
+                                                     && Self::is_copy_feedback_active(
+                                                         self.macro_preset_copy_feedback_until,
+                                                     );
+                                             let copy_fill = if preset_copy_feedback_active {
+                                                 Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                             } else {
+                                                 ui.visuals().widgets.inactive.bg_fill
+                                             };
+                                             let copy_stroke = if preset_copy_feedback_active {
+                                                 Color32::from_rgb(126, 224, 182)
+                                             } else {
+                                                 ui.visuals().widgets.inactive.bg_stroke.color
+                                             };
+
+                                             let copy_btn = ui.add(
+                                                 Button::new(Self::material_icon_text(0xe14d, 16.0))
+                                                     .min_size(egui::vec2(28.0, 24.0))
+                                                     .fill(copy_fill)
+                                                     .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                             )
+                                             .on_hover_text(Self::tr_lang(
+                                                 language,
+                                                 if preset_copy_feedback_active {
+                                                     "Copied!"
+                                                 } else {
+                                                     "Copy preset"
+                                                 },
+                                                 if preset_copy_feedback_active {
+                                                     "Đã copy!"
+                                                 } else {
+                                                     "Copy preset"
+                                                 },
+                                             ));
+                                             if copy_btn.clicked() {
                                                  self.macro_preset_clipboard = Some(preset.clone());
-                                                 self.status = "Copied macro preset.".to_owned();
+                                                 self.macro_preset_copy_feedback_target = Some(preset.id);
+                                                 self.macro_preset_copy_feedback_until =
+                                                     Some(Instant::now() + Duration::from_millis(1500));
+                                                 self.status = Self::tr_lang(
+                                                     language,
+                                                     "Copied macro preset to clipboard.",
+                                                     "Đã sao chép preset macro vào bộ nhớ tạm.",
+                                                 )
+                                                 .to_owned();
                                              }
                                              if self.show_share_buttons {
                                                  let preset_export_feedback =
@@ -12239,23 +12288,35 @@ if supports_move_mouse || show_detection_tuning {
                                             inside
                                         }
                                 };
+                                 let step_ref = &preset.steps[step_index];
+                                 let loop_start_needs_end = step_ref.action == MacroAction::LoopStart && {
+                                     let mut nested = 0usize;
+                                     !preset.steps[step_index + 1..].iter().any(|candidate| {
+                                         match candidate.action {
+                                             MacroAction::LoopStart => nested += 1,
+                                             MacroAction::LoopEnd if nested == 0 => return true,
+                                             MacroAction::LoopEnd => nested -= 1,
+                                             _ => {}
+                                         }
+                                         false
+                                     })
+                                 };
+                                 let if_start_needs_end = step_ref.action == MacroAction::IfStart && {
+                                     let mut nested = 0usize;
+                                     !preset.steps[step_index + 1..].iter().any(|candidate| {
+                                         match candidate.action {
+                                             MacroAction::IfStart => nested += 1,
+                                             MacroAction::IfEnd if nested == 0 => return true,
+                                             MacroAction::IfEnd => nested -= 1,
+                                             _ => {}
+                                         }
+                                         false
+                                     })
+                                 };
                                 let is_step_executing = crate::overlay::ACTIVE_MACRO_STEPS.lock()
                                     .get(&preset.id)
                                     .map(|set| set.contains(&step_index))
                                     .unwrap_or(false);
-                                let step_ref = &preset.steps[step_index];
-                                let loop_start_needs_end = step_ref.action == MacroAction::LoopStart && {
-                                    let mut nested = 0usize;
-                                    !preset.steps[step_index + 1..].iter().any(|candidate| {
-                                        match candidate.action {
-                                            MacroAction::LoopStart => nested += 1,
-                                            MacroAction::LoopEnd if nested == 0 => return true,
-                                            MacroAction::LoopEnd => nested -= 1,
-                                            _ => {}
-                                        }
-                                        false
-                                    })
-                                };
                                 let is_vision_active = step_ref.action == MacroAction::StartVisionSearch && {
                                     crate::overlay::is_vision_following_active_by_spec(&step_ref.key)
                                 };
@@ -15787,60 +15848,64 @@ if supports_move_mouse || show_detection_tuning {
                                                     if self.macro_folders_panel_open { 32.0 } else { 44.0 };
                                                 ui.add_sized([trailing_spacer_width, 20.0], egui::Label::new(""));
                                                 ui.add_sized([trailing_spacer_width, 20.0], egui::Label::new(""));
+                                                let paste_btn = ui.add_enabled(
+                                                    !self.macro_step_clipboard.is_empty(),
+                                                    Button::new(Self::material_icon_text(0xe14e, 14.0))
+                                                        .min_size(vec2(24.0, 18.0)),
+                                                )
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    "Paste copied step(s) below this step.",
+                                                    "Paste copied step(s) below this step.",
+                                                ));
+                                                if paste_btn.clicked() {
+                                                    paste_step_after =
+                                                        Some((group.id, preset.id, step_index));
+                                                }
+                                                let copy_feedback_active =
+                                                    self.macro_step_copy_feedback_target
+                                                        == Some((group.id, preset.id, step_index))
+                                                        && Self::is_copy_feedback_active(
+                                                            self.macro_step_copy_feedback_until,
+                                                        );
+                                                let copy_fill = if copy_feedback_active {
+                                                    Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                                } else {
+                                                    ui.visuals().widgets.inactive.bg_fill
+                                                };
+                                                let copy_stroke = if copy_feedback_active {
+                                                    Color32::from_rgb(126, 224, 182)
+                                                } else {
+                                                    ui.visuals().widgets.inactive.bg_stroke.color
+                                                };
+                                                let copy_btn = ui.add(
+                                                    Button::new(Self::material_icon_text(0xe14d, 14.0))
+                                                        .min_size(vec2(24.0, 18.0))
+                                                        .fill(copy_fill)
+                                                        .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                                )
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    if copy_feedback_active {
+                                                        "Copied!"
+                                                    } else {
+                                                        "Copy this step"
+                                                    },
+                                                    if copy_feedback_active {
+                                                        "Đã copy!"
+                                                    } else {
+                                                        "Copy bước này"
+                                                    },
+                                                ));
+                                                if copy_btn.clicked() {
+                                                    copy_single_step =
+                                                        Some((group.id, preset.id, step_index));
+                                                }
                                             } else {
                                                 ui.add_sized([28.0, 20.0], egui::Label::new(""));
                                             }
                                             let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                  let copy_feedback_active =
-                                                      self.macro_step_copy_feedback_target
-                                                          == Some((group.id, preset.id, step_index))
-                                                          && Self::is_copy_feedback_active(
-                                                              self.macro_step_copy_feedback_until,
-                                                          );
-                                                  if ui
-                                                      .add(
-                                                          Button::new(Self::tr_lang(language, "Paste", "Paste"))
-                                                              .min_size(vec2(42.0, 18.0)),
-                                                      )
-                                                      .on_hover_text(Self::tr_lang(
-                                                          language,
-                                                          "Paste copied step(s) below this step.",
-                                                          "Paste copied step(s) below this step.",
-                                                      ))
-                                                      .clicked()
-                                                  {
-                                                      paste_step_after =
-                                                          Some((group.id, preset.id, step_index));
-                                                  }
-                                                  if copy_feedback_active {
-                                                      ui.add_sized(
-                                                          [48.0, 20.0],
-                                                          egui::Label::new(
-                                                              RichText::new(Self::tr_lang(
-                                                                  language,
-                                                                  "Copied",
-                                                                  "Copied",
-                                                              ))
-                                                              .color(Color32::from_rgb(126, 224, 182))
-                                                              .strong(),
-                                                          ),
-                                                      );
-                                                  } else if ui
-                                                      .add(
-                                                          Button::new(Self::tr_lang(language, "Copy", "Copy"))
-                                                              .min_size(vec2(42.0, 18.0)),
-                                                      )
-                                                      .on_hover_text(Self::tr_lang(
-                                                          language,
-                                                          "Copy this step.",
-                                                          "Copy this step.",
-                                                      ))
-                                                      .clicked()
-                                                  {
-                                                      copy_single_step =
-                                                          Some((group.id, preset.id, step_index));
-                                                  }
                                                 if self.show_share_buttons {
                                                   let step_export_feedback =
                                                       self.macro_step_export_feedback_target
@@ -16236,6 +16301,19 @@ if supports_move_mouse || show_detection_tuning {
                                 let mut loop_end = MacroStep::default();
                                 loop_end.action = MacroAction::LoopEnd;
                                 target_preset.steps.push(loop_end);
+                                live_sync = true;
+                                clear_step_selection = Some((group.id, preset_id));
+                            }
+                        }
+                        if let Some(preset_id) = append_missing_if_end {
+                            if let Some(target_preset) = group
+                                .presets
+                                .iter_mut()
+                                .find(|preset| preset.id == preset_id)
+                            {
+                                let mut if_end = MacroStep::default();
+                                if_end.action = MacroAction::IfEnd;
+                                target_preset.steps.push(if_end);
                                 live_sync = true;
                                 clear_step_selection = Some((group.id, preset_id));
                             }
@@ -17419,7 +17497,9 @@ if supports_move_mouse || show_detection_tuning {
                                             ui.end_row();
                                         }
                                         if let Some(var_name) = to_remove_var {
-                                            crate::overlay::RUNTIME_VARIABLES.lock().remove(&var_name);
+                                            crate::overlay::RUNTIME_VARIABLES
+                                                .lock()
+                                                .remove(&var_name);
                                             crate::overlay::TEXT_VARIABLES.lock().remove(&var_name);
                                         }
                                     });
@@ -20872,11 +20952,15 @@ if supports_move_mouse || show_detection_tuning {
         }
         let popup_id = response.id.with("sug_popup");
         let top_min = (ui.ctx().content_rect().top() + 60.0).max(60.0);
-        let below_space = (ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0).max(0.0);
+        let below_space =
+            (ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0).max(0.0);
         let above_space = (response.rect.top() - top_min - 8.0).max(0.0);
         let open_upward = above_space > below_space && above_space >= 120.0;
         let popup_position = if open_upward {
-            egui::pos2(response.rect.left(), (response.rect.top() - 4.0).max(top_min))
+            egui::pos2(
+                response.rect.left(),
+                (response.rect.top() - 4.0).max(top_min),
+            )
         } else {
             egui::pos2(response.rect.left(), response.rect.bottom().max(top_min))
         };
@@ -21118,11 +21202,15 @@ if supports_move_mouse || show_detection_tuning {
         }
         let popup_id = response.id.with("sug_popup_raw");
         let top_min = (ui.ctx().content_rect().top() + 60.0).max(60.0);
-        let below_space = (ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0).max(0.0);
+        let below_space =
+            (ui.ctx().content_rect().bottom() - response.rect.bottom() - 8.0).max(0.0);
         let above_space = (response.rect.top() - top_min - 8.0).max(0.0);
         let open_upward = above_space > below_space && above_space >= 120.0;
         let popup_position = if open_upward {
-            egui::pos2(response.rect.left(), (response.rect.top() - 4.0).max(top_min))
+            egui::pos2(
+                response.rect.left(),
+                (response.rect.top() - 4.0).max(top_min),
+            )
         } else {
             egui::pos2(response.rect.left(), response.rect.bottom().max(top_min))
         };
@@ -21296,50 +21384,45 @@ if supports_move_mouse || show_detection_tuning {
         let response = match highlight_mode {
             TextHighlightMode::None => {
                 if !is_multiline && text_has_newline {
-                    let mut layouter =
-                        |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
-                            let sanitized = string.as_str().replace('\n', " ");
-                            let mut job = egui::text::LayoutJob::default();
-                            job.wrap.max_width = wrap_width;
-                            let font_id = egui::TextStyle::Body.resolve(ui.style());
-                            let color = ui.visuals().text_color();
-                            job.append(
-                                &sanitized,
-                                0.0,
-                                egui::text::TextFormat::simple(font_id, color),
-                            );
-                            ui.fonts_mut(|fonts| fonts.layout_job(job))
-                        };
+                    let mut layouter = |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
+                        let sanitized = string.as_str().replace('\n', " ");
+                        let mut job = egui::text::LayoutJob::default();
+                        job.wrap.max_width = wrap_width;
+                        let font_id = egui::TextStyle::Body.resolve(ui.style());
+                        let color = ui.visuals().text_color();
+                        job.append(
+                            &sanitized,
+                            0.0,
+                            egui::text::TextFormat::simple(font_id, color),
+                        );
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
                     ui.put(textbox_rect, text_edit.layouter(&mut layouter))
                 } else {
                     ui.put(textbox_rect, text_edit)
                 }
             }
             TextHighlightMode::VariableTokens | TextHighlightMode::Interpolations => {
-                let mut layouter =
-                    |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
-                        let effective_wrap_width = Self::highlight_job_wrap_width(
-                            has_focus,
-                            multiline_on_focus,
-                            wrap_width,
-                        );
-                        let text_style = egui::TextStyle::Body;
-                        let sanitized_str;
-                        let raw = string.as_str();
-                        let input_str = if !is_multiline && raw.contains('\n') {
-                            sanitized_str = raw.replace('\n', " ");
-                            &sanitized_str
-                        } else {
-                            raw
-                        };
-                        let job = Self::interpolation_highlight_job(
-                            ui,
-                            input_str,
-                            effective_wrap_width,
-                            text_style,
-                        );
-                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                let mut layouter = |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
+                    let effective_wrap_width =
+                        Self::highlight_job_wrap_width(has_focus, multiline_on_focus, wrap_width);
+                    let text_style = egui::TextStyle::Body;
+                    let sanitized_str;
+                    let raw = string.as_str();
+                    let input_str = if !is_multiline && raw.contains('\n') {
+                        sanitized_str = raw.replace('\n', " ");
+                        &sanitized_str
+                    } else {
+                        raw
                     };
+                    let job = Self::interpolation_highlight_job(
+                        ui,
+                        input_str,
+                        effective_wrap_width,
+                        text_style,
+                    );
+                    ui.fonts_mut(|fonts| fonts.layout_job(job))
+                };
                 ui.put(textbox_rect, text_edit.layouter(&mut layouter))
             }
         };
@@ -21367,12 +21450,10 @@ if supports_move_mouse || show_detection_tuning {
             let screen_rect = ui.ctx().screen_rect();
             let popup_width = 400.0f32.min(screen_rect.width() - 32.0);
             let popup_height = 140.0f32;
-            let mut popup_pos = egui::pos2(
-                textbox_rect.min.x,
-                textbox_rect.max.y + 4.0,
-            );
+            let mut popup_pos = egui::pos2(textbox_rect.min.x, textbox_rect.max.y + 4.0);
             if popup_pos.y + popup_height > screen_rect.max.y - 10.0 {
-                popup_pos.y = (textbox_rect.min.y - popup_height - 4.0).clamp(60.0, (screen_rect.max.y - popup_height - 10.0).max(60.0));
+                popup_pos.y = (textbox_rect.min.y - popup_height - 4.0)
+                    .clamp(60.0, (screen_rect.max.y - popup_height - 10.0).max(60.0));
             }
             if popup_pos.x + popup_width > screen_rect.max.x - 10.0 {
                 popup_pos.x = (screen_rect.max.x - popup_width - 10.0).max(10.0);
@@ -21386,7 +21467,10 @@ if supports_move_mouse || show_detection_tuning {
                         .inner_margin(8.0)
                         .corner_radius(6.0)
                         .fill(egui::Color32::from_rgb(24, 26, 32))
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(86, 156, 224)))
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            egui::Color32::from_rgb(86, 156, 224),
+                        ))
                         .show(ui, |ui| {
                             ui.set_width(popup_width);
                             ui.horizontal(|ui| {
@@ -21399,7 +21483,12 @@ if supports_move_mouse || show_detection_tuning {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if ui.add(Button::new(Self::material_icon_text(0xe5cd, 14.0))).clicked() {
+                                        if ui
+                                            .add(Button::new(Self::material_icon_text(
+                                                0xe5cd, 14.0,
+                                            )))
+                                            .clicked()
+                                        {
                                             ui.memory_mut(|mem| mem.surrender_focus(id));
                                         }
                                     },

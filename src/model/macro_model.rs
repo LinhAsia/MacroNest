@@ -431,8 +431,12 @@ pub struct MacroStep {
     pub trigger_macro_group_id: Option<u32>,
 }
 
-fn default_esp_aim_smooth() -> f64 { 1.0 }
-fn default_esp_aim_sens() -> f64 { 1.0 }
+fn default_esp_aim_smooth() -> f64 {
+    1.0
+}
+fn default_esp_aim_sens() -> f64 {
+    1.0
+}
 
 impl Default for MacroStep {
     fn default() -> Self {

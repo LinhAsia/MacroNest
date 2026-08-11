@@ -334,13 +334,14 @@ impl WriteWatch {
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
-        if address % 4 != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "hardware watchpoint i32 requires a 4-byte aligned address",
-            ));
-        }
-        WatchSession::start(pid, WatchKind::Write { address }, architecture, notify).map(Self)
+        let aligned = address & !3;
+        WatchSession::start(
+            pid,
+            WatchKind::Write { address: aligned },
+            architecture,
+            notify,
+        )
+        .map(Self)
     }
 
     pub fn stop(&mut self) {
@@ -360,13 +361,14 @@ impl AddressAccessWatch {
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
-        if address % 4 != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "hardware i32 access watchpoint requires a 4-byte aligned address",
-            ));
-        }
-        WatchSession::start(pid, WatchKind::ReadWrite { address }, architecture, notify).map(Self)
+        let aligned = address & !3;
+        WatchSession::start(
+            pid,
+            WatchKind::ReadWrite { address: aligned },
+            architecture,
+            notify,
+        )
+        .map(Self)
     }
 
     pub fn stop(&mut self) {
@@ -388,13 +390,7 @@ impl AccessWatch {
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
-        Self::start_with_limit(
-            pid,
-            instruction_address,
-            architecture,
-            usize::MAX,
-            notify,
-        )
+        Self::start_with_limit(pid, instruction_address, architecture, usize::MAX, notify)
     }
 
     pub fn start_once<F>(
@@ -660,7 +656,8 @@ fn watch_loop<F>(
                                             architecture,
                                         );
                                         let pair = (instruction_decoded, details);
-                                        seen_instruction_details.insert(instruction_address, pair.clone());
+                                        seen_instruction_details
+                                            .insert(instruction_address, pair.clone());
                                         pair
                                     };
                                     let likely_stack_copy =

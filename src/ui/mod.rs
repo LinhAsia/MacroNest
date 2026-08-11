@@ -734,6 +734,8 @@ pub struct CrosshairApp {
     macro_step_copy_feedback_until: Option<Instant>,
     macro_selected_steps_copy_feedback_target: Option<(u32, u32)>,
     macro_selected_steps_copy_feedback_until: Option<std::time::Instant>,
+    macro_preset_copy_feedback_target: Option<u32>,
+    macro_preset_copy_feedback_until: Option<std::time::Instant>,
 
     pub(crate) captured_freeze_frame: Option<crate::window_list::ScreenCaptureFrame>,
     pub(crate) captured_freeze_texture: Option<egui::TextureHandle>,
@@ -1091,6 +1093,8 @@ impl CrosshairApp {
             macro_step_copy_feedback_until: None,
             macro_selected_steps_copy_feedback_target: None,
             macro_selected_steps_copy_feedback_until: None,
+            macro_preset_copy_feedback_target: None,
+            macro_preset_copy_feedback_until: None,
 
             captured_freeze_frame: None,
             captured_freeze_texture: None,

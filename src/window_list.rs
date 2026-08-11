@@ -1019,7 +1019,9 @@ mod windows_impl {
         }
 
         if is_rgba_frame_blank(&rgba) {
-            if let Some(desktop_frame) = capture_screen_region_from_desktop(rect.left, rect.top, screen_width, screen_height) {
+            if let Some(desktop_frame) =
+                capture_screen_region_from_desktop(rect.left, rect.top, screen_width, screen_height)
+            {
                 rgba = downscale_rgba(
                     &desktop_frame.rgba,
                     desktop_frame.width,
