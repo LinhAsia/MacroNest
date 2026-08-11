@@ -15870,67 +15870,62 @@ if supports_move_mouse || show_detection_tuning {
                                                         ));
                                                     live_sync |= response.changed();
                                                 }
-                                                // Trailing spacers to align key steps with mouse steps that have X/Y columns
-                                                let trailing_spacer_width =
-                                                    if self.macro_folders_panel_open { 32.0 } else { 44.0 };
-                                                ui.add_sized([trailing_spacer_width, 20.0], egui::Label::new(""));
-                                                ui.add_sized([trailing_spacer_width, 20.0], egui::Label::new(""));
-                                            }
-                                            let paste_btn = ui.add_enabled(
-                                                !self.macro_step_clipboard.is_empty(),
-                                                Button::new(Self::material_icon_text(0xe14e, 14.0))
-                                                    .min_size(vec2(24.0, 18.0)),
-                                            )
-                                            .on_hover_text(Self::tr_lang(
-                                                language,
-                                                "Paste copied step(s) below this step.",
-                                                "Paste copied step(s) below this step.",
-                                            ));
-                                            if paste_btn.clicked() {
-                                                paste_step_after =
-                                                    Some((group.id, preset.id, step_index));
-                                            }
-                                            let copy_feedback_active =
-                                                self.macro_step_copy_feedback_target
-                                                    == Some((group.id, preset.id, step_index))
-                                                    && Self::is_copy_feedback_active(
-                                                        self.macro_step_copy_feedback_until,
-                                                    );
-                                            let copy_fill = if copy_feedback_active {
-                                                Color32::from_rgba_premultiplied(72, 156, 116, 140)
-                                            } else {
-                                                ui.visuals().widgets.inactive.bg_fill
-                                            };
-                                            let copy_stroke = if copy_feedback_active {
-                                                Color32::from_rgb(126, 224, 182)
-                                            } else {
-                                                ui.visuals().widgets.inactive.bg_stroke.color
-                                            };
-                                            let copy_btn = ui.add(
-                                                Button::new(Self::material_icon_text(0xe14f, 18.0))
-                                                    .min_size(vec2(36.0, 24.0))
-                                                    .fill(copy_fill)
-                                                    .stroke(egui::Stroke::new(1.0, copy_stroke)),
-                                            )
-                                            .on_hover_text(Self::tr_lang(
-                                                language,
-                                                if copy_feedback_active {
-                                                    "Copied!"
-                                                } else {
-                                                    "Copy this step"
-                                                },
-                                                if copy_feedback_active {
-                                                    "Đã copy!"
-                                                } else {
-                                                    "Sao chép bước này"
-                                                },
-                                            ));
-                                            if copy_btn.clicked() {
-                                                copy_single_step =
-                                                    Some((group.id, preset.id, step_index));
                                             }
                                             let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                let paste_btn = ui.add_enabled(
+                                                    !self.macro_step_clipboard.is_empty(),
+                                                    Button::new(Self::material_icon_text(0xe14d, 14.0))
+                                                        .min_size(vec2(26.0, 20.0)),
+                                                )
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    "Paste copied step(s) below this step.",
+                                                    "D\u{00e1}n b\u{01b0}\u{01a1}c \u{0111}\u{00e3} sao ch\u{00e9}p b\u{00ea}n d\u{01b0}\u{1edb}i b\u{01b0}\u{01a1}c n\u{00e0}y.",
+                                                ));
+                                                if paste_btn.clicked() {
+                                                    paste_step_after =
+                                                        Some((group.id, preset.id, step_index));
+                                                }
+                                                let copy_feedback_active =
+                                                    self.macro_step_copy_feedback_target
+                                                        == Some((group.id, preset.id, step_index))
+                                                        && Self::is_copy_feedback_active(
+                                                            self.macro_step_copy_feedback_until,
+                                                        );
+                                                let copy_fill = if copy_feedback_active {
+                                                    Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                                } else {
+                                                    ui.visuals().widgets.inactive.bg_fill
+                                                };
+                                                let copy_stroke = if copy_feedback_active {
+                                                    Color32::from_rgb(126, 224, 182)
+                                                } else {
+                                                    ui.visuals().widgets.inactive.bg_stroke.color
+                                                };
+                                                let copy_btn = ui.add(
+                                                    Button::new(Self::material_icon_text(0xe14f, 14.0))
+                                                        .min_size(vec2(26.0, 20.0))
+                                                        .fill(copy_fill)
+                                                        .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                                )
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    if copy_feedback_active {
+                                                        "Copied!"
+                                                    } else {
+                                                        "Copy this step"
+                                                    },
+                                                    if copy_feedback_active {
+                                                        "\u{0110}\u{00e3} copy!"
+                                                    } else {
+                                                        "Sao ch\u{00e9}p b\u{01b0}\u{01a1}c n\u{00e0}y"
+                                                    },
+                                                ));
+                                                if copy_btn.clicked() {
+                                                    copy_single_step =
+                                                        Some((group.id, preset.id, step_index));
+                                                }
                                                 if self.show_share_buttons {
                                                   let step_export_feedback =
                                                       self.macro_step_export_feedback_target
