@@ -6001,7 +6001,7 @@ impl CrosshairApp {
                                      if Self::with_emphasized_button_hover(ui, |ui| {
                                          ui.add_sized(
                                              [36.0, 24.0],
-                                             Button::new("📋")
+                                             Button::new(Self::material_icon_text(0xe14f, 18.0))
                                                  .fill(copy_fill)
                                                  .stroke(egui::Stroke::new(1.0, copy_stroke)),
                                          )
@@ -6026,7 +6026,7 @@ impl CrosshairApp {
                                      if Self::with_emphasized_button_hover(ui, |ui| {
                                          ui.add_enabled(
                                              !self.macro_group_clipboard.is_empty(),
-                                             Button::new("📥")
+                                             Button::new(Self::material_icon_text(0xe14d, 18.0))
                                                  .min_size(egui::vec2(36.0, 24.0)),
                                          )
                                      })
