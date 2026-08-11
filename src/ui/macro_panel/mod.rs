@@ -15171,12 +15171,18 @@ if supports_move_mouse || show_detection_tuning {
                                                 } else if matches!(step.action, MacroAction::StartVisionSearch
                                                          | MacroAction::ScanVisionOnce
                                                          | MacroAction::StopVision | MacroAction::StopVisionWait) {
-                                                    let is_manual = step.key.trim().eq_ignore_ascii_case("manual");
+                                                    let mut is_manual = step.key.trim().eq_ignore_ascii_case("manual");
+                                                    if ui.checkbox(&mut is_manual, Self::tr_lang(language, "Manual", "Th\u{1ee7} c\u{00f4}ng")).changed() {
+                                                        if is_manual {
+                                                            step.key = "manual".to_owned();
+                                                        } else {
+                                                            step.key = "".to_owned();
+                                                        }
+                                                        live_sync = true;
+                                                    }
                                                     let selected_id = if is_manual { None } else { step.key.trim().parse::<u32>().ok() };
-                                                    let selected_label = if is_manual {
-                                                        Self::tr_lang(language, "Manual Mode", "Th\u{1ee7} c\u{00f4}ng").to_owned()
-                                                    } else {
-                                                        selected_id
+                                                    if !is_manual {
+                                                        let selected_label = selected_id
                                                             .and_then(|id| {
                                                                 self.state
                                                                     .vision_presets
@@ -15186,75 +15192,65 @@ if supports_move_mouse || show_detection_tuning {
                                                             })
                                                             .unwrap_or_else(|| {
                                                                 if step.key.trim().is_empty() {
-                                                                    Self::tr_lang(language, "Select vision", "Select vision")
+                                                                    Self::tr_lang(language, "Select vision preset", "Ch\u{1ecd}n vision preset")
                                                                     .to_owned()
                                                                 } else {
                                                                     format!("ID: {}", step.key)
                                                                 }
-                                                            })
-                                                    };
-                                                    egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "vision-preset-step"))
-    .width(130.0)
-
-    .selected_text(selected_label)
-
-    .show_ui(ui, |ui| {
-        if ui.selectable_label(is_manual, Self::tr_lang(language, "Manual Mode", "Th\u{1ee7} c\u{00f4}ng")).clicked() {
-            step.key = "manual".to_owned();
-            live_sync = true;
-        }
-        ui.separator();
-
-                    let (image_presets, color_presets, pixel_presets): (Vec<_>, Vec<_>, Vec<_>) = self.state.vision_presets.iter().fold(
-                        (Vec::new(), Vec::new(), Vec::new()),
-                        |(mut img, mut col, mut pix), p| {
-                            if p.is_pixel_counter {
-                                pix.push(p);
-                            } else if p.use_color_matching {
-                                col.push(p);
-                            } else {
-                                img.push(p);
-                            }
-                            (img, col, pix)
-                        }
-                    );
-                    if !image_presets.is_empty() {
-                        ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
-                        ui.separator();
-                        for p in &image_presets {
-                            if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
-                            }
-                        }
-                    }
-                    if !color_presets.is_empty() {
-                        if !image_presets.is_empty() {
-                            ui.add_space(4.0);
-                        }
-                        ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
-                        ui.separator();
-                        for p in &color_presets {
-                            if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
-                            }
-                        }
-                    }
-                    let show_pixel_counter = step.action == MacroAction::ScanVisionOnce;
-                    if show_pixel_counter && !pixel_presets.is_empty() {
-                        if !image_presets.is_empty() || !color_presets.is_empty() {
-                            ui.add_space(4.0);
-                        }
-                        ui.colored_label(egui::Color32::from_rgb(255, 165, 0), Self::tr_lang(language, "Pixel Counter", "\u{0110}\u{1ebf}m pixel"));
-                        ui.separator();
-                        for p in &pixel_presets {
-                            if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
-                                Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
-                            }
-                        }
-                    }
-    });
-
-                                                     if is_manual {
+                                                            });
+                                                        egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "vision-preset-step"))
+                                                            .width(130.0)
+                                                            .selected_text(selected_label)
+                                                            .show_ui(ui, |ui| {
+                                                                let (image_presets, color_presets, pixel_presets): (Vec<_>, Vec<_>, Vec<_>) = self.state.vision_presets.iter().fold(
+                                                                    (Vec::new(), Vec::new(), Vec::new()),
+                                                                    |(mut img, mut col, mut pix), p| {
+                                                                        if p.is_pixel_counter {
+                                                                            pix.push(p);
+                                                                        } else if p.use_color_matching {
+                                                                            col.push(p);
+                                                                        } else {
+                                                                            img.push(p);
+                                                                        }
+                                                                        (img, col, pix)
+                                                                    }
+                                                                );
+                                                                if !image_presets.is_empty() {
+                                                                    ui.colored_label(egui::Color32::from_rgb(0, 191, 255), Self::tr_lang(language, "Image Detect", "Ph\u{00e1}t hi\u{1ec7}n \u{1ea3}nh"));
+                                                                    ui.separator();
+                                                                    for p in &image_presets {
+                                                                        if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
+                                                                            Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                if !color_presets.is_empty() {
+                                                                    if !image_presets.is_empty() {
+                                                                        ui.add_space(4.0);
+                                                                    }
+                                                                    ui.colored_label(egui::Color32::from_rgb(0, 250, 154), Self::tr_lang(language, "Color Detect", "Ph\u{00e1}t hi\u{1ec7}n m\u{00e0}u"));
+                                                                    ui.separator();
+                                                                    for p in &color_presets {
+                                                                        if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
+                                                                            Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                let show_pixel_counter = step.action == MacroAction::ScanVisionOnce;
+                                                                if show_pixel_counter && !pixel_presets.is_empty() {
+                                                                    if !image_presets.is_empty() || !color_presets.is_empty() {
+                                                                        ui.add_space(4.0);
+                                                                    }
+                                                                    ui.colored_label(egui::Color32::from_rgb(255, 165, 0), Self::tr_lang(language, "Pixel Counter", "\u{0110}\u{1ebf}m pixel"));
+                                                                    ui.separator();
+                                                                    for p in &pixel_presets {
+                                                                        if ui.selectable_label(selected_id == Some(p.id), &p.name).clicked() {
+                                                                            Self::apply_vision_step_preset_selection(step, p, &mut live_sync);
+                                                                        }
+                                                                    }
+                                                                }
+                                                            });
+                                                    } else {
                                                          ui.add_space(2.0);
                                                          ui.label(Self::tr_lang(language, "Tol:", "Tol:"));
                                                          let resp = ui.add(egui::DragValue::new(&mut step.vision_color_tolerance).range(0..=100));
@@ -20422,101 +20418,74 @@ if supports_move_mouse || show_detection_tuning {
         ui.scope(|ui| {
             match step.action {
                 MacroAction::StartAudioSensePreset => {
-                    let mut start_mode = if step.audio_sense_preset_id.is_some() {
-                        0_u8
-                    } else {
-                        1_u8
-                    };
+                    let is_manual = step.audio_sense_preset_id.is_none();
                     ui.vertical(|ui| {
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            egui::ComboBox::from_id_salt(ui.id().with((id_prefix, "audio-start-mode")))
-                                .selected_text(match start_mode {
-                                    0 => Self::tr_lang(language, "Preset", "T\u{1eeb} preset"),
-                                    _ => Self::tr_lang(language, "Pitch", "Cao \u{0111}\u{1ed9}"),
-                                })
-                                .width(90.0)
-                                .show_ui(ui, |ui| {
-                                    ui.selectable_value(
-                                        &mut start_mode,
-                                        0,
-                                        Self::tr_lang(language, "Preset", "T\u{1eeb} preset"),
-                                    );
-                                    ui.selectable_value(
-                                        &mut start_mode,
-                                        1,
-                                        Self::tr_lang(language, "Pitch", "Cao \u{0111}\u{1ed9}"),
-                                    );
-                                });
-                            match start_mode {
-                                0 => {
-                                    if step.audio_sense_preset_id.is_none() {
-                                        step.audio_sense_preset_id = preset_options.first().map(|(id, _)| *id);
-                                        *live_sync = true;
-                                    }
-                                    Self::render_audio_sense_preset_selector(
-                                        ui,
-                                        language,
-                                        (id_prefix, "audio-preset"),
-                                        preset_options,
-                                        &mut step.audio_sense_preset_id,
-                                        live_sync,
-                                    );
-                                    ui.label(Self::tr_lang(language, "Note", "Note"));
-                                    *live_sync |= Self::render_audio_sense_var_box(
-                                        ui,
-                                        language,
-                                        ui.id().with((id_prefix, "preset-note-var")),
-                                        &mut step.audio_sense_spec.pitch.output_note_var,
-                                        timer_names,
-                                        64.0,
-                                        "note_var",
-                                    );
-                                    ui.label(Self::tr_lang(language, "Level", "Level"));
-                                    *live_sync |= Self::render_audio_sense_var_box(
-                                        ui,
-                                        language,
-                                        ui.id().with((id_prefix, "preset-level-var")),
-                                        &mut step.audio_sense_spec.pitch.output_level_var,
-                                        timer_names,
-                                        62.0,
-                                        "level_var",
-                                    );
+                            let mut is_manual_check = is_manual;
+                            if ui.checkbox(&mut is_manual_check, Self::tr_lang(language, "Manual", "Th\u{1ee7} c\u{00f4}ng")).changed() {
+                                if is_manual_check {
+                                    step.audio_sense_preset_id = None;
+                                    step.audio_sense_spec.kind = AudioSensePresetKind::Pitch;
+                                } else {
+                                    step.audio_sense_preset_id = preset_options.first().map(|(id, _)| *id);
                                 }
-                                _ => {
-                                    if step.audio_sense_preset_id.is_some() || step.audio_sense_spec.kind != AudioSensePresetKind::Pitch {
-                                        step.audio_sense_preset_id = None;
-                                        step.audio_sense_spec.kind = AudioSensePresetKind::Pitch;
-                                        *live_sync = true;
-                                    }
-                                    ui.add_space(6.0);
+                                *live_sync = true;
+                            }
+                            if !is_manual {
+                                if step.audio_sense_preset_id.is_none() {
+                                    step.audio_sense_preset_id = preset_options.first().map(|(id, _)| *id);
+                                    *live_sync = true;
+                                }
+                                Self::render_audio_sense_preset_selector(
+                                    ui,
+                                    language,
+                                    (id_prefix, "audio-preset"),
+                                    preset_options,
+                                    &mut step.audio_sense_preset_id,
+                                    live_sync,
+                                );
+                                ui.label(Self::tr_lang(language, "Note", "Note"));
+                                *live_sync |= Self::render_audio_sense_var_box(
+                                    ui,
+                                    language,
+                                    ui.id().with((id_prefix, "preset-note-var")),
+                                    &mut step.audio_sense_spec.pitch.output_note_var,
+                                    timer_names,
+                                    64.0,
+                                    "note_var",
+                                );
+                                ui.label(Self::tr_lang(language, "Level", "Level"));
+                                *live_sync |= Self::render_audio_sense_var_box(
+                                    ui,
+                                    language,
+                                    ui.id().with((id_prefix, "preset-level-var")),
+                                    &mut step.audio_sense_spec.pitch.output_level_var,
+                                    timer_names,
+                                    62.0,
+                                    "level_var",
+                                );
+                            } else {
+                                if step.audio_sense_spec.kind != AudioSensePresetKind::Pitch {
+                                    step.audio_sense_spec.kind = AudioSensePresetKind::Pitch;
+                                    *live_sync = true;
+                                }
+                                ui.add_space(2.0);
+                                *live_sync |= ui
+                                    .checkbox(
+                                        &mut step.audio_sense_spec.pitch.monitor.permanent,
+                                        Self::tr_lang(language, "Permanent", "Permanent"),
+                                    )
+                                    .changed();
+                                if !step.audio_sense_spec.pitch.monitor.permanent {
+                                    ui.add_space(2.0);
+                                    ui.label("ms");
                                     *live_sync |= ui
-                                        .checkbox(
-                                            &mut step.audio_sense_spec.pitch.monitor.permanent,
-                                            Self::tr_lang(language, "Permanent", "Permanent"),
+                                        .add(
+                                            DragValue::new(&mut step.audio_sense_spec.pitch.monitor.duration_ms)
+                                                .range(100..=60_000)
+                                                .speed(10.0),
                                         )
                                         .changed();
-                                    if !step.audio_sense_spec.pitch.monitor.permanent {
-                                        ui.add_space(2.0);
-                                        ui.label("ms");
-                                        *live_sync |= ui
-                                            .add(
-                                                DragValue::new(&mut step.audio_sense_spec.pitch.monitor.duration_ms)
-                                                    .range(100..=60_000)
-                                                    .speed(10.0),
-                                            )
-                                            .changed();
-                                    }
-                                    ui.add_space(6.0);
-                                    let collapse_icon = if step.audio_sense_collapsed { 0xe5cc } else { 0xe5cf };
-                                    let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
-                                    if ui
-                                        .add_sized([18.0, 18.0], collapse_btn)
-                                        .on_hover_text(if step.audio_sense_collapsed { "Expand" } else { "Collapse" })
-                                        .clicked()
-                                    {
-                                        step.audio_sense_collapsed = !step.audio_sense_collapsed;
-                                        *live_sync = true;
-                                    }
                                     ui.add_space(2.0);
                                     let is_active = crate::overlay::is_audio_sense_active(
                                         step.audio_sense_preset_id,
@@ -20576,22 +20545,19 @@ if supports_move_mouse || show_detection_tuning {
                                 }
                             }
                         });
-                        match start_mode {
-                            1 if !step.audio_sense_collapsed => {
-                                ui.add_space(4.0);
-                                Self::render_audio_sense_pitch_custom_step(
-                                    ui,
-                                    language,
-                                    id_prefix,
-                                    audio_sense_devices,
-                                    timer_names,
-                                    step,
-                                    live_sync,
-                                    audio_sense_presets,
-                                    audio_sense_presets_changed,
-                                );
-                            }
-                            _ => {}
+                        if is_manual && !step.audio_sense_collapsed {
+                            ui.add_space(4.0);
+                            Self::render_audio_sense_pitch_custom_step(
+                                ui,
+                                language,
+                                id_prefix,
+                                audio_sense_devices,
+                                timer_names,
+                                step,
+                                live_sync,
+                                audio_sense_presets,
+                                audio_sense_presets_changed,
+                            );
                         }
                     });
                 }
