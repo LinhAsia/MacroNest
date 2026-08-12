@@ -6173,7 +6173,27 @@ impl CrosshairApp {
                             TitlebarQuickActionKind::ScreenDraw,
                             self.state.quick_screen_draw_enabled,
                         );
-                        if button_response.clicked() {
+
+                        // Instant screenshot corner button (chọn vùng -> copy)
+                        let snap_rect = egui::Rect::from_min_size(
+                            pos2(button_response.rect.right() - 27.0, button_response.rect.top() + 4.0),
+                            vec2(23.0, 23.0),
+                        );
+                        let snap_response = ui.put(
+                            snap_rect,
+                            Button::new(Self::material_icon_text(0xe3b0, 12.0)) // photo_camera
+                                .corner_radius(6.0)
+                                .fill(Color32::from_rgba_premultiplied(20, 28, 44, 230))
+                                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(117, 219, 166))),
+                        ).on_hover_text(Self::tr_lang(
+                            self.state.ui_language,
+                            "Instant screenshot (select region → copy)",
+                            "Chụp nhanh (chọn vùng → copy)",
+                        ));
+
+                        if snap_response.clicked() {
+                            crate::overlay::screen_draw_instant_screenshot();
+                        } else if button_response.clicked() {
                             self.state.quick_screen_draw_enabled =
                                 !self.state.quick_screen_draw_enabled;
                             self.sync_quick_screen_draw_config();
@@ -6191,40 +6211,21 @@ impl CrosshairApp {
                             vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::Label::new(
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Draw",
-                                            "Vẽ",
-                                        ))
-                                        .size(11.0)
-                                        .color(
-                                            if button_response.hovered() {
-                                                ui.visuals().strong_text_color()
-                                            } else {
-                                                ui.visuals().text_color()
-                                            },
-                                        ),
-                                    ));
-                                    // Instant screenshot: chọn vùng → copy clipboard
-                                    let snap_btn = Button::new(
-                                        Self::material_icon_text(0xe3b0, 11.0), // photo_camera
-                                    )
-                                    .frame(false)
-                                    .small();
-                                    if ui
-                                        .add(snap_btn)
-                                        .on_hover_text(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Instant screenshot (select region → copy)",
-                                            "Chụp nhanh (chọn vùng → copy)",
-                                        ))
-                                        .clicked()
-                                    {
-                                        crate::overlay::screen_draw_instant_screenshot();
-                                    }
-                                });
+                                ui.add(egui::Label::new(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Draw",
+                                        "Vẽ",
+                                    ))
+                                    .size(11.0)
+                                    .color(
+                                        if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        },
+                                    ),
+                                ));
                             },
                         );
 
@@ -6394,7 +6395,34 @@ impl CrosshairApp {
                             TitlebarQuickActionKind::VideoRecord,
                             self.state.quick_video_record_enabled,
                         );
-                        if button_response.clicked() && !recorder_busy {
+
+                        // Instant record corner button (auto full screen record)
+                        let rec_rect = egui::Rect::from_min_size(
+                            pos2(button_response.rect.right() - 27.0, button_response.rect.top() + 4.0),
+                            vec2(23.0, 23.0),
+                        );
+                        let rec_response = ui.put(
+                            rec_rect,
+                            Button::new(Self::material_icon_text(0xe04b, 12.0)) // videocam
+                                .corner_radius(6.0)
+                                .fill(Color32::from_rgba_premultiplied(20, 28, 44, 230))
+                                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(117, 219, 166))),
+                        ).on_hover_text(Self::tr_lang(
+                            self.state.ui_language,
+                            "Instant record (full screen)",
+                            "Quay nhanh (toàn màn hình)",
+                        ));
+
+                        if rec_response.clicked() {
+                            if !recorder_busy && self.ffmpeg_installed {
+                                self.state.quick_video_record_mode =
+                                    QuickVideoRecordMode::FullScreen;
+                                self.sync_quick_video_record_config();
+                                if !recording {
+                                    crate::video_recorder::toggle_async();
+                                }
+                            }
+                        } else if button_response.clicked() && !recorder_busy {
                             self.state.quick_video_record_enabled =
                                 !self.state.quick_video_record_enabled;
                             self.sync_quick_video_record_config();
@@ -6413,46 +6441,19 @@ impl CrosshairApp {
                             vec2(92.0, 28.0),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::Label::new(
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Record",
-                                            "Quay video",
-                                        ))
-                                        .size(11.0)
-                                        .color(if button_response.hovered() {
-                                            ui.visuals().strong_text_color()
-                                        } else {
-                                            ui.visuals().text_color()
-                                        }),
-                                    ));
-                                    // Instant record: bắt đầu quay full màn hình ngay
-                                    let rec_btn = Button::new(
-                                        Self::material_icon_text(0xe061, 11.0), // play_circle
-                                    )
-                                    .frame(false)
-                                    .small();
-                                    if ui
-                                        .add(rec_btn)
-                                        .on_hover_text(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Instant record (full screen)",
-                                            "Quay nhanh (toàn màn hình)",
-                                        ))
-                                        .clicked()
-                                        && !recorder_busy
-                                        && self.ffmpeg_installed
-                                    {
-                                        // Ensure full-screen mode then toggle
-                                        self.state.quick_video_record_mode =
-                                            QuickVideoRecordMode::FullScreen;
-                                        self.sync_quick_video_record_config();
-                                        if !recording {
-                                            crate::video_recorder::toggle_async();
-                                        }
-                                    }
-                                });
+                                ui.add(egui::Label::new(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Record",
+                                        "Quay video",
+                                    ))
+                                    .size(11.0)
+                                    .color(if button_response.hovered() {
+                                        ui.visuals().strong_text_color()
+                                    } else {
+                                        ui.visuals().text_color()
+                                    }),
+                                ));
                             },
                         );
 
