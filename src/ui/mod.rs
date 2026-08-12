@@ -6176,15 +6176,15 @@ impl CrosshairApp {
 
                         // Instant screenshot corner button (chọn vùng -> copy)
                         let snap_rect = egui::Rect::from_min_size(
-                            pos2(button_response.rect.right() - 27.0, button_response.rect.top() + 4.0),
-                            vec2(23.0, 23.0),
+                            pos2(button_response.rect.right() - 31.0, button_response.rect.top() + 3.0),
+                            vec2(27.0, 27.0),
                         );
                         let snap_response = ui.put(
                             snap_rect,
-                            Button::new(Self::material_icon_text(0xe3b0, 12.0)) // photo_camera
-                                .corner_radius(6.0)
+                            Button::new(Self::material_icon_text(0xe3b0, 14.0)) // photo_camera
+                                .corner_radius(7.0)
                                 .fill(Color32::from_rgba_premultiplied(20, 28, 44, 230))
-                                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(117, 219, 166))),
+                                .stroke(egui::Stroke::new(1.2, Color32::from_rgb(117, 219, 166))),
                         ).on_hover_text(Self::tr_lang(
                             self.state.ui_language,
                             "Instant screenshot (select region → copy)",
@@ -6398,29 +6398,49 @@ impl CrosshairApp {
 
                         // Instant record corner button (auto full screen record)
                         let rec_rect = egui::Rect::from_min_size(
-                            pos2(button_response.rect.right() - 27.0, button_response.rect.top() + 4.0),
-                            vec2(23.0, 23.0),
+                            pos2(button_response.rect.right() - 31.0, button_response.rect.top() + 3.0),
+                            vec2(27.0, 27.0),
                         );
+                        let rec_fill = if recording {
+                            Color32::from_rgb(220, 38, 38) // Red when recording
+                        } else {
+                            Color32::from_rgba_premultiplied(20, 28, 44, 230)
+                        };
+                        let rec_stroke = if recording {
+                            egui::Stroke::new(1.5, Color32::from_rgb(254, 202, 202))
+                        } else {
+                            egui::Stroke::new(1.2, Color32::from_rgb(117, 219, 166))
+                        };
+                        let rec_tooltip = if recording {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Stop recording",
+                                "Dừng quay video",
+                            )
+                        } else {
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Instant record (full screen)",
+                                "Quay nhanh (toàn màn hình)",
+                            )
+                        };
+
                         let rec_response = ui.put(
                             rec_rect,
-                            Button::new(Self::material_icon_text(0xe04b, 12.0)) // videocam
-                                .corner_radius(6.0)
-                                .fill(Color32::from_rgba_premultiplied(20, 28, 44, 230))
-                                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(117, 219, 166))),
-                        ).on_hover_text(Self::tr_lang(
-                            self.state.ui_language,
-                            "Instant record (full screen)",
-                            "Quay nhanh (toàn màn hình)",
-                        ));
+                            Button::new(Self::material_icon_text(0xe04b, 14.0)) // videocam
+                                .corner_radius(7.0)
+                                .fill(rec_fill)
+                                .stroke(rec_stroke),
+                        ).on_hover_text(rec_tooltip);
 
                         if rec_response.clicked() {
                             if !recorder_busy && self.ffmpeg_installed {
-                                self.state.quick_video_record_mode =
-                                    QuickVideoRecordMode::FullScreen;
-                                self.sync_quick_video_record_config();
                                 if !recording {
-                                    crate::video_recorder::toggle_async();
+                                    self.state.quick_video_record_mode =
+                                        QuickVideoRecordMode::FullScreen;
+                                    self.sync_quick_video_record_config();
                                 }
+                                crate::video_recorder::toggle_async();
                             }
                         } else if button_response.clicked() && !recorder_busy {
                             self.state.quick_video_record_enabled =
