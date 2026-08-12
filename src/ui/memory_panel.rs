@@ -216,6 +216,7 @@ struct DeepPointerDialog {
     entity_z_offset: i64,
     entity_stride: u32,
     entity_count: u32,
+    entity_root_matching: bool,
     using_entity_roots: bool,
 }
 
@@ -4806,6 +4807,7 @@ impl CrosshairApp {
                         entity_z_offset: 8,
                         entity_stride: 0x48,
                         entity_count: 32,
+                        entity_root_matching: false,
                         using_entity_roots: false,
                     });
                 }
@@ -4817,7 +4819,7 @@ impl CrosshairApp {
         let limits = self.pointer_scan_limits();
         let worker_progress = Arc::clone(&progress);
         let (tx, rx) = mpsc::channel();
-        if let Some((map_a, targets_a, entity_stride, entity_slots)) = self
+        if let Some((map_a, targets_a, entity_stride, entity_slots, entity_root_matching)) = self
             .memory_panel
             .deep_pointer_dialog
             .as_ref()
@@ -4828,6 +4830,7 @@ impl CrosshairApp {
                         dialog.source_addresses.clone(),
                         dialog.entity_stride as usize,
                         dialog.entity_count as usize,
+                        dialog.entity_root_matching,
                     )
                 })
             })
@@ -4860,10 +4863,16 @@ impl CrosshairApp {
                     // Entity instances can occupy a different slot after restart. Searching
                     // only the selected field address means the shared list root is never
                     // enumerated, so comparing paths afterward cannot recover it.
-                    let targets_a =
-                        expand_entity_slot_targets(&targets_a, entity_stride, entity_slots);
-                    let targets_b =
-                        expand_entity_slot_targets(&targets, entity_stride, entity_slots);
+                    let targets_a = if entity_root_matching {
+                        expand_entity_slot_targets(&targets_a, entity_stride, entity_slots)
+                    } else {
+                        targets_a
+                    };
+                    let targets_b = if entity_root_matching {
+                        expand_entity_slot_targets(&targets, entity_stride, entity_slots)
+                    } else {
+                        targets
+                    };
                     let paths_a = map_a.paths_to_any(
                         &targets_a,
                         limits.max_offset,
@@ -4876,7 +4885,12 @@ impl CrosshairApp {
                         limits.max_depth,
                         comparison_limit,
                     );
-                    compare_pointer_paths(paths_a, paths_b, entity_stride, limits.result_limit)
+                    compare_pointer_paths(
+                        paths_a,
+                        paths_b,
+                        entity_root_matching.then_some(entity_stride).unwrap_or(0),
+                        limits.result_limit,
+                    )
                 })
                 .map_err(|error| error.to_string());
                 let _ = tx.send(DeepPointerJobResult::Compared(result));
@@ -4924,6 +4938,7 @@ impl CrosshairApp {
                 entity_z_offset: 8,
                 entity_stride: 0x48,
                 entity_count: 32,
+                entity_root_matching: false,
                 using_entity_roots: false,
             });
         }
@@ -6878,11 +6893,13 @@ impl CrosshairApp {
                             "No identical full path. Found {entity_root_count} stable entity-list root(s) after removing the changing slot offset (stride {}).",
                             dialog.entity_stride
                         )
-                    } else if exact_count == 0 {
+                    } else if exact_count == 0 && dialog.entity_root_matching {
                         format!(
                             "No identical pointer path or stable entity-list root found with stride {}. Verify the stride before comparing again.",
                             dialog.entity_stride
                         )
+                    } else if exact_count == 0 {
+                        "No identical pointer path found between map A and map B.".to_owned()
                     } else {
                         format!(
                             "Compared map A and map B: {exact_count} identical pointer path(s)."
@@ -6967,22 +6984,29 @@ impl CrosshairApp {
                         });
                         ui.group(|ui| {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("Entity-list root matching").strong());
-                                ui.label("Stride (bytes)");
-                                ui.add(
+                                ui.checkbox(
+                                    &mut dialog.entity_root_matching,
+                                    RichText::new("Entity-list root matching").strong(),
+                                );
+                                ui.add_enabled_ui(dialog.entity_root_matching, |ui| {
+                                    ui.label("Stride (bytes)");
+                                    ui.add(
                                     egui::DragValue::new(&mut dialog.entity_stride)
                                         .range(1..=0x10000),
-                                );
-                                ui.label("Slots each side");
-                                ui.add(
+                                    );
+                                    ui.label("Slots each side");
+                                    ui.add(
                                     egui::DragValue::new(&mut dialog.entity_count)
                                         .range(1..=512),
-                                );
+                                    );
+                                });
                             });
                             ui.label(
-                                RichText::new(
-                                    "Set these before Compare with map A. MacroNest searches nearby entity slots on both maps, then keeps their common stable root.",
-                                )
+                                RichText::new(if dialog.entity_root_matching {
+                                    "MacroNest searches nearby entity slots on both maps, then keeps their common stable root."
+                                } else {
+                                    "Off: compare map A and map B as a normal pointer scan; stride is ignored."
+                                })
                                 .weak()
                                 .small(),
                             );

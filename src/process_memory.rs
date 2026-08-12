@@ -2586,6 +2586,25 @@ mod tests {
     }
 
     #[test]
+    fn normal_pointer_map_comparison_ignores_entity_stride_matching() {
+        let path_a = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x20, 0x90],
+        };
+        let path_b = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x20, 0x120],
+        };
+
+        let comparison = compare_pointer_paths([path_a], [path_b], 0, 32);
+
+        assert!(comparison.exact.is_empty());
+        assert!(comparison.entity_roots.is_empty());
+    }
+
+    #[test]
     fn pointer_map_comparison_finds_entity_slot_at_intermediate_level() {
         let path_a = PointerPath {
             module: "game.exe".to_owned(),
