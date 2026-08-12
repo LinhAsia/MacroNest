@@ -582,166 +582,171 @@ impl CrosshairApp {
         pending_vision_capture: &mut Option<(u32, crate::ui::VisionCaptureMode)>,
         live_sync: &mut bool,
     ) {
-        ui.horizontal(|ui| {
-            ui.add_space(4.0);
+        ui.indent("vision_manual_panel_indent", |ui| {
+            ui.add_space(2.0);
 
-            // 1. Mode selection with text label
-            ui.label(Self::tr_lang(language, "Mode:", "Chế độ:"));
-            let mut mode = if v_preset.is_pixel_counter {
-                2
-            } else if v_preset.use_color_matching {
-                1
-            } else {
-                0
-            };
+            // Row 1: Mode Selection & Capture/Sample Button
+            ui.horizontal(|ui| {
+                ui.label(Self::tr_lang(language, "Mode:", "Chế độ:"));
+                let mut mode = if v_preset.is_pixel_counter {
+                    2
+                } else if v_preset.use_color_matching {
+                    1
+                } else {
+                    0
+                };
 
-            let mode_combo = egui::ComboBox::from_id_salt((v_preset.id, "step-manual-vision-mode"))
-                .width(130.0)
-                .selected_text(match mode {
-                    0 => Self::tr_lang(language, "Image Detect", "Phát hiện ảnh"),
-                    1 => Self::tr_lang(language, "Color Detect", "Phát hiện màu"),
-                    _ => Self::tr_lang(language, "Pixel Counter", "Đếm pixel"),
+                let mode_combo = egui::ComboBox::from_id_salt((v_preset.id, "step-manual-vision-mode"))
+                    .width(130.0)
+                    .selected_text(match mode {
+                        0 => Self::tr_lang(language, "Image Detect", "Phát hiện ảnh"),
+                        1 => Self::tr_lang(language, "Color Detect", "Phát hiện màu"),
+                        _ => Self::tr_lang(language, "Pixel Counter", "Đếm pixel"),
+                    });
+
+                mode_combo.show_ui(ui, |ui| {
+                    if ui.selectable_value(&mut mode, 0, Self::tr_lang(language, "Image Detect", "Phát hiện ảnh")).clicked() {
+                        v_preset.use_color_matching = false;
+                        v_preset.is_pixel_counter = false;
+                        *live_sync = true;
+                    }
+                    if ui.selectable_value(&mut mode, 1, Self::tr_lang(language, "Color Detect", "Phát hiện màu")).clicked() {
+                        v_preset.use_color_matching = true;
+                        v_preset.is_pixel_counter = false;
+                        *live_sync = true;
+                    }
+                    if ui.selectable_value(&mut mode, 2, Self::tr_lang(language, "Pixel Counter", "Đếm pixel")).clicked() {
+                        v_preset.use_color_matching = false;
+                        v_preset.is_pixel_counter = true;
+                        *live_sync = true;
+                    }
                 });
 
-            mode_combo.show_ui(ui, |ui| {
-                if ui.selectable_value(&mut mode, 0, Self::tr_lang(language, "Image Detect", "Phát hiện ảnh")).clicked() {
-                    v_preset.use_color_matching = false;
-                    v_preset.is_pixel_counter = false;
-                    *live_sync = true;
-                }
-                if ui.selectable_value(&mut mode, 1, Self::tr_lang(language, "Color Detect", "Phát hiện màu")).clicked() {
-                    v_preset.use_color_matching = true;
-                    v_preset.is_pixel_counter = false;
-                    *live_sync = true;
-                }
-                if ui.selectable_value(&mut mode, 2, Self::tr_lang(language, "Pixel Counter", "Đếm pixel")).clicked() {
-                    v_preset.use_color_matching = false;
-                    v_preset.is_pixel_counter = true;
-                    *live_sync = true;
+                ui.add_space(8.0);
+
+                if !v_preset.use_color_matching && !v_preset.is_pixel_counter {
+                    let pick_lbl = Self::tr_lang(language, "Pick Template", "Chụp mẫu ảnh");
+                    if Self::render_icon_text_button(ui, 0xe3b4, pick_lbl)
+                        .on_hover_text(Self::tr_lang(language, "Pick image template from screen", "Chụp ảnh mẫu từ màn hình"))
+                        .clicked()
+                    {
+                        *pending_vision_capture = Some((v_preset.id, crate::ui::VisionCaptureMode::Template));
+                    }
+                } else {
+                    if !v_preset.is_pixel_counter {
+                        let mut is_single = v_preset.search_region_is_single_pixel;
+                        if ui.checkbox(&mut is_single, Self::tr_lang(language, "1px (Single)", "1px (Điểm ảnh)")).changed() {
+                            v_preset.search_region_is_single_pixel = is_single;
+                            if is_single {
+                                Self::set_vision_preset_single_pixel_region(v_preset, None, None);
+                            } else {
+                                Self::clear_vision_preset_search_region(v_preset);
+                            }
+                            *live_sync = true;
+                        }
+                    }
+
+                    let (pick_lbl, pick_tooltip) = if v_preset.search_region_is_single_pixel || v_preset.is_pixel_counter {
+                        (
+                            Self::tr_lang(language, "Pick Pixel", "Chọn pixel"),
+                            Self::tr_lang(language, "Pick pixel from screen", "Chọn pixel trên màn hình"),
+                        )
+                    } else {
+                        (
+                            Self::tr_lang(language, "Pick Color", "Chọn màu"),
+                            Self::tr_lang(language, "Pick color from screen", "Chọn màu trên màn hình"),
+                        )
+                    };
+
+                    if Self::render_icon_text_button(ui, 0xe3b4, pick_lbl)
+                        .on_hover_text(pick_tooltip)
+                        .clicked()
+                    {
+                        let mode = if v_preset.search_region_is_single_pixel || v_preset.is_pixel_counter {
+                            crate::ui::VisionCaptureMode::SinglePixel
+                        } else {
+                            crate::ui::VisionCaptureMode::ColorSample
+                        };
+                        *pending_vision_capture = Some((v_preset.id, mode));
+                    }
+
+                    let color = v_preset.target_color.map(|c| egui::Color32::from_rgb(c.r, c.g, c.b)).unwrap_or(egui::Color32::GRAY);
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 2.0, color);
+                    ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::GRAY), egui::StrokeKind::Outside);
                 }
             });
 
             ui.add_space(4.0);
 
-            // 2. Pick template / color / pixel button (with feature icon 0xe3b4 + text label)
-            if !v_preset.use_color_matching && !v_preset.is_pixel_counter {
-                let pick_lbl = Self::tr_lang(language, "Pick Template", "Chụp mẫu ảnh");
-                if Self::render_icon_text_button(ui, 0xe3b4, pick_lbl)
-                    .on_hover_text(Self::tr_lang(language, "Pick image template from screen", "Chụp ảnh mẫu từ màn hình"))
-                    .clicked()
-                {
-                    *pending_vision_capture = Some((v_preset.id, crate::ui::VisionCaptureMode::Template));
-                }
-            } else {
-                if !v_preset.is_pixel_counter {
-                    let mut is_single = v_preset.search_region_is_single_pixel;
-                    if ui.checkbox(&mut is_single, Self::tr_lang(language, "1px (Single)", "1px (Điểm ảnh)")).changed() {
-                        v_preset.search_region_is_single_pixel = is_single;
-                        if is_single {
-                            Self::set_vision_preset_single_pixel_region(v_preset, None, None);
-                        } else {
-                            Self::clear_vision_preset_search_region(v_preset);
-                        }
-                        *live_sync = true;
-                    }
-                }
+            // Row 2: Search Region Controls
+            ui.horizontal(|ui| {
+                ui.label(Self::tr_lang(language, "Region:", "Vùng tìm:"));
+                let has_area = v_preset.search_region_screen_x.is_some() && !v_preset.search_region_is_single_pixel;
 
-                let (pick_lbl, pick_tooltip) = if v_preset.search_region_is_single_pixel || v_preset.is_pixel_counter {
+                let (pick_area_lbl, pick_area_tooltip) = if has_area {
                     (
-                        Self::tr_lang(language, "Pick Pixel", "Chọn pixel"),
-                        Self::tr_lang(language, "Pick pixel from screen", "Chọn pixel trên màn hình"),
+                        Self::tr_lang(language, "Re-pick Region", "Chọn lại vùng"),
+                        Self::tr_lang(language, "Re-pick search region", "Chọn lại vùng tìm kiếm"),
                     )
                 } else {
                     (
-                        Self::tr_lang(language, "Pick Color", "Chọn màu"),
-                        Self::tr_lang(language, "Pick color from screen", "Chọn màu trên màn hình"),
+                        Self::tr_lang(language, "Pick Region", "Chọn vùng"),
+                        Self::tr_lang(language, "Pick search region", "Chọn vùng tìm kiếm"),
                     )
                 };
 
-                if Self::render_icon_text_button(ui, 0xe3b4, pick_lbl)
-                    .on_hover_text(pick_tooltip)
+                if Self::render_icon_text_button(ui, 0xe85d, pick_area_lbl)
+                    .on_hover_text(pick_area_tooltip)
                     .clicked()
                 {
-                    let mode = if v_preset.search_region_is_single_pixel || v_preset.is_pixel_counter {
-                        crate::ui::VisionCaptureMode::SinglePixel
-                    } else {
-                        crate::ui::VisionCaptureMode::ColorSample
-                    };
-                    *pending_vision_capture = Some((v_preset.id, mode));
+                    *pending_vision_capture = Some((v_preset.id, crate::ui::VisionCaptureMode::SearchRegion));
                 }
 
-                // Feature preview: Color swatch
-                let color = v_preset.target_color.map(|c| egui::Color32::from_rgb(c.r, c.g, c.b)).unwrap_or(egui::Color32::GRAY);
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
-                ui.painter().rect_filled(rect, 2.0, color);
-                ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, egui::Color32::GRAY), egui::StrokeKind::Outside);
-            }
+                if has_area {
+                    let adj_lbl = Self::tr_lang(language, "Adjust Region", "Sửa vùng");
+                    if Self::render_icon_text_button(ui, 0xe3c9, adj_lbl)
+                        .on_hover_text(Self::tr_lang(language, "Adjust search region", "Điều chỉnh vùng tìm kiếm"))
+                        .clicked()
+                    {
+                        *pending_vision_capture = Some((v_preset.id, crate::ui::VisionCaptureMode::RegionAdjust));
+                    }
+
+                    let clr_lbl = Self::tr_lang(language, "Clear Region", "Xóa vùng");
+                    if Self::render_icon_text_button(ui, 0xe14c, clr_lbl)
+                        .on_hover_text(Self::tr_lang(language, "Clear search region", "Xóa vùng tìm kiếm"))
+                        .clicked()
+                    {
+                        Self::clear_vision_preset_search_region(v_preset);
+                        *live_sync = true;
+                    }
+                }
+            });
 
             ui.add_space(4.0);
 
-            // 3. Search region buttons (with feature icons 0xe85d, 0xe3c9, 0xe14c + text labels)
-            ui.label(Self::tr_lang(language, "Region:", "Vùng tìm:"));
-            let has_area = v_preset.search_region_screen_x.is_some() && !v_preset.search_region_is_single_pixel;
-
-            let (pick_area_lbl, pick_area_tooltip) = if has_area {
-                (
-                    Self::tr_lang(language, "Re-pick Region", "Chọn lại vùng"),
-                    Self::tr_lang(language, "Re-pick search region", "Chọn lại vùng tìm kiếm"),
-                )
-            } else {
-                (
-                    Self::tr_lang(language, "Pick Region", "Chọn vùng"),
-                    Self::tr_lang(language, "Pick search region", "Chọn vùng tìm kiếm"),
-                )
-            };
-
-            if Self::render_icon_text_button(ui, 0xe85d, pick_area_lbl)
-                .on_hover_text(pick_area_tooltip)
-                .clicked()
-            {
-                *pending_vision_capture = Some((v_preset.id, crate::ui::VisionCaptureMode::SearchRegion));
-            }
-
-            if has_area {
-                let adj_lbl = Self::tr_lang(language, "Adjust Region", "Sửa vùng");
-                if Self::render_icon_text_button(ui, 0xe3c9, adj_lbl)
-                    .on_hover_text(Self::tr_lang(language, "Adjust search region", "Điều chỉnh vùng tìm kiếm"))
-                    .clicked()
-                {
-                    *pending_vision_capture = Some((v_preset.id, crate::ui::VisionCaptureMode::RegionAdjust));
-                }
-
-                let clr_lbl = Self::tr_lang(language, "Clear Region", "Xóa vùng");
-                if Self::render_icon_text_button(ui, 0xe14c, clr_lbl)
-                    .on_hover_text(Self::tr_lang(language, "Clear search region", "Xóa vùng tìm kiếm"))
-                    .clicked()
-                {
-                    Self::clear_vision_preset_search_region(v_preset);
+            // Row 3: Color Tolerance & Save Preset
+            ui.horizontal(|ui| {
+                ui.label(Self::tr_lang(language, "Color Tolerance (Tol):", "Độ lệch màu (Tol):"));
+                let resp = ui.add(egui::DragValue::new(&mut v_preset.color_tolerance).range(0..=100));
+                if resp.changed() {
+                    step.vision_color_tolerance = v_preset.color_tolerance;
                     *live_sync = true;
                 }
-            }
 
-            ui.add_space(4.0);
+                ui.add_space(12.0);
 
-            // 4. Color Tolerance (with full text label)
-            ui.label(Self::tr_lang(language, "Color Tolerance (Tol):", "Độ lệch màu (Tol):"));
-            let resp = ui.add(egui::DragValue::new(&mut v_preset.color_tolerance).range(0..=100));
-            if resp.changed() {
-                step.vision_color_tolerance = v_preset.color_tolerance;
-                *live_sync = true;
-            }
+                let save_lbl = Self::tr_lang(language, "Save as Preset", "Lưu thành Preset");
+                if Self::render_icon_text_button(ui, 0xe161, save_lbl)
+                    .on_hover_text(Self::tr_lang(language, "Save as Vision Preset", "Lưu thành Vision Preset"))
+                    .clicked()
+                {
+                    v_preset.name = format!("Vision Preset #{}", v_preset.id);
+                    *live_sync = true;
+                }
+            });
 
-            ui.add_space(4.0);
-
-            // 5. Save as Vision Preset (with feature icon 0xe161 + text label)
-            let save_lbl = Self::tr_lang(language, "Save as Preset", "Lưu thành Preset");
-            if Self::render_icon_text_button(ui, 0xe161, save_lbl)
-                .on_hover_text(Self::tr_lang(language, "Save as Vision Preset", "Lưu thành Vision Preset"))
-                .clicked()
-            {
-                v_preset.name = format!("Vision Preset #{}", v_preset.id);
-                *live_sync = true;
-            }
+            ui.add_space(2.0);
         });
     }
 
