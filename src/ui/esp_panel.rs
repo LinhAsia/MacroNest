@@ -190,9 +190,13 @@ impl CrosshairApp {
                                 }
                                 ui.label("Step");
                                 if let Some(step) = preset.entity_root_step.as_mut() {
-                                    ui.add(DragValue::new(step).range(1..=0x10000))
+                                    ui.add(
+                                        DragValue::new(step)
+                                            .range(1..=0x10000)
+                                            .hexadecimal(1, false, false),
+                                    )
                                         .on_hover_text(
-                                            "Raw-address navigation step in bytes; defaults to Stride.",
+                                            "Raw-address navigation step in hexadecimal bytes; defaults to Stride.",
                                         );
                                 }
                             });
@@ -208,7 +212,8 @@ impl CrosshairApp {
                                 ui.label("Stride");
                                 ui.add(
                                     DragValue::new(&mut preset.entity_stride)
-                                        .range(1..=0x10000),
+                                        .range(1..=0x10000)
+                                        .hexadecimal(1, false, false),
                                 );
                                 ui.label("Count");
                                 ui.add(
@@ -219,7 +224,7 @@ impl CrosshairApp {
                             ui.label("");
                             ui.label(
                                 RichText::new(
-                                    "Offsets and stride are bytes. Runtime reads are capped at 512 slots.",
+                                    "Offsets are bytes. Stride and Step are hexadecimal bytes. Runtime reads are capped at 512 slots.",
                                 )
                                 .weak(),
                             );

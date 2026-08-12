@@ -302,6 +302,10 @@ mod entity_address_tests {
             Some("0xFD0")
         );
         assert_eq!(shift_raw_entity_root("game.exe+1000", 0x18, 1), None);
+        assert_eq!(
+            shift_raw_entity_root("0x1F009EAF340", 0x370, 1).as_deref(),
+            Some("0x1F009EAF6B0")
+        );
     }
 }
 
