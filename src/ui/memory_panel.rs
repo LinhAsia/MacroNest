@@ -193,7 +193,23 @@ struct StablePointerDialog {
 
 enum DeepPointerJobResult {
     MapA(Result<PointerMap, String>),
-    Compared(Result<PointerPathComparison, String>),
+    Compared(Result<DeepPointerComparisonResult, String>),
+}
+
+struct DeepPointerComparisonResult {
+    comparison: PointerPathComparison,
+    paths_a: usize,
+    paths_b: usize,
+    path_limit: usize,
+}
+
+#[derive(Clone, Copy)]
+struct DeepPointerComparisonStats {
+    paths_a: usize,
+    paths_b: usize,
+    exact: usize,
+    entity_roots: usize,
+    path_limit: usize,
 }
 
 struct DeepPointerDialog {
@@ -218,6 +234,7 @@ struct DeepPointerDialog {
     entity_count: u32,
     entity_root_matching: bool,
     using_entity_roots: bool,
+    comparison_stats: Option<DeepPointerComparisonStats>,
 }
 
 fn expand_entity_slot_targets(
@@ -4816,6 +4833,7 @@ impl CrosshairApp {
                         entity_count: 32,
                         entity_root_matching: false,
                         using_entity_roots: false,
+                        comparison_stats: None,
                     });
                 }
                 return;
@@ -4892,12 +4910,19 @@ impl CrosshairApp {
                         limits.max_depth,
                         comparison_limit,
                     );
-                    compare_pointer_paths(
-                        paths_a,
-                        paths_b,
-                        entity_root_matching.then_some(entity_stride).unwrap_or(0),
-                        limits.result_limit,
-                    )
+                    let paths_a_count = paths_a.len();
+                    let paths_b_count = paths_b.len();
+                    DeepPointerComparisonResult {
+                        comparison: compare_pointer_paths(
+                            paths_a,
+                            paths_b,
+                            entity_root_matching.then_some(entity_stride).unwrap_or(0),
+                            limits.result_limit,
+                        ),
+                        paths_a: paths_a_count,
+                        paths_b: paths_b_count,
+                        path_limit: comparison_limit,
+                    }
                 })
                 .map_err(|error| error.to_string());
                 let _ = tx.send(DeepPointerJobResult::Compared(result));
@@ -4913,6 +4938,7 @@ impl CrosshairApp {
             dialog.selected.clear();
             dialog.selection_anchor = None;
             dialog.using_entity_roots = false;
+            dialog.comparison_stats = None;
         } else {
             thread::spawn(move || {
                 let result = capture_pointer_map_with_budget(
@@ -4947,6 +4973,7 @@ impl CrosshairApp {
                 entity_count: 32,
                 entity_root_matching: false,
                 using_entity_roots: false,
+                comparison_stats: None,
             });
         }
     }
@@ -6886,9 +6913,17 @@ impl CrosshairApp {
                         dialog.source_addresses.len()
                     );
                 }
-                DeepPointerJobResult::Compared(Ok(comparison)) => {
+                DeepPointerJobResult::Compared(Ok(result)) => {
+                    let comparison = result.comparison;
                     let exact_count = comparison.exact.len();
                     let entity_root_count = comparison.entity_roots.len();
+                    dialog.comparison_stats = Some(DeepPointerComparisonStats {
+                        paths_a: result.paths_a,
+                        paths_b: result.paths_b,
+                        exact: exact_count,
+                        entity_roots: entity_root_count,
+                        path_limit: result.path_limit,
+                    });
                     dialog.using_entity_roots = exact_count == 0 && entity_root_count > 0;
                     dialog.candidates = if dialog.using_entity_roots {
                         comparison.entity_roots
@@ -6957,6 +6992,31 @@ impl CrosshairApp {
                     .frame(Self::memory_popup_frame(ctx))
                     .show(ctx, |ui| {
                         ui.label(&dialog.status);
+                        if let Some(stats) = dialog.comparison_stats {
+                            let a_limited = if stats.paths_a >= stats.path_limit {
+                                " (limit reached)"
+                            } else {
+                                ""
+                            };
+                            let b_limited = if stats.paths_b >= stats.path_limit {
+                                " (limit reached)"
+                            } else {
+                                ""
+                            };
+                            ui.label(
+                                RichText::new(format!(
+                                    "Paths found — Map A: {}{}  |  Map B: {}{}  |  Identical: {}  |  Entity roots: {}",
+                                    stats.paths_a,
+                                    a_limited,
+                                    stats.paths_b,
+                                    b_limited,
+                                    stats.exact,
+                                    stats.entity_roots,
+                                ))
+                                .monospace()
+                                .strong(),
+                            );
+                        }
                         if dialog.rx.is_some() {
                             let read = dialog.progress.load(Ordering::Relaxed);
                             ui.label(format!("Read {:.1} MB", read as f64 / 1_048_576.0));
