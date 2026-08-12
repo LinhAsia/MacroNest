@@ -826,6 +826,10 @@ impl CrosshairApp {
                 }
 
                 if is_manual {
+                    if step.action == MacroAction::StartVisionSearch {
+                        ui.add_space(2.0);
+                        ui.weak(Self::tr_lang(language, "(Move Mouse only)", "(Move Mouse only)"));
+                    }
                     ui.add_space(2.0);
                     let collapse_icon = if step.vision_collapsed { 0xe5cc } else { 0xe5cf };
                     let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
