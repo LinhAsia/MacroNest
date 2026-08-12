@@ -6900,10 +6900,10 @@ impl CrosshairApp {
                                     .size(12.0)
                                     .weak(),
                                 );
-                                recording || recorder_busy || keep_open
+                                keep_open
                             },
                         );
-                        if keep_open || recording || recorder_busy {
+                        if keep_open {
                             keep_menu_open = true;
                         }
                     },
