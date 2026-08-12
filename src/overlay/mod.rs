@@ -12934,7 +12934,21 @@ mod windows_overlay {
             }
             started_inactive = !state.active;
             if started_inactive {
-                activate_screen_draw(&mut state, None);
+                let freeze = state.freeze_screen;
+                let captured_frame = if freeze {
+                    let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+                    if screen_w > 0 && screen_h > 0 {
+                        window_list::capture_virtual_screen_region(
+                            screen_x, screen_y, screen_w, screen_h,
+                        )
+                        .map(|frame| frame.rgba)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                activate_screen_draw(&mut state, captured_frame);
             }
             let trigger = match &mode {
                 ScreenDrawCaptureMode::VideoHoldTrigger(trigger) => Some(trigger.clone()),

@@ -1562,6 +1562,9 @@ fn run_region_border(
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        if message == windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST {
+            return LRESULT(windows::Win32::UI::WindowsAndMessaging::HTTRANSPARENT as isize);
+        }
         unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
     }
 
@@ -1806,6 +1809,9 @@ fn run_video_copy_toast(rect: Option<RECT>, language: crate::model::UiLanguage) 
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        if message == windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST {
+            return LRESULT(windows::Win32::UI::WindowsAndMessaging::HTTRANSPARENT as isize);
+        }
         unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
     }
 
