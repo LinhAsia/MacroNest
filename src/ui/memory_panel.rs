@@ -564,6 +564,7 @@ struct ScanJobResult {
     pid: u32,
     action: MemoryScanAction,
     result: Result<ScanJobCandidates, String>,
+    undo: Option<ScanJobCandidates>,
 }
 
 enum ScanJobCandidates {
@@ -684,6 +685,7 @@ pub(crate) struct MemoryPanelState {
     status: String,
     last_action: String,
     job_rx: Option<Receiver<ScanJobResult>>,
+    scan_undo: Option<ScanJobCandidates>,
     scanning: bool,
     scan_progress: Arc<AtomicUsize>,
     scan_input_count: usize,
@@ -776,6 +778,7 @@ impl Default for MemoryPanelState {
             status: "Ready".to_owned(),
             last_action: "Ready".to_owned(),
             job_rx: None,
+            scan_undo: None,
             scanning: false,
             scan_progress: Arc::new(AtomicUsize::new(0)),
             scan_input_count: 0,
@@ -1911,18 +1914,30 @@ impl CrosshairApp {
                         } else if reset_last && index == 2 {
                             let width = ui.available_width();
                             ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = 8.0;
+                                ui.spacing_mut().item_spacing.x = GAP;
+                                let button_width = ((width - GAP) * 0.5).max(52.0);
                                 if ui
                                     .add_enabled(
                                         !self.memory_panel.scanning,
                                         Button::new(self.tr("Reset", "Reset"))
-                                            .min_size(vec2((width - 34.0).max(52.0), 26.0)),
+                                            .min_size(vec2(button_width, 26.0)),
                                     )
                                     .clicked()
                                 {
                                     self.reset_memory_scan("New scan");
                                 }
-                                ui.allocate_space(vec2(26.0, 26.0));
+                                if ui
+                                    .add_enabled(
+                                        !self.memory_panel.scanning
+                                            && self.memory_panel.scan_undo.is_some(),
+                                        Button::new("Undo")
+                                            .min_size(vec2(button_width, 26.0)),
+                                    )
+                                    .on_hover_text("Restore results from the previous filter")
+                                    .clicked()
+                                {
+                                    self.undo_memory_scan_filter();
+                                }
                             });
                         }
                     },
@@ -11037,6 +11052,15 @@ impl CrosshairApp {
         let pause_while_scanning = self.memory_panel.pause_while_scanning;
         let is_aob = self.memory_panel.is_aob_scan;
         thread::spawn(move || {
+            // Keep one undo snapshot. The copy happens on the worker thread so a large
+            // result set does not stall egui, and is replaced after the next filter.
+            let undo = if !candidates.is_empty() {
+                Some(ScanJobCandidates::Numeric(candidates.clone()))
+            } else if !text_candidates.is_empty() {
+                Some(ScanJobCandidates::Text(text_candidates.clone()))
+            } else {
+                None
+            };
             let _pause = if pause_while_scanning {
                 match PausedProcess::new(pid) {
                     Ok(paused) => Some(paused),
@@ -11045,6 +11069,7 @@ impl CrosshairApp {
                             pid,
                             action,
                             result: Err(format!("Unable to pause target: {error}")),
+                            undo,
                         });
                         return;
                     }
@@ -11102,6 +11127,7 @@ impl CrosshairApp {
                 pid,
                 action,
                 result,
+                undo,
             });
         });
     }
@@ -11132,14 +11158,21 @@ impl CrosshairApp {
         if self.memory_panel.process_pid != Some(outcome.pid) {
             return;
         }
-        match outcome.result {
+        let ScanJobResult {
+            action,
+            result,
+            undo,
+            ..
+        } = outcome;
+        match result {
             Ok(ScanJobCandidates::Numeric(candidates)) => {
                 let count = candidates.len();
                 self.memory_panel.candidates = candidates;
                 self.memory_panel.live_candidate_values.clear();
                 self.memory_panel.text_candidates.clear();
                 self.memory_panel.status =
-                    format!("{} — {count} result(s)", outcome.action.label());
+                    format!("{} — {count} result(s)", action.label());
+                self.memory_panel.scan_undo = undo;
             }
             Ok(ScanJobCandidates::Text(candidates)) => {
                 let count = candidates.len();
@@ -11147,16 +11180,30 @@ impl CrosshairApp {
                 self.memory_panel.candidates.clear();
                 self.memory_panel.live_candidate_values.clear();
                 self.memory_panel.status =
-                    format!("{} — {count} text result(s)", outcome.action.label());
+                    format!("{} — {count} text result(s)", action.label());
+                self.memory_panel.scan_undo = undo;
             }
             Err(error) => {
-                self.memory_panel.status = format!("{} failed: {error}", outcome.action.label());
+                if let Some(previous) = undo {
+                    match previous {
+                        ScanJobCandidates::Numeric(candidates) => {
+                            self.memory_panel.candidates = candidates;
+                            self.memory_panel.text_candidates.clear();
+                        }
+                        ScanJobCandidates::Text(candidates) => {
+                            self.memory_panel.text_candidates = candidates;
+                            self.memory_panel.candidates.clear();
+                        }
+                    }
+                }
+                self.memory_panel.status = format!("{} failed: {error}", action.label());
             }
         }
     }
 
     fn reset_memory_scan(&mut self, status: &str) {
         self.memory_panel.job_rx = None;
+        self.memory_panel.scan_undo = None;
         self.memory_panel.scanning = false;
         self.memory_panel.candidates.clear();
         self.memory_panel.live_candidate_values.clear();
@@ -11169,6 +11216,31 @@ impl CrosshairApp {
         self.memory_panel.has_scan_session = false;
         self.memory_panel.status = status.to_owned();
         self.memory_panel.last_action = status.to_owned();
+    }
+
+    fn undo_memory_scan_filter(&mut self) {
+        let Some(previous) = self.memory_panel.scan_undo.take() else {
+            return;
+        };
+        let count = match previous {
+            ScanJobCandidates::Numeric(candidates) => {
+                let count = candidates.len();
+                self.memory_panel.candidates = candidates;
+                self.memory_panel.text_candidates.clear();
+                count
+            }
+            ScanJobCandidates::Text(candidates) => {
+                let count = candidates.len();
+                self.memory_panel.text_candidates = candidates;
+                self.memory_panel.candidates.clear();
+                count
+            }
+        };
+        self.memory_panel.live_candidate_values.clear();
+        self.memory_panel.selected_results.clear();
+        self.memory_panel.selection_anchor = None;
+        self.memory_panel.status = format!("Undo — restored {count} result(s)");
+        self.memory_panel.last_action = "Undo scan filter".to_owned();
     }
 
     fn add_selected_memory_results(&mut self) {
