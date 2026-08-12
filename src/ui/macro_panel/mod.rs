@@ -20701,7 +20701,7 @@ if supports_move_mouse || show_detection_tuning {
                                 }
                             }
                         });
-                        if step.audio_sense_preset_id.is_none() && !step.audio_sense_collapsed {
+                        if step.audio_sense_preset_id.is_none() {
                             ui.add_space(4.0);
                             Self::render_audio_sense_pitch_custom_step(
                                 ui,
