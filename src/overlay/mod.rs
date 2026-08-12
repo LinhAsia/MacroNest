@@ -9625,6 +9625,14 @@ mod windows_overlay {
         if started_from_inactive {
             let freeze = SCREEN_DRAW_STATE.lock().freeze_screen;
             if freeze {
+                hide_ui_window_native();
+                let controller = CONTROLLER_HWND.load(Ordering::Relaxed);
+                if controller != 0 {
+                    unsafe {
+                        let _ = ShowWindow(HWND(controller as *mut _), SW_HIDE);
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
                 let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                 if screen_w > 0 && screen_h > 0 {
                     captured_frame = window_list::capture_virtual_screen_region(
@@ -12936,6 +12944,14 @@ mod windows_overlay {
             if started_inactive {
                 let freeze = state.freeze_screen;
                 let captured_frame = if freeze {
+                    hide_ui_window_native();
+                    let controller = CONTROLLER_HWND.load(Ordering::Relaxed);
+                    if controller != 0 {
+                        unsafe {
+                            let _ = ShowWindow(HWND(controller as *mut _), SW_HIDE);
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
                     let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                     if screen_w > 0 && screen_h > 0 {
                         window_list::capture_virtual_screen_region(
