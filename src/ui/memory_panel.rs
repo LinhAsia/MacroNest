@@ -3248,13 +3248,20 @@ impl CrosshairApp {
                                         )
                                     }
                                 } else {
-                                    self.tr(
-                                        "Deep pointer scan: create map A",
-                                        "Quét pointer sâu: tạo map A",
-                                    )
+                                    if single_target {
+                                        self.tr(
+                                            "Deep pointer scan: create map A",
+                                            "Quét pointer sâu: tạo map A",
+                                        )
+                                    } else {
+                                        self.tr(
+                                            "Deep pointer scan: create map A from all selected addresses",
+                                            "Quét pointer sâu: tạo map A từ tất cả địa chỉ đã chọn",
+                                        )
+                                    }
                                 };
                                 if ui
-                                    .add_enabled(single_target || has_map_a, Button::new(deep_label))
+                                    .add_enabled(selected_count > 0, Button::new(deep_label))
                                     .clicked()
                                 {
                                     deep_pointer_scan = true;
@@ -6874,7 +6881,10 @@ impl CrosshairApp {
             match result {
                 DeepPointerJobResult::MapA(Ok(map)) => {
                     dialog.map_a = Some(Arc::new(map));
-                    dialog.status = "Map A ready. Restart the game, find the new target address, then right-click it and choose Compare with map A.".to_owned();
+                    dialog.status = format!(
+                        "Map A ready with {} target address(es). Restart the game, select the new target address(es), then choose Compare with map A.",
+                        dialog.source_addresses.len()
+                    );
                 }
                 DeepPointerJobResult::Compared(Ok(comparison)) => {
                     let exact_count = comparison.exact.len();
