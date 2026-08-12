@@ -7,7 +7,7 @@ use iced_x86::{
     OpAccess, OpKind, Register,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io,
     sync::{
         Arc,
@@ -380,6 +380,14 @@ pub struct AccessWatch(WatchSession);
 
 type ExecuteMatcher = Box<dyn Fn(usize) -> bool + Send + Sync + 'static>;
 
+fn accepts_execute_address(
+    unique_addresses: bool,
+    seen: &mut HashSet<usize>,
+    address: usize,
+) -> bool {
+    !unique_addresses || seen.insert(address)
+}
+
 impl AccessWatch {
     pub fn start<F>(
         pid: u32,
@@ -405,6 +413,27 @@ impl AccessWatch {
         Self::start_with_limit(pid, instruction_address, architecture, 1, notify)
     }
 
+    pub fn start_unique<F>(
+        pid: u32,
+        instruction_address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        unique_limit: usize,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        Self::start_with_limit_and_matcher(
+            pid,
+            instruction_address,
+            architecture,
+            unique_limit.max(1),
+            None,
+            true,
+            notify,
+        )
+    }
+
     pub fn start_matching<F, M>(
         pid: u32,
         instruction_address: usize,
@@ -423,6 +452,7 @@ impl AccessWatch {
             architecture,
             capture_limit,
             Some(Box::new(matcher)),
+            false,
             notify,
         )
     }
@@ -443,6 +473,7 @@ impl AccessWatch {
             architecture,
             capture_limit,
             None,
+            false,
             notify,
         )
     }
@@ -453,6 +484,7 @@ impl AccessWatch {
         architecture: MemoryDebuggerArchitecture,
         capture_limit: usize,
         matcher: Option<ExecuteMatcher>,
+        unique_addresses: bool,
         notify: F,
     ) -> io::Result<Self>
     where
@@ -467,6 +499,7 @@ impl AccessWatch {
                 instruction,
                 capture_limit,
                 matcher,
+                unique_addresses,
             },
             architecture,
             notify,
@@ -491,6 +524,7 @@ enum WatchKind {
         instruction: Instruction,
         capture_limit: usize,
         matcher: Option<ExecuteMatcher>,
+        unique_addresses: bool,
     },
 }
 
@@ -590,6 +624,7 @@ fn watch_loop<F>(
     let mut threads = HashMap::new();
     let mut access_hits = 0usize;
     let mut execute_candidates_seen = 0usize;
+    let mut unique_execute_addresses = HashSet::new();
     let mut capture_limit_reached = false;
     let mut seen_instruction_details = HashMap::<usize, (String, String)>::new();
     while !stop.load(Ordering::Acquire) {
@@ -676,6 +711,7 @@ fn watch_loop<F>(
                                 instruction,
                                 capture_limit,
                                 matcher,
+                                unique_addresses,
                                 ..
                             } => {
                                 if !capture_limit_reached
@@ -684,7 +720,12 @@ fn watch_loop<F>(
                                 {
                                     let matches = matcher
                                         .as_ref()
-                                        .map_or(true, |matcher| matcher(data_address));
+                                        .map_or(true, |matcher| matcher(data_address))
+                                        && accepts_execute_address(
+                                            *unique_addresses,
+                                            &mut unique_execute_addresses,
+                                            data_address,
+                                        );
                                     if matcher.is_some() {
                                         execute_candidates_seen += 1;
                                     }
@@ -1432,6 +1473,14 @@ mod tests {
         .expect("a candidate");
         assert_eq!(selected.0, 0);
         assert_eq!(selected.1.len(), 4);
+    }
+
+    #[test]
+    fn unique_execute_capture_ignores_an_address_after_its_first_hit() {
+        let mut seen = HashSet::new();
+        assert!(accepts_execute_address(true, &mut seen, 0x1000));
+        assert!(!accepts_execute_address(true, &mut seen, 0x1000));
+        assert!(accepts_execute_address(true, &mut seen, 0x1020));
     }
 
     #[test]

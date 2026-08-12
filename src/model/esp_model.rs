@@ -59,6 +59,11 @@ pub struct EspPreset {
     pub entity_stride: u32,
     pub entity_root_step: Option<u32>,
     pub entity_count: u32,
+    pub entity_auto_code_module: String,
+    pub entity_auto_code_offset: usize,
+    pub entity_auto_capture_count: u32,
+    pub entity_auto_hud_enabled: bool,
+    pub entity_auto_hud_preset_id: Option<u32>,
     pub entity_aabb_center: bool,
     pub entity_aabb_pair_offset: i64,
     pub camera_x: String,
@@ -154,6 +159,11 @@ impl EspPreset {
             entity_stride: 0x48,
             entity_root_step: None,
             entity_count: 32,
+            entity_auto_code_module: String::new(),
+            entity_auto_code_offset: 0,
+            entity_auto_capture_count: 5,
+            entity_auto_hud_enabled: false,
+            entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
             entity_aabb_pair_offset: 0x0C,
             camera_x: String::new(),
@@ -274,9 +284,32 @@ pub(crate) fn shift_raw_entity_root(text: &str, stride: u32, slots: i32) -> Opti
     Some(format!("0x{address:X}"))
 }
 
+pub(crate) fn entity_root_from_instruction_hits(
+    hits: &[usize],
+    required: u32,
+    stride: u32,
+) -> Result<usize, &'static str> {
+    let required = required.max(1) as usize;
+    let stride = stride.max(1) as usize;
+    let mut hits = hits.to_vec();
+    hits.sort_unstable();
+    hits.dedup();
+    if hits.len() < required {
+        return Err("not enough unique entity addresses");
+    }
+    let hits = &hits[..required];
+    if hits.windows(2).any(|pair| pair[1] - pair[0] != stride) {
+        return Err("captured addresses do not match the configured Stride");
+    }
+    Ok(hits[0])
+}
+
 #[cfg(test)]
 mod entity_address_tests {
-    use super::{aabb_center_component, entity_field_address, shift_raw_entity_root};
+    use super::{
+        aabb_center_component, entity_field_address, entity_root_from_instruction_hits,
+        shift_raw_entity_root,
+    };
 
     #[test]
     fn calculates_positive_and_negative_entity_fields() {
@@ -306,6 +339,19 @@ mod entity_address_tests {
             shift_raw_entity_root("0x1F009EAF340", 0x370, 1).as_deref(),
             Some("0x1F009EAF6B0")
         );
+    }
+
+    #[test]
+    fn instruction_hits_resolve_the_lowest_evenly_spaced_entity() {
+        assert_eq!(
+            entity_root_from_instruction_hits(
+                &[0x1090, 0x1030, 0x1070, 0x1010, 0x1050],
+                5,
+                0x20,
+            ),
+            Ok(0x1010)
+        );
+        assert!(entity_root_from_instruction_hits(&[0x1010, 0x1030, 0x1080], 3, 0x20).is_err());
     }
 }
 

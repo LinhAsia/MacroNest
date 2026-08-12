@@ -7,7 +7,286 @@ use crate::model::{
 
 use super::CrosshairApp;
 
+#[cfg(windows)]
+use crate::memory_debugger::debugger::{
+    AccessWatch, WatchEvent, disassemble_from, is_instruction_compatible,
+    resolve_module_offset,
+};
+
+#[cfg(windows)]
+pub(super) struct EspEntityRootCapture {
+    pub(super) preset_id: u32,
+    required: usize,
+    addresses: Vec<usize>,
+    rx: std::sync::mpsc::Receiver<WatchEvent>,
+    active: Option<AccessWatch>,
+    hud_preset_id: Option<u32>,
+}
+
 impl CrosshairApp {
+    #[cfg(windows)]
+    fn show_esp_entity_capture_hud(&self, hud_preset_id: Option<u32>, text: String) {
+        let Some(hud_preset_id) = hud_preset_id else {
+            return;
+        };
+        let Some(mut hud) = self
+            .state
+            .hud_presets
+            .iter()
+            .find(|hud| hud.id == hud_preset_id)
+            .cloned()
+        else {
+            return;
+        };
+        hud.text = text;
+        let _ = self
+            .overlay_tx
+            .send(crate::overlay::OverlayCommand::PreviewHudPreset(vec![hud]));
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn stop_esp_entity_root_capture(&mut self, status: Option<&str>) {
+        let Some(mut capture) = self.esp_entity_root_capture.take() else {
+            return;
+        };
+        if let Some(mut active) = capture.active.take() {
+            active.stop();
+        }
+        if capture.hud_preset_id.is_some() {
+            let _ = self
+                .overlay_tx
+                .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
+        }
+        self.esp_entity_capture_hud_hide_at = None;
+        if let Some(status) = status {
+            self.esp_entity_capture_feedback
+                .insert(capture.preset_id, status.to_owned());
+        }
+    }
+
+    #[cfg(windows)]
+    fn start_esp_entity_root_capture(&mut self, preset_id: u32) {
+        self.stop_esp_entity_root_capture(Some("Stopped"));
+        let Some(preset) = self
+            .state
+            .esp_presets
+            .iter()
+            .find(|preset| preset.id == preset_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(code) = self
+            .state
+            .memory_code_list
+            .iter()
+            .find(|code| {
+                code.module
+                    .eq_ignore_ascii_case(&preset.entity_auto_code_module)
+                    && code.offset == preset.entity_auto_code_offset
+            })
+            .cloned()
+        else {
+            self.esp_entity_capture_feedback
+                .insert(preset_id, "Select a Code-list instruction".to_owned());
+            return;
+        };
+        let Some(pid) = crate::window_list::process_id_for_window(Some(&preset.target_window)) else {
+            self.esp_entity_capture_feedback
+                .insert(preset_id, "Target window is not running".to_owned());
+            return;
+        };
+        let instruction_address = match resolve_module_offset(pid, &code.module, code.offset) {
+            Ok(address) => address,
+            Err(error) => {
+                self.esp_entity_capture_feedback
+                    .insert(preset_id, format!("Instruction unavailable: {error}"));
+                return;
+            }
+        };
+        let current_instruction = disassemble_from(
+            pid,
+            instruction_address,
+            self.state.memory_debugger_architecture,
+            1,
+        )
+        .ok()
+        .and_then(|mut lines| lines.pop())
+        .map(|(_, _, instruction)| instruction);
+        if current_instruction
+            .as_ref()
+            .is_none_or(|current| !is_instruction_compatible(&code.instruction, current))
+        {
+            self.esp_entity_capture_feedback.insert(
+                preset_id,
+                "Saved instruction no longer matches this game build".to_owned(),
+            );
+            return;
+        }
+        let hud_preset_id = if preset.entity_auto_hud_enabled {
+            let Some(id) = preset.entity_auto_hud_preset_id else {
+                self.esp_entity_capture_feedback
+                    .insert(preset_id, "Select a HUD preset or disable HUD".to_owned());
+                return;
+            };
+            Some(id)
+        } else {
+            None
+        };
+        self.close_memory_debuggers();
+        let required = preset.entity_auto_capture_count.clamp(1, 512) as usize;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let started = AccessWatch::start_unique(
+            pid,
+            instruction_address,
+            self.state.memory_debugger_architecture,
+            required,
+            move |event| {
+                let _ = tx.send(event);
+            },
+        );
+        match started {
+            Ok(active) => {
+                self.esp_entity_root_capture = Some(EspEntityRootCapture {
+                    preset_id,
+                    required,
+                    addresses: Vec::with_capacity(required),
+                    rx,
+                    active: Some(active),
+                    hud_preset_id,
+                });
+                self.esp_entity_capture_feedback
+                    .insert(preset_id, format!("Captured 0/{required}"));
+                self.esp_entity_capture_hud_hide_at = None;
+                self.show_esp_entity_capture_hud(
+                    hud_preset_id,
+                    format!("Entity scan 0/{required}"),
+                );
+            }
+            Err(error) => {
+                self.esp_entity_capture_feedback
+                    .insert(preset_id, format!("Unable to start debugger: {error}"));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn poll_esp_entity_root_capture(&mut self, ctx: &egui::Context) {
+        if self
+            .esp_entity_capture_hud_hide_at
+            .is_some_and(|hide_at| std::time::Instant::now() >= hide_at)
+        {
+            self.esp_entity_capture_hud_hide_at = None;
+            let _ = self
+                .overlay_tx
+                .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
+        }
+        let Some(mut capture) = self.esp_entity_root_capture.take() else {
+            return;
+        };
+        let mut changed = false;
+        let mut stopped = None;
+        while let Ok(event) = capture.rx.try_recv() {
+            match event {
+                WatchEvent::Started { .. } => {}
+                WatchEvent::AccessHit { data_address } => {
+                    if !capture.addresses.contains(&data_address) {
+                        capture.addresses.push(data_address);
+                        changed = true;
+                    }
+                }
+                WatchEvent::CaptureLimitReached(_) => {}
+                WatchEvent::Error(error) => stopped = Some(format!("Debugger stopped: {error}")),
+                WatchEvent::Stopped if capture.addresses.len() < capture.required => {
+                    stopped = Some("Debugger stopped before enough entities moved".to_owned())
+                }
+                WatchEvent::Stopped | WatchEvent::AddressHit { .. } => {}
+            }
+        }
+        let captured = capture.addresses.len().min(capture.required);
+        if changed {
+            self.esp_entity_capture_feedback.insert(
+                capture.preset_id,
+                format!("Captured {captured}/{}", capture.required),
+            );
+            self.show_esp_entity_capture_hud(
+                capture.hud_preset_id,
+                format!("Entity scan {captured}/{}", capture.required),
+            );
+        }
+        if captured >= capture.required {
+            if let Some(mut active) = capture.active.take() {
+                active.stop();
+            }
+            let result = self
+                .state
+                .esp_presets
+                .iter()
+                .find(|preset| preset.id == capture.preset_id)
+                .map(|preset| {
+                    crate::model::entity_root_from_instruction_hits(
+                        &capture.addresses,
+                        capture.required as u32,
+                        preset.entity_stride,
+                    )
+                });
+            match result {
+                Some(Ok(root)) => {
+                    if let Some(preset) = self
+                        .state
+                        .esp_presets
+                        .iter_mut()
+                        .find(|preset| preset.id == capture.preset_id)
+                    {
+                        preset.entity_root = format!("0x{root:X}");
+                        preset.entity_list_enabled = true;
+                    }
+                    self.esp_entity_capture_feedback.insert(
+                        capture.preset_id,
+                        format!("Root updated: 0x{root:X}"),
+                    );
+                    self.show_esp_entity_capture_hud(
+                        capture.hud_preset_id,
+                        format!("Entity scan {}/{} - root found", capture.required, capture.required),
+                    );
+                    if capture.hud_preset_id.is_some() {
+                        self.esp_entity_capture_hud_hide_at =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+                    }
+                    self.persist_esp_presets();
+                }
+                Some(Err(error)) => {
+                    self.esp_entity_capture_feedback.insert(
+                        capture.preset_id,
+                        format!("{captured}/{} captured, but {error}", capture.required),
+                    );
+                    if capture.hud_preset_id.is_some() {
+                        let _ = self
+                            .overlay_tx
+                            .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
+                    }
+                }
+                None => {}
+            }
+            return;
+        }
+        if let Some(status) = stopped {
+            if let Some(mut active) = capture.active.take() {
+                active.stop();
+            }
+            self.esp_entity_capture_feedback
+                .insert(capture.preset_id, status);
+            if capture.hud_preset_id.is_some() {
+                let _ = self
+                    .overlay_tx
+                    .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
+            }
+            return;
+        }
+        self.esp_entity_root_capture = Some(capture);
+        ctx.request_repaint_after(std::time::Duration::from_millis(35));
+    }
+
     pub(crate) fn render_esp_panel(&mut self, ui: &mut egui::Ui) {
         let mut dirty = false;
         if ui.button("+ Add ESP preset").clicked() {
@@ -25,6 +304,8 @@ impl CrosshairApp {
         let mut remove = None;
         let mut copy_preset = None;
         let mut paste_after = None;
+        let mut auto_capture_start = None;
+        let mut auto_capture_stop = None;
         let can_paste = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Esp(_))
@@ -35,6 +316,17 @@ impl CrosshairApp {
             let before = preset.clone();
             let snapshot = preset.clone();
             let calibration_feedback = self.esp_calibration_feedback.get(&preset.id).cloned();
+            let entity_capture_feedback = self
+                .esp_entity_capture_feedback
+                .get(&preset.id)
+                .cloned();
+            #[cfg(windows)]
+            let entity_capture_active = self
+                .esp_entity_root_capture
+                .as_ref()
+                .is_some_and(|capture| capture.preset_id == preset.id);
+            #[cfg(not(windows))]
+            let entity_capture_active = false;
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_sized(
@@ -219,6 +511,93 @@ impl CrosshairApp {
                                 ui.add(
                                     DragValue::new(&mut preset.entity_count).range(1..=512),
                                 );
+                            });
+                            ui.end_row();
+                            ui.label("Auto root");
+                            ui.horizontal_wrapped(|ui| {
+                                let selected_code = self
+                                    .state
+                                    .memory_code_list
+                                    .iter()
+                                    .find(|code| {
+                                        code.module.eq_ignore_ascii_case(
+                                            &preset.entity_auto_code_module,
+                                        ) && code.offset == preset.entity_auto_code_offset
+                                    });
+                                ComboBox::from_id_salt(("esp_auto_root_code", preset.id))
+                                    .selected_text(selected_code.map_or(
+                                        "Select instruction".to_owned(),
+                                        |code| {
+                                            format!(
+                                                "{}+{:X}  {}",
+                                                code.module, code.offset, code.instruction
+                                            )
+                                        },
+                                    ))
+                                    .width(280.0)
+                                    .show_ui(ui, |ui| {
+                                        for code in &self.state.memory_code_list {
+                                            let selected = code.module.eq_ignore_ascii_case(
+                                                &preset.entity_auto_code_module,
+                                            ) && code.offset == preset.entity_auto_code_offset;
+                                            if ui
+                                                .selectable_label(
+                                                    selected,
+                                                    format!(
+                                                        "{}+{:X}  {}",
+                                                        code.module, code.offset, code.instruction
+                                                    ),
+                                                )
+                                                .clicked()
+                                            {
+                                                preset.entity_auto_code_module =
+                                                    code.module.clone();
+                                                preset.entity_auto_code_offset = code.offset;
+                                            }
+                                        }
+                                    });
+                                ui.label("Need");
+                                ui.add(
+                                    DragValue::new(&mut preset.entity_auto_capture_count)
+                                        .range(1..=512),
+                                );
+                                ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
+                                if preset.entity_auto_hud_enabled {
+                                    let hud_name = preset
+                                        .entity_auto_hud_preset_id
+                                        .and_then(|id| {
+                                            self.state
+                                                .hud_presets
+                                                .iter()
+                                                .find(|hud| hud.id == id)
+                                        })
+                                        .map_or("Select HUD", |hud| hud.name.as_str());
+                                    ComboBox::from_id_salt(("esp_auto_root_hud", preset.id))
+                                        .selected_text(hud_name)
+                                        .width(120.0)
+                                        .show_ui(ui, |ui| {
+                                            for hud in &self.state.hud_presets {
+                                                ui.selectable_value(
+                                                    &mut preset.entity_auto_hud_preset_id,
+                                                    Some(hud.id),
+                                                    &hud.name,
+                                                );
+                                            }
+                                        });
+                                }
+                                if entity_capture_active {
+                                    if ui.button("Stop").clicked() {
+                                        auto_capture_stop = Some(preset.id);
+                                    }
+                                } else if ui.button("Scan").clicked() {
+                                    auto_capture_start = Some(preset.id);
+                                }
+                                if let Some(status) = &entity_capture_feedback {
+                                    ui.label(
+                                        RichText::new(status)
+                                            .color(ui.visuals().weak_text_color()),
+                                    );
+                                }
                             });
                             ui.end_row();
                             ui.label("");
@@ -739,8 +1118,17 @@ impl CrosshairApp {
             }
         }
         if let Some(id) = remove {
+            #[cfg(windows)]
+            if self
+                .esp_entity_root_capture
+                .as_ref()
+                .is_some_and(|capture| capture.preset_id == id)
+            {
+                self.stop_esp_entity_root_capture(None);
+            }
             self.state.esp_presets.retain(|preset| preset.id != id);
             self.esp_calibration_feedback.remove(&id);
+            self.esp_entity_capture_feedback.remove(&id);
             dirty = true;
         }
         if let Some(preset) = copy_preset {
@@ -760,6 +1148,14 @@ impl CrosshairApp {
         }
         if dirty {
             self.persist_esp_presets();
+        }
+        #[cfg(windows)]
+        if let Some(id) = auto_capture_stop {
+            self.stop_esp_entity_root_capture(Some("Stopped"));
+            self.esp_entity_capture_feedback
+                .insert(id, "Stopped".to_owned());
+        } else if let Some(id) = auto_capture_start {
+            self.start_esp_entity_root_capture(id);
         }
     }
 }

@@ -905,6 +905,10 @@ pub struct CrosshairApp {
     geometry_preset_preview_target: Option<u32>,
     geometry_preview_sent: Option<GeometrySpec>,
     esp_calibration_feedback: HashMap<u32, String>,
+    esp_entity_capture_feedback: HashMap<u32, String>,
+    #[cfg(windows)]
+    esp_entity_root_capture: Option<esp_panel::EspEntityRootCapture>,
+    esp_entity_capture_hud_hide_at: Option<Instant>,
     show_geometry_preset_preview_target: Option<(u32, u32, usize, bool)>,
     show_geometry_preset_preview_sent: Option<Option<u32>>,
     audio_sense_devices: Vec<String>,
@@ -1261,6 +1265,10 @@ impl CrosshairApp {
             geometry_preset_preview_target: None,
             geometry_preview_sent: None,
             esp_calibration_feedback: HashMap::new(),
+            esp_entity_capture_feedback: HashMap::new(),
+            #[cfg(windows)]
+            esp_entity_root_capture: None,
+            esp_entity_capture_hud_hide_at: None,
             show_geometry_preset_preview_target: None,
             show_geometry_preset_preview_sent: None,
             audio_sense_devices: Vec::new(),
@@ -14676,6 +14684,8 @@ impl eframe::App for CrosshairApp {
             self.native_transitions_disabled_applied = true;
         }
         self.run_deferred_startup_tasks(ctx);
+        #[cfg(windows)]
+        self.poll_esp_entity_root_capture(ctx);
         if self.startup_update_check_pending {
             self.startup_update_check_pending = false;
             self.check_for_update_with_origin(ctx, true);

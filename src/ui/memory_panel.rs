@@ -11157,7 +11157,8 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn close_memory_debuggers(&mut self) {
+    pub(crate) fn close_memory_debuggers(&mut self) {
+        self.stop_esp_entity_root_capture(Some("Stopped by another debugger"));
         if let Some(mut dialog) = self.memory_panel.instruction_watch_dialog.take()
             && let Some(mut active) = dialog.active.take()
         {
