@@ -15434,7 +15434,7 @@ if supports_move_mouse || show_detection_tuning {
                                                          &mut pending_vision_step_capture,
                                                          &mut live_sync,
                                                      );
-let selected_id = step.key.trim().parse::<u32>().ok();
+                                                     let selected_id = step.key.trim().parse::<u32>().ok();
                                                      let selected_vision_preset = selected_id.and_then(|id| {
                                                          self.state.vision_presets.iter().find(|p| p.id == id)
                                                      });
@@ -15463,7 +15463,7 @@ let selected_id = step.key.trim().parse::<u32>().ok();
                                                          ui.add_space(4.0);
                                                          ui.weak(Self::tr_lang(language, "(Mouse move only)", "(Mouse move only)"));
                                                      }
-                                                                                                           if step.action == MacroAction::ScanVisionOnce {
+                                                                                                           if !is_manual && step.action == MacroAction::ScanVisionOnce {
                                                           ui.add_space(4.0);
                                                           if is_single_pixel {
                                                               ui.label(Self::tr_lang(language, "Color Var:", "Color Var:"));
