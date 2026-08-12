@@ -12960,6 +12960,10 @@ mod windows_overlay {
         begin_video_region_capture(ScreenDrawCaptureMode::VideoRegionSelect)
     }
 
+    pub fn screen_draw_instant_screenshot() -> bool {
+        begin_video_region_capture(ScreenDrawCaptureMode::MouseDrag)
+    }
+
     pub fn screen_draw_release_video_region_capture() {
         mark_screen_draw_capture_trigger_released();
     }
@@ -40409,6 +40413,9 @@ mod fallback {
         false
     }
     pub fn screen_draw_select_video_region() -> bool {
+        false
+    }
+    pub fn screen_draw_instant_screenshot() -> bool {
         false
     }
     pub fn screen_draw_release_video_region_capture() {}
