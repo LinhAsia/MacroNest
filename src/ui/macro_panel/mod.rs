@@ -530,13 +530,7 @@ impl CrosshairApp {
         if !show_move_fields && !show_detection_tuning {
             return;
         }
-        ui.add_space(4.0);
         if show_move_fields {
-            ui.weak(Self::tr_lang(
-                language,
-                "Move Mouse only",
-                "Move Mouse only",
-            ));
             Self::render_vision_axis_lock_controls(ui, step, language, live_sync);
             Self::render_vision_move_mode_controls(ui, step, language, live_sync);
         }
@@ -15436,17 +15430,21 @@ if supports_move_mouse || show_detection_tuning {
                                                          &mut pending_vision_step_capture,
                                                          &mut live_sync,
                                                      );
-                                                     let selected_id = step.key.trim().parse::<u32>().ok();
-                                                     let selected_preset = selected_id.and_then(|id| {
+let selected_id = step.key.trim().parse::<u32>().ok();
+                                                     let selected_vision_preset = selected_id.and_then(|id| {
                                                          self.state.vision_presets.iter().find(|p| p.id == id)
                                                      });
-                                                     let is_manual = step.key.trim().eq_ignore_ascii_case("manual") || selected_preset.as_ref().map_or(false, |p| p.name.starts_with("Manual Vision #"));
-                                                     let is_pixel = selected_preset.as_ref().map(|p| p.is_pixel_counter).unwrap_or(false);
-                                                     let is_single_pixel = selected_preset.as_ref().map(|p| p.use_color_matching && p.search_region_is_single_pixel && !p.is_pixel_counter).unwrap_or(false);
-                                                     let show_detection_tuning = selected_preset
-                                                         .as_ref()
-                                                         .map(|p| p.use_color_matching || p.is_pixel_counter)
-                                                         .unwrap_or(false);
+                                                     let is_manual = step.key.trim().eq_ignore_ascii_case("manual") || selected_id.map_or(false, |id| self.state.vision_presets.iter().find(|p| p.id == id).map_or(false, |p| p.name.starts_with("Manual Vision #")));
+                                                     let is_pixel = selected_vision_preset
+                                                         .is_some_and(|preset| preset.is_pixel_counter);
+                                                     let is_single_pixel = selected_vision_preset.is_some_and(|preset| {
+                                                         preset.use_color_matching
+                                                             && preset.search_region_is_single_pixel
+                                                             && !preset.is_pixel_counter
+                                                     });
+                                                     let show_detection_tuning = selected_vision_preset.is_some_and(|preset| {
+                                                         preset.use_color_matching || preset.is_pixel_counter
+                                                     });
                                                      let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
                                                      if !is_manual && step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                          Self::render_start_vision_move_mouse_controls(
