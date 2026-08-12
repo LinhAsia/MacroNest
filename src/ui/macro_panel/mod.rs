@@ -488,8 +488,12 @@ impl CrosshairApp {
         language: UiLanguage,
         show_move_toggle: bool,
         show_detection_tuning: bool,
+        is_manual: bool,
         live_sync: &mut bool,
     ) {
+        if is_manual {
+            return;
+        }
         let show_move_fields = if show_move_toggle {
             ui.add_space(4.0);
             let resp = ui.checkbox(
@@ -525,9 +529,10 @@ impl CrosshairApp {
         language: UiLanguage,
         show_move_fields: bool,
         show_detection_tuning: bool,
+        is_manual: bool,
         live_sync: &mut bool,
     ) {
-        if !show_move_fields && !show_detection_tuning {
+        if is_manual || (!show_move_fields && !show_detection_tuning) {
             return;
         }
         if show_move_fields {
@@ -761,6 +766,7 @@ impl CrosshairApp {
                                 language,
                                 supports_move_mouse,
                                 show_detection_tuning,
+                                false,
                                 live_sync,
                             );
                         });
@@ -8399,6 +8405,7 @@ impl CrosshairApp {
                                                  let show_detection_tuning = selected_vision_preset.is_some_and(|preset| {
                                                         preset.use_color_matching || preset.is_pixel_counter
                                                     });
+                                                 let is_manual = step.key.trim().eq_ignore_ascii_case("manual") || selected_id.map_or(false, |id| self.state.vision_presets.iter().find(|p| p.id == id).map_or(false, |p| p.name.starts_with("Manual Vision #")));
                                                  let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
                                                     if step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                         Self::render_start_vision_move_mouse_controls(
@@ -8407,6 +8414,7 @@ impl CrosshairApp {
                                                             language,
                                                             supports_move_mouse,
                                                             show_detection_tuning,
+                                                            is_manual,
                                                             &mut live_sync,
                                                         );
                                                     } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
@@ -8488,6 +8496,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               language,
                                                               supports_move_mouse,
                                                               show_detection_tuning,
+                                                              is_manual,
                                                               &mut live_sync,
                                                           );
                                                       }
@@ -10708,6 +10717,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                  let show_detection_tuning = selected_vision_preset.is_some_and(|preset| {
                                                         preset.use_color_matching || preset.is_pixel_counter
                                                     });
+                                                 let is_manual = step.key.trim().eq_ignore_ascii_case("manual") || selected_id.map_or(false, |id| self.state.vision_presets.iter().find(|p| p.id == id).map_or(false, |p| p.name.starts_with("Manual Vision #")));
                                                  let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
                                                     if step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                         Self::render_start_vision_move_mouse_controls(
@@ -10716,6 +10726,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             language,
                                                             supports_move_mouse,
                                                             show_detection_tuning,
+                                                            is_manual,
                                                             &mut live_sync,
                                                         );
                                                     } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
@@ -10797,6 +10808,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               language,
                                                               supports_move_mouse,
                                                               show_detection_tuning,
+                                                              is_manual,
                                                               &mut live_sync,
                                                           );
                                                       }
@@ -14030,6 +14042,7 @@ if supports_move_mouse || show_detection_tuning {
                                                      let show_detection_tuning = selected_vision_preset.is_some_and(|preset| {
                                                         preset.use_color_matching || preset.is_pixel_counter
                                                     });
+                                                     let is_manual = step.key.trim().eq_ignore_ascii_case("manual") || selected_id.map_or(false, |id| self.state.vision_presets.iter().find(|p| p.id == id).map_or(false, |p| p.name.starts_with("Manual Vision #")));
                                                      let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
                                                     if step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                         Self::render_start_vision_move_mouse_controls(
@@ -14038,6 +14051,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             language,
                                                             supports_move_mouse,
                                                             show_detection_tuning,
+                                                            is_manual,
                                                             &mut live_sync,
                                                         );
                                                     } else if matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
@@ -14119,6 +14133,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   language,
                                                                   supports_move_mouse,
                                                                   show_detection_tuning,
+                                                                  is_manual,
                                                                   &mut live_sync,
                                                               );
                                                           }
@@ -15435,9 +15450,10 @@ if supports_move_mouse || show_detection_tuning {
                                                          &mut live_sync,
                                                      );
                                                      let selected_id = step.key.trim().parse::<u32>().ok();
-                                                     let selected_vision_preset = selected_id.and_then(|id| {
-                                                         self.state.vision_presets.iter().find(|p| p.id == id)
-                                                     });
+                                                     let selected_vision_preset = Self::vision_preset_by_id(
+                                                         &self.state.vision_presets,
+                                                         selected_id,
+                                                     );
                                                      let is_manual = step.key.trim().eq_ignore_ascii_case("manual") || selected_id.map_or(false, |id| self.state.vision_presets.iter().find(|p| p.id == id).map_or(false, |p| p.name.starts_with("Manual Vision #")));
                                                      let is_pixel = selected_vision_preset
                                                          .is_some_and(|preset| preset.is_pixel_counter);
@@ -15450,20 +15466,21 @@ if supports_move_mouse || show_detection_tuning {
                                                          preset.use_color_matching || preset.is_pixel_counter
                                                      });
                                                      let supports_move_mouse = selected_id.is_some() && !is_pixel && !is_single_pixel;
-                                                     if !is_manual && step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
+                                                     if step.action == MacroAction::StartVisionSearch && (supports_move_mouse || show_detection_tuning) {
                                                          Self::render_start_vision_move_mouse_controls(
                                                              ui,
                                                              step,
                                                              language,
                                                              supports_move_mouse,
                                                              show_detection_tuning,
+                                                             is_manual,
                                                              &mut live_sync,
                                                          );
                                                      } else if !is_manual && matches!(step.action, MacroAction::StartVisionSearch | MacroAction::StopVision) {
                                                          ui.add_space(4.0);
                                                          ui.weak(Self::tr_lang(language, "(Mouse move only)", "(Mouse move only)"));
                                                      }
-                                                                                                           if !is_manual && step.action == MacroAction::ScanVisionOnce {
+                                                     if !is_manual && step.action == MacroAction::ScanVisionOnce {
                                                           ui.add_space(4.0);
                                                           if is_single_pixel {
                                                               ui.label(Self::tr_lang(language, "Color Var:", "Color Var:"));
@@ -15538,6 +15555,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   language,
                                                                   supports_move_mouse,
                                                                   show_detection_tuning,
+                                                                  is_manual,
                                                                   &mut live_sync,
                                                               );
                                                           }
