@@ -391,6 +391,8 @@ pub struct MacroStep {
     pub audio_sense_spec: AudioSenseSpec,
     #[serde(default = "default_true")]
     pub audio_sense_collapsed: bool,
+    #[serde(default = "default_true")]
+    pub vision_collapsed: bool,
     #[serde(default)]
     pub audio_sense_stop_all: bool,
     #[serde(default)]
@@ -532,6 +534,7 @@ impl Default for MacroStep {
             audio_sense_preset_id: None,
             audio_sense_spec: AudioSenseSpec::default(),
             audio_sense_collapsed: true,
+            vision_collapsed: true,
             audio_sense_stop_all: false,
             geometry_preset_id: None,
             geometry_preset_use_custom_ref: false,

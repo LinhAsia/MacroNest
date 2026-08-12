@@ -15319,6 +15319,19 @@ if supports_move_mouse || show_detection_tuning {
                                                         }
                                                         live_sync = true;
                                                     }
+                                                    if is_manual {
+                                                        ui.add_space(2.0);
+                                                        let collapse_icon = if step.vision_collapsed { 0xe5cc } else { 0xe5cf };
+                                                        let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
+                                                        if ui
+                                                            .add_sized([18.0, 18.0], collapse_btn)
+                                                            .on_hover_text(if step.vision_collapsed { "Expand" } else { "Collapse" })
+                                                            .clicked()
+                                                        {
+                                                            step.vision_collapsed = !step.vision_collapsed;
+                                                            live_sync = true;
+                                                        }
+                                                    }
                                                     let selected_id = if is_manual { None } else { step.key.trim().parse::<u32>().ok() };
                                                     if !is_manual {
                                                         let selected_label = selected_id
@@ -15389,7 +15402,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                     }
                                                                 }
                                                             });
-                                                    } else {
+                                                    } else if !step.vision_collapsed {
                                                          ui.add_space(2.0);
                                                          ui.label(Self::tr_lang(language, "Tol:", "Tol:"));
                                                          let resp = ui.add(egui::DragValue::new(&mut step.vision_color_tolerance).range(0..=100));
@@ -20587,6 +20600,19 @@ if supports_move_mouse || show_detection_tuning {
                                 *live_sync = true;
                             }
                             let is_manual_now = step.audio_sense_preset_id.is_none();
+                            if is_manual_now {
+                                ui.add_space(2.0);
+                                let collapse_icon = if step.audio_sense_collapsed { 0xe5cc } else { 0xe5cf };
+                                let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
+                                if ui
+                                    .add_sized([18.0, 18.0], collapse_btn)
+                                    .on_hover_text(if step.audio_sense_collapsed { "Expand" } else { "Collapse" })
+                                    .clicked()
+                                {
+                                    step.audio_sense_collapsed = !step.audio_sense_collapsed;
+                                    *live_sync = true;
+                                }
+                            }
                             if !is_manual_now {
                                 if step.audio_sense_preset_id.is_none() {
                                     step.audio_sense_preset_id = preset_options.first().map(|(id, _)| *id).or(Some(0));
@@ -20642,66 +20668,10 @@ if supports_move_mouse || show_detection_tuning {
                                                 .speed(10.0),
                                         )
                                         .changed();
-                                    ui.add_space(2.0);
-                                    let is_active = crate::overlay::is_audio_sense_active(
-                                        step.audio_sense_preset_id,
-                                        macro_preset_id,
-                                        step_index,
-                                        is_hold_stop,
-                                    );
-                                    let icon = if is_active { 0xe8f5 } else { 0xe8f4 };
-                                    let preview_btn = Button::new(Self::material_icon_text(icon, 12.0));
-                                    let preview_response = ui.add_sized([18.0, 18.0], preview_btn);
-                                    let tooltip = if is_active {
-                                        Self::tr_lang(language, "Stop preview", "Stop preview")
-                                    } else {
-                                        Self::tr_lang(language, "Preview sound capture", "Preview sound capture")
-                                    };
-                                    preview_response.clone().on_hover_text(tooltip);
-                                    if preview_response.clicked() {
-                                        if is_active {
-                                            crate::overlay::stop_audio_sense(
-                                                step.audio_sense_preset_id,
-                                                macro_preset_id,
-                                                step_index,
-                                                is_hold_stop,
-                                            );
-                                        } else {
-                                            crate::overlay::start_audio_sense_preview(
-                                                step,
-                                                macro_preset_id,
-                                                step_index,
-                                                is_hold_stop,
-                                            );
-                                        }
-                                        *live_sync = true;
-                                    }
-                                    if is_active {
-                                        ui.ctx().request_repaint();
-                                        if let Some(snapshot) = crate::overlay::get_audio_sense_snapshot(
-                                            step.audio_sense_preset_id,
-                                            macro_preset_id,
-                                            step_index,
-                                            is_hold_stop,
-                                        ) {
-                                            ui.add_space(4.0);
-                                            let text = format!(
-                                                "Note: {} | Conf: {:.2} | Level: {:.2}",
-                                                snapshot.note,
-                                                snapshot.confidence,
-                                                snapshot.level
-                                            );
-                                            ui.label(
-                                                egui::RichText::new(text)
-                                                    .size(11.0)
-                                                    .color(ui.visuals().weak_text_color())
-                                            );
-                                        }
-                                    }
                                 }
                             }
                         });
-                        if step.audio_sense_preset_id.is_none() {
+                        if step.audio_sense_preset_id.is_none() && !step.audio_sense_collapsed {
                             ui.add_space(4.0);
                             Self::render_audio_sense_pitch_custom_step(
                                 ui,
