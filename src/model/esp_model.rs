@@ -289,26 +289,49 @@ pub(crate) fn entity_root_from_instruction_hits(
     required: u32,
     stride: u32,
 ) -> Result<usize, &'static str> {
+    entity_instruction_hit_progress(hits, required, stride)
+        .0
+        .ok_or("no complete group matches the configured Stride")
+}
+
+pub(crate) fn entity_instruction_hit_progress(
+    hits: &[usize],
+    required: u32,
+    stride: u32,
+) -> (Option<usize>, usize) {
     let required = required.max(1) as usize;
     let stride = stride.max(1) as usize;
     let mut hits = hits.to_vec();
     hits.sort_unstable();
     hits.dedup();
-    if hits.len() < required {
-        return Err("not enough unique entity addresses");
+    let mut best = 0;
+    for &start in &hits {
+        let mut matched = 1;
+        while matched < required {
+            let Some(address) = stride
+                .checked_mul(matched)
+                .and_then(|offset| start.checked_add(offset))
+            else {
+                break;
+            };
+            if hits.binary_search(&address).is_err() {
+                break;
+            }
+            matched += 1;
+        }
+        best = best.max(matched);
+        if matched == required {
+            return (Some(start), required);
+        }
     }
-    let hits = &hits[..required];
-    if hits.windows(2).any(|pair| pair[1] - pair[0] != stride) {
-        return Err("captured addresses do not match the configured Stride");
-    }
-    Ok(hits[0])
+    (None, best.min(required))
 }
 
 #[cfg(test)]
 mod entity_address_tests {
     use super::{
-        aabb_center_component, entity_field_address, entity_root_from_instruction_hits,
-        shift_raw_entity_root,
+        aabb_center_component, entity_field_address, entity_instruction_hit_progress,
+        entity_root_from_instruction_hits, shift_raw_entity_root,
     };
 
     #[test]
@@ -345,13 +368,17 @@ mod entity_address_tests {
     fn instruction_hits_resolve_the_lowest_evenly_spaced_entity() {
         assert_eq!(
             entity_root_from_instruction_hits(
-                &[0x1090, 0x1030, 0x1070, 0x1010, 0x1050],
+                &[0x5001, 0x1090, 0x1030, 0x7777, 0x1070, 0x1010, 0x1050],
                 5,
                 0x20,
             ),
             Ok(0x1010)
         );
         assert!(entity_root_from_instruction_hits(&[0x1010, 0x1030, 0x1080], 3, 0x20).is_err());
+        assert_eq!(
+            entity_instruction_hit_progress(&[0x9001, 0x1010, 0x1050, 0x1030], 5, 0x20),
+            (None, 3)
+        );
     }
 }
 

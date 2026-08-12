@@ -23,6 +23,9 @@ pub(super) struct EspEntityRootCapture {
     hud_preset_id: Option<u32>,
 }
 
+#[cfg(windows)]
+const ESP_ENTITY_ROOT_CAPTURE_LIMIT: usize = 4096;
+
 impl CrosshairApp {
     #[cfg(windows)]
     fn show_esp_entity_capture_hud(&self, hud_preset_id: Option<u32>, text: String) {
@@ -140,7 +143,9 @@ impl CrosshairApp {
             pid,
             instruction_address,
             self.state.memory_debugger_architecture,
-            required,
+            // ponytail: bound menu/loading noise; raise this cap if a game legitimately
+            // touches more unique entity addresses before the wanted group appears.
+            ESP_ENTITY_ROOT_CAPTURE_LIMIT,
             move |event| {
                 let _ = tx.send(event);
             },
@@ -156,7 +161,7 @@ impl CrosshairApp {
                     hud_preset_id,
                 });
                 self.esp_entity_capture_feedback
-                    .insert(preset_id, format!("Captured 0/{required}"));
+                    .insert(preset_id, format!("Matched 0/{required}"));
                 self.esp_entity_capture_hud_hide_at = None;
                 self.show_esp_entity_capture_hud(
                     hud_preset_id,
@@ -190,31 +195,47 @@ impl CrosshairApp {
             match event {
                 WatchEvent::Started { .. } => {}
                 WatchEvent::AccessHit { data_address } => {
-                    if !capture.addresses.contains(&data_address) {
-                        capture.addresses.push(data_address);
-                        changed = true;
-                    }
+                    capture.addresses.push(data_address);
+                    changed = true;
                 }
-                WatchEvent::CaptureLimitReached(_) => {}
+                WatchEvent::CaptureLimitReached(limit) => {
+                    stopped = Some(format!(
+                        "Stopped after {limit} unique addresses without a matching Stride group"
+                    ));
+                }
                 WatchEvent::Error(error) => stopped = Some(format!("Debugger stopped: {error}")),
-                WatchEvent::Stopped if capture.addresses.len() < capture.required => {
-                    stopped = Some("Debugger stopped before enough entities moved".to_owned())
+                WatchEvent::Stopped if stopped.is_none() => {
+                    stopped = Some(
+                        "Debugger stopped before a complete Stride group was found".to_owned(),
+                    )
                 }
                 WatchEvent::Stopped | WatchEvent::AddressHit { .. } => {}
             }
         }
-        let captured = capture.addresses.len().min(capture.required);
+        let progress = self
+            .state
+            .esp_presets
+            .iter()
+            .find(|preset| preset.id == capture.preset_id)
+            .map(|preset| {
+                crate::model::entity_instruction_hit_progress(
+                    &capture.addresses,
+                    capture.required as u32,
+                    preset.entity_stride,
+                )
+            });
+        let (candidate, matched) = progress.unwrap_or((None, 0));
         if changed {
             self.esp_entity_capture_feedback.insert(
                 capture.preset_id,
-                format!("Captured {captured}/{}", capture.required),
+                format!("Matched {matched}/{}", capture.required),
             );
             self.show_esp_entity_capture_hud(
                 capture.hud_preset_id,
-                format!("Entity scan {captured}/{}", capture.required),
+                format!("Entity scan {matched}/{}", capture.required),
             );
         }
-        if captured >= capture.required {
+        if candidate.is_some() {
             if let Some(mut active) = capture.active.take() {
                 active.stop();
             }
@@ -258,7 +279,7 @@ impl CrosshairApp {
                 Some(Err(error)) => {
                     self.esp_entity_capture_feedback.insert(
                         capture.preset_id,
-                        format!("{captured}/{} captured, but {error}", capture.required),
+                        format!("Matched {matched}/{}, but {error}", capture.required),
                     );
                     if capture.hud_preset_id.is_some() {
                         let _ = self
@@ -560,6 +581,9 @@ impl CrosshairApp {
                                 ui.add(
                                     DragValue::new(&mut preset.entity_auto_capture_count)
                                         .range(1..=512),
+                                )
+                                .on_hover_text(
+                                    "Stops only after this many addresses form one group at the configured Stride.",
                                 );
                                 ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
                                 if preset.entity_auto_hud_enabled {
