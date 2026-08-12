@@ -2818,7 +2818,7 @@ impl CrosshairApp {
                 }
                 if response.clicked() {
                     if !selected {
-                        *current = MacroAction::DisableNetworkAdapter;
+                        *current = MacroAction::CutInternetRoute;
                         *live_sync = true;
                     }
                     ui.close();
