@@ -20016,57 +20016,59 @@ if supports_move_mouse || show_detection_tuning {
                         );
                     });
                     if !step.geometry_collapsed {
-                        ui.add_space(4.0);
-                        let geometry_editor_changed = Self::render_geometry_spec_editor(
-                            ui,
-                            language,
-                            macro_preset_id,
-                            step_index as u32,
-                            true,
-                            &mut step.geometry_spec,
-                            vision_manual_color,
-                            vision_manual_color_hex,
-                            request_screen_color_pick,
-                            &mut pending_screen_color_target,
-                            begin_mouse_move_absolute_capture_target,
-                            vietnamese_input_enabled,
-                            vietnamese_input_mode,
-                            Some(group_id),
-                        );
-                        *live_sync |= geometry_editor_changed;
-                        geometry_preview_dirty |= geometry_editor_changed;
-                        if geometry_preview_dirty
-                            && *draw_geometry_step_preview_target == Some(current_preview_target)
-                        {
-                            Self::send_geometry_spec_preview_command(
-                                overlay_tx,
-                                Some(step.geometry_spec.clone()),
+                        ui.indent("draw_geometry_step_indent", |ui| {
+                            ui.add_space(4.0);
+                            let geometry_editor_changed = Self::render_geometry_spec_editor(
+                                ui,
+                                language,
+                                macro_preset_id,
+                                step_index as u32,
+                                true,
+                                &mut step.geometry_spec,
+                                vision_manual_color,
+                                vision_manual_color_hex,
+                                request_screen_color_pick,
+                                &mut pending_screen_color_target,
+                                begin_mouse_move_absolute_capture_target,
+                                vietnamese_input_enabled,
+                                vietnamese_input_mode,
+                                Some(group_id),
                             );
-                        }
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            let save_preset_btn_text = Self::tr_lang(language, "Save as Preset", "Save as Preset");
-                            ui.menu_button(save_preset_btn_text, |ui| {
-                                if ui.button(Self::tr_lang(language, "+ New preset", "+ New preset")).clicked() {
-                                    let next_preset_id = geometry_presets.iter().map(|p| p.id).max().unwrap_or(0) + 1;
-                                    let mut new_preset = crate::model::GeometryPreset::new(next_preset_id);
-                                    new_preset.name = format!("Preset {}", next_preset_id);
-                                    if let Some(object) = new_preset.object_mut() {
-                                        object.spec = step.geometry_spec.clone();
-                                    }
-                                    geometry_presets.push(new_preset);
-                                    *geometry_presets_changed = true;
-                                    ui.close_menu();
-                                }
-                                for preset in geometry_presets.iter_mut() {
-                                    if ui.button(&preset.name).clicked() {
-                                        if let Some(object) = preset.object_mut() {
+                            *live_sync |= geometry_editor_changed;
+                            geometry_preview_dirty |= geometry_editor_changed;
+                            if geometry_preview_dirty
+                                && *draw_geometry_step_preview_target == Some(current_preview_target)
+                            {
+                                Self::send_geometry_spec_preview_command(
+                                    overlay_tx,
+                                    Some(step.geometry_spec.clone()),
+                                );
+                            }
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                let save_preset_btn_text = Self::tr_lang(language, "Save as Preset", "Save as Preset");
+                                ui.menu_button(save_preset_btn_text, |ui| {
+                                    if ui.button(Self::tr_lang(language, "+ New preset", "+ New preset")).clicked() {
+                                        let next_preset_id = geometry_presets.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+                                        let mut new_preset = crate::model::GeometryPreset::new(next_preset_id);
+                                        new_preset.name = format!("Preset {}", next_preset_id);
+                                        if let Some(object) = new_preset.object_mut() {
                                             object.spec = step.geometry_spec.clone();
                                         }
+                                        geometry_presets.push(new_preset);
                                         *geometry_presets_changed = true;
                                         ui.close_menu();
                                     }
-                                }
+                                    for preset in geometry_presets.iter_mut() {
+                                        if ui.button(&preset.name).clicked() {
+                                            if let Some(object) = preset.object_mut() {
+                                                object.spec = step.geometry_spec.clone();
+                                            }
+                                            *geometry_presets_changed = true;
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
                             });
                         });
                     }
@@ -20500,30 +20502,84 @@ if supports_move_mouse || show_detection_tuning {
         audio_sense_presets_changed: &mut bool,
     ) {
         step.audio_sense_spec.kind = AudioSensePresetKind::Pitch;
-        ui.vertical(|ui| {
-            Self::render_audio_sense_monitor_settings_inline(
-                ui,
-                language,
-                (id_prefix, "pitch-monitor"),
-                audio_sense_devices,
-                &mut step.audio_sense_spec.pitch.monitor,
-                live_sync,
-            );
-            ui.add_space(4.0);
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                *live_sync |= ui
-                    .checkbox(
-                        &mut step.audio_sense_spec.pitch.show_sharps,
-                        Self::tr_lang(language, "Use sharps", "Use sharps"),
-                    )
-                    .changed();
-            });
-            ui.add_space(4.0);
-            egui::Grid::new(ui.id().with((id_prefix, "pitch-vars-grid")))
-                .num_columns(4)
-                .spacing([6.0, 4.0])
-                .show(ui, |ui| {
-                    ui.label(Self::tr_lang(language, "Note", "Note"));
+        egui::Grid::new(ui.id().with((id_prefix, "audio-sense-manual-grid")))
+            .num_columns(2)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                // Row 1: Source & Rate
+                ui.label(Self::tr_lang(language, "Source:", "Source:"));
+                ui.horizontal(|ui| {
+                    ComboBox::from_id_salt((id_prefix, "source"))
+                        .width(110.0)
+                        .selected_text(match step.audio_sense_spec.pitch.monitor.source {
+                            AudioSenseSource::System => Self::tr_lang(language, "System", "System"),
+                            AudioSenseSource::Microphone => Self::tr_lang(language, "Microphone", "Microphone"),
+                        })
+                        .show_ui(ui, |ui| {
+                            *live_sync |= ui
+                                .selectable_value(
+                                    &mut step.audio_sense_spec.pitch.monitor.source,
+                                    AudioSenseSource::System,
+                                    Self::tr_lang(language, "System", "System"),
+                                )
+                                .changed();
+                            *live_sync |= ui
+                                .selectable_value(
+                                    &mut step.audio_sense_spec.pitch.monitor.source,
+                                    AudioSenseSource::Microphone,
+                                    Self::tr_lang(language, "Microphone", "Microphone"),
+                                )
+                                .changed();
+                        });
+
+                    if step.audio_sense_spec.pitch.monitor.source == AudioSenseSource::Microphone {
+                        ComboBox::from_id_salt((id_prefix, "device"))
+                            .width(160.0)
+                            .selected_text(step.audio_sense_spec.pitch.monitor.input_device_name.clone().unwrap_or_else(|| {
+                                Self::tr_lang(language, "Default microphone", "Default microphone").to_owned()
+                            }))
+                            .show_ui(ui, |ui| {
+                                if ui
+                                    .selectable_label(
+                                        step.audio_sense_spec.pitch.monitor.input_device_name.is_none(),
+                                        Self::tr_lang(language, "Default microphone", "Default microphone"),
+                                    )
+                                    .clicked()
+                                {
+                                    step.audio_sense_spec.pitch.monitor.input_device_name = None;
+                                    *live_sync = true;
+                                }
+                                for device in audio_sense_devices {
+                                    if ui
+                                        .selectable_label(
+                                            step.audio_sense_spec.pitch.monitor.input_device_name.as_deref() == Some(device.as_str()),
+                                            device,
+                                        )
+                                        .clicked()
+                                    {
+                                        step.audio_sense_spec.pitch.monitor.input_device_name = Some(device.clone());
+                                        *live_sync = true;
+                                    }
+                                }
+                            });
+                    }
+
+                    ui.add_space(6.0);
+                    ui.label("Hz:");
+                    *live_sync |= ui
+                        .add(
+                            DragValue::new(&mut step.audio_sense_spec.pitch.monitor.updates_per_second)
+                                .range(1..=60)
+                                .speed(0.2),
+                        )
+                        .changed();
+                });
+                ui.end_row();
+
+                // Row 2: Outputs (Note, Level, Sharps)
+                ui.label(Self::tr_lang(language, "Outputs:", "Outputs:"));
+                ui.horizontal(|ui| {
+                    ui.label(Self::tr_lang(language, "Note:", "Note:"));
                     *live_sync |= Self::render_audio_sense_var_box(
                         ui,
                         language,
@@ -20533,7 +20589,8 @@ if supports_move_mouse || show_detection_tuning {
                         78.0,
                         "note_var",
                     );
-                    ui.label(Self::tr_lang(language, "Level", "Level"));
+                    ui.add_space(6.0);
+                    ui.label(Self::tr_lang(language, "Level:", "Level:"));
                     *live_sync |= Self::render_audio_sense_var_box(
                         ui,
                         language,
@@ -20543,8 +20600,20 @@ if supports_move_mouse || show_detection_tuning {
                         78.0,
                         "level_var",
                     );
-                    ui.end_row();
-                    ui.label(Self::tr_lang(language, "Min Conf", "Min Conf"));
+                    ui.add_space(6.0);
+                    *live_sync |= ui
+                        .checkbox(
+                            &mut step.audio_sense_spec.pitch.show_sharps,
+                            Self::tr_lang(language, "Use sharps", "Use sharps"),
+                        )
+                        .changed();
+                });
+                ui.end_row();
+
+                // Row 3: Thresholds
+                ui.label(Self::tr_lang(language, "Threshold:", "Threshold:"));
+                ui.horizontal(|ui| {
+                    ui.label(Self::tr_lang(language, "Min Conf:", "Min Conf:"));
                     *live_sync |= ui
                         .add(
                             DragValue::new(&mut step.audio_sense_spec.pitch.min_confidence)
@@ -20552,7 +20621,8 @@ if supports_move_mouse || show_detection_tuning {
                                 .speed(5.0),
                         )
                         .changed();
-                    ui.label(Self::tr_lang(language, "Min Level", "Min Level"));
+                    ui.add_space(6.0);
+                    ui.label(Self::tr_lang(language, "Min Level:", "Min Level:"));
                     *live_sync |= ui
                         .add(
                             DragValue::new(&mut step.audio_sense_spec.pitch.min_level)
@@ -20560,28 +20630,29 @@ if supports_move_mouse || show_detection_tuning {
                                 .speed(5.0),
                         )
                         .changed();
-                    ui.end_row();
                 });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .button(Self::tr_lang(language, "Add as preset", "Add as preset"))
-                    .clicked()
-                {
-                    let next_id = audio_sense_presets
-                        .iter()
-                        .map(|preset| preset.id)
-                        .max()
-                        .unwrap_or(0)
-                        + 1;
-                    let mut preset = AudioSensePreset::new_pitch(next_id);
-                    preset.name = format!("Pitch Detect {}", next_id);
-                    preset.pitch = step.audio_sense_spec.pitch.clone();
-                    audio_sense_presets.push(preset);
-                    *audio_sense_presets_changed = true;
-                }
+                ui.end_row();
+
+                // Row 4: Save Preset Button
+                ui.label("");
+                ui.horizontal(|ui| {
+                    let btn_lbl = Self::tr_lang(language, "Add as preset", "Add as preset");
+                    if Self::render_icon_text_button(ui, 0xe161, btn_lbl).clicked() {
+                        let next_id = audio_sense_presets
+                            .iter()
+                            .map(|preset| preset.id)
+                            .max()
+                            .unwrap_or(0)
+                            + 1;
+                        let mut preset = AudioSensePreset::new_pitch(next_id);
+                        preset.name = format!("Pitch Detect {}", next_id);
+                        preset.pitch = step.audio_sense_spec.pitch.clone();
+                        audio_sense_presets.push(preset);
+                        *audio_sense_presets_changed = true;
+                    }
+                });
+                ui.end_row();
             });
-        });
     }
 
     fn render_audio_sense_step_editor(
@@ -20706,17 +20777,19 @@ if supports_move_mouse || show_detection_tuning {
                         });
                         if step.audio_sense_preset_id.is_none() && !step.audio_sense_collapsed {
                             ui.add_space(4.0);
-                            Self::render_audio_sense_pitch_custom_step(
-                                ui,
-                                language,
-                                id_prefix,
-                                audio_sense_devices,
-                                timer_names,
-                                step,
-                                live_sync,
-                                audio_sense_presets,
-                                audio_sense_presets_changed,
-                            );
+                            ui.indent("audio_sense_step_indent", |ui| {
+                                Self::render_audio_sense_pitch_custom_step(
+                                    ui,
+                                    language,
+                                    id_prefix,
+                                    audio_sense_devices,
+                                    timer_names,
+                                    step,
+                                    live_sync,
+                                    audio_sense_presets,
+                                    audio_sense_presets_changed,
+                                );
+                            });
                         }
                     });
                 }
