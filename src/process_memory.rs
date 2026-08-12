@@ -2,11 +2,13 @@ use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
     ffi::c_void,
-    io,
+    fs::{self, File},
+    io::{self, BufReader, BufWriter, Read, Write},
     mem::{MaybeUninit, size_of},
+    path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -33,6 +35,8 @@ const PAGE_GUARD: u32 = 0x100;
 const SCAN_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 const SCAN_BUCKET_BYTES: usize = 64 * 1024 * 1024;
 const PAGE_BYTES: usize = 4096;
+const SCAN_SNAPSHOT_MAGIC: &[u8; 8] = b"MNSCAN01";
+static NEXT_SCAN_SNAPSHOT_ID: AtomicU64 = AtomicU64::new(0);
 
 #[repr(C)]
 struct MemoryBasicInformation {
@@ -173,6 +177,108 @@ impl ScanValue {
 pub struct ScanCandidate {
     pub address: usize,
     current: u64,
+}
+
+#[derive(Debug)]
+pub struct ScanCandidateSnapshot {
+    path: PathBuf,
+    count: usize,
+}
+
+impl ScanCandidateSnapshot {
+    pub fn capture(
+        candidates: &[ScanCandidate],
+        progress: Option<&AtomicUsize>,
+    ) -> io::Result<Self> {
+        let id = NEXT_SCAN_SNAPSHOT_ID.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "macronest-scan-{}-{id}.bin",
+            std::process::id()
+        ));
+        let write_result = (|| {
+            let mut writer = BufWriter::with_capacity(1024 * 1024, File::create(&path)?);
+            writer.write_all(SCAN_SNAPSHOT_MAGIC)?;
+            writer.write_all(&(candidates.len() as u64).to_le_bytes())?;
+            for (index, candidate) in candidates.iter().enumerate() {
+                writer.write_all(&(candidate.address as u64).to_le_bytes())?;
+                writer.write_all(&candidate.current.to_le_bytes())?;
+                if index % 65_536 == 0 {
+                    if let Some(progress) = progress {
+                        progress.store(index.saturating_mul(16), Ordering::Relaxed);
+                    }
+                }
+            }
+            writer.flush()?;
+            if let Some(progress) = progress {
+                progress.store(candidates.len().saturating_mul(16), Ordering::Relaxed);
+            }
+            Ok(())
+        })();
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&path);
+            return Err(error);
+        }
+        Ok(Self {
+            path,
+            count: candidates.len(),
+        })
+    }
+
+    pub fn restore_into(&self, candidates: &mut Vec<ScanCandidate>) -> io::Result<()> {
+        let expected_len = 16u64.saturating_add((self.count as u64).saturating_mul(16));
+        if fs::metadata(&self.path)?.len() != expected_len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "scan undo snapshot is incomplete",
+            ));
+        }
+        let mut reader = BufReader::with_capacity(1024 * 1024, File::open(&self.path)?);
+        let mut header = [0u8; 8];
+        reader.read_exact(&mut header)?;
+        if &header != SCAN_SNAPSHOT_MAGIC {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid scan undo snapshot",
+            ));
+        }
+        let mut bytes = [0u8; 8];
+        reader.read_exact(&mut bytes)?;
+        if u64::from_le_bytes(bytes) != self.count as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "scan undo snapshot count changed",
+            ));
+        }
+        candidates.clear();
+        candidates.try_reserve(self.count).map_err(|_| {
+            io::Error::other("not enough memory to restore the scan undo snapshot")
+        })?;
+        for _ in 0..self.count {
+            reader.read_exact(&mut bytes)?;
+            let address = u64::from_le_bytes(bytes) as usize;
+            reader.read_exact(&mut bytes)?;
+            candidates.push(ScanCandidate {
+                address,
+                current: u64::from_le_bytes(bytes),
+            });
+        }
+        Ok(())
+    }
+
+    pub const fn len(&self) -> usize {
+        self.count
+    }
+
+    #[cfg(test)]
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for ScanCandidateSnapshot {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1910,11 +2016,31 @@ fn text_bytes_equal(
 
 pub fn filter_scan_candidates(
     pid: u32,
+    candidates: Vec<ScanCandidate>,
+    value_type: ScanValueType,
+    comparison: ScanComparison,
+    exact: Option<ScanValue>,
+    range: Option<(ScanValue, ScanValue)>,
+) -> io::Result<Vec<ScanCandidate>> {
+    filter_scan_candidates_with_progress(
+        pid,
+        candidates,
+        value_type,
+        comparison,
+        exact,
+        range,
+        None,
+    )
+}
+
+pub fn filter_scan_candidates_with_progress(
+    pid: u32,
     mut candidates: Vec<ScanCandidate>,
     value_type: ScanValueType,
     comparison: ScanComparison,
     exact: Option<ScanValue>,
     range: Option<(ScanValue, ScanValue)>,
+    progress: Option<Arc<AtomicUsize>>,
 ) -> io::Result<Vec<ScanCandidate>> {
     if candidates.is_empty() {
         return Ok(candidates);
@@ -1925,12 +2051,21 @@ pub fn filter_scan_candidates(
         .clamp(1, 8)
         .min(candidates.len().div_ceil(100_000).max(1));
     let chunk_len = candidates.len().div_ceil(worker_count);
+    let progress = progress.as_deref();
     let kept = thread::scope(|scope| {
         candidates
             .chunks_mut(chunk_len)
             .map(|chunk| {
                 scope.spawn(move || {
-                    filter_candidate_slice(pid, chunk, value_type, comparison, exact, range)
+                    filter_candidate_slice(
+                        pid,
+                        chunk,
+                        value_type,
+                        comparison,
+                        exact,
+                        range,
+                        progress,
+                    )
                 })
             })
             .collect::<Vec<_>>()
@@ -1961,6 +2096,7 @@ fn filter_candidate_slice(
     comparison: ScanComparison,
     exact: Option<ScanValue>,
     range: Option<(ScanValue, ScanValue)>,
+    progress: Option<&AtomicUsize>,
 ) -> io::Result<usize> {
     let process = ScanProcess::open(pid, false)?;
     let mut page = [0; PAGE_BYTES];
@@ -1973,6 +2109,9 @@ fn filter_candidate_slice(
             end += 1;
         }
         if let Ok(count) = process.read(page_base, &mut page) {
+            if let Some(progress) = progress {
+                progress.fetch_add(count, Ordering::Relaxed);
+            }
             for read in index..end {
                 let candidate = candidates[read];
                 let offset = candidate.address - page_base;
@@ -2535,6 +2674,21 @@ mod tests {
             merged.iter().map(|item| item.address).collect::<Vec<_>>(),
             [1, 2, 3]
         );
+    }
+
+    #[test]
+    fn scan_candidate_snapshot_restores_without_a_second_candidate_copy() {
+        let original = vec![
+            ScanCandidate::new(0x1000, ScanValue::F32(1.25)),
+            ScanCandidate::new(0x2000, ScanValue::F32(-3.5)),
+            ScanCandidate::new(0x3000, ScanValue::F32(9.0)),
+        ];
+        let snapshot = ScanCandidateSnapshot::capture(&original, None).unwrap();
+        assert!(snapshot.path().exists());
+        let mut restored = Vec::with_capacity(original.len());
+        snapshot.restore_into(&mut restored).unwrap();
+        assert_eq!(restored, original);
+        drop(snapshot);
     }
 
     #[test]

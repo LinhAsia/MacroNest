@@ -20,11 +20,13 @@ use crate::{
     process_memory::{
         EntityListCandidate, EntityListScanResult, EntityListValidation, MemoryRegionInfo,
         MemoryScanOptions, PausedProcess, PointerMap, PointerPath, PointerPathComparison,
-        PointerScanLimits, ScanCandidate, ScanComparison, ScanValue, ScanValueType, TextEncoding,
-        TextScanCandidate, ViewProjectionCandidate, capture_pointer_map_with_budget,
+        PointerScanLimits, ScanCandidate, ScanCandidateSnapshot, ScanComparison, ScanValue,
+        ScanValueType, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
+        capture_pointer_map_with_budget,
         compare_pointer_paths, filter_aob_scan_candidates, filter_scan_candidates,
-        filter_text_scan_candidates, query_memory_region, read_memory_bytes, read_scan_value,
-        read_text_memory, refresh_scan_candidates, scan_aob_memory_with_progress,
+        filter_scan_candidates_with_progress, filter_text_scan_candidates, query_memory_region,
+        read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
+        scan_aob_memory_with_progress,
         scan_entity_lists_with_progress, scan_memory_range_with_progress,
         scan_pointer_paths_with_budget, scan_pointer_paths_with_budget_options,
         scan_text_memory_with_progress, scan_view_projection_candidates, validate_entity_list,
@@ -564,11 +566,17 @@ struct ScanJobResult {
     pid: u32,
     action: MemoryScanAction,
     result: Result<ScanJobCandidates, String>,
-    undo: Option<ScanJobCandidates>,
+    undo: Option<ScanUndo>,
 }
 
 enum ScanJobCandidates {
     Numeric(Vec<ScanCandidate>),
+    Text(Vec<TextScanCandidate>),
+}
+
+enum ScanUndo {
+    Numeric(Vec<ScanCandidate>),
+    NumericFile(ScanCandidateSnapshot),
     Text(Vec<TextScanCandidate>),
 }
 
@@ -685,7 +693,7 @@ pub(crate) struct MemoryPanelState {
     status: String,
     last_action: String,
     job_rx: Option<Receiver<ScanJobResult>>,
-    scan_undo: Option<ScanJobCandidates>,
+    scan_undo: Option<ScanUndo>,
     scanning: bool,
     scan_progress: Arc<AtomicUsize>,
     scan_input_count: usize,
@@ -11052,12 +11060,19 @@ impl CrosshairApp {
         let pause_while_scanning = self.memory_panel.pause_while_scanning;
         let is_aob = self.memory_panel.is_aob_scan;
         thread::spawn(move || {
-            // Keep one undo snapshot. The copy happens on the worker thread so a large
-            // result set does not stall egui, and is replaced after the next filter.
+            // ponytail: large numeric snapshots live on disk; a paged result store is the
+            // upgrade path if scans much larger than available RAM become common.
+            const MAX_IN_MEMORY_UNDO_RESULTS: usize = 1_000_000;
             let undo = if !candidates.is_empty() {
-                Some(ScanJobCandidates::Numeric(candidates.clone()))
+                if candidates.len() <= MAX_IN_MEMORY_UNDO_RESULTS {
+                    Some(ScanUndo::Numeric(candidates.clone()))
+                } else {
+                    ScanCandidateSnapshot::capture(&candidates, Some(progress.as_ref()))
+                        .ok()
+                        .map(ScanUndo::NumericFile)
+                }
             } else if !text_candidates.is_empty() {
-                Some(ScanJobCandidates::Text(text_candidates.clone()))
+                Some(ScanUndo::Text(text_candidates.clone()))
             } else {
                 None
             };
@@ -11108,8 +11123,17 @@ impl CrosshairApp {
                 }
                 .map(ScanJobCandidates::Text)
             } else if let Some(comparison) = action.comparison() {
-                filter_scan_candidates(pid, candidates, value_type, comparison, exact, range)
-                    .map(ScanJobCandidates::Numeric)
+                progress.store(0, Ordering::Relaxed);
+                filter_scan_candidates_with_progress(
+                    pid,
+                    candidates,
+                    value_type,
+                    comparison,
+                    exact,
+                    range,
+                    Some(progress),
+                )
+                .map(ScanJobCandidates::Numeric)
             } else {
                 scan_memory_range_with_progress(
                     pid,
@@ -11185,15 +11209,12 @@ impl CrosshairApp {
             }
             Err(error) => {
                 if let Some(previous) = undo {
-                    match previous {
-                        ScanJobCandidates::Numeric(candidates) => {
-                            self.memory_panel.candidates = candidates;
-                            self.memory_panel.text_candidates.clear();
-                        }
-                        ScanJobCandidates::Text(candidates) => {
-                            self.memory_panel.text_candidates = candidates;
-                            self.memory_panel.candidates.clear();
-                        }
+                    if let Err(restore_error) = self.restore_memory_scan_undo(previous) {
+                        self.memory_panel.status = format!(
+                            "{} failed: {error}; undo restore failed: {restore_error}",
+                            action.label()
+                        );
+                        return;
                     }
                 }
                 self.memory_panel.status = format!("{} failed: {error}", action.label());
@@ -11222,18 +11243,11 @@ impl CrosshairApp {
         let Some(previous) = self.memory_panel.scan_undo.take() else {
             return;
         };
-        let count = match previous {
-            ScanJobCandidates::Numeric(candidates) => {
-                let count = candidates.len();
-                self.memory_panel.candidates = candidates;
-                self.memory_panel.text_candidates.clear();
-                count
-            }
-            ScanJobCandidates::Text(candidates) => {
-                let count = candidates.len();
-                self.memory_panel.text_candidates = candidates;
-                self.memory_panel.candidates.clear();
-                count
+        let count = match self.restore_memory_scan_undo(previous) {
+            Ok(count) => count,
+            Err(error) => {
+                self.memory_panel.status = format!("Undo failed: {error}");
+                return;
             }
         };
         self.memory_panel.live_candidate_values.clear();
@@ -11241,6 +11255,34 @@ impl CrosshairApp {
         self.memory_panel.selection_anchor = None;
         self.memory_panel.status = format!("Undo — restored {count} result(s)");
         self.memory_panel.last_action = "Undo scan filter".to_owned();
+    }
+
+    fn restore_memory_scan_undo(&mut self, previous: ScanUndo) -> Result<usize, String> {
+        match previous {
+            ScanUndo::Numeric(candidates) => {
+                let count = candidates.len();
+                self.memory_panel.candidates = candidates;
+                self.memory_panel.text_candidates.clear();
+                Ok(count)
+            }
+            ScanUndo::NumericFile(snapshot) => {
+                let count = snapshot.len();
+                let mut candidates = std::mem::take(&mut self.memory_panel.candidates);
+                let restored = snapshot
+                    .restore_into(&mut candidates)
+                    .map_err(|error| error.to_string());
+                self.memory_panel.candidates = candidates;
+                restored?;
+                self.memory_panel.text_candidates.clear();
+                Ok(count)
+            }
+            ScanUndo::Text(candidates) => {
+                let count = candidates.len();
+                self.memory_panel.text_candidates = candidates;
+                self.memory_panel.candidates.clear();
+                Ok(count)
+            }
+        }
     }
 
     fn add_selected_memory_results(&mut self) {
