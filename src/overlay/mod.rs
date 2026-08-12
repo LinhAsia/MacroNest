@@ -139,7 +139,7 @@ mod windows_overlay {
                     LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
                     PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN,
                     SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
-                    SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOWNA,
+                    SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNA,
                     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
                     SWP_SHOWWINDOW, SetCursor, SetCursorPos, SetForegroundWindow,
                     SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowLongW,
@@ -9626,12 +9626,6 @@ mod windows_overlay {
             let freeze = SCREEN_DRAW_STATE.lock().freeze_screen;
             if freeze {
                 hide_ui_window_native();
-                let controller = CONTROLLER_HWND.load(Ordering::Relaxed);
-                if controller != 0 {
-                    unsafe {
-                        let _ = ShowWindow(HWND(controller as *mut _), SW_HIDE);
-                    }
-                }
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                 if screen_w > 0 && screen_h > 0 {
@@ -12432,6 +12426,10 @@ mod windows_overlay {
             });
             send_ui_command(command);
         }
+        show_ui_window_native();
+        if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
+            let _ = tx.send(UiCommand::ShowWindow);
+        }
     }
 
     fn activate_screen_draw(state: &mut ScreenDrawState, captured_frame: Option<Vec<u8>>) {
@@ -12945,12 +12943,6 @@ mod windows_overlay {
                 let freeze = state.freeze_screen;
                 let captured_frame = if freeze {
                     hide_ui_window_native();
-                    let controller = CONTROLLER_HWND.load(Ordering::Relaxed);
-                    if controller != 0 {
-                        unsafe {
-                            let _ = ShowWindow(HWND(controller as *mut _), SW_HIDE);
-                        }
-                    }
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                     if screen_w > 0 && screen_h > 0 {
@@ -36875,7 +36867,7 @@ mod windows_overlay {
                 return;
             }
 
-            let _ = ShowWindow(app, SW_SHOWNA);
+            let _ = ShowWindow(app, SW_SHOW);
         }
     }
 
