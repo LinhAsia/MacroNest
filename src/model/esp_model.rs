@@ -26,6 +26,14 @@ pub enum EspAngleUnit {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum EspPitchInput {
+    #[default]
+    Angle,
+    SineComponent,
+    TangentComponent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum EspHorizontalPlane {
     #[default]
     Xy,
@@ -88,6 +96,7 @@ pub struct EspPreset {
     pub value_type: MemoryValueType,
     pub yaw_unit: EspAngleUnit,
     pub pitch_unit: EspAngleUnit,
+    pub pitch_input: EspPitchInput,
     pub pitch_multiplier: f32,
     pub horizontal_plane: EspHorizontalPlane,
     pub invert_camera_yaw: bool,
@@ -102,6 +111,7 @@ pub struct EspPreset {
     pub screen_offset_x: f32,
     pub screen_offset_y: f32,
     pub horizontal_fov: f32,
+    pub vertical_projection_multiplier: f32,
     pub marker_source: EspMarkerSource,
     pub marker: EspMarkerKind,
     /// Image file path. Kept under its original key for saved-preset compatibility.
@@ -186,6 +196,7 @@ impl EspPreset {
             value_type: MemoryValueType::F32,
             yaw_unit: EspAngleUnit::Degrees,
             pitch_unit: EspAngleUnit::Radians,
+            pitch_input: EspPitchInput::Angle,
             pitch_multiplier: 1.0,
             horizontal_plane: EspHorizontalPlane::Xz,
             invert_camera_yaw: false,
@@ -200,6 +211,7 @@ impl EspPreset {
             screen_offset_x: 0.0,
             screen_offset_y: 0.0,
             horizontal_fov: 90.0,
+            vertical_projection_multiplier: 1.0,
             marker_source: EspMarkerSource::Geometry,
             marker: EspMarkerKind::Dot,
             marker_asset_path: String::new(),
@@ -519,7 +531,12 @@ fn esp_pitch_to_radians(preset: &EspPreset, pitch: f32) -> f32 {
     } else {
         1.0
     };
-    esp_angle_to_radians(pitch, preset.pitch_unit) * multiplier
+    let pitch = match preset.pitch_input {
+        EspPitchInput::Angle => esp_angle_to_radians(pitch, preset.pitch_unit),
+        EspPitchInput::SineComponent => pitch.clamp(-1.0, 1.0).asin(),
+        EspPitchInput::TangentComponent => pitch.atan(),
+    };
+    pitch * multiplier
 }
 
 pub(crate) fn esp_orientation_from_direction_pair(
@@ -541,7 +558,7 @@ pub(crate) fn esp_orientation_from_direction_pair(
     } else {
         1.0
     };
-    direction[0] *= mult;
+    // Only the B/A ratio affects atan2; multiplying both components cancels out.
     direction[1] *= mult;
     let length = direction[0].hypot(direction[1]);
     if !length.is_finite() || length <= f32::EPSILON || !pitch.is_finite() {
@@ -733,7 +750,12 @@ pub(crate) fn project_esp(
     let half_fov_x = (preset.horizontal_fov.clamp(1.0, 179.0).to_radians() * 0.5).max(0.001);
     let half_fov_y = (half_fov_x.tan() / aspect.max(0.01)).atan();
     let x = camera_right / (camera_depth * half_fov_x.tan());
-    let y = camera_up / (camera_depth * half_fov_y.tan());
+    let vertical_projection_multiplier = if preset.vertical_projection_multiplier.is_finite() {
+        preset.vertical_projection_multiplier.max(0.0)
+    } else {
+        1.0
+    };
+    let y = camera_up / (camera_depth * half_fov_y.tan()) * vertical_projection_multiplier;
     if !x.is_finite() || !y.is_finite() || !distance.is_finite() {
         return None;
     }
@@ -796,6 +818,8 @@ mod tests {
         object.remove("target_audio_volume");
         object.remove("target_audio_full_volume_distance");
         object.remove("target_audio_max_distance");
+        object.remove("pitch_input");
+        object.remove("vertical_projection_multiplier");
 
         let preset: EspPreset = serde_json::from_value(value).unwrap();
         assert_eq!(preset.marker_source, EspMarkerSource::Geometry);
@@ -820,6 +844,8 @@ mod tests {
         assert!(preset.target_audio_path.is_empty());
         assert!(preset.target_audio_loop);
         assert_eq!(preset.target_audio_volume, 1.0);
+        assert_eq!(preset.pitch_input, EspPitchInput::Angle);
+        assert_eq!(preset.vertical_projection_multiplier, 1.0);
     }
 
     #[test]
@@ -1015,6 +1041,12 @@ mod tests {
         preset.invert_direction_a = true;
         let (yaw, _) = esp_orientation_from_direction_pair(&preset, [1.0, 0.0], -0.29).unwrap();
         assert!((yaw + std::f32::consts::FRAC_PI_2).abs() < 0.001);
+
+        preset.swap_direction_pair = false;
+        preset.invert_direction_a = false;
+        preset.direction_multiplier = 2.0;
+        let (yaw, _) = esp_orientation_from_direction_pair(&preset, [1.0, 1.0], 0.0).unwrap();
+        assert!((yaw - 2.0_f32.atan()).abs() < 0.001);
     }
 
     #[test]
@@ -1031,5 +1063,43 @@ mod tests {
         assert!(
             (esp_pitch_to_radians(&preset, 180.0) - std::f32::consts::PI).abs() < 0.001
         );
+
+        preset.pitch_multiplier = 1.0;
+        preset.pitch_input = EspPitchInput::SineComponent;
+        assert!(
+            (esp_pitch_to_radians(&preset, 1.0) - std::f32::consts::FRAC_PI_2).abs()
+                < 0.001
+        );
+        preset.pitch_input = EspPitchInput::TangentComponent;
+        assert!(
+            (esp_pitch_to_radians(&preset, 1.0) - std::f32::consts::FRAC_PI_4).abs()
+                < 0.001
+        );
+    }
+
+    #[test]
+    fn vertical_projection_scale_does_not_change_screen_x() {
+        let mut preset = EspPreset::default();
+        let normal = project_esp(
+            &preset,
+            [10.0, 2.0, 2.0],
+            [0.0; 3],
+            0.0,
+            0.0,
+            16.0 / 9.0,
+        )
+        .unwrap();
+        preset.vertical_projection_multiplier = 0.5;
+        let scaled = project_esp(
+            &preset,
+            [10.0, 2.0, 2.0],
+            [0.0; 3],
+            0.0,
+            0.0,
+            16.0 / 9.0,
+        )
+        .unwrap();
+        assert!((normal.normalized_x - scaled.normalized_x).abs() < 0.001);
+        assert!((normal.normalized_y * 0.5 - scaled.normalized_y).abs() < 0.001);
     }
 }

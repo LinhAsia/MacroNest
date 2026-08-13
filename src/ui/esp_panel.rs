@@ -2,7 +2,7 @@ use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Grid, RichText, T
 
 use crate::model::{
     EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspMarkerSource, EspOrientationSource,
-    EspPreset, MemoryValueType, RgbaColor,
+    EspPitchInput, EspPreset, MemoryValueType, RgbaColor,
 };
 
 use super::CrosshairApp;
@@ -881,7 +881,9 @@ impl CrosshairApp {
                                     preset.yaw_offset_degrees = value;
                                 }
                             }
-                            ui.label("Direction scale").on_hover_text("Multiplier for Direction A/B vector values");
+                            ui.label("Direction B/A ratio").on_hover_text(
+                                "Scales Direction B relative to A before atan2. Use this when horizontal ESP is correct near one direction but increasingly wrong while rotating.",
+                            );
                             ui.add(
                                 DragValue::new(&mut preset.direction_multiplier)
                                     .speed(0.001)
@@ -891,6 +893,28 @@ impl CrosshairApp {
                                 preset.direction_multiplier = 1.0;
                             }
                         });
+                        ui.end_row();
+
+                        ui.label("Pitch input");
+                        ComboBox::from_id_salt(("esp_pitch_input", preset.id))
+                            .selected_text(match preset.pitch_input {
+                                EspPitchInput::Angle => "Angle",
+                                EspPitchInput::SineComponent => "Direction component (asin)",
+                                EspPitchInput::TangentComponent => "Slope component (atan)",
+                            })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut preset.pitch_input, EspPitchInput::Angle, "Angle");
+                                ui.selectable_value(
+                                    &mut preset.pitch_input,
+                                    EspPitchInput::SineComponent,
+                                    "Direction component (asin)",
+                                );
+                                ui.selectable_value(
+                                    &mut preset.pitch_input,
+                                    EspPitchInput::TangentComponent,
+                                    "Slope component (atan)",
+                                );
+                            });
                         ui.end_row();
 
                         ui.label("Pitch scale").on_hover_text(
@@ -904,6 +928,21 @@ impl CrosshairApp {
                             );
                             if ui.small_button("Reset scale").clicked() {
                                 preset.pitch_multiplier = 1.0;
+                            }
+                        });
+                        ui.end_row();
+
+                        ui.label("Vertical projection scale").on_hover_text(
+                            "Scales only final screen Y. Lower this when every vertical movement is too large while horizontal alignment is already correct.",
+                        );
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                DragValue::new(&mut preset.vertical_projection_multiplier)
+                                    .speed(0.01)
+                                    .range(0.0..=10.0),
+                            );
+                            if ui.small_button("Reset vertical").clicked() {
+                                preset.vertical_projection_multiplier = 1.0;
                             }
                         });
                         ui.end_row();
@@ -926,7 +965,9 @@ impl CrosshairApp {
                                     .speed(1.0)
                                     .range(-10000.0..=10000.0),
                             );
-                            ui.label("Height scale").on_hover_text("Multiplier for Z elevation distance (e.g., 0.01 if Z is in cm while X/Y are in m)");
+                            ui.label("World height scale").on_hover_text(
+                                "Scales Target height - Camera height in world coordinates. It does not change camera pitch response.",
+                            );
                             ui.add(
                                 DragValue::new(&mut preset.height_scale)
                                     .speed(0.001)
@@ -959,7 +1000,9 @@ impl CrosshairApp {
                                 preset.horizontal_plane = EspHorizontalPlane::Xy;
                                 preset.yaw_unit = EspAngleUnit::Degrees;
                                 preset.pitch_unit = EspAngleUnit::Radians;
+                                preset.pitch_input = EspPitchInput::Angle;
                                 preset.pitch_multiplier = 1.0;
+                                preset.direction_multiplier = 1.0;
                                 preset.invert_camera_yaw = false;
                                 preset.invert_yaw = false;
                                 preset.invert_pitch = false;
@@ -969,6 +1012,7 @@ impl CrosshairApp {
                                 preset.screen_offset_x = 0.0;
                                 preset.screen_offset_y = 0.0;
                                 preset.horizontal_fov = 90.0;
+                                preset.vertical_projection_multiplier = 1.0;
                             }
                             if ui.button("Capture direction").clicked() {
                                 self.esp_calibration_feedback
