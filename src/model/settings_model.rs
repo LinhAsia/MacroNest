@@ -466,6 +466,8 @@ pub struct MemoryCodeEntry {
     pub module: String,
     pub offset: usize,
     pub instruction: String,
+    #[serde(default)]
+    pub aob_signature: String,
     pub writes: bool,
     #[serde(default)]
     pub original_bytes: Option<Vec<u8>>,

@@ -928,7 +928,7 @@ pub enum ScanComparison {
     Between,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ScanRegion {
     base: usize,
     size: usize,
@@ -1890,10 +1890,68 @@ pub fn scan_aob_memory_with_progress(
         )
     })?;
     let process = ScanProcess::open(pid, false)?;
+    scan_aob_regions(
+        &process,
+        &pattern,
+        pattern_str,
+        result_limit,
+        scan_regions_for(&process, options),
+        total,
+    )
+}
+
+pub fn scan_aob_memory_range_with_progress(
+    pid: u32,
+    pattern_str: &str,
+    base: usize,
+    size: usize,
+    result_limit: usize,
+    options: MemoryScanOptions,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<TextScanCandidate>> {
+    let pattern = parse_aob_pattern(pattern_str).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid AOB pattern format (e.g. F3 41 ?? 10 50 10)",
+        )
+    })?;
+    let process = ScanProcess::open(pid, false)?;
+    let end = base.saturating_add(size);
+    let regions = scan_regions_for(&process, options)
+        .into_iter()
+        .filter_map(|region| intersect_scan_region(region, base, end))
+        .collect();
+    scan_aob_regions(
+        &process,
+        &pattern,
+        pattern_str,
+        result_limit,
+        regions,
+        total,
+    )
+}
+
+fn intersect_scan_region(region: ScanRegion, start: usize, end: usize) -> Option<ScanRegion> {
+    let intersection_start = region.base.max(start);
+    let intersection_end = region.base.saturating_add(region.size).min(end);
+    (intersection_start < intersection_end).then_some(ScanRegion {
+        base: intersection_start,
+        size: intersection_end - intersection_start,
+    })
+}
+
+fn scan_aob_regions(
+    process: &ScanProcess,
+    pattern: &[AobByte],
+    pattern_str: &str,
+    result_limit: usize,
+    regions: Vec<ScanRegion>,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<TextScanCandidate>> {
     let mut found = Vec::new();
     let mut buffer = Vec::new();
     let overlap = pattern.len().saturating_sub(1);
-    'regions: for region in scan_regions_for(&process, options) {
+    'regions: for region in regions {
         let end = region.base.saturating_add(region.size);
         let mut chunk_base = region.base;
         while chunk_base < end {
@@ -1914,9 +1972,9 @@ pub fn scan_aob_memory_with_progress(
                 }
                 let max_start = count.saturating_sub(pattern.len());
                 for offset in 0..=max_start {
-                    if offset < prefix
-                        || !aob_bytes_equal(&haystack[offset..offset + pattern.len()], &pattern)
-                    {
+                    // The prefix is pattern.len() - 1, so a complete match that starts
+                    // there necessarily crosses into this new chunk and is not a duplicate.
+                    if !aob_bytes_equal(&haystack[offset..offset + pattern.len()], pattern) {
                         continue;
                     }
                     found.push(TextScanCandidate {
@@ -2658,6 +2716,26 @@ mod tests {
             &[true; 3],
             &[Some([1.0, 2.0, 3.0]); 3],
         )
+    }
+
+    #[test]
+    fn aob_relocation_matches_wildcards_and_stays_inside_the_module_range() {
+        let pattern = parse_aob_pattern("F3 41 ?? 10").unwrap();
+        assert!(aob_bytes_equal(&[0xF3, 0x41, 0x0F, 0x10], &pattern));
+        assert_eq!(
+            intersect_scan_region(
+                ScanRegion {
+                    base: 0x1000,
+                    size: 0x1000,
+                },
+                0x1800,
+                0x2800,
+            ),
+            Some(ScanRegion {
+                base: 0x1800,
+                size: 0x800,
+            })
+        );
     }
 
     #[test]

@@ -1140,6 +1140,28 @@ pub fn get_instruction_bytes(pid: u32, address: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+pub fn get_instruction_aob_signature(
+    pid: u32,
+    address: usize,
+    architecture: MemoryDebuggerArchitecture,
+) -> io::Result<String> {
+    let lines = disassemble_from(pid, address, architecture, 6)?;
+    let signature = lines
+        .into_iter()
+        .map(|(_, bytes, _)| bytes)
+        .filter(|bytes| !bytes.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if signature.is_empty() {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "instruction has no readable bytes",
+        ))
+    } else {
+        Ok(signature)
+    }
+}
+
 pub fn disassemble_from(
     pid: u32,
     address: usize,

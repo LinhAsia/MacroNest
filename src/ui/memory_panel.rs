@@ -26,7 +26,7 @@ use crate::{
         compare_pointer_paths, filter_aob_scan_candidates, filter_scan_candidates,
         filter_scan_candidates_with_progress, filter_text_scan_candidates, query_memory_region,
         read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
-        scan_aob_memory_with_progress,
+        scan_aob_memory_range_with_progress, scan_aob_memory_with_progress,
         scan_entity_lists_with_progress, scan_memory_range_with_progress,
         scan_pointer_paths_with_budget, scan_pointer_paths_with_budget_options,
         scan_text_memory_with_progress, scan_view_projection_candidates, validate_entity_list,
@@ -38,7 +38,8 @@ use crate::{
 #[cfg(windows)]
 use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, ProcessInfo, WatchEvent, WriteWatch, disassemble_from,
-    get_instruction_bytes, instruction_writes_memory, is_instruction_compatible,
+    get_instruction_aob_signature, get_instruction_bytes, instruction_writes_memory,
+    is_instruction_compatible,
     list_process_details, module_offset_for_address, normalize_instruction, process_modules,
     process_pointer_width, resolve_module_offset,
 };
@@ -569,6 +570,15 @@ struct ScanJobResult {
     undo: Option<ScanUndo>,
 }
 
+#[cfg(windows)]
+struct CodeRelocateResult {
+    pid: u32,
+    module: String,
+    old_offset: usize,
+    aob_signature: String,
+    result: Result<Vec<usize>, String>,
+}
+
 enum ScanJobCandidates {
     Numeric(Vec<ScanCandidate>),
     Text(Vec<TextScanCandidate>),
@@ -693,6 +703,10 @@ pub(crate) struct MemoryPanelState {
     status: String,
     last_action: String,
     job_rx: Option<Receiver<ScanJobResult>>,
+    #[cfg(windows)]
+    code_relocate_rx: Option<Receiver<CodeRelocateResult>>,
+    #[cfg(windows)]
+    code_relocate_status: String,
     scan_undo: Option<ScanUndo>,
     scanning: bool,
     scan_progress: Arc<AtomicUsize>,
@@ -786,6 +800,10 @@ impl Default for MemoryPanelState {
             status: "Ready".to_owned(),
             last_action: "Ready".to_owned(),
             job_rx: None,
+            #[cfg(windows)]
+            code_relocate_rx: None,
+            #[cfg(windows)]
+            code_relocate_status: String::new(),
             scan_undo: None,
             scanning: false,
             scan_progress: Arc::new(AtomicUsize::new(0)),
@@ -4233,6 +4251,8 @@ impl CrosshairApp {
         if !self.memory_panel.code_list_open {
             return;
         }
+        #[cfg(windows)]
+        self.poll_code_entry_relocate();
         let mut corrected_actions = false;
         if let Some(pid) = self.memory_panel.process_pid {
             for entry in &mut self.state.memory_code_list {
@@ -4254,6 +4274,7 @@ impl CrosshairApp {
             ReplaceNop(usize),
             RestoreOriginal(usize),
             StartAccessWatch(usize),
+            Relocate(usize),
             Rename(usize),
             Delete(usize),
             ReplaceAll,
@@ -4296,8 +4317,15 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     Self::memory_view_cell(ui, 190.0, "Address / Module");
                     Self::memory_view_cell(ui, 310.0, "Name / Instruction");
-                    Self::memory_view_cell(ui, 180.0, "Action / Status");
+                    Self::memory_view_cell(ui, 320.0, "Action / Status");
                 });
+                #[cfg(windows)]
+                if !self.memory_panel.code_relocate_status.is_empty() {
+                    ui.label(
+                        RichText::new(&self.memory_panel.code_relocate_status)
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                }
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
@@ -4327,6 +4355,28 @@ impl CrosshairApp {
                                 if action_response.clicked() {
                                     pending_action = Some(CodeAction::StartAccessWatch(index));
                                 }
+                                let copy_aob_response = ui.add_enabled(
+                                    !entry.aob_signature.is_empty(),
+                                    egui::Button::new("Copy AOB").small(),
+                                )
+                                .on_hover_text("Copy the saved six-instruction AOB signature");
+                                if copy_aob_response.clicked() {
+                                    ui.ctx().copy_text(entry.aob_signature.clone());
+                                    self.memory_panel.code_relocate_status =
+                                        format!("Copied AOB for '{}'", entry.name);
+                                }
+                                let relocate_response = ui.add_enabled(
+                                    !entry.aob_signature.is_empty()
+                                        && !entry.replaced
+                                        && self.memory_panel.code_relocate_rx.is_none(),
+                                    egui::Button::new("Relocate").small(),
+                                )
+                                .on_hover_text(
+                                    "Find the saved AOB in this module and update a unique new offset",
+                                );
+                                if relocate_response.clicked() {
+                                    pending_action = Some(CodeAction::Relocate(index));
+                                }
                                 let rename_response = ui.small_button("Rename");
                                 if rename_response.clicked() {
                                     pending_action = Some(CodeAction::Rename(index));
@@ -4338,6 +4388,8 @@ impl CrosshairApp {
                                 address_response
                                     .union(instruction_response)
                                     .union(action_response)
+                                    .union(copy_aob_response)
+                                    .union(relocate_response)
                                     .union(rename_response)
                                     .union(delete_response)
                             })
@@ -4461,6 +4513,10 @@ impl CrosshairApp {
                 #[cfg(windows)]
                 self.open_code_access_watch(index);
             }
+            Some(CodeAction::Relocate(index)) => {
+                #[cfg(windows)]
+                self.start_code_entry_relocate(index);
+            }
             Some(CodeAction::Rename(index)) => {
                 if let Some(entry) = self.state.memory_code_list.get(index) {
                     self.memory_panel.edit_code_name_index = Some(index);
@@ -4486,6 +4542,158 @@ impl CrosshairApp {
                 }
             }
             None => {}
+        }
+        #[cfg(windows)]
+        if self.memory_panel.code_relocate_rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(windows)]
+    fn start_code_entry_relocate(&mut self, code_index: usize) {
+        if self.memory_panel.code_relocate_rx.is_some() {
+            return;
+        }
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.code_relocate_status = "Select a process first".to_owned();
+            return;
+        };
+        let Some(entry) = self.state.memory_code_list.get(code_index).cloned() else {
+            return;
+        };
+        if entry.aob_signature.is_empty() {
+            self.memory_panel.code_relocate_status =
+                "This old entry has no saved AOB; add the instruction again".to_owned();
+            return;
+        }
+        let Some((_, module_base, module_size)) = process_modules(pid)
+            .ok()
+            .and_then(|modules| {
+                modules
+                    .into_iter()
+                    .find(|(name, _, _)| name.eq_ignore_ascii_case(&entry.module))
+            })
+        else {
+            self.memory_panel.code_relocate_status =
+                format!("Module '{}' is not loaded", entry.module);
+            return;
+        };
+        let (tx, rx) = mpsc::channel();
+        let module = entry.module.clone();
+        let old_offset = entry.offset;
+        let aob_signature = entry.aob_signature.clone();
+        let worker_module = module.clone();
+        let worker_aob = aob_signature.clone();
+        thread::spawn(move || {
+            let options = MemoryScanOptions {
+                writable: false,
+                executable: true,
+                copy_on_write: true,
+                active_memory_only: false,
+                mem_private: false,
+                mem_image: true,
+                mem_mapped: false,
+                alignment: None,
+            };
+            let result = scan_aob_memory_range_with_progress(
+                pid,
+                &worker_aob,
+                module_base,
+                module_size,
+                2,
+                options,
+                Arc::new(AtomicUsize::new(0)),
+            )
+            .map(|matches| {
+                matches
+                    .into_iter()
+                    .map(|candidate| candidate.address - module_base)
+                    .collect()
+            })
+            .map_err(|error| error.to_string());
+            let _ = tx.send(CodeRelocateResult {
+                pid,
+                module: worker_module,
+                old_offset,
+                aob_signature: worker_aob,
+                result,
+            });
+        });
+        self.memory_panel.code_relocate_rx = Some(rx);
+        self.memory_panel.code_relocate_status =
+            format!("Searching {} for saved AOB...", module);
+    }
+
+    #[cfg(windows)]
+    fn poll_code_entry_relocate(&mut self) {
+        let Some(rx) = self.memory_panel.code_relocate_rx.as_ref() else {
+            return;
+        };
+        let outcome = match rx.try_recv() {
+            Ok(outcome) => outcome,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.memory_panel.code_relocate_rx = None;
+                self.memory_panel.code_relocate_status = "AOB relocation stopped unexpectedly".to_owned();
+                return;
+            }
+        };
+        self.memory_panel.code_relocate_rx = None;
+        if self.memory_panel.process_pid != Some(outcome.pid) {
+            self.memory_panel.code_relocate_status =
+                "Process changed while relocating; try again".to_owned();
+            return;
+        }
+        let Some(index) = self.state.memory_code_list.iter().position(|entry| {
+            entry.module.eq_ignore_ascii_case(&outcome.module)
+                && entry.offset == outcome.old_offset
+                && entry.aob_signature == outcome.aob_signature
+        }) else {
+            self.memory_panel.code_relocate_status =
+                "Code-list entry changed while relocating".to_owned();
+            return;
+        };
+        match outcome.result {
+            Ok(matches) if matches.len() == 1 => {
+                let new_offset = matches[0];
+                let entry = &mut self.state.memory_code_list[index];
+                entry.offset = new_offset;
+                for preset in &mut self.state.esp_presets {
+                    if preset
+                        .entity_auto_code_module
+                        .eq_ignore_ascii_case(&outcome.module)
+                        && preset.entity_auto_code_offset == outcome.old_offset
+                    {
+                        preset.entity_auto_code_offset = new_offset;
+                    }
+                }
+                for pointer in &mut self.state.memory_pointer_list {
+                    if pointer.code_module.eq_ignore_ascii_case(&outcome.module)
+                        && pointer.code_offset == outcome.old_offset
+                    {
+                        pointer.code_offset = new_offset;
+                    }
+                }
+                self.memory_panel.code_relocate_status = format!(
+                    "Relocated '{}' from {}+{:X} to {}+{:X}",
+                    entry.name, outcome.module, outcome.old_offset, outcome.module, new_offset
+                );
+                crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
+                crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+                self.persist();
+            }
+            Ok(matches) if matches.is_empty() => {
+                self.memory_panel.code_relocate_status =
+                    "Saved AOB was not found in the module; code probably changed".to_owned();
+            }
+            Ok(_) => {
+                self.memory_panel.code_relocate_status =
+                    "Saved AOB is not unique; offset was not changed".to_owned();
+            }
+            Err(error) => {
+                self.memory_panel.code_relocate_status =
+                    format!("AOB relocation failed: {error}");
+            }
         }
     }
 
@@ -4600,28 +4808,53 @@ impl CrosshairApp {
             self.memory_panel.status = "Instruction is not inside a loaded module".to_owned();
             return;
         };
-        if self
+        let existing = self
             .state
             .memory_code_list
             .iter()
-            .any(|entry| entry.module.eq_ignore_ascii_case(&module) && entry.offset == offset)
-        {
+            .position(|entry| entry.module.eq_ignore_ascii_case(&module) && entry.offset == offset);
+        if existing.is_some_and(|index| {
+            !self.state.memory_code_list[index].aob_signature.is_empty()
+        }) {
             self.memory_panel.status = "Instruction is already in the code list".to_owned();
             return;
         }
+        let aob_signature = match get_instruction_aob_signature(
+            pid,
+            address,
+            self.state.memory_debugger_architecture,
+        ) {
+            Ok(signature) => signature,
+            Err(error) => {
+                self.memory_panel.status = format!("Unable to save instruction AOB: {error}");
+                return;
+            }
+        };
         let writes = instruction_writes_memory(pid, address).unwrap_or(writes);
+        if let Some(index) = existing {
+            let entry = &mut self.state.memory_code_list[index];
+            entry.aob_signature = aob_signature;
+            entry.instruction = instruction.to_owned();
+            entry.writes = writes;
+            crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
+            self.memory_panel.code_list_open = true;
+            self.memory_panel.status = "AOB saved to the existing code-list entry".to_owned();
+            self.persist();
+            return;
+        }
         self.state.memory_code_list.push(MemoryCodeEntry {
             name: instruction.to_owned(),
             module,
             offset,
             instruction: instruction.to_owned(),
+            aob_signature,
             writes,
             original_bytes: None,
             replaced: false,
         });
         crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
         self.memory_panel.code_list_open = true;
-        self.memory_panel.status = "Instruction added to code list".to_owned();
+        self.memory_panel.status = "Instruction and AOB added to code list".to_owned();
         self.persist();
     }
 
