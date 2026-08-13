@@ -26999,30 +26999,50 @@ mod windows_overlay {
             )]);
         }
 
-        let root_expression = preset.entity_root.trim();
-        if root_expression.is_empty() {
-            return Err("Entity root is empty".to_owned());
-        }
-        let (target_pid, root) = frame
-            .resolve_address(pid, root_expression, false)
-            .ok_or_else(|| "Entity root could not be resolved".to_owned())?;
         let count = preset.entity_count.clamp(1, 512);
         let stride = preset.entity_stride.max(1);
+        let (target_pid, entity_addresses) = if preset.entity_auto_hit_order {
+            if preset.entity_hit_order_addresses.is_empty() {
+                return Err("Hit-order entity list has not been captured".to_owned());
+            }
+            (
+                pid,
+                preset
+                    .entity_hit_order_addresses
+                    .iter()
+                    .copied()
+                    .take(count as usize)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            let root_expression = preset.entity_root.trim();
+            if root_expression.is_empty() {
+                return Err("Entity root is empty".to_owned());
+            }
+            let (target_pid, root) = frame
+                .resolve_address(pid, root_expression, false)
+                .ok_or_else(|| "Entity root could not be resolved".to_owned())?;
+            (
+                target_pid,
+                (0..count)
+                    .map(|index| root + (index as usize) * (stride as usize))
+                    .collect::<Vec<_>>(),
+            )
+        };
         let mut targets = Vec::with_capacity(count.min(64) as usize);
-        for index in 0..count {
-            let entity_address = root + (index as usize) * (stride as usize);
+        for entity_address in entity_addresses {
             let Some(x_address) =
-                crate::model::entity_field_address(root, index, stride, preset.entity_x_offset)
+                crate::model::entity_field_address(entity_address, 0, 1, preset.entity_x_offset)
             else {
                 continue;
             };
             let Some(y_address) =
-                crate::model::entity_field_address(root, index, stride, preset.entity_y_offset)
+                crate::model::entity_field_address(entity_address, 0, 1, preset.entity_y_offset)
             else {
                 continue;
             };
             let Some(z_address) =
-                crate::model::entity_field_address(root, index, stride, preset.entity_z_offset)
+                crate::model::entity_field_address(entity_address, 0, 1, preset.entity_z_offset)
             else {
                 continue;
             };

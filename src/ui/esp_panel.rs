@@ -17,6 +17,7 @@ use crate::memory_debugger::debugger::{
 pub(super) struct EspEntityRootCapture {
     pub(super) preset_id: u32,
     required: usize,
+    hit_order: bool,
     addresses: Vec<usize>,
     rx: std::sync::mpsc::Receiver<WatchEvent>,
     active: Option<AccessWatch>,
@@ -138,14 +139,19 @@ impl CrosshairApp {
         };
         self.close_memory_debuggers();
         let required = preset.entity_auto_capture_count.clamp(1, 512) as usize;
+        let hit_order = preset.entity_auto_hit_order;
         let (tx, rx) = std::sync::mpsc::channel();
         let started = AccessWatch::start_unique(
             pid,
             instruction_address,
             self.state.memory_debugger_architecture,
-            // ponytail: bound menu/loading noise; raise this cap if a game legitimately
-            // touches more unique entity addresses before the wanted group appears.
-            ESP_ENTITY_ROOT_CAPTURE_LIMIT,
+            if hit_order {
+                required
+            } else {
+                // ponytail: bound menu/loading noise; raise this cap if a game legitimately
+                // touches more unique entity addresses before the wanted group appears.
+                ESP_ENTITY_ROOT_CAPTURE_LIMIT
+            },
             move |event| {
                 let _ = tx.send(event);
             },
@@ -155,13 +161,20 @@ impl CrosshairApp {
                 self.esp_entity_root_capture = Some(EspEntityRootCapture {
                     preset_id,
                     required,
+                    hit_order,
                     addresses: Vec::with_capacity(required),
                     rx,
                     active: Some(active),
                     hud_preset_id,
                 });
                 self.esp_entity_capture_feedback
-                    .insert(preset_id, format!("Matched 0/{required}"));
+                    .insert(
+                        preset_id,
+                        format!(
+                            "{} 0/{required}",
+                            if hit_order { "Captured" } else { "Matched" }
+                        ),
+                    );
                 self.esp_entity_capture_hud_hide_at = None;
                 self.show_esp_entity_capture_hud(
                     hud_preset_id,
@@ -199,45 +212,98 @@ impl CrosshairApp {
                     changed = true;
                 }
                 WatchEvent::CaptureLimitReached(limit) => {
-                    stopped = Some(format!(
-                        "Stopped after {limit} unique addresses without a matching Stride group"
-                    ));
+                    if !capture.hit_order {
+                        stopped = Some(format!(
+                            "Stopped after {limit} unique addresses without a matching Stride group"
+                        ));
+                    }
                 }
                 WatchEvent::Error(error) => stopped = Some(format!("Debugger stopped: {error}")),
                 WatchEvent::Stopped if stopped.is_none() => {
-                    stopped = Some(
-                        "Debugger stopped before a complete Stride group was found".to_owned(),
-                    )
+                    stopped = Some(if capture.hit_order {
+                        "Debugger stopped before enough unique addresses were captured".to_owned()
+                    } else {
+                        "Debugger stopped before a complete Stride group was found".to_owned()
+                    })
                 }
                 WatchEvent::Stopped | WatchEvent::AddressHit { .. } => {}
             }
         }
-        let progress = self
-            .state
-            .esp_presets
-            .iter()
-            .find(|preset| preset.id == capture.preset_id)
-            .map(|preset| {
-                crate::model::entity_instruction_hit_progress(
+        let ordered = capture
+            .hit_order
+            .then(|| {
+                crate::model::entity_hits_in_capture_order(
                     &capture.addresses,
                     capture.required as u32,
-                    preset.entity_stride,
                 )
-            });
-        let (candidate, matched) = progress.unwrap_or((None, 0));
+            })
+            .flatten();
+        let (candidate, matched) = if capture.hit_order {
+            (
+                ordered
+                    .as_ref()
+                    .and_then(|addresses| addresses.first())
+                    .copied(),
+                capture.addresses.len().min(capture.required),
+            )
+        } else {
+            self.state
+                .esp_presets
+                .iter()
+                .find(|preset| preset.id == capture.preset_id)
+                .map(|preset| {
+                    crate::model::entity_instruction_hit_progress(
+                        &capture.addresses,
+                        capture.required as u32,
+                        preset.entity_stride,
+                    )
+                })
+                .unwrap_or((None, 0))
+        };
         if changed {
             self.esp_entity_capture_feedback.insert(
                 capture.preset_id,
-                format!("Matched {matched}/{}", capture.required),
+                format!(
+                    "{} {matched}/{}",
+                    if capture.hit_order { "Captured" } else { "Matched" },
+                    capture.required
+                ),
             );
             self.show_esp_entity_capture_hud(
                 capture.hud_preset_id,
                 format!("Entity scan {matched}/{}", capture.required),
             );
         }
-        if candidate.is_some() {
+        if let Some(candidate) = candidate {
             if let Some(mut active) = capture.active.take() {
                 active.stop();
+            }
+            if capture.hit_order && let Some(addresses) = ordered {
+                if let Some(preset) = self
+                    .state
+                    .esp_presets
+                    .iter_mut()
+                    .find(|preset| preset.id == capture.preset_id)
+                {
+                    preset.entity_root = format!("0x{candidate:X}");
+                    preset.entity_hit_order_addresses = addresses;
+                    preset.entity_count = capture.required as u32;
+                    preset.entity_list_enabled = true;
+                }
+                self.esp_entity_capture_feedback.insert(
+                    capture.preset_id,
+                    format!("Captured {} entities in hit order", capture.required),
+                );
+                self.show_esp_entity_capture_hud(
+                    capture.hud_preset_id,
+                    format!("Entity scan {}/{} - order saved", capture.required, capture.required),
+                );
+                if capture.hud_preset_id.is_some() {
+                    self.esp_entity_capture_hud_hide_at =
+                        Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+                }
+                self.persist_esp_presets();
+                return;
             }
             let result = self
                 .state
@@ -577,14 +643,20 @@ impl CrosshairApp {
                                             }
                                         }
                                     });
+                                ui.checkbox(&mut preset.entity_auto_hit_order, "Hit order")
+                                    .on_hover_text(
+                                        "Keep unique instruction addresses in first-hit order; ignore Stride grouping.",
+                                    );
                                 ui.label("Need");
                                 ui.add(
                                     DragValue::new(&mut preset.entity_auto_capture_count)
                                         .range(1..=512),
                                 )
-                                .on_hover_text(
-                                    "Stops only after this many addresses form one group at the configured Stride.",
-                                );
+                                .on_hover_text(if preset.entity_auto_hit_order {
+                                    "Stop after this many unique addresses are captured."
+                                } else {
+                                    "Stop only after this many addresses form one group at the configured Stride."
+                                });
                                 ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
                                 if preset.entity_auto_hud_enabled {
                                     let hud_name = preset

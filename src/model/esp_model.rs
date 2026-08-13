@@ -62,6 +62,8 @@ pub struct EspPreset {
     pub entity_auto_code_module: String,
     pub entity_auto_code_offset: usize,
     pub entity_auto_capture_count: u32,
+    pub entity_auto_hit_order: bool,
+    pub entity_hit_order_addresses: Vec<usize>,
     pub entity_auto_hud_enabled: bool,
     pub entity_auto_hud_preset_id: Option<u32>,
     pub entity_aabb_center: bool,
@@ -162,6 +164,8 @@ impl EspPreset {
             entity_auto_code_module: String::new(),
             entity_auto_code_offset: 0,
             entity_auto_capture_count: 5,
+            entity_auto_hit_order: false,
+            entity_hit_order_addresses: Vec::new(),
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
@@ -327,11 +331,26 @@ pub(crate) fn entity_instruction_hit_progress(
     (None, best.min(required))
 }
 
+pub(crate) fn entity_hits_in_capture_order(hits: &[usize], required: u32) -> Option<Vec<usize>> {
+    let required = required.max(1) as usize;
+    let mut ordered = Vec::with_capacity(required);
+    // ponytail: captures are capped at 512; use a HashSet too if that ceiling grows.
+    for &address in hits {
+        if !ordered.contains(&address) {
+            ordered.push(address);
+            if ordered.len() == required {
+                return Some(ordered);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod entity_address_tests {
     use super::{
-        aabb_center_component, entity_field_address, entity_instruction_hit_progress,
-        entity_root_from_instruction_hits, shift_raw_entity_root,
+        aabb_center_component, entity_field_address, entity_hits_in_capture_order,
+        entity_instruction_hit_progress, entity_root_from_instruction_hits, shift_raw_entity_root,
     };
 
     #[test]
@@ -379,6 +398,15 @@ mod entity_address_tests {
             entity_instruction_hit_progress(&[0x9001, 0x1010, 0x1050, 0x1030], 5, 0x20),
             (None, 3)
         );
+    }
+
+    #[test]
+    fn instruction_hits_keep_first_seen_order_without_stride_grouping() {
+        assert_eq!(
+            entity_hits_in_capture_order(&[0x3000, 0x1000, 0x3000, 0x2200], 3),
+            Some(vec![0x3000, 0x1000, 0x2200])
+        );
+        assert_eq!(entity_hits_in_capture_order(&[0x3000, 0x1000], 3), None);
     }
 }
 
