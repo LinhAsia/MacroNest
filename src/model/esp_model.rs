@@ -88,6 +88,7 @@ pub struct EspPreset {
     pub value_type: MemoryValueType,
     pub yaw_unit: EspAngleUnit,
     pub pitch_unit: EspAngleUnit,
+    pub pitch_multiplier: f32,
     pub horizontal_plane: EspHorizontalPlane,
     pub invert_camera_yaw: bool,
     pub invert_camera_pitch: bool,
@@ -185,6 +186,7 @@ impl EspPreset {
             value_type: MemoryValueType::F32,
             yaw_unit: EspAngleUnit::Degrees,
             pitch_unit: EspAngleUnit::Radians,
+            pitch_multiplier: 1.0,
             horizontal_plane: EspHorizontalPlane::Xz,
             invert_camera_yaw: false,
             invert_camera_pitch: false,
@@ -511,6 +513,15 @@ fn esp_angle_from_radians(value: f32, unit: EspAngleUnit) -> f32 {
     }
 }
 
+fn esp_pitch_to_radians(preset: &EspPreset, pitch: f32) -> f32 {
+    let multiplier = if preset.pitch_multiplier.is_finite() {
+        preset.pitch_multiplier
+    } else {
+        1.0
+    };
+    esp_angle_to_radians(pitch, preset.pitch_unit) * multiplier
+}
+
 pub(crate) fn esp_orientation_from_direction_pair(
     preset: &EspPreset,
     mut direction: [f32; 2],
@@ -573,7 +584,7 @@ pub(crate) fn esp_calibration_sample(
         bearing_yaw: forward_b.atan2(forward_a),
         bearing_pitch: vertical.atan2(horizontal_distance),
         camera_yaw: esp_angle_to_radians(yaw, preset.yaw_unit),
-        camera_pitch: esp_angle_to_radians(pitch, preset.pitch_unit),
+        camera_pitch: esp_pitch_to_radians(preset, pitch),
     })
 }
 
@@ -698,7 +709,7 @@ pub(crate) fn project_esp(
         return None;
     }
     let mut yaw = esp_angle_to_radians(yaw, preset.yaw_unit);
-    let mut pitch = esp_angle_to_radians(pitch, preset.pitch_unit);
+    let mut pitch = esp_pitch_to_radians(preset, pitch);
     if preset.invert_camera_yaw {
         yaw = -yaw;
     }
@@ -1004,5 +1015,21 @@ mod tests {
         preset.invert_direction_a = true;
         let (yaw, _) = esp_orientation_from_direction_pair(&preset, [1.0, 0.0], -0.29).unwrap();
         assert!((yaw + std::f32::consts::FRAC_PI_2).abs() < 0.001);
+    }
+
+    #[test]
+    fn pitch_multiplier_scales_a_presets_raw_pitch() {
+        let mut preset = EspPreset::default();
+        preset.pitch_unit = EspAngleUnit::Degrees;
+        preset.pitch_multiplier = 0.5;
+        assert!(
+            (esp_pitch_to_radians(&preset, 180.0) - std::f32::consts::FRAC_PI_2).abs()
+                < 0.001
+        );
+
+        preset.pitch_multiplier = f32::NAN;
+        assert!(
+            (esp_pitch_to_radians(&preset, 180.0) - std::f32::consts::PI).abs() < 0.001
+        );
     }
 }

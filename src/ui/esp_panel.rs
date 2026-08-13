@@ -893,6 +893,21 @@ impl CrosshairApp {
                         });
                         ui.end_row();
 
+                        ui.label("Pitch scale").on_hover_text(
+                            "Scale only camera pitch response; values below 1 slow vertical ESP movement without changing horizontal FOV.",
+                        );
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                DragValue::new(&mut preset.pitch_multiplier)
+                                    .speed(0.01)
+                                    .range(0.0..=10.0),
+                            );
+                            if ui.small_button("Reset scale").clicked() {
+                                preset.pitch_multiplier = 1.0;
+                            }
+                        });
+                        ui.end_row();
+
                         // --- Pitch zero offset ---
                         ui.label("Pitch zero offset").on_hover_text("Use only when every marker is consistently too high/low as the camera tilts.");
                         ui.horizontal(|ui| {
@@ -944,6 +959,7 @@ impl CrosshairApp {
                                 preset.horizontal_plane = EspHorizontalPlane::Xy;
                                 preset.yaw_unit = EspAngleUnit::Degrees;
                                 preset.pitch_unit = EspAngleUnit::Radians;
+                                preset.pitch_multiplier = 1.0;
                                 preset.invert_camera_yaw = false;
                                 preset.invert_yaw = false;
                                 preset.invert_pitch = false;
