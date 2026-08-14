@@ -4908,6 +4908,12 @@ mod windows_overlay {
                         state.active && state.text_session.is_none()
                     };
                     if screen_draw_active && is_key_down {
+                        if info.vkCode == 0x1B {
+                            screen_draw_deactivate();
+                            update_held_key(info.vkCode, is_key_down, is_key_up);
+                            update_modifier_state(info.vkCode, is_key_down);
+                            return LRESULT(1);
+                        }
                         let ctrl_down = unsafe { GetAsyncKeyState(0x11) } < 0;
                         if ctrl_down && matches!(info.vkCode, 0x5A | 0x59) {
                             let shift_down = unsafe { GetAsyncKeyState(0x10) } < 0;
@@ -12998,30 +13004,46 @@ mod windows_overlay {
                 return false;
             }
             let freeze = SCREEN_DRAW_STATE.lock().freeze_screen;
-            let mut captured_frame = None;
             if freeze {
-                hide_ui_window_native();
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
-                if screen_w > 0 && screen_h > 0 {
-                    captured_frame = window_list::capture_virtual_screen_region(
-                        screen_x, screen_y, screen_w, screen_h,
-                    )
-                    .map(|frame| frame.rgba);
+                std::thread::spawn(|| {
+                    hide_ui_window_native();
+                    std::thread::sleep(std::time::Duration::from_millis(60));
+                    let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+                    let captured_frame = if screen_w > 0 && screen_h > 0 {
+                        window_list::capture_virtual_screen_region(
+                            screen_x, screen_y, screen_w, screen_h,
+                        )
+                        .map(|frame| frame.rgba)
+                    } else {
+                        None
+                    };
+                    {
+                        let mut state = SCREEN_DRAW_STATE.lock();
+                        activate_screen_draw(&mut state, captured_frame);
+                        state.trigger_latched = false;
+                        state.trigger_is_down = false;
+                        state.trigger_pressed_at = None;
+                        state.trigger_started_from_inactive = false;
+                        state.trigger_release_should_keep_open = true;
+                        state.suppress_next_trigger_hold = true;
+                    }
+                    request_screen_draw_overlay_sync();
+                    request_ui_repaint();
+                });
+            } else {
+                {
+                    let mut state = SCREEN_DRAW_STATE.lock();
+                    activate_screen_draw(&mut state, None);
+                    state.trigger_latched = false;
+                    state.trigger_is_down = false;
+                    state.trigger_pressed_at = None;
+                    state.trigger_started_from_inactive = false;
+                    state.trigger_release_should_keep_open = true;
+                    state.suppress_next_trigger_hold = true;
                 }
+                request_screen_draw_overlay_sync();
+                request_ui_repaint();
             }
-            {
-                let mut state = SCREEN_DRAW_STATE.lock();
-                activate_screen_draw(&mut state, captured_frame);
-                state.trigger_latched = false;
-                state.trigger_is_down = false;
-                state.trigger_pressed_at = None;
-                state.trigger_started_from_inactive = false;
-                state.trigger_release_should_keep_open = true;
-                state.suppress_next_trigger_hold = true;
-            }
-            request_screen_draw_overlay_sync();
-            request_ui_repaint();
             true
         }
     }
@@ -16658,6 +16680,32 @@ mod windows_overlay {
         let color_pick_preview = state_guard.color_pick_preview.clone();
         let capturing_region = state_guard.capturing_region;
         if !capturing_region {
+            let toolbar_x = state_guard.toolbar_x;
+            let toolbar_y = state_guard.toolbar_y;
+            let color = state_guard.color;
+            let brush_size = state_guard.brush_size;
+            let eraser = state_guard.eraser;
+            let smoothing = state_guard.smoothing;
+            let smoothing_amount = state_guard.smoothing_amount;
+            let tool = state_guard.tool;
+            let color_palette_open = state_guard.color_palette_open;
+
+            draw_screen_draw_toolbar_rgba(
+                state_guard.frame_rgba.as_mut_slice(),
+                width,
+                height,
+                toolbar_x,
+                toolbar_y,
+                color,
+                brush_size,
+                eraser,
+                smoothing,
+                smoothing_amount,
+                tool,
+                color_palette_open,
+                toolbar_color_pick_mode,
+            );
+
             if toolbar_color_pick_mode
                 && let Some(preview) = color_pick_preview.as_ref()
                 && let Some(panel_rect) = screen_draw_color_pick_panel_rect(&state_guard)
