@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::{MemoryValueType, RgbaColor};
@@ -76,6 +77,8 @@ pub struct EspPreset {
     pub entity_auto_hud_preset_id: Option<u32>,
     pub entity_aabb_center: bool,
     pub entity_aabb_pair_offset: i64,
+    #[serde(default)]
+    pub custom_entity_colors: HashMap<u32, RgbaColor>,
     pub camera_x: String,
     pub camera_y: String,
     pub camera_z: String,
@@ -181,6 +184,7 @@ impl EspPreset {
             entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
             entity_aabb_pair_offset: 0x0C,
+            custom_entity_colors: HashMap::new(),
             camera_x: String::new(),
             camera_y: String::new(),
             camera_z: String::new(),

@@ -27034,7 +27034,7 @@ mod windows_overlay {
         preset: &crate::model::EspPreset,
         frame: &mut EspReadFrame,
         pid: u32,
-    ) -> Result<Vec<([f32; 3], usize)>, String> {
+    ) -> Result<Vec<([f32; 3], usize, usize)>, String> {
         if !preset.entity_list_enabled {
             let mut read = |label: &str, expression: &str| {
                 frame
@@ -27047,6 +27047,7 @@ mod windows_overlay {
                     read("Target Y", &preset.target_y)?,
                     read("Target Z", &preset.target_z)?,
                 ],
+                0,
                 0,
             )]);
         }
@@ -27082,7 +27083,7 @@ mod windows_overlay {
             )
         };
         let mut targets = Vec::with_capacity(count.min(64) as usize);
-        for entity_address in entity_addresses {
+        for (entity_index, entity_address) in entity_addresses.into_iter().enumerate() {
             let Some(x_address) =
                 crate::model::entity_field_address(entity_address, 0, 1, preset.entity_x_offset)
             else {
@@ -27130,7 +27131,7 @@ mod windows_overlay {
                 && target.iter().any(|value| value.abs() > f32::EPSILON)
                 && target.iter().all(|value| value.abs() < 1.0e9)
             {
-                targets.push((target, entity_address));
+                targets.push((target, entity_address, entity_index));
             }
         }
         Ok(targets)
@@ -27141,7 +27142,7 @@ mod windows_overlay {
         frame: &mut EspReadFrame,
     ) -> Result<([f32; 3], [f32; 3], f32, f32), String> {
         let (pid, camera, yaw, pitch) = read_esp_view_inputs(preset, frame)?;
-        let (target, _) = read_esp_targets(preset, frame, pid)?
+        let (target, _, _) = read_esp_targets(preset, frame, pid)?
             .into_iter()
             .next()
             .ok_or_else(|| "Entity List contains no readable position".to_owned())?;
@@ -27234,7 +27235,7 @@ mod windows_overlay {
         let Ok(targets) = read_esp_targets(preset, frame, pid) else {
             return (Vec::new(), None);
         };
-        let nearest_target = targets.iter().map(|(t, _)| *t).min_by(|left, right| {
+        let nearest_target = targets.iter().map(|(t, _, _)| *t).min_by(|left, right| {
             let distance = |target: &[f32; 3]| {
                 let dx = target[0] - camera[0];
                 let dy = target[1] - camera[1];
@@ -27264,12 +27265,13 @@ mod windows_overlay {
         if preset.debug_mode {
             ESP_DEBUG_BOX_HITS.lock().clear();
         }
-        for (target, entity_address) in targets {
+        for (target, entity_address, entity_index) in targets {
             let (mut target_shapes, snapshot) = esp_shapes_for_target(
                 preset,
                 marker_asset,
                 target,
                 entity_address,
+                entity_index,
                 camera,
                 yaw,
                 pitch,
@@ -27301,6 +27303,7 @@ mod windows_overlay {
         marker_asset: Option<&Arc<str>>,
         target: [f32; 3],
         entity_address: usize,
+        entity_index: usize,
         camera: [f32; 3],
         yaw: f32,
         pitch: f32,
@@ -27355,11 +27358,16 @@ mod windows_overlay {
                 + preset.screen_offset_y
                 + preset.marker_offset_y)
                 .round() as i32;
+        let effective_color = preset
+            .custom_entity_colors
+            .get(&((entity_index + 1) as u32))
+            .copied()
+            .unwrap_or(preset.color);
         let color = [
-            preset.color.r,
-            preset.color.g,
-            preset.color.b,
-            preset.color.a,
+            effective_color.r,
+            effective_color.g,
+            effective_color.b,
+            effective_color.a,
         ];
         let thickness = preset.thickness.round().max(1.0) as i32;
         let marker_scale = crate::model::esp_marker_scale(preset, distance);

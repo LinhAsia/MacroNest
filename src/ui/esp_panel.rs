@@ -715,11 +715,92 @@ impl CrosshairApp {
                                     );
                                     ui.label("bytes");
                                 }
-                            })
-                            .response
-                            .on_hover_text(
-                                "Average each X/Y/Z field with the matching field at this signed byte delta.",
-                            );
+                            });
+                            ui.end_row();
+                            ui.label("Entity colors");
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Entity #");
+                                let mut target_idx: u32 = ui.data_mut(|d| {
+                                    *d.get_temp_mut_or(
+                                        egui::Id::new(("entity_color_idx", preset.id)),
+                                        1u32,
+                                    )
+                                });
+                                if ui
+                                    .add(
+                                        DragValue::new(&mut target_idx)
+                                            .range(1..=preset.entity_count.max(1) as u32),
+                                    )
+                                    .changed()
+                                {
+                                    ui.data_mut(|d| {
+                                        d.insert_temp(
+                                            egui::Id::new(("entity_color_idx", preset.id)),
+                                            target_idx,
+                                        )
+                                    });
+                                }
+
+                                let mut pick_color = ui.data_mut(|d| {
+                                    *d.get_temp_mut_or(
+                                        egui::Id::new(("entity_color_picker", preset.id)),
+                                        Color32::from_rgb(255, 0, 0),
+                                    )
+                                });
+                                if ui.color_edit_button_srgba(&mut pick_color).changed() {
+                                    ui.data_mut(|d| {
+                                        d.insert_temp(
+                                            egui::Id::new(("entity_color_picker", preset.id)),
+                                            pick_color,
+                                        )
+                                    });
+                                }
+
+                                if ui
+                                    .button("Set color")
+                                    .on_hover_text("Assign custom color to selected Entity #")
+                                    .clicked()
+                                {
+                                    preset.custom_entity_colors.insert(
+                                        target_idx,
+                                        crate::model::RgbaColor {
+                                            r: pick_color.r(),
+                                            g: pick_color.g(),
+                                            b: pick_color.b(),
+                                            a: pick_color.a(),
+                                        },
+                                    );
+                                }
+
+                                if !preset.custom_entity_colors.is_empty() {
+                                    ui.label("| Active:");
+                                    let mut to_remove = None;
+                                    let mut sorted_keys: Vec<_> =
+                                        preset.custom_entity_colors.keys().copied().collect();
+                                    sorted_keys.sort_unstable();
+                                    for key in sorted_keys {
+                                        if let Some(c) = preset.custom_entity_colors.get(&key) {
+                                            let color_32 = Color32::from_rgba_unmultiplied(
+                                                c.r, c.g, c.b, c.a,
+                                            );
+                                            ui.horizontal(|ui| {
+                                                let (rect, _) = ui.allocate_exact_size(
+                                                    egui::vec2(12.0, 12.0),
+                                                    egui::Sense::hover(),
+                                                );
+                                                ui.painter().rect_filled(rect, 2.0, color_32);
+                                                ui.label(format!("#{}", key));
+                                                if ui.small_button("❌").clicked() {
+                                                    to_remove = Some(key);
+                                                }
+                                            });
+                                        }
+                                    }
+                                    if let Some(key) = to_remove {
+                                        preset.custom_entity_colors.remove(&key);
+                                    }
+                                }
+                            });
                             ui.end_row();
                         } else {
                             for (label, value) in [
