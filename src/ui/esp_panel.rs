@@ -389,7 +389,7 @@ impl CrosshairApp {
 
         let windows = crate::window_list::list_open_windows();
         let mut remove = None;
-        let mut copy_preset = None;
+        let mut copy_preset_index = None;
         let mut paste_after = None;
         let mut auto_capture_start = None;
         let mut auto_capture_stop = None;
@@ -401,7 +401,6 @@ impl CrosshairApp {
             let mut preset = self.state.esp_presets[index].clone();
             let migrated_marker_source = preset.migrate_marker_sources();
             let before = preset.clone();
-            let snapshot = preset.clone();
             let calibration_feedback = self.esp_calibration_feedback.get(&preset.id).cloned();
             let entity_capture_feedback = self
                 .esp_entity_capture_feedback
@@ -431,7 +430,7 @@ impl CrosshairApp {
                             paste_after = Some(index);
                         }
                         if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                            copy_preset = Some(snapshot.clone());
+                            copy_preset_index = Some(index);
                         }
                         if Self::sound_style_remove_button(ui).clicked() {
                             remove = Some(preset.id);
@@ -1349,6 +1348,9 @@ impl CrosshairApp {
                         ui.end_row();
                     });
             });
+            if copy_preset_index == Some(index) {
+                self.preset_clipboard = Some(crate::ui::PresetClipboard::Esp(preset.clone()));
+            }
             if migrated_marker_source || preset != before {
                 self.state.esp_presets[index] = preset;
                 dirty = true;
@@ -1368,9 +1370,7 @@ impl CrosshairApp {
             self.esp_entity_capture_feedback.remove(&id);
             dirty = true;
         }
-        if let Some(preset) = copy_preset {
-            self.preset_clipboard = Some(crate::ui::PresetClipboard::Esp(preset));
-        }
+
         if let Some(index) = paste_after
             && let Some(crate::ui::PresetClipboard::Esp(mut preset)) = self.preset_clipboard.clone()
         {

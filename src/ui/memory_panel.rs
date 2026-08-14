@@ -8992,9 +8992,12 @@ impl CrosshairApp {
                 .iter_mut()
                 .find(|p| p.id == preset_id)
             {
-                target.target_x = addr_hex;
+                target.target_x = addr_hex.clone();
                 target.target_z = addr_z;
                 target.target_y = addr_y;
+                if target.entity_list_enabled {
+                    target.entity_root = addr_hex;
+                }
             }
             self.persist_esp_presets();
         }
