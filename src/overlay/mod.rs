@@ -27373,7 +27373,9 @@ mod windows_overlay {
         let marker_scale = crate::model::esp_marker_scale(preset, distance);
         let mut shapes = Vec::new();
         match preset.marker_source {
+            crate::model::EspMarkerSource::None => {}
             crate::model::EspMarkerSource::Geometry => match preset.marker {
+                crate::model::EspMarkerKind::None => {}
                 crate::model::EspMarkerKind::Dot => {
                     let radius = (preset.dot_radius * marker_scale).round().max(1.0) as i32;
                     shapes.push(GeometryRenderShape {
@@ -27507,18 +27509,57 @@ mod windows_overlay {
             }
         }
         if preset.show_tracer {
+            let origin_x = left + width / 2;
+            let origin_y = top + height;
+            let (target_x, target_y) = match preset.marker_source {
+                crate::model::EspMarkerSource::Geometry => match preset.marker {
+                    crate::model::EspMarkerKind::Dot => {
+                        let radius = (preset.dot_radius * marker_scale).round().max(1.0) as i32;
+                        let dx = (origin_x - x) as f32;
+                        let dy = (origin_y - y) as f32;
+                        let len = (dx * dx + dy * dy).sqrt();
+                        if len > radius as f32 && len > 0.001 {
+                            (
+                                x + ((dx / len) * radius as f32).round() as i32,
+                                y + ((dy / len) * radius as f32).round() as i32,
+                            )
+                        } else {
+                            (x, y)
+                        }
+                    }
+                    crate::model::EspMarkerKind::Box => {
+                        let half_width =
+                            (preset.box_width * marker_scale * 0.5).round().max(1.0) as i32;
+                        let half_height =
+                            (preset.box_height * marker_scale * 0.5).round().max(1.0) as i32;
+                        let dx = (origin_x - x) as f32;
+                        let dy = (origin_y - y) as f32;
+                        if dy.abs() > 0.001 {
+                            let t = (half_height as f32 / dy.abs()).min(1.0);
+                            let edge_x = (x as f32 + dx * t).round() as i32;
+                            let edge_x_clamped = edge_x.clamp(x - half_width, x + half_width);
+                            let edge_y = if dy > 0.0 { y + half_height } else { y - half_height };
+                            (edge_x_clamped, edge_y)
+                        } else {
+                            (if dx > 0.0 { x + half_width } else { x - half_width }, y)
+                        }
+                    }
+                    crate::model::EspMarkerKind::None => (x, y),
+                },
+                _ => (x, y),
+            };
             shapes.push(GeometryRenderShape {
                 bounds: (
-                    left.min(x),
-                    y.min(top + height),
-                    (left + width / 2).max(x),
-                    (top + height).max(y),
+                    left.min(target_x.min(origin_x)),
+                    top.min(target_y.min(origin_y)),
+                    (left + width).max(target_x.max(origin_x)),
+                    (top + height).max(target_y.max(origin_y)),
                 ),
                 draw: GeometryRenderDraw::Line {
-                    x1: left + width / 2,
-                    y1: top + height,
-                    x2: x,
-                    y2: y,
+                    x1: origin_x,
+                    y1: origin_y,
+                    x2: target_x,
+                    y2: target_y,
                     stroke: color,
                     thickness,
                 },

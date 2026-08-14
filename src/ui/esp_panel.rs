@@ -610,17 +610,25 @@ impl CrosshairApp {
                                             &preset.entity_auto_code_module,
                                         ) && code.offset == preset.entity_auto_code_offset
                                     });
+                                let format_code_label = |code: &crate::model::MemoryCodeEntry| {
+                                    if !code.name.trim().is_empty() {
+                                        format!(
+                                            "{} — {}+{:X}  {}",
+                                            code.name, code.module, code.offset, code.instruction
+                                        )
+                                    } else {
+                                        format!(
+                                            "{}+{:X}  {}",
+                                            code.module, code.offset, code.instruction
+                                        )
+                                    }
+                                };
                                 ComboBox::from_id_salt(("esp_auto_root_code", preset.id))
                                     .selected_text(selected_code.map_or(
                                         "Select instruction".to_owned(),
-                                        |code| {
-                                            format!(
-                                                "{}+{:X}  {}",
-                                                code.module, code.offset, code.instruction
-                                            )
-                                        },
+                                        format_code_label,
                                     ))
-                                    .width(280.0)
+                                    .width(320.0)
                                     .show_ui(ui, |ui| {
                                         for code in &self.state.memory_code_list {
                                             let selected = code.module.eq_ignore_ascii_case(
@@ -629,10 +637,7 @@ impl CrosshairApp {
                                             if ui
                                                 .selectable_label(
                                                     selected,
-                                                    format!(
-                                                        "{}+{:X}  {}",
-                                                        code.module, code.offset, code.instruction
-                                                    ),
+                                                    format_code_label(code),
                                                 )
                                                 .clicked()
                                             {
@@ -1132,22 +1137,26 @@ impl CrosshairApp {
                                     EspMarkerSource::Text => "Text",
                                     EspMarkerSource::Svg => "SVG",
                                     EspMarkerSource::Image => "Image",
+                                    EspMarkerSource::None => "None (Tracer / Audio only)",
                                 })
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Geometry, "Geometry");
                                     ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Text, "Text");
                                     ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Svg, "SVG");
                                     ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Image, "Image");
+                                    ui.selectable_value(&mut preset.marker_source, EspMarkerSource::None, "None (Tracer / Audio only)");
                                 });
                             if preset.marker_source == EspMarkerSource::Geometry {
                                 ComboBox::from_id_salt(("esp_marker", preset.id))
                                     .selected_text(match preset.marker {
                                         EspMarkerKind::Dot => "Dot",
                                         EspMarkerKind::Box => "Box",
+                                        EspMarkerKind::None => "None",
                                     })
                                     .show_ui(ui, |ui| {
                                         ui.selectable_value(&mut preset.marker, EspMarkerKind::Dot, "Dot");
                                         ui.selectable_value(&mut preset.marker, EspMarkerKind::Box, "Box");
+                                        ui.selectable_value(&mut preset.marker, EspMarkerKind::None, "None");
                                     });
                                 match preset.marker {
                                     EspMarkerKind::Dot => {
@@ -1160,10 +1169,13 @@ impl CrosshairApp {
                                         ui.label("Height");
                                         ui.add(DragValue::new(&mut preset.box_height).speed(1.0).range(2.0..=1000.0));
                                     }
+                                    EspMarkerKind::None => {}
                                 }
-                                ui.label("Thickness");
-                                ui.add(DragValue::new(&mut preset.thickness).speed(1.0).range(1.0..=30.0));
-                                ui.checkbox(&mut preset.filled, "Fill");
+                                if preset.marker != EspMarkerKind::None {
+                                    ui.label("Thickness");
+                                    ui.add(DragValue::new(&mut preset.thickness).speed(1.0).range(1.0..=30.0));
+                                    ui.checkbox(&mut preset.filled, "Fill");
+                                }
                             } else if preset.marker_source == EspMarkerSource::Text {
                                 ui.label("Offset X");
                                 ui.add(DragValue::new(&mut preset.text_offset_x).speed(1.0));

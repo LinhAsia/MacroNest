@@ -9639,21 +9639,20 @@ impl CrosshairApp {
                 format_prefixed_memory_address(address)
             ),
         };
-        let view_address = if dialog.scroll_offset >= 0 {
-            address.saturating_add(dialog.scroll_offset as usize)
-        } else {
-            address.saturating_sub(dialog.scroll_offset.unsigned_abs())
-        };
         let unit = memory_display_width(dialog.display_type);
         let value_width = memory_display_cell_width(dialog.display_type);
         let address_width = 145.0;
         let ascii_width = 210.0;
-        let approx_cols = (((720.0 - address_width - ascii_width) / value_width).floor() as usize).clamp(1, 32 / unit);
+        let approx_cols = (((780.0 - address_width - ascii_width) / value_width).floor() as usize).clamp(1, 32 / unit);
         let approx_row_bytes = (approx_cols * unit).max(1);
 
         let (start_address, read_size) = match kind {
-            MemoryViewKind::Bytes => ((view_address.saturating_sub(512)) / approx_row_bytes * approx_row_bytes, 1280),
-            MemoryViewKind::Structure => (view_address, 512),
+            MemoryViewKind::Bytes => {
+                let pre_bytes = approx_row_bytes * 3;
+                let target_row_aligned = (address / approx_row_bytes) * approx_row_bytes;
+                (target_row_aligned.saturating_sub(pre_bytes), 4096)
+            }
+            MemoryViewKind::Structure => (address, 1024),
         };
         let mut actual_start_address = start_address;
         let bytes = self
@@ -9676,8 +9675,8 @@ impl CrosshairApp {
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(760.0, 430.0))
-                .with_min_inner_size(vec2(520.0, 280.0))
+                .with_inner_size(vec2(780.0, 620.0))
+                .with_min_inner_size(vec2(540.0, 360.0))
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
@@ -9727,7 +9726,8 @@ impl CrosshairApp {
         }
         egui::Window::new(&title)
             .id(egui::Id::new("memory-view-main"))
-            .default_size(vec2(720.0, 430.0))
+            .default_size(vec2(780.0, 620.0))
+            .min_size(vec2(540.0, 360.0))
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
@@ -9839,32 +9839,26 @@ impl CrosshairApp {
                 .clamp(1, 32 / unit);
             let row_bytes = columns * unit;
 
-            // Keyboard navigation (Up / Down Arrow, PageUp / PageDown) & Mouse wheel scrolling
-            let mut move_delta: isize = 0;
+            // Keyboard navigation (Up / Down Arrow, PageUp / PageDown)
+            let mut move_address_delta: isize = 0;
             ui.input(|i| {
                 if i.key_pressed(egui::Key::ArrowUp) {
-                    move_delta -= row_bytes as isize;
+                    move_address_delta -= row_bytes as isize;
                 } else if i.key_pressed(egui::Key::ArrowDown) {
-                    move_delta += row_bytes as isize;
+                    move_address_delta += row_bytes as isize;
                 } else if i.key_pressed(egui::Key::PageUp) {
-                    move_delta -= (row_bytes * 10) as isize;
+                    move_address_delta -= (row_bytes * 10) as isize;
                 } else if i.key_pressed(egui::Key::PageDown) {
-                    move_delta += (row_bytes * 10) as isize;
+                    move_address_delta += (row_bytes * 10) as isize;
                 }
             });
 
-            let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
-            if scroll_delta != 0.0 && ui.ui_contains_pointer() {
-                let lines = (scroll_delta.abs() / 12.0).clamp(1.0, 5.0) as usize;
-                if scroll_delta > 0.0 {
-                    move_delta -= (lines * row_bytes) as isize;
-                } else if scroll_delta < 0.0 {
-                    move_delta += (lines * row_bytes) as isize;
+            if move_address_delta != 0 {
+                if move_address_delta > 0 {
+                    dialog.address = dialog.address.saturating_add(move_address_delta as usize);
+                } else {
+                    dialog.address = dialog.address.saturating_sub(move_address_delta.unsigned_abs());
                 }
-            }
-
-            if move_delta != 0 {
-                dialog.scroll_offset = dialog.scroll_offset.saturating_add(move_delta);
                 ui.ctx().request_repaint();
             }
 
@@ -9920,9 +9914,11 @@ impl CrosshairApp {
         }
         match dialog.kind {
             MemoryViewKind::Bytes => {
-                egui::ScrollArea::both().show(ui, |ui| {
-                    Self::render_memory_region_grid(ui, language, dialog, start_address, bytes, current_time)
-                });
+                egui::ScrollArea::both()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        Self::render_memory_region_grid(ui, language, dialog, start_address, bytes, current_time)
+                    });
             }
             MemoryViewKind::Structure => {
                 // Auto-identify class on first open

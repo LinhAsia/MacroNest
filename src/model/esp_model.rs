@@ -8,6 +8,7 @@ pub enum EspMarkerKind {
     #[default]
     Dot,
     Box,
+    None,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -17,6 +18,7 @@ pub enum EspMarkerSource {
     Text,
     Svg,
     Image,
+    None,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
