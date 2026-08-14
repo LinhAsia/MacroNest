@@ -16204,6 +16204,10 @@ impl eframe::App for CrosshairApp {
                         color_pick_mode,
                     );
                 });
+                ctx.send_viewport_cmd_to(
+                    egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                    egui::ViewportCommand::Visible(toolbar_visible),
+                );
             } else {
                 let hidden_for_drawing = ctx.data(|d| {
                     d.get_temp::<bool>(egui::Id::new("main_window_hidden_for_drawing"))

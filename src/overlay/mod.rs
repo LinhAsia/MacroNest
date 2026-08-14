@@ -16680,32 +16680,6 @@ mod windows_overlay {
         let color_pick_preview = state_guard.color_pick_preview.clone();
         let capturing_region = state_guard.capturing_region;
         if !capturing_region {
-            let toolbar_x = state_guard.toolbar_x;
-            let toolbar_y = state_guard.toolbar_y;
-            let color = state_guard.color;
-            let brush_size = state_guard.brush_size;
-            let eraser = state_guard.eraser;
-            let smoothing = state_guard.smoothing;
-            let smoothing_amount = state_guard.smoothing_amount;
-            let tool = state_guard.tool;
-            let color_palette_open = state_guard.color_palette_open;
-
-            draw_screen_draw_toolbar_rgba(
-                state_guard.frame_rgba.as_mut_slice(),
-                width,
-                height,
-                toolbar_x,
-                toolbar_y,
-                color,
-                brush_size,
-                eraser,
-                smoothing,
-                smoothing_amount,
-                tool,
-                color_palette_open,
-                toolbar_color_pick_mode,
-            );
-
             if toolbar_color_pick_mode
                 && let Some(preview) = color_pick_preview.as_ref()
                 && let Some(panel_rect) = screen_draw_color_pick_panel_rect(&state_guard)
@@ -37130,6 +37104,8 @@ mod windows_overlay {
         }
     }
 
+    static SAVED_UI_WINDOW_POS: parking_lot::Mutex<Option<(i32, i32)>> = parking_lot::Mutex::new(None);
+
     fn hide_ui_window_native() {
         unsafe {
             let Some(app) = find_app_ui_window() else {
@@ -37139,7 +37115,21 @@ mod windows_overlay {
                 return;
             }
 
-            let _ = ShowWindow(app, SW_HIDE);
+            let mut rect = RECT::default();
+            if GetWindowRect(app, &mut rect).is_ok() {
+                if rect.left != -10000 {
+                    *SAVED_UI_WINDOW_POS.lock() = Some((rect.left, rect.top));
+                }
+            }
+            let _ = SetWindowPos(
+                app,
+                None,
+                -10000,
+                -10000,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
         }
     }
 
@@ -37152,7 +37142,19 @@ mod windows_overlay {
                 return;
             }
 
-            let _ = ShowWindow(app, SW_SHOW);
+            if let Some((x, y)) = SAVED_UI_WINDOW_POS.lock().take() {
+                let _ = SetWindowPos(
+                    app,
+                    None,
+                    x,
+                    y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW,
+                );
+            } else {
+                let _ = ShowWindow(app, SW_SHOW);
+            }
         }
     }
 
@@ -37165,7 +37167,19 @@ mod windows_overlay {
                 return;
             }
 
-            let _ = ShowWindow(app, SW_SHOWNA);
+            if let Some((x, y)) = SAVED_UI_WINDOW_POS.lock().take() {
+                let _ = SetWindowPos(
+                    app,
+                    None,
+                    x,
+                    y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+            } else {
+                let _ = ShowWindow(app, SW_SHOWNA);
+            }
         }
     }
 
