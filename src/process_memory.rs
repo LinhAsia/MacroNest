@@ -685,6 +685,35 @@ pub fn scan_pointer_paths_with_budget(
     )
 }
 
+pub fn scan_pointer_paths_to_targets_with_budget(
+    pid: u32,
+    targets: &[usize],
+    modules: &[(String, usize, usize)],
+    pointer_width: usize,
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+    max_bytes: usize,
+    progress: Arc<AtomicUsize>,
+) -> io::Result<Vec<(usize, Vec<PointerPath>)>> {
+    let map = capture_pointer_map_with_budget_cancel(
+        pid,
+        modules,
+        pointer_width,
+        max_bytes,
+        progress,
+        None,
+    )?;
+    Ok(targets
+        .iter()
+        .copied()
+        .map(|target| {
+            let paths = map.paths_to(target, max_offset, max_depth, result_limit);
+            (target, paths)
+        })
+        .collect())
+}
+
 pub fn scan_pointer_paths_with_budget_options(
     pid: u32,
     target: usize,

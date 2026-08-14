@@ -28,7 +28,7 @@ use crate::{
         read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
         scan_aob_memory_range_with_progress, scan_aob_memory_with_progress,
         scan_entity_lists_with_progress, scan_memory_range_with_progress,
-        scan_pointer_paths_with_budget, scan_pointer_paths_with_budget_options,
+        scan_pointer_paths_to_targets_with_budget, scan_pointer_paths_with_budget_options,
         scan_text_memory_with_progress, scan_view_projection_candidates, validate_entity_list,
         write_code_bytes, write_scan_value, write_text_memory,
     },
@@ -154,6 +154,8 @@ struct PointerSpec {
 }
 
 struct StablePointerCandidate {
+    source_address: usize,
+    expected_value: ScanValue,
     path: PointerPath,
     valid: Option<bool>,
     resolved_base: Option<usize>,
@@ -165,7 +167,7 @@ struct StablePointerCandidate {
 
 struct StablePointerJobResult {
     pid: u32,
-    result: Result<Vec<PointerPath>, String>,
+    result: Result<Vec<(usize, Vec<PointerPath>)>, String>,
 }
 
 struct StablePointerFilterResult {
@@ -176,10 +178,10 @@ struct StablePointerFilterResult {
 }
 
 struct StablePointerDialog {
-    source_address: usize,
+    source_addresses: Vec<usize>,
     source_pid: u32,
     value_type: ScanValueType,
-    expected_value: ScanValue,
+    expected_values: HashMap<usize, ScanValue>,
     status: String,
     candidates: Vec<StablePointerCandidate>,
     selected: Option<usize>,
@@ -2223,6 +2225,9 @@ impl CrosshairApp {
                 ui.close();
             }
         });
+        if response.clicked_by(egui::PointerButton::Middle) {
+            self.navigate_open_memory_view(address_value);
+        }
         if manual_double_clicked || response.double_clicked() {
             self.memory_panel.selected_results.clear();
             self.memory_panel.selected_results.insert(index);
@@ -2558,6 +2563,9 @@ impl CrosshairApp {
                                 ui.close();
                             }
                         });
+                        if response.clicked_by(egui::PointerButton::Middle) {
+                            self.navigate_open_memory_view(address_value);
+                        }
                         if response.double_clicked() {
                             self.memory_panel.selected_results.clear();
                             self.memory_panel.selected_results.insert(index);
@@ -2719,15 +2727,11 @@ impl CrosshairApp {
                     });
                 });
                 ui.separator();
-                if ui.rect_contains_pointer(ui.max_rect())
-                    && ui.input(|input| input.pointer.primary_pressed())
-                {
-                    self.memory_panel.saved_list_active = true;
-                }
                 let editing = self.memory_panel.edit_value_index.is_some()
                     || self.memory_panel.edit_description_index.is_some();
                 if self.memory_panel.saved_list_active
                     && !editing
+                    && ui.ctx().memory(|memory| memory.focused().is_none())
                     && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A))
                 {
                     self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
@@ -3021,6 +3025,9 @@ impl CrosshairApp {
                             for hit in row_hits {
                                 response = response.union(hit);
                             }
+                            if response.clicked_by(egui::PointerButton::Middle) {
+                                self.navigate_open_memory_view(saved.address);
+                            }
                             if ui.input(|input| {
                                 input.pointer.button_pressed(egui::PointerButton::Primary)
                             }) && let Some(pointer) = ui.ctx().pointer_latest_pos()
@@ -3251,11 +3258,18 @@ impl CrosshairApp {
                                 }
                                 if ui
                                     .add_enabled(
-                                        single_target,
-                                        Button::new(self.tr(
-                                            "Find stable pointer automatically",
-                                            "Tự động tìm pointer ổn định",
-                                        )),
+                                        selected_count > 0,
+                                        Button::new(if single_target {
+                                            self.tr(
+                                                "Find stable pointer automatically",
+                                                "Tự động tìm pointer ổn định",
+                                            )
+                                        } else {
+                                            self.tr(
+                                                "Find stable pointers for all selected addresses",
+                                                "Tìm pointer ổn định cho tất cả địa chỉ đã chọn",
+                                            )
+                                        }),
                                     )
                                     .clicked()
                                 {
@@ -4939,13 +4953,38 @@ impl CrosshairApp {
             self.memory_panel.status = "Select a process".to_owned();
             return;
         };
-        let Some(expected_value) = saved.current else {
+        let mut targets = if self.memory_panel.selected_saved.len() > 1 {
+            self.memory_panel
+                .selected_saved
+                .iter()
+                .filter_map(|&index| self.memory_panel.saved.get(index))
+                .filter(|entry| {
+                    entry.text_encoding.is_none() && entry.value_type == saved.value_type
+                })
+                .filter_map(|entry| entry.current.map(|value| (entry.address, value)))
+                .collect::<Vec<_>>()
+        } else {
+            saved
+                .current
+                .map(|value| vec![(saved.address, value)])
+                .unwrap_or_default()
+        };
+        targets.sort_unstable_by_key(|(address, _)| *address);
+        targets.dedup_by_key(|(address, _)| *address);
+        if targets.is_empty() {
             self.memory_panel.status = self
-                .tr("Unable to read this address", "Không thể đọc địa chỉ này")
+                .tr(
+                    "Unable to read the selected addresses",
+                    "Không thể đọc các địa chỉ đã chọn",
+                )
                 .to_owned();
             return;
-        };
-        let target = saved.address;
+        }
+        let source_addresses = targets
+            .iter()
+            .map(|(address, _)| *address)
+            .collect::<Vec<_>>();
+        let expected_values = targets.iter().copied().collect::<HashMap<_, _>>();
         let progress = Arc::new(AtomicUsize::new(0));
         let limits = self.pointer_scan_limits();
         let modules = match process_modules(pid) {
@@ -4954,10 +4993,10 @@ impl CrosshairApp {
                 let status = format!("Unable to list process modules: {error}");
                 self.memory_panel.status.clone_from(&status);
                 self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
-                    source_address: target,
+                    source_addresses,
                     source_pid: pid,
                     value_type: saved.value_type,
-                    expected_value,
+                    expected_values,
                     status,
                     candidates: Vec::new(),
                     selected: None,
@@ -4976,11 +5015,12 @@ impl CrosshairApp {
         };
         let worker_progress = Arc::clone(&progress);
         let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
+        let worker_targets = source_addresses.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = scan_pointer_paths_with_budget(
+            let result = scan_pointer_paths_to_targets_with_budget(
                 pid,
-                target,
+                &worker_targets,
                 &modules,
                 pointer_width,
                 limits.max_offset,
@@ -4993,11 +5033,11 @@ impl CrosshairApp {
             let _ = tx.send(StablePointerJobResult { pid, result });
         });
         self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
-            source_address: target,
+            source_addresses,
             source_pid: pid,
             value_type: saved.value_type,
-            expected_value,
-            status: "Scanning pointer paths…".to_owned(),
+            expected_values,
+            status: format!("Scanning pointer paths for {} target(s)…", targets.len()),
             candidates: Vec::new(),
             selected: None,
             rx: Some(rx),
@@ -6824,17 +6864,22 @@ impl CrosshairApp {
                 dialog.status = "The source process changed during pointer scan".to_owned();
             } else {
                 match outcome.result {
-                    Ok(paths) => {
-                        dialog.candidates = paths
+                    Ok(paths_by_target) => {
+                        dialog.candidates = paths_by_target
                             .into_iter()
-                            .map(|path| StablePointerCandidate {
-                                path,
-                                valid: None,
-                                resolved_base: None,
-                                resolved_address: None,
-                                observed_value: None,
-                                live_value: None,
-                                filter_value: None,
+                            .flat_map(|(source_address, paths)| {
+                                let expected_value = dialog.expected_values[&source_address];
+                                paths.into_iter().map(move |path| StablePointerCandidate {
+                                    source_address,
+                                    expected_value,
+                                    path,
+                                    valid: None,
+                                    resolved_base: None,
+                                    resolved_address: None,
+                                    observed_value: None,
+                                    live_value: None,
+                                    filter_value: None,
+                                })
                             })
                             .collect();
                         dialog.candidates.sort_by_key(|candidate| {
@@ -6854,8 +6899,9 @@ impl CrosshairApp {
                                 .then_some(" (path limit reached)")
                                 .unwrap_or_default();
                             format!(
-                                "{} candidate(s){limit_note}. Restart the game, restore the target value, select the new process, then Validate.",
+                                "{} candidate(s) for {} target(s){limit_note}. Restart the game, restore the target values, select the new process, then Validate.",
                                 dialog.candidates.len(),
+                                dialog.source_addresses.len(),
                             )
                         };
                     }
@@ -6959,6 +7005,7 @@ impl CrosshairApp {
                     ui.checkbox(&mut dialog.exe_only, "EXE only");
                 });
                 ui.separator();
+                const TARGET_WIDTH: f32 = 145.0;
                 const STATUS_WIDTH: f32 = 108.0;
                 const ROOT_WIDTH: f32 = 195.0;
                 const OFFSETS_WIDTH: f32 = 170.0;
@@ -6968,6 +7015,7 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     for (width, title) in [
+                        (TARGET_WIDTH, "Target"),
                         (STATUS_WIDTH, "Status"),
                         (ROOT_WIDTH, "Root"),
                         (OFFSETS_WIDTH, "Offsets"),
@@ -7017,7 +7065,8 @@ impl CrosshairApp {
                         dialog.last_live_refresh = Instant::now();
                     }
                     ui.set_min_width(
-                        STATUS_WIDTH
+                        TARGET_WIDTH
+                            + STATUS_WIDTH
                             + ROOT_WIDTH
                             + OFFSETS_WIDTH
                             + ADDRESS_WIDTH
@@ -7077,6 +7126,10 @@ impl CrosshairApp {
                             |ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
                                 for (width, text) in [
+                                    (
+                                        TARGET_WIDTH,
+                                        format_prefixed_memory_address(candidate.source_address),
+                                    ),
                                     (STATUS_WIDTH, state.to_owned()),
                                     (ROOT_WIDTH, root),
                                     (OFFSETS_WIDTH, offsets),
@@ -7757,7 +7810,7 @@ impl CrosshairApp {
             candidate.observed_value = Some(observed);
             candidate.live_value = Some(observed);
             candidate.filter_value = Some(observed);
-            if observed == dialog.expected_value {
+            if observed == candidate.expected_value {
                 candidate.valid = Some(true);
             } else {
                 candidate.valid = None;
@@ -7792,8 +7845,8 @@ impl CrosshairApp {
             });
         dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
         dialog.status = format!(
-            "PID {pid}: {valid} verified, {changed} resolved with a different value, {broken} broken. Expected {}.",
-            editable_scan_value(dialog.expected_value, false)
+            "PID {pid}: {valid} verified, {changed} resolved with a different value, {broken} broken across {} target(s).",
+            dialog.source_addresses.len()
         );
     }
 
@@ -9986,6 +10039,12 @@ impl CrosshairApp {
                         ui.ctx()
                             .copy_text(format_prefixed_memory_address(row_address));
                     }
+                    if address_cell.clicked_by(egui::PointerButton::Middle) {
+                        dialog.pending_add = Some((
+                            row_address,
+                            memory_display_scan_type(dialog.display_type),
+                        ));
+                    }
                     address_cell.context_menu(|ui| {
                         if ui.button("Copy address").clicked() {
                             ui.ctx()
@@ -10013,6 +10072,12 @@ impl CrosshairApp {
                             }
                         }
                         let cell_address = row_address.saturating_add(column * unit);
+                        if cell.clicked_by(egui::PointerButton::Middle) {
+                            dialog.pending_add = Some((
+                                cell_address,
+                                memory_display_scan_type(dialog.display_type),
+                            ));
+                        }
                         cell.context_menu(|ui| {
                             let add_label = Self::tr_lang(
                                 language,
@@ -10315,6 +10380,14 @@ impl CrosshairApp {
                         .inner;
                     if desc_resp.clicked() || av.clicked() {
                         newly_selected_address = Some(element_address);
+                    }
+                    if desc_resp.clicked_by(egui::PointerButton::Middle)
+                        || av.clicked_by(egui::PointerButton::Middle)
+                    {
+                        add_request = Some((
+                            element_address,
+                            element.value_type.scan_type(dialog.pointer_width),
+                        ));
                     }
                     if av.double_clicked() {
                         if is_ptr && pointed != 0 {
@@ -11528,6 +11601,29 @@ impl CrosshairApp {
             saved_to_library: false,
         });
         self.memory_panel.manual_address.clear();
+    }
+
+    fn navigate_open_memory_view(&mut self, address: usize) -> bool {
+        let Some(dialog) = self.memory_panel.memory_view_dialog.as_mut() else {
+            return false;
+        };
+        Self::navigate_memory_view_dialog(dialog, address);
+        true
+    }
+
+    fn navigate_memory_view_dialog(dialog: &mut MemoryViewDialog, address: usize) {
+        if dialog.address == address {
+            return;
+        }
+        dialog.history.push(dialog.address);
+        dialog.address = address;
+        dialog.previous_bytes.clear();
+        dialog.byte_change_times.clear();
+        dialog.auto_dissected = false;
+        dialog.selected_structure_address = None;
+        if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
+            active.address = address;
+        }
     }
 
     fn open_manual_structure_view(&mut self) {
@@ -13310,5 +13406,45 @@ mod tests {
         let mut pending = hotkey::parse_binding("Ctrl+Shift");
         update_pending_modifier_capture(&mut pending, hotkey::parse_binding("Ctrl").unwrap());
         assert_eq!(hotkey::format_binding(pending.as_ref()), "Ctrl+Shift");
+    }
+
+    #[test]
+    fn memory_view_navigation_keeps_display_type() {
+        let elements = default_structure_elements();
+        let mut dialog = MemoryViewDialog {
+            address: 0x1000,
+            tracked_base: None,
+            kind: MemoryViewKind::Bytes,
+            display_type: MemoryDisplayType::Float,
+            relative_addresses: false,
+            pinned: true,
+            elements: elements.clone(),
+            pending_add: None,
+            pending_track: None,
+            pointer_width: 8,
+            previous_bytes: vec![1],
+            byte_change_times: HashMap::from([(0, 1.0)]),
+            classes: vec![StructureClass {
+                name: "Class_0".to_owned(),
+                address: 0x1000,
+                elements,
+            }],
+            selected_class: 0,
+            class_detection_status: String::new(),
+            class_detection_attempted: false,
+            auto_dissected: true,
+            history: Vec::new(),
+            structure_back_step: "10".to_owned(),
+            structure_forward_step: "10".to_owned(),
+            selected_structure_address: Some(0x1004),
+        };
+
+        CrosshairApp::navigate_memory_view_dialog(&mut dialog, 0x2000);
+
+        assert_eq!(dialog.address, 0x2000);
+        assert!(matches!(dialog.display_type, MemoryDisplayType::Float));
+        assert_eq!(dialog.history, vec![0x1000]);
+        assert!(dialog.previous_bytes.is_empty());
+        assert!(dialog.byte_change_times.is_empty());
     }
 }
