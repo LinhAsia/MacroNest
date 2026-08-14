@@ -6182,38 +6182,6 @@ impl CrosshairApp {
                             self.state.quick_screen_draw_enabled,
                         );
 
-                        // Instant screenshot corner button (chọn vùng -> copy)
-                        let snap_rect = egui::Rect::from_min_size(
-                            pos2(button_response.rect.right() - 31.0, button_response.rect.top() + 3.0),
-                            vec2(27.0, 27.0),
-                        );
-                        let snap_response = ui.put(
-                            snap_rect,
-                            Button::new(Self::material_icon_text(0xe3b0, 14.0)) // photo_camera
-                                .corner_radius(7.0)
-                                .fill(Color32::from_rgba_premultiplied(20, 28, 44, 230))
-                                .stroke(egui::Stroke::new(1.2, Color32::from_rgb(117, 219, 166))),
-                        ).on_hover_text(Self::tr_lang(
-                            self.state.ui_language,
-                            "Instant screenshot (select region → copy)",
-                            "Chụp nhanh (chọn vùng → copy)",
-                        ));
-
-                        if snap_response.clicked() {
-                            crate::overlay::screen_draw_instant_screenshot();
-                        } else if button_response.clicked() {
-                            self.state.quick_screen_draw_enabled =
-                                !self.state.quick_screen_draw_enabled;
-                            self.sync_quick_screen_draw_config();
-                            self.persist();
-                            self.status = if self.state.quick_screen_draw_enabled {
-                                "Screen draw hotkey enabled."
-                            } else {
-                                "Screen draw hotkey disabled."
-                            }
-                            .to_owned();
-                        }
-
                         ui.add_space(6.0);
                         ui.allocate_ui_with_layout(
                             vec2(92.0, 28.0),
@@ -6236,6 +6204,81 @@ impl CrosshairApp {
                                 ));
                             },
                         );
+
+                        if button_response.clicked() {
+                            self.state.quick_screen_draw_enabled =
+                                !self.state.quick_screen_draw_enabled;
+                            self.sync_quick_screen_draw_config();
+                            self.persist();
+                            self.status = if self.state.quick_screen_draw_enabled {
+                                "Screen draw hotkey enabled."
+                            } else {
+                                "Screen draw hotkey disabled."
+                            }
+                            .to_owned();
+                        }
+
+                        // Direct Draw trigger corner button (mở toolbar vẽ lên màn hình)
+                        let draw_active = crate::overlay::screen_draw_active();
+                        let draw_rect = egui::Rect::from_min_size(
+                            pos2(button_response.rect.right() - 59.0, button_response.rect.top() + 3.0),
+                            vec2(27.0, 27.0),
+                        );
+                        let (draw_fill, draw_stroke) = if draw_active {
+                            (
+                                Color32::from_rgb(117, 219, 166),
+                                egui::Stroke::new(1.2, Color32::from_rgb(232, 250, 240)),
+                            )
+                        } else {
+                            (
+                                Color32::from_rgba_premultiplied(20, 28, 44, 230),
+                                egui::Stroke::new(1.2, Color32::from_rgb(117, 219, 166)),
+                            )
+                        };
+                        let draw_icon_color = if draw_active {
+                            Color32::from_rgb(18, 24, 38)
+                        } else {
+                            Color32::from_rgb(117, 219, 166)
+                        };
+                        let draw_response = ui.put(
+                            draw_rect,
+                            Button::new(
+                                RichText::new(Self::material_icon_text(0xe3ae, 14.0).text()) // brush / draw
+                                    .color(draw_icon_color),
+                            )
+                            .corner_radius(7.0)
+                            .fill(draw_fill)
+                            .stroke(draw_stroke),
+                        ).on_hover_text(Self::tr_lang(
+                            self.state.ui_language,
+                            "Draw on screen (Open toolbar to draw / capture)",
+                            "Vẽ lên màn hình (Mở toolbar vẽ / chụp ảnh)",
+                        ));
+
+                        if draw_response.clicked() {
+                            crate::overlay::screen_draw_toggle_from_ui();
+                        }
+
+                        // Instant screenshot corner button (chọn vùng -> copy)
+                        let snap_rect = egui::Rect::from_min_size(
+                            pos2(button_response.rect.right() - 31.0, button_response.rect.top() + 3.0),
+                            vec2(27.0, 27.0),
+                        );
+                        let snap_response = ui.put(
+                            snap_rect,
+                            Button::new(Self::material_icon_text(0xe3b0, 14.0)) // photo_camera
+                                .corner_radius(7.0)
+                                .fill(Color32::from_rgba_premultiplied(20, 28, 44, 230))
+                                .stroke(egui::Stroke::new(1.2, Color32::from_rgb(117, 219, 166))),
+                        ).on_hover_text(Self::tr_lang(
+                            self.state.ui_language,
+                            "Instant screenshot (select region → copy)",
+                            "Chụp nhanh (chọn vùng → copy)",
+                        ));
+
+                        if snap_response.clicked() {
+                            crate::overlay::screen_draw_instant_screenshot();
+                        }
 
                         // Popup settings
                         let mut keep_open = false;
@@ -6322,7 +6365,7 @@ impl CrosshairApp {
                                     if ui
                                         .add_sized(
                                             [164.0, 22.0],
-                                            capture_button,
+                                             capture_button,
                                         )
                                         .on_hover_text(if capture_active {
                                             Self::tr_lang(
@@ -6404,6 +6447,41 @@ impl CrosshairApp {
                             self.state.quick_video_record_enabled,
                         );
 
+                        ui.add_space(6.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "Record",
+                                        "Quay video",
+                                    ))
+                                    .size(11.0)
+                                    .color(if button_response.hovered() {
+                                        ui.visuals().strong_text_color()
+                                    } else {
+                                        ui.visuals().text_color()
+                                    }),
+                                ));
+                            },
+                        );
+
+                        if button_response.clicked() && !recorder_busy {
+                            self.state.quick_video_record_enabled =
+                                !self.state.quick_video_record_enabled;
+                            self.sync_quick_video_record_config();
+                            if !self.state.quick_video_record_enabled && recording {
+                                crate::video_recorder::toggle_async();
+                            } else if self.state.quick_video_record_enabled
+                                && !self.ffmpeg_installed
+                            {
+                                self.start_ffmpeg_download();
+                            }
+                            self.persist();
+                        }
+
                         // Instant record corner button (auto full screen record)
                         let rec_rect = egui::Rect::from_min_size(
                             pos2(button_response.rect.right() - 31.0, button_response.rect.top() + 3.0),
@@ -6450,40 +6528,7 @@ impl CrosshairApp {
                                 }
                                 crate::video_recorder::toggle_async();
                             }
-                        } else if button_response.clicked() && !recorder_busy {
-                            self.state.quick_video_record_enabled =
-                                !self.state.quick_video_record_enabled;
-                            self.sync_quick_video_record_config();
-                            if !self.state.quick_video_record_enabled && recording {
-                                crate::video_recorder::toggle_async();
-                            } else if self.state.quick_video_record_enabled
-                                && !self.ffmpeg_installed
-                            {
-                                self.start_ffmpeg_download();
-                            }
-                            self.persist();
                         }
-
-                        ui.add_space(6.0);
-                        ui.allocate_ui_with_layout(
-                            vec2(92.0, 28.0),
-                            egui::Layout::top_down(egui::Align::Center),
-                            |ui| {
-                                ui.add(egui::Label::new(
-                                    RichText::new(Self::tr_lang(
-                                        self.state.ui_language,
-                                        "Record",
-                                        "Quay video",
-                                    ))
-                                    .size(11.0)
-                                    .color(if button_response.hovered() {
-                                        ui.visuals().strong_text_color()
-                                    } else {
-                                        ui.visuals().text_color()
-                                    }),
-                                ));
-                            },
-                        );
 
                         let mut keep_open = false;
                         render_popup(
