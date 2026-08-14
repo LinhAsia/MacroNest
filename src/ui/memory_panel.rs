@@ -3084,6 +3084,47 @@ impl CrosshairApp {
                                     self.memory_panel.saved_selection_anchor = Some(index);
                                 }
                             }
+                            if response.clicked_by(egui::PointerButton::Middle) {
+                                self.memory_panel.saved_list_active = true;
+                                self.memory_panel.selected_saved.clear();
+                                self.memory_panel.selected_saved.insert(index);
+                                self.memory_panel.saved_selection_anchor = Some(index);
+                                if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                    view.address = saved.address;
+                                } else {
+                                    self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                                        address: saved.address,
+                                        tracked_base: None,
+                                        kind: MemoryViewKind::Bytes,
+                                        display_type: MemoryDisplayType::ByteHex,
+                                        relative_addresses: false,
+                                        pinned: true,
+                                        elements: default_structure_elements(),
+                                        pending_add: None,
+                                        pending_track: None,
+                                        pointer_width: self
+                                            .memory_panel
+                                            .process_pid
+                                            .and_then(|pid| process_pointer_width(pid).ok())
+                                            .unwrap_or(8),
+                                        previous_bytes: Vec::new(),
+                                        byte_change_times: HashMap::new(),
+                                        classes: vec![StructureClass {
+                                            name: "Class_0".to_owned(),
+                                            address: saved.address,
+                                            elements: default_structure_elements(),
+                                        }],
+                                        selected_class: 0,
+                                        class_detection_status: String::new(),
+                                         class_detection_attempted: false,
+                                         auto_dissected: false,
+                                         history: Vec::new(),
+                                         structure_back_step: "10".to_owned(),
+                                         structure_forward_step: "C".to_owned(),
+                                         selected_structure_address: None,
+                                    });
+                                }
+                            }
                             response.context_menu(|ui| {
                                 let selected_count = self.memory_panel.selected_saved.len();
                                 let single_target = selected_count == 1;
@@ -10125,6 +10166,9 @@ impl CrosshairApp {
                         ui.ctx()
                             .copy_text(format_prefixed_memory_address(row_address));
                     }
+                    if address_cell.clicked() || address_cell.clicked_by(egui::PointerButton::Middle) {
+                        dialog.address = row_address;
+                    }
                     if address_cell.clicked_by(egui::PointerButton::Middle) {
                         dialog.pending_add = Some((
                             row_address,
@@ -10167,6 +10211,9 @@ impl CrosshairApp {
                                     Color32::from_rgba_unmultiplied(220, 40, 40, alpha),
                                 );
                             }
+                        }
+                        if cell.clicked() || cell.clicked_by(egui::PointerButton::Middle) {
+                            dialog.address = cell_address;
                         }
                         if cell.clicked_by(egui::PointerButton::Middle) {
                             dialog.pending_add = Some((
