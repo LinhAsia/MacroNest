@@ -2226,6 +2226,8 @@ impl CrosshairApp {
             }
         });
         if response.clicked_by(egui::PointerButton::Middle) {
+            let toggle = ui.input(|input| input.modifiers.ctrl || input.modifiers.command);
+            self.select_memory_result(index, if toggle { !selected } else { true }, ui);
             self.navigate_open_memory_view(address_value);
         }
         if manual_double_clicked || response.double_clicked() {
@@ -2564,6 +2566,13 @@ impl CrosshairApp {
                             }
                         });
                         if response.clicked_by(egui::PointerButton::Middle) {
+                            let toggle =
+                                ui.input(|input| input.modifiers.ctrl || input.modifiers.command);
+                            self.select_memory_result(
+                                index,
+                                if toggle { !selected } else { true },
+                                ui,
+                            );
                             self.navigate_open_memory_view(address_value);
                         }
                         if response.double_clicked() {
@@ -3026,6 +3035,8 @@ impl CrosshairApp {
                                 response = response.union(hit);
                             }
                             if response.clicked_by(egui::PointerButton::Middle) {
+                                self.memory_panel.saved_list_active = true;
+                                self.select_saved_memory_row(index, selected, ui);
                                 self.navigate_open_memory_view(saved.address);
                             }
                             if ui.input(|input| {
@@ -9555,6 +9566,7 @@ impl CrosshairApp {
             });
     }
 
+
     fn render_memory_view_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.memory_panel.memory_view_dialog.take() else {
             return;
@@ -9573,10 +9585,22 @@ impl CrosshairApp {
                 format_prefixed_memory_address(address)
             ),
         };
+        let (start_address, read_size) = match kind {
+            MemoryViewKind::Bytes => ((address.saturating_sub(512)) / 16 * 16, 1280),
+            MemoryViewKind::Structure => (address, 512),
+        };
+        let mut actual_start_address = start_address;
         let bytes = self
             .memory_panel
             .process_pid
-            .and_then(|pid| read_memory_bytes(pid, address, 512).ok());
+            .and_then(|pid| {
+                read_memory_bytes(pid, start_address, read_size)
+                    .or_else(|_| {
+                        actual_start_address = address;
+                        read_memory_bytes(pid, address, 512)
+                    })
+                    .ok()
+            });
         let region = self
             .memory_panel
             .process_pid
@@ -9594,8 +9618,6 @@ impl CrosshairApp {
                 .with_always_on_top();
             let mut unpin = false;
             ctx.show_viewport_immediate(
-                // ID must be stable — do NOT include `address` here or navigation
-                // will destroy and recreate the viewport on every jump.
                 egui::ViewportId::from_hash_of("memory-view-pinned-struct"),
                 builder,
                 |ctx, _| {
@@ -9618,6 +9640,7 @@ impl CrosshairApp {
                                 self.state.ui_language,
                                 self.memory_panel.process_pid,
                                 &mut dialog,
+                                actual_start_address,
                                 bytes.as_deref(),
                                 region,
                             );
@@ -9651,6 +9674,7 @@ impl CrosshairApp {
                     self.state.ui_language,
                     self.memory_panel.process_pid,
                     &mut dialog,
+                    actual_start_address,
                     bytes.as_deref(),
                     region,
                 );
@@ -9670,6 +9694,7 @@ impl CrosshairApp {
         language: crate::model::UiLanguage,
         process_pid: Option<u32>,
         dialog: &mut MemoryViewDialog,
+        start_address: usize,
         bytes: Option<&[u8]>,
         region: Option<MemoryRegionInfo>,
     ) {
@@ -9740,6 +9765,51 @@ impl CrosshairApp {
             ui.ctx().request_repaint();
         }
         if matches!(dialog.kind, MemoryViewKind::Bytes) {
+            let unit = memory_display_width(dialog.display_type);
+            let value_width = memory_display_cell_width(dialog.display_type);
+            let address_width = 145.0;
+            let ascii_width = 210.0;
+            let columns = (((ui.available_width() - address_width - ascii_width) / value_width).floor()
+                as usize)
+                .clamp(1, 32 / unit);
+            let row_bytes = columns * unit;
+
+            // Keyboard navigation (Up / Down Arrow, PageUp / PageDown)
+            let wants_kb = ui.ctx().wants_keyboard_input();
+            let mut move_address = None;
+            if !wants_kb {
+                ui.input(|i| {
+                    if i.key_pressed(egui::Key::ArrowUp) {
+                        move_address = Some(dialog.address.saturating_sub(row_bytes));
+                    } else if i.key_pressed(egui::Key::ArrowDown) {
+                        move_address = Some(dialog.address.saturating_add(row_bytes));
+                    } else if i.key_pressed(egui::Key::PageUp) {
+                        move_address = Some(dialog.address.saturating_sub(row_bytes * 10));
+                    } else if i.key_pressed(egui::Key::PageDown) {
+                        move_address = Some(dialog.address.saturating_add(row_bytes * 10));
+                    }
+                });
+            }
+
+            // Mouse wheel scrolling
+            let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
+            if scroll_delta != 0.0 && ui.ui_contains_pointer() {
+                let lines = (scroll_delta.abs() / 12.0).clamp(1.0, 5.0) as usize;
+                if scroll_delta > 0.0 {
+                    move_address = Some(dialog.address.saturating_sub(lines * row_bytes));
+                } else if scroll_delta < 0.0 {
+                    move_address = Some(dialog.address.saturating_add(lines * row_bytes));
+                }
+            }
+
+            if let Some(new_addr) = move_address {
+                dialog.address = new_addr;
+                dialog.previous_bytes.clear();
+                dialog.byte_change_times.clear();
+                ui.ctx().request_repaint();
+                return;
+            }
+
             let step = parse_hex_offset(&dialog.structure_forward_step);
             let mut next_address = None;
             ui.horizontal(|ui| {
@@ -9793,7 +9863,7 @@ impl CrosshairApp {
         match dialog.kind {
             MemoryViewKind::Bytes => {
                 egui::ScrollArea::both().show(ui, |ui| {
-                    Self::render_memory_region_grid(ui, language, dialog, bytes, current_time)
+                    Self::render_memory_region_grid(ui, language, dialog, start_address, bytes, current_time)
                 });
             }
             MemoryViewKind::Structure => {
@@ -9997,6 +10067,7 @@ impl CrosshairApp {
         ui: &mut egui::Ui,
         language: crate::model::UiLanguage,
         dialog: &mut MemoryViewDialog,
+        start_address: usize,
         bytes: &[u8],
         current_time: f64,
     ) {
@@ -10016,7 +10087,7 @@ impl CrosshairApp {
                 &Self::tr_lang(language, "Address", "Địa chỉ"),
             );
             for column in 0..columns {
-                let low_byte = dialog.address.wrapping_add(column * unit) & 0xFF;
+                let low_byte = start_address.wrapping_add(column * unit) & 0xFF;
                 Self::memory_view_cell(ui, value_width, &format!("{low_byte:02X}"));
             }
             Self::memory_view_cell(ui, ascii_width, "0123456789ABCDEF0123456789ABCDEF");
@@ -10024,17 +10095,32 @@ impl CrosshairApp {
         ui.separator();
 
         for (row, chunk) in bytes.chunks(row_bytes).enumerate() {
-            let row_address = dialog.address.saturating_add(row * row_bytes);
+            let row_address = start_address.saturating_add(row * row_bytes);
+            let is_target_row = (row_address <= dialog.address)
+                && (dialog.address < row_address.saturating_add(row_bytes));
+
             let row_res = ui
                 .horizontal(|ui| {
+                    let relative_offset = (row_address as isize) - (dialog.address as isize);
                     let shown_address = if dialog.relative_addresses {
-                        format!("+{:04X}", row * row_bytes)
+                        if relative_offset >= 0 {
+                            format!("+{:04X}", relative_offset)
+                        } else {
+                            format!("-{:04X}", relative_offset.abs())
+                        }
                     } else {
                         format_memory_address(row_address)
                     };
                     let address_cell =
                         Self::memory_view_cell(ui, address_width, &shown_address)
                             .on_hover_text("Double-click or right-click to copy this address");
+                    if is_target_row {
+                        ui.painter().rect_filled(
+                            address_cell.rect,
+                            2.0,
+                            Color32::from_rgba_unmultiplied(60, 130, 220, 75),
+                        );
+                    }
                     if address_cell.double_clicked() {
                         ui.ctx()
                             .copy_text(format_prefixed_memory_address(row_address));
@@ -10057,6 +10143,17 @@ impl CrosshairApp {
                             .then(|| format_memory_display(value, dialog.display_type))
                             .unwrap_or_default();
                         let cell = Self::memory_view_cell(ui, value_width, &text);
+                        let cell_address = row_address.saturating_add(column * unit);
+                        let is_target_cell = (cell_address <= dialog.address)
+                            && (dialog.address < cell_address.saturating_add(unit));
+                        if is_target_cell {
+                            ui.painter().rect_stroke(
+                                cell.rect,
+                                2.0,
+                                egui::Stroke::new(1.5, Color32::from_rgb(80, 180, 255)),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
                         // Red-fade highlight for changed bytes (Cheat Engine style)
                         let byte_offset = row * row_bytes + column * unit;
                         if let Some(&change_time) = dialog.byte_change_times.get(&byte_offset) {
@@ -10071,7 +10168,6 @@ impl CrosshairApp {
                                 );
                             }
                         }
-                        let cell_address = row_address.saturating_add(column * unit);
                         if cell.clicked_by(egui::PointerButton::Middle) {
                             dialog.pending_add = Some((
                                 cell_address,
