@@ -468,6 +468,7 @@ struct MemoryViewDialog {
     pending_track: Option<usize>,
     pointer_width: usize,
     previous_bytes: Vec<u8>,
+    previous_byte_map: HashMap<usize, u8>,
     /// Maps byte offset -> time (seconds, from egui) when that byte last changed.
     /// Used to render the Cheat Engine-style red-fade highlight.
     byte_change_times: HashMap<usize, f64>,
@@ -3109,6 +3110,7 @@ impl CrosshairApp {
                                             .and_then(|pid| process_pointer_width(pid).ok())
                                             .unwrap_or(8),
                                         previous_bytes: Vec::new(),
+                                        previous_byte_map: HashMap::new(),
                                         byte_change_times: HashMap::new(),
                                         classes: vec![StructureClass {
                                             name: "Class_0".to_owned(),
@@ -3393,6 +3395,7 @@ impl CrosshairApp {
                                             .and_then(|pid| process_pointer_width(pid).ok())
                                             .unwrap_or(8),
                                         previous_bytes: Vec::new(),
+                                        previous_byte_map: HashMap::new(),
                                         byte_change_times: HashMap::new(),
                                         classes: vec![StructureClass {
                                             name: "Class_0".to_owned(),
@@ -3444,6 +3447,7 @@ impl CrosshairApp {
                                             .and_then(|pid| process_pointer_width(pid).ok())
                                             .unwrap_or(8),
                                         previous_bytes: Vec::new(),
+                                        previous_byte_map: HashMap::new(),
                                         byte_change_times: HashMap::new(),
                                         classes: vec![StructureClass {
                                             name: "Class_0".to_owned(),
@@ -9024,6 +9028,7 @@ impl CrosshairApp {
                     .and_then(|pid| process_pointer_width(pid).ok())
                     .unwrap_or(8),
                 previous_bytes: Vec::new(),
+                                        previous_byte_map: HashMap::new(),
                 byte_change_times: HashMap::new(),
                 classes: vec![StructureClass {
                     name: "Class_0".to_owned(),
@@ -9636,8 +9641,15 @@ impl CrosshairApp {
         } else {
             address.saturating_sub(dialog.scroll_offset.unsigned_abs())
         };
+        let unit = memory_display_width(dialog.display_type);
+        let value_width = memory_display_cell_width(dialog.display_type);
+        let address_width = 145.0;
+        let ascii_width = 210.0;
+        let approx_cols = (((720.0 - address_width - ascii_width) / value_width).floor() as usize).clamp(1, 32 / unit);
+        let approx_row_bytes = (approx_cols * unit).max(1);
+
         let (start_address, read_size) = match kind {
-            MemoryViewKind::Bytes => ((view_address.saturating_sub(512)) / 16 * 16, 1280),
+            MemoryViewKind::Bytes => ((view_address.saturating_sub(512)) / approx_row_bytes * approx_row_bytes, 1280),
             MemoryViewKind::Structure => (view_address, 512),
         };
         let mut actual_start_address = start_address;
@@ -9793,18 +9805,17 @@ impl CrosshairApp {
             });
             return;
         };
-        // Update byte change highlight map: compare new bytes with previous_bytes.
+        // Update byte change highlight map: compare new bytes per absolute memory address.
         let current_time = ui.input(|i| i.time);
-        if !dialog.previous_bytes.is_empty() && dialog.previous_bytes.len() == bytes.len() {
-            for (i, (&new_byte, &old_byte)) in
-                bytes.iter().zip(dialog.previous_bytes.iter()).enumerate()
-            {
+        for (i, &new_byte) in bytes.iter().enumerate() {
+            let addr = start_address.wrapping_add(i);
+            if let Some(&old_byte) = dialog.previous_byte_map.get(&addr) {
                 if new_byte != old_byte {
-                    dialog.byte_change_times.insert(i, current_time);
+                    dialog.byte_change_times.insert(addr, current_time);
                 }
             }
+            dialog.previous_byte_map.insert(addr, new_byte);
         }
-        // Always update previous_bytes for next frame comparison.
         dialog.previous_bytes = bytes.to_vec();
         // Request repaint while there are still fading highlights active.
         const FADE_DURATION: f64 = 1.5;
@@ -10202,8 +10213,8 @@ impl CrosshairApp {
                             );
                         }
                         // Red-fade highlight for changed bytes (Cheat Engine style)
-                        let byte_offset = row * row_bytes + column * unit;
-                        if let Some(&change_time) = dialog.byte_change_times.get(&byte_offset) {
+                        let cell_address = row_address.saturating_add(column * unit);
+                        if let Some(&change_time) = dialog.byte_change_times.get(&cell_address) {
                             const FADE_DURATION: f64 = 1.5;
                             let age = current_time - change_time;
                             if age < FADE_DURATION {
@@ -11794,6 +11805,7 @@ impl CrosshairApp {
             pending_track: None,
             pointer_width: process_pointer_width(pid).unwrap_or(8),
             previous_bytes: Vec::new(),
+                                        previous_byte_map: HashMap::new(),
             byte_change_times: HashMap::new(),
             classes: vec![StructureClass {
                 name: "Class_0".to_owned(),
