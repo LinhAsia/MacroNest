@@ -482,6 +482,7 @@ struct MemoryViewDialog {
     structure_back_step: String,
     structure_forward_step: String,
     selected_structure_address: Option<usize>,
+    scroll_offset: isize,
 }
 
 #[cfg(windows)]
@@ -3122,6 +3123,7 @@ impl CrosshairApp {
                                          structure_back_step: "10".to_owned(),
                                          structure_forward_step: "C".to_owned(),
                                          selected_structure_address: None,
+                                        scroll_offset: 0,
                                     });
                                 }
                             }
@@ -3405,6 +3407,7 @@ impl CrosshairApp {
                                         structure_back_step: "10".to_owned(),
                                         structure_forward_step: "C".to_owned(),
                                         selected_structure_address: None,
+                                        scroll_offset: 0,
                                     });
                                     ui.close();
                                 }
@@ -3455,6 +3458,7 @@ impl CrosshairApp {
                                          structure_back_step: "10".to_owned(),
                                          structure_forward_step: "10".to_owned(),
                                          selected_structure_address: None,
+                                        scroll_offset: 0,
                                     });
                                     ui.close();
                                 }
@@ -9034,6 +9038,7 @@ impl CrosshairApp {
                 structure_back_step: "10".to_owned(),
                 structure_forward_step: "C".to_owned(),
                 selected_structure_address: None,
+                                        scroll_offset: 0,
             });
         }
         if open {
@@ -9626,9 +9631,14 @@ impl CrosshairApp {
                 format_prefixed_memory_address(address)
             ),
         };
+        let view_address = if dialog.scroll_offset >= 0 {
+            address.saturating_add(dialog.scroll_offset as usize)
+        } else {
+            address.saturating_sub(dialog.scroll_offset.unsigned_abs())
+        };
         let (start_address, read_size) = match kind {
-            MemoryViewKind::Bytes => ((address.saturating_sub(512)) / 16 * 16, 1280),
-            MemoryViewKind::Structure => (address, 512),
+            MemoryViewKind::Bytes => ((view_address.saturating_sub(512)) / 16 * 16, 1280),
+            MemoryViewKind::Structure => (view_address, 512),
         };
         let mut actual_start_address = start_address;
         let bytes = self
@@ -9815,40 +9825,33 @@ impl CrosshairApp {
                 .clamp(1, 32 / unit);
             let row_bytes = columns * unit;
 
-            // Keyboard navigation (Up / Down Arrow, PageUp / PageDown)
-            let wants_kb = ui.ctx().wants_keyboard_input();
-            let mut move_address = None;
-            if !wants_kb {
-                ui.input(|i| {
-                    if i.key_pressed(egui::Key::ArrowUp) {
-                        move_address = Some(dialog.address.saturating_sub(row_bytes));
-                    } else if i.key_pressed(egui::Key::ArrowDown) {
-                        move_address = Some(dialog.address.saturating_add(row_bytes));
-                    } else if i.key_pressed(egui::Key::PageUp) {
-                        move_address = Some(dialog.address.saturating_sub(row_bytes * 10));
-                    } else if i.key_pressed(egui::Key::PageDown) {
-                        move_address = Some(dialog.address.saturating_add(row_bytes * 10));
-                    }
-                });
-            }
+            // Keyboard navigation (Up / Down Arrow, PageUp / PageDown) & Mouse wheel scrolling
+            let mut move_delta: isize = 0;
+            ui.input(|i| {
+                if i.key_pressed(egui::Key::ArrowUp) {
+                    move_delta -= row_bytes as isize;
+                } else if i.key_pressed(egui::Key::ArrowDown) {
+                    move_delta += row_bytes as isize;
+                } else if i.key_pressed(egui::Key::PageUp) {
+                    move_delta -= (row_bytes * 10) as isize;
+                } else if i.key_pressed(egui::Key::PageDown) {
+                    move_delta += (row_bytes * 10) as isize;
+                }
+            });
 
-            // Mouse wheel scrolling
             let scroll_delta = ui.input(|i| i.raw_scroll_delta.y);
             if scroll_delta != 0.0 && ui.ui_contains_pointer() {
                 let lines = (scroll_delta.abs() / 12.0).clamp(1.0, 5.0) as usize;
                 if scroll_delta > 0.0 {
-                    move_address = Some(dialog.address.saturating_sub(lines * row_bytes));
+                    move_delta -= (lines * row_bytes) as isize;
                 } else if scroll_delta < 0.0 {
-                    move_address = Some(dialog.address.saturating_add(lines * row_bytes));
+                    move_delta += (lines * row_bytes) as isize;
                 }
             }
 
-            if let Some(new_addr) = move_address {
-                dialog.address = new_addr;
-                dialog.previous_bytes.clear();
-                dialog.byte_change_times.clear();
+            if move_delta != 0 {
+                dialog.scroll_offset = dialog.scroll_offset.saturating_add(move_delta);
                 ui.ctx().request_repaint();
-                return;
             }
 
             let step = parse_hex_offset(&dialog.structure_forward_step);
@@ -11805,6 +11808,7 @@ impl CrosshairApp {
             structure_back_step: "10".to_owned(),
             structure_forward_step: "10".to_owned(),
             selected_structure_address: None,
+                                        scroll_offset: 0,
         });
     }
 
