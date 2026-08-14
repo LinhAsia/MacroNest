@@ -13566,6 +13566,7 @@ mod tests {
             pending_track: None,
             pointer_width: 8,
             previous_bytes: vec![1],
+            previous_byte_map: HashMap::new(),
             byte_change_times: HashMap::from([(0, 1.0)]),
             classes: vec![StructureClass {
                 name: "Class_0".to_owned(),
