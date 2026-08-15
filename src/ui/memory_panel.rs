@@ -10187,9 +10187,12 @@ impl CrosshairApp {
         let unit = memory_display_width(dialog.display_type);
         let value_width = memory_display_cell_width(dialog.display_type);
         let address_width = 145.0;
-        let ascii_width = 210.0;
         let columns = dialog.memory_columns.max(1);
         let row_bytes = columns * unit;
+        let ascii_width = Self::memory_view_ascii_width(dialog.display_type, columns);
+        let ascii_header = (0..row_bytes)
+            .map(|offset| char::from_digit((offset & 0xF) as u32, 16).unwrap().to_ascii_uppercase())
+            .collect::<String>();
 
         ui.horizontal(|ui| {
             Self::memory_view_cell(
@@ -10201,7 +10204,7 @@ impl CrosshairApp {
                 let low_byte = start_address.wrapping_add(column * unit) & 0xFF;
                 Self::memory_view_cell(ui, value_width, &format!("{low_byte:02X}"));
             }
-            Self::memory_view_cell(ui, ascii_width, "0123456789ABCDEF0123456789ABCDEF");
+            Self::memory_view_cell(ui, ascii_width, &ascii_header);
         });
         ui.separator();
 
@@ -11792,13 +11795,22 @@ impl CrosshairApp {
     }
 
     fn memory_view_width_for_columns(display_type: MemoryDisplayType, columns: usize) -> f32 {
-        145.0 + 210.0 + memory_display_cell_width(display_type) * columns.max(1) as f32 + 50.0
+        let columns = columns.max(1);
+        145.0
+            + Self::memory_view_ascii_width(display_type, columns)
+            + memory_display_cell_width(display_type) * columns as f32
+            + 50.0
     }
 
     fn memory_view_column_count(available_width: f32, display_type: MemoryDisplayType) -> usize {
-        (((available_width - 145.0 - 210.0) / memory_display_cell_width(display_type)).floor()
-            as usize)
+        let width_per_column = memory_display_cell_width(display_type)
+            + memory_display_width(display_type) as f32 * 7.0;
+        (((available_width - 145.0 - 8.0) / width_per_column).floor() as usize)
             .clamp(1, 32 / memory_display_width(display_type))
+    }
+
+    fn memory_view_ascii_width(display_type: MemoryDisplayType, columns: usize) -> f32 {
+        (memory_display_width(display_type) * columns.max(1)) as f32 * 7.0 + 8.0
     }
 
     fn memory_view_offset_between(start: usize, base: usize) -> isize {
@@ -13725,7 +13737,10 @@ mod tests {
         let paged_up = CrosshairApp::memory_view_window_start(0x1000, 12, -96);
         assert_eq!(initial - paged_up, 96);
         assert_eq!(
-            CrosshairApp::memory_view_column_count(145.0 + 210.0 + 3.0 * 100.0, MemoryDisplayType::Float),
+            CrosshairApp::memory_view_column_count(
+                CrosshairApp::memory_view_width_for_columns(MemoryDisplayType::Float, 3) - 50.0,
+                MemoryDisplayType::Float,
+            ),
             3
         );
     }
