@@ -469,9 +469,8 @@ struct MemoryViewDialog {
     pointer_width: usize,
     previous_bytes: Vec<u8>,
     previous_byte_map: HashMap<usize, u8>,
-    /// Maps byte offset -> time (seconds, from egui) when that byte last changed.
-    /// Used to render the Cheat Engine-style red-fade highlight.
-    byte_change_times: HashMap<usize, f64>,
+    track_changes: bool,
+    changed_addresses: HashSet<usize>,
     classes: Vec<StructureClass>,
     selected_class: usize,
     class_detection_status: String,
@@ -3111,7 +3110,8 @@ impl CrosshairApp {
                                             .unwrap_or(8),
                                         previous_bytes: Vec::new(),
                                         previous_byte_map: HashMap::new(),
-                                        byte_change_times: HashMap::new(),
+                                        track_changes: false,
+                                        changed_addresses: HashSet::new(),
                                         classes: vec![StructureClass {
                                             name: "Class_0".to_owned(),
                                             address: saved.address,
@@ -3396,7 +3396,8 @@ impl CrosshairApp {
                                             .unwrap_or(8),
                                         previous_bytes: Vec::new(),
                                         previous_byte_map: HashMap::new(),
-                                        byte_change_times: HashMap::new(),
+                                        track_changes: false,
+                                        changed_addresses: HashSet::new(),
                                         classes: vec![StructureClass {
                                             name: "Class_0".to_owned(),
                                             address: saved.address,
@@ -3448,7 +3449,8 @@ impl CrosshairApp {
                                             .unwrap_or(8),
                                         previous_bytes: Vec::new(),
                                         previous_byte_map: HashMap::new(),
-                                        byte_change_times: HashMap::new(),
+                                        track_changes: false,
+                                        changed_addresses: HashSet::new(),
                                         classes: vec![StructureClass {
                                             name: "Class_0".to_owned(),
                                             address: saved.address,
@@ -9031,8 +9033,9 @@ impl CrosshairApp {
                     .and_then(|pid| process_pointer_width(pid).ok())
                     .unwrap_or(8),
                 previous_bytes: Vec::new(),
-                                        previous_byte_map: HashMap::new(),
-                byte_change_times: HashMap::new(),
+                previous_byte_map: HashMap::new(),
+                track_changes: false,
+                changed_addresses: HashSet::new(),
                 classes: vec![StructureClass {
                     name: "Class_0".to_owned(),
                     address,
@@ -9046,7 +9049,7 @@ impl CrosshairApp {
                 structure_back_step: "10".to_owned(),
                 structure_forward_step: "C".to_owned(),
                 selected_structure_address: None,
-                                        scroll_offset: 0,
+                scroll_offset: 0,
             });
         }
         if open {
@@ -9640,18 +9643,13 @@ impl CrosshairApp {
             ),
         };
         let unit = memory_display_width(dialog.display_type);
-        let value_width = memory_display_cell_width(dialog.display_type);
-        let address_width = 145.0;
-        let ascii_width = 210.0;
-        let approx_cols = (((780.0 - address_width - ascii_width) / value_width).floor() as usize).clamp(1, 32 / unit);
-        let approx_row_bytes = (approx_cols * unit).max(1);
+        let row_bytes = unit * 3;
 
         let (start_address, read_size) = match kind {
-            MemoryViewKind::Bytes => {
-                let pre_bytes = approx_row_bytes * 3;
-                let target_row_aligned = (address / approx_row_bytes) * approx_row_bytes;
-                (target_row_aligned.saturating_sub(pre_bytes), 4096)
-            }
+            MemoryViewKind::Bytes => (
+                Self::memory_view_window_start(address, row_bytes, dialog.scroll_offset),
+                4096,
+            ),
             MemoryViewKind::Structure => (address, 1024),
         };
         let mut actual_start_address = start_address;
@@ -9675,8 +9673,8 @@ impl CrosshairApp {
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(780.0, 620.0))
-                .with_min_inner_size(vec2(540.0, 360.0))
+                .with_inner_size(vec2(690.0, 820.0))
+                .with_min_inner_size(vec2(560.0, 500.0))
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
@@ -9726,8 +9724,8 @@ impl CrosshairApp {
         }
         egui::Window::new(&title)
             .id(egui::Id::new("memory-view-main"))
-            .default_size(vec2(780.0, 620.0))
-            .min_size(vec2(540.0, 360.0))
+            .default_size(vec2(690.0, 820.0))
+            .min_size(vec2(560.0, 500.0))
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
@@ -9808,60 +9806,17 @@ impl CrosshairApp {
             });
             return;
         };
-        // Update byte change highlight map: compare new bytes per absolute memory address.
-        let current_time = ui.input(|i| i.time);
-        for (i, &new_byte) in bytes.iter().enumerate() {
-            let addr = start_address.wrapping_add(i);
-            if let Some(&old_byte) = dialog.previous_byte_map.get(&addr) {
-                if new_byte != old_byte {
-                    dialog.byte_change_times.insert(addr, current_time);
-                }
-            }
-            dialog.previous_byte_map.insert(addr, new_byte);
+        if dialog.track_changes {
+            Self::track_memory_changes(
+                &mut dialog.previous_byte_map,
+                &mut dialog.changed_addresses,
+                start_address,
+                bytes,
+            );
         }
         dialog.previous_bytes = bytes.to_vec();
-        // Request repaint while there are still fading highlights active.
-        const FADE_DURATION: f64 = 1.5;
-        let has_active_fade = dialog
-            .byte_change_times
-            .values()
-            .any(|&t| current_time - t < FADE_DURATION);
-        if has_active_fade {
-            ui.ctx().request_repaint();
-        }
+        let row_bytes = memory_display_width(dialog.display_type) * 3;
         if matches!(dialog.kind, MemoryViewKind::Bytes) {
-            let unit = memory_display_width(dialog.display_type);
-            let value_width = memory_display_cell_width(dialog.display_type);
-            let address_width = 145.0;
-            let ascii_width = 210.0;
-            let columns = (((ui.available_width() - address_width - ascii_width) / value_width).floor()
-                as usize)
-                .clamp(1, 32 / unit);
-            let row_bytes = columns * unit;
-
-            // Keyboard navigation (Up / Down Arrow, PageUp / PageDown)
-            let mut move_address_delta: isize = 0;
-            ui.input(|i| {
-                if i.key_pressed(egui::Key::ArrowUp) {
-                    move_address_delta -= row_bytes as isize;
-                } else if i.key_pressed(egui::Key::ArrowDown) {
-                    move_address_delta += row_bytes as isize;
-                } else if i.key_pressed(egui::Key::PageUp) {
-                    move_address_delta -= (row_bytes * 10) as isize;
-                } else if i.key_pressed(egui::Key::PageDown) {
-                    move_address_delta += (row_bytes * 10) as isize;
-                }
-            });
-
-            if move_address_delta != 0 {
-                if move_address_delta > 0 {
-                    dialog.address = dialog.address.saturating_add(move_address_delta as usize);
-                } else {
-                    dialog.address = dialog.address.saturating_sub(move_address_delta.unsigned_abs());
-                }
-                ui.ctx().request_repaint();
-            }
-
             let step = parse_hex_offset(&dialog.structure_forward_step);
             let mut next_address = None;
             ui.horizontal(|ui| {
@@ -9891,11 +9846,34 @@ impl CrosshairApp {
                 {
                     next_address = Some(dialog.address.saturating_add(step.unwrap()));
                 }
+                ui.separator();
+                let tracking_label = if dialog.track_changes {
+                    Self::tr_lang(language, "Stop tracking", "Dừng theo dõi")
+                } else {
+                    Self::tr_lang(language, "Track changes", "Theo dõi thay đổi")
+                };
+                if ui.small_button(tracking_label).clicked() {
+                    if dialog.track_changes {
+                        dialog.track_changes = false;
+                    } else {
+                        dialog.track_changes = true;
+                        dialog.previous_byte_map.clear();
+                        dialog.changed_addresses.clear();
+                    }
+                }
+                if !dialog.changed_addresses.is_empty() {
+                    ui.label(
+                        RichText::new(format!("{} changed", dialog.changed_addresses.len()))
+                            .small()
+                            .weak(),
+                    );
+                    if ui.small_button(Self::tr_lang(language, "Clear", "Xóa dấu")).clicked() {
+                        dialog.changed_addresses.clear();
+                    }
+                }
             });
             if let Some(address) = next_address {
-                dialog.address = address;
-                dialog.previous_bytes.clear();
-                dialog.byte_change_times.clear();
+                Self::navigate_memory_view_dialog(dialog, address);
                 return;
             }
             if let Some(region) = region {
@@ -9914,11 +9892,42 @@ impl CrosshairApp {
         }
         match dialog.kind {
             MemoryViewKind::Bytes => {
-                egui::ScrollArea::both()
+                let mut output = egui::ScrollArea::both()
+                    .id_salt("memory-region-grid")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        Self::render_memory_region_grid(ui, language, dialog, start_address, bytes, current_time)
+                        Self::render_memory_region_grid(ui, language, dialog, start_address, bytes)
                     });
+                let wheel = ui.input(|input| input.smooth_scroll_delta.y);
+                let hovered = ui
+                    .ctx()
+                    .pointer_latest_pos()
+                    .is_some_and(|position| output.inner_rect.contains(position));
+                let max_scroll = (output.content_size.y - output.inner_rect.height()).max(0.0);
+                const PAGE_ROWS: usize = 12;
+                let page_bytes = row_bytes * PAGE_ROWS;
+                let mut page_changed = false;
+                if hovered && wheel > 0.0 && output.state.offset.y <= 0.5 {
+                    dialog.scroll_offset = dialog
+                        .scroll_offset
+                        .saturating_sub(page_bytes as isize);
+                    output.state.offset.y += PAGE_ROWS as f32 * 18.0;
+                    page_changed = true;
+                } else if hovered
+                    && wheel < 0.0
+                    && output.state.offset.y >= max_scroll - 0.5
+                {
+                    dialog.scroll_offset = dialog
+                        .scroll_offset
+                        .saturating_add(page_bytes as isize);
+                    output.state.offset.y =
+                        (output.state.offset.y - PAGE_ROWS as f32 * 18.0).max(0.0);
+                    page_changed = true;
+                }
+                if page_changed {
+                    output.state.store(ui.ctx(), output.id);
+                    ui.ctx().request_repaint();
+                }
             }
             MemoryViewKind::Structure => {
                 // Auto-identify class on first open
@@ -10123,15 +10132,12 @@ impl CrosshairApp {
         dialog: &mut MemoryViewDialog,
         start_address: usize,
         bytes: &[u8],
-        current_time: f64,
     ) {
         let unit = memory_display_width(dialog.display_type);
         let value_width = memory_display_cell_width(dialog.display_type);
         let address_width = 145.0;
         let ascii_width = 210.0;
-        let columns = (((ui.available_width() - address_width - ascii_width) / value_width).floor()
-            as usize)
-            .clamp(1, 32 / unit);
+        let columns = 3;
         let row_bytes = columns * unit;
 
         ui.horizontal(|ui| {
@@ -10179,9 +10185,6 @@ impl CrosshairApp {
                         ui.ctx()
                             .copy_text(format_prefixed_memory_address(row_address));
                     }
-                    if address_cell.clicked() || address_cell.clicked_by(egui::PointerButton::Middle) {
-                        dialog.address = row_address;
-                    }
                     if address_cell.clicked_by(egui::PointerButton::Middle) {
                         dialog.pending_add = Some((
                             row_address,
@@ -10201,6 +10204,18 @@ impl CrosshairApp {
                             .unwrap_or_default();
                         let cell = Self::memory_view_cell(ui, value_width, &text);
                         let cell_address = row_address.saturating_add(column * unit);
+                        let changed = (0..value.len()).any(|byte| {
+                            dialog
+                                .changed_addresses
+                                .contains(&cell_address.saturating_add(byte))
+                        });
+                        if changed {
+                            ui.painter().rect_filled(
+                                cell.rect,
+                                2.0,
+                                Color32::from_rgba_unmultiplied(230, 190, 70, 24),
+                            );
+                        }
                         let is_target_cell = (cell_address <= dialog.address)
                             && (dialog.address < cell_address.saturating_add(unit));
                         if is_target_cell {
@@ -10210,23 +10225,6 @@ impl CrosshairApp {
                                 egui::Stroke::new(1.5, Color32::from_rgb(80, 180, 255)),
                                 egui::StrokeKind::Outside,
                             );
-                        }
-                        // Red-fade highlight for changed bytes (Cheat Engine style)
-                        let cell_address = row_address.saturating_add(column * unit);
-                        if let Some(&change_time) = dialog.byte_change_times.get(&cell_address) {
-                            const FADE_DURATION: f64 = 1.5;
-                            let age = current_time - change_time;
-                            if age < FADE_DURATION {
-                                let alpha = ((1.0 - age / FADE_DURATION) * 210.0) as u8;
-                                ui.painter().rect_filled(
-                                    cell.rect,
-                                    2.0,
-                                    Color32::from_rgba_unmultiplied(220, 40, 40, alpha),
-                                );
-                            }
-                        }
-                        if cell.clicked() || cell.clicked_by(egui::PointerButton::Middle) {
-                            dialog.address = cell_address;
                         }
                         if cell.clicked_by(egui::PointerButton::Middle) {
                             dialog.pending_add = Some((
@@ -11767,6 +11765,29 @@ impl CrosshairApp {
         true
     }
 
+    fn memory_view_window_start(address: usize, row_bytes: usize, scroll_offset: isize) -> usize {
+        let aligned = address / row_bytes * row_bytes;
+        aligned
+            .saturating_sub(row_bytes * 3)
+            .checked_add_signed(scroll_offset)
+            .unwrap_or(if scroll_offset < 0 { 0 } else { usize::MAX })
+    }
+
+    fn track_memory_changes(
+        previous: &mut HashMap<usize, u8>,
+        changed: &mut HashSet<usize>,
+        start_address: usize,
+        bytes: &[u8],
+    ) {
+        for (offset, &byte) in bytes.iter().enumerate() {
+            let address = start_address.wrapping_add(offset);
+            if previous.get(&address).is_some_and(|old| *old != byte) {
+                changed.insert(address);
+            }
+            previous.insert(address, byte);
+        }
+    }
+
     fn navigate_memory_view_dialog(dialog: &mut MemoryViewDialog, address: usize) {
         if dialog.address == address {
             return;
@@ -11774,7 +11795,10 @@ impl CrosshairApp {
         dialog.history.push(dialog.address);
         dialog.address = address;
         dialog.previous_bytes.clear();
-        dialog.byte_change_times.clear();
+        dialog.previous_byte_map.clear();
+        dialog.changed_addresses.clear();
+        dialog.track_changes = false;
+        dialog.scroll_offset = 0;
         dialog.auto_dissected = false;
         dialog.selected_structure_address = None;
         if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
@@ -11804,8 +11828,9 @@ impl CrosshairApp {
             pending_track: None,
             pointer_width: process_pointer_width(pid).unwrap_or(8),
             previous_bytes: Vec::new(),
-                                        previous_byte_map: HashMap::new(),
-            byte_change_times: HashMap::new(),
+            previous_byte_map: HashMap::new(),
+            track_changes: false,
+            changed_addresses: HashSet::new(),
             classes: vec![StructureClass {
                 name: "Class_0".to_owned(),
                 address,
@@ -11819,7 +11844,7 @@ impl CrosshairApp {
             structure_back_step: "10".to_owned(),
             structure_forward_step: "10".to_owned(),
             selected_structure_address: None,
-                                        scroll_offset: 0,
+            scroll_offset: 0,
         });
     }
 
@@ -13582,7 +13607,8 @@ mod tests {
             pointer_width: 8,
             previous_bytes: vec![1],
             previous_byte_map: HashMap::new(),
-            byte_change_times: HashMap::from([(0, 1.0)]),
+            track_changes: false,
+            changed_addresses: HashSet::from([0]),
             classes: vec![StructureClass {
                 name: "Class_0".to_owned(),
                 address: 0x1000,
@@ -13596,6 +13622,7 @@ mod tests {
             structure_back_step: "10".to_owned(),
             structure_forward_step: "10".to_owned(),
             selected_structure_address: Some(0x1004),
+            scroll_offset: 0,
         };
 
         CrosshairApp::navigate_memory_view_dialog(&mut dialog, 0x2000);
@@ -13604,6 +13631,26 @@ mod tests {
         assert!(matches!(dialog.display_type, MemoryDisplayType::Float));
         assert_eq!(dialog.history, vec![0x1000]);
         assert!(dialog.previous_bytes.is_empty());
-        assert!(dialog.byte_change_times.is_empty());
+        assert!(dialog.changed_addresses.is_empty());
+        assert!(!dialog.track_changes);
+    }
+
+    #[test]
+    fn memory_view_window_pages_above_the_anchor() {
+        let initial = CrosshairApp::memory_view_window_start(0x1000, 12, 0);
+        let paged_up = CrosshairApp::memory_view_window_start(0x1000, 12, -96);
+        assert_eq!(initial - paged_up, 96);
+    }
+
+    #[test]
+    fn memory_change_tracking_keeps_every_address_that_changed() {
+        let mut previous = HashMap::new();
+        let mut changed = HashSet::new();
+        CrosshairApp::track_memory_changes(&mut previous, &mut changed, 0x1000, &[1, 2, 3]);
+        assert!(changed.is_empty());
+
+        CrosshairApp::track_memory_changes(&mut previous, &mut changed, 0x1000, &[1, 9, 3]);
+        CrosshairApp::track_memory_changes(&mut previous, &mut changed, 0x1000, &[1, 2, 3]);
+        assert_eq!(changed, HashSet::from([0x1001]));
     }
 }
