@@ -483,6 +483,9 @@ struct MemoryViewDialog {
     structure_forward_step: String,
     selected_structure_address: Option<usize>,
     scroll_offset: isize,
+    memory_columns: usize,
+    reset_memory_scroll: bool,
+    fit_memory_columns: bool,
 }
 
 #[cfg(windows)]
@@ -3126,6 +3129,9 @@ impl CrosshairApp {
                                          structure_forward_step: "C".to_owned(),
                                          selected_structure_address: None,
                                         scroll_offset: 0,
+                                        memory_columns: 3,
+                                        reset_memory_scroll: true,
+                                        fit_memory_columns: true,
                                     });
                                 }
                             }
@@ -3412,6 +3418,9 @@ impl CrosshairApp {
                                         structure_forward_step: "C".to_owned(),
                                         selected_structure_address: None,
                                         scroll_offset: 0,
+                                        memory_columns: 3,
+                                        reset_memory_scroll: true,
+                                        fit_memory_columns: true,
                                     });
                                     ui.close();
                                 }
@@ -3465,6 +3474,9 @@ impl CrosshairApp {
                                          structure_forward_step: "10".to_owned(),
                                          selected_structure_address: None,
                                         scroll_offset: 0,
+                                        memory_columns: 3,
+                                        reset_memory_scroll: true,
+                                        fit_memory_columns: true,
                                     });
                                     ui.close();
                                 }
@@ -9050,6 +9062,9 @@ impl CrosshairApp {
                 structure_forward_step: "C".to_owned(),
                 selected_structure_address: None,
                 scroll_offset: 0,
+                memory_columns: 3,
+                reset_memory_scroll: true,
+                fit_memory_columns: true,
             });
         }
         if open {
@@ -9643,7 +9658,8 @@ impl CrosshairApp {
             ),
         };
         let unit = memory_display_width(dialog.display_type);
-        let row_bytes = unit * 3;
+        let row_bytes = unit * dialog.memory_columns.max(1);
+        let three_column_width = Self::memory_view_width_for_columns(dialog.display_type, 3);
 
         let (start_address, read_size) = match kind {
             MemoryViewKind::Bytes => (
@@ -9670,15 +9686,18 @@ impl CrosshairApp {
             .and_then(|pid| query_memory_region(pid, address).ok());
         let mut open = true;
         if dialog.pinned {
-            let builder = egui::ViewportBuilder::default()
+            let fit_columns = dialog.fit_memory_columns;
+            let mut builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(690.0, 820.0))
-                .with_min_inner_size(vec2(560.0, 500.0))
+                .with_min_inner_size(vec2(420.0, 360.0))
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_always_on_top();
+            if fit_columns {
+                builder = builder.with_inner_size(vec2(three_column_width, 820.0));
+            }
             let mut unpin = false;
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("memory-view-pinned-struct"),
@@ -9714,6 +9733,9 @@ impl CrosshairApp {
             if unpin {
                 dialog.pinned = false;
             }
+            if fit_columns {
+                dialog.fit_memory_columns = false;
+            }
             self.add_pending_structure_address(&mut dialog);
             self.apply_pending_tracked_field(&mut dialog);
             if open {
@@ -9724,8 +9746,8 @@ impl CrosshairApp {
         }
         egui::Window::new(&title)
             .id(egui::Id::new("memory-view-main"))
-            .default_size(vec2(690.0, 820.0))
-            .min_size(vec2(560.0, 500.0))
+            .default_size(vec2(three_column_width, 820.0))
+            .min_size(vec2(420.0, 360.0))
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
@@ -9815,8 +9837,34 @@ impl CrosshairApp {
             );
         }
         dialog.previous_bytes = bytes.to_vec();
-        let row_bytes = memory_display_width(dialog.display_type) * 3;
         if matches!(dialog.kind, MemoryViewKind::Bytes) {
+            let columns = Self::memory_view_column_count(ui.available_width(), dialog.display_type);
+            Self::set_memory_view_columns(dialog, columns);
+        }
+        let row_bytes =
+            memory_display_width(dialog.display_type) * dialog.memory_columns.max(1);
+        if matches!(dialog.kind, MemoryViewKind::Bytes) {
+            let move_rows = if ui.ctx().memory(|memory| memory.focused().is_none()) {
+                ui.input(|input| {
+                    if input.key_pressed(egui::Key::ArrowUp) {
+                        -1
+                    } else if input.key_pressed(egui::Key::ArrowDown) {
+                        1
+                    } else {
+                        0
+                    }
+                })
+            } else {
+                0
+            };
+            if move_rows != 0 {
+                let address = if move_rows < 0 {
+                    dialog.address.saturating_sub(row_bytes)
+                } else {
+                    dialog.address.saturating_add(row_bytes)
+                };
+                Self::move_memory_view_highlight(dialog, address, row_bytes);
+            }
             let step = parse_hex_offset(&dialog.structure_forward_step);
             let mut next_address = None;
             ui.horizontal(|ui| {
@@ -9873,8 +9921,7 @@ impl CrosshairApp {
                 }
             });
             if let Some(address) = next_address {
-                Self::navigate_memory_view_dialog(dialog, address);
-                return;
+                Self::move_memory_view_highlight(dialog, address, row_bytes);
             }
             if let Some(region) = region {
                 ui.label(
@@ -9907,7 +9954,11 @@ impl CrosshairApp {
                 const PAGE_ROWS: usize = 12;
                 let page_bytes = row_bytes * PAGE_ROWS;
                 let mut page_changed = false;
-                if hovered && wheel > 0.0 && output.state.offset.y <= 0.5 {
+                if dialog.reset_memory_scroll {
+                    output.state.offset = egui::Vec2::ZERO;
+                    dialog.reset_memory_scroll = false;
+                    page_changed = true;
+                } else if hovered && wheel > 0.0 && output.state.offset.y <= 0.5 {
                     dialog.scroll_offset = dialog
                         .scroll_offset
                         .saturating_sub(page_bytes as isize);
@@ -10137,7 +10188,7 @@ impl CrosshairApp {
         let value_width = memory_display_cell_width(dialog.display_type);
         let address_width = 145.0;
         let ascii_width = 210.0;
-        let columns = 3;
+        let columns = dialog.memory_columns.max(1);
         let row_bytes = columns * unit;
 
         ui.horizontal(|ui| {
@@ -10159,8 +10210,7 @@ impl CrosshairApp {
             let is_target_row = (row_address <= dialog.address)
                 && (dialog.address < row_address.saturating_add(row_bytes));
 
-            let row_res = ui
-                .horizontal(|ui| {
+            ui.horizontal(|ui| {
                     let relative_offset = (row_address as isize) - (dialog.address as isize);
                     let shown_address = if dialog.relative_addresses {
                         if relative_offset >= 0 {
@@ -10233,6 +10283,11 @@ impl CrosshairApp {
                             ));
                         }
                         cell.context_menu(|ui| {
+                            if ui.button("Copy address").clicked() {
+                                ui.ctx()
+                                    .copy_text(format_prefixed_memory_address(cell_address));
+                                ui.close();
+                            }
                             let add_label = Self::tr_lang(
                                 language,
                                 "Add this address to the list",
@@ -10262,6 +10317,10 @@ impl CrosshairApp {
                                         )
                                         .clicked()
                                     {
+                                        dialog.scroll_offset = 0;
+                                        dialog.memory_columns = 3;
+                                        dialog.reset_memory_scroll = true;
+                                        dialog.fit_memory_columns = true;
                                         ui.close();
                                     }
                                 }
@@ -10294,47 +10353,6 @@ impl CrosshairApp {
                         })
                         .collect::<String>();
                     Self::memory_view_cell(ui, ascii_width, &ascii);
-                })
-                .response;
-
-            row_res.context_menu(|ui| {
-                let add_label = Self::tr_lang(
-                    language,
-                    "Add this address to the list",
-                    "Thêm địa chỉ này vào danh sách",
-                );
-                if ui.button(add_label).clicked() {
-                    dialog.pending_add =
-                        Some((row_address, memory_display_scan_type(dialog.display_type)));
-                    ui.close();
-                }
-                ui.separator();
-                let display_label = Self::tr_lang(language, "Display Type", "Kiểu hiển thị");
-                ui.menu_button(display_label, |ui| {
-                    for (display_type, label) in memory_display_types() {
-                        if ui
-                            .selectable_value(&mut dialog.display_type, display_type, label)
-                            .clicked()
-                        {
-                            ui.close();
-                        }
-                    }
-                });
-                let rel_label = Self::tr_lang(
-                    language,
-                    "Show relative addresses",
-                    "Hiện địa chỉ tương đối",
-                );
-                ui.checkbox(&mut dialog.relative_addresses, rel_label);
-                let dissect_label = Self::tr_lang(
-                    language,
-                    "Open in dissect data/structure",
-                    "Mở trong phân tích dữ liệu/cấu trúc",
-                );
-                if ui.button(dissect_label).clicked() {
-                    dialog.kind = MemoryViewKind::Structure;
-                    ui.close();
-                }
             });
         }
     }
@@ -10826,8 +10844,8 @@ impl CrosshairApp {
         cell.add_sized(
             rect.size(),
             egui::Label::new(RichText::new(text).monospace())
-                .selectable(true)
-                .sense(Sense::click_and_drag()),
+                .selectable(false)
+                .sense(Sense::click()),
         )
         .on_hover_cursor(egui::CursorIcon::Default)
     }
@@ -11773,6 +11791,51 @@ impl CrosshairApp {
             .unwrap_or(if scroll_offset < 0 { 0 } else { usize::MAX })
     }
 
+    fn memory_view_width_for_columns(display_type: MemoryDisplayType, columns: usize) -> f32 {
+        145.0 + 210.0 + memory_display_cell_width(display_type) * columns.max(1) as f32 + 50.0
+    }
+
+    fn memory_view_column_count(available_width: f32, display_type: MemoryDisplayType) -> usize {
+        (((available_width - 145.0 - 210.0) / memory_display_cell_width(display_type)).floor()
+            as usize)
+            .clamp(1, 32 / memory_display_width(display_type))
+    }
+
+    fn memory_view_offset_between(start: usize, base: usize) -> isize {
+        (start as i128 - base as i128).clamp(isize::MIN as i128, isize::MAX as i128) as isize
+    }
+
+    fn set_memory_view_columns(dialog: &mut MemoryViewDialog, columns: usize) {
+        let columns = columns.max(1);
+        if dialog.memory_columns == columns {
+            return;
+        }
+        let unit = memory_display_width(dialog.display_type);
+        let old_start = Self::memory_view_window_start(
+            dialog.address,
+            unit * dialog.memory_columns.max(1),
+            dialog.scroll_offset,
+        );
+        let new_base = Self::memory_view_window_start(dialog.address, unit * columns, 0);
+        dialog.memory_columns = columns;
+        dialog.scroll_offset = Self::memory_view_offset_between(old_start, new_base);
+    }
+
+    fn move_memory_view_highlight(
+        dialog: &mut MemoryViewDialog,
+        address: usize,
+        row_bytes: usize,
+    ) {
+        let start = Self::memory_view_window_start(
+            dialog.address,
+            row_bytes,
+            dialog.scroll_offset,
+        );
+        dialog.address = address;
+        let base = Self::memory_view_window_start(address, row_bytes, 0);
+        dialog.scroll_offset = Self::memory_view_offset_between(start, base);
+    }
+
     fn track_memory_changes(
         previous: &mut HashMap<usize, u8>,
         changed: &mut HashSet<usize>,
@@ -11789,16 +11852,16 @@ impl CrosshairApp {
     }
 
     fn navigate_memory_view_dialog(dialog: &mut MemoryViewDialog, address: usize) {
-        if dialog.address == address {
-            return;
+        if dialog.address != address {
+            dialog.history.push(dialog.address);
+            dialog.address = address;
         }
-        dialog.history.push(dialog.address);
-        dialog.address = address;
         dialog.previous_bytes.clear();
         dialog.previous_byte_map.clear();
         dialog.changed_addresses.clear();
         dialog.track_changes = false;
         dialog.scroll_offset = 0;
+        dialog.reset_memory_scroll = true;
         dialog.auto_dissected = false;
         dialog.selected_structure_address = None;
         if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
@@ -11845,6 +11908,9 @@ impl CrosshairApp {
             structure_forward_step: "10".to_owned(),
             selected_structure_address: None,
             scroll_offset: 0,
+            memory_columns: 3,
+            reset_memory_scroll: true,
+            fit_memory_columns: true,
         });
     }
 
@@ -13623,6 +13689,9 @@ mod tests {
             structure_forward_step: "10".to_owned(),
             selected_structure_address: Some(0x1004),
             scroll_offset: 0,
+            memory_columns: 3,
+            reset_memory_scroll: true,
+            fit_memory_columns: true,
         };
 
         CrosshairApp::navigate_memory_view_dialog(&mut dialog, 0x2000);
@@ -13633,6 +13702,21 @@ mod tests {
         assert!(dialog.previous_bytes.is_empty());
         assert!(dialog.changed_addresses.is_empty());
         assert!(!dialog.track_changes);
+
+        let visible_start = CrosshairApp::memory_view_window_start(
+            dialog.address,
+            12,
+            dialog.scroll_offset,
+        );
+        CrosshairApp::move_memory_view_highlight(&mut dialog, 0x200C, 12);
+        assert_eq!(
+            CrosshairApp::memory_view_window_start(
+                dialog.address,
+                12,
+                dialog.scroll_offset,
+            ),
+            visible_start
+        );
     }
 
     #[test]
@@ -13640,6 +13724,10 @@ mod tests {
         let initial = CrosshairApp::memory_view_window_start(0x1000, 12, 0);
         let paged_up = CrosshairApp::memory_view_window_start(0x1000, 12, -96);
         assert_eq!(initial - paged_up, 96);
+        assert_eq!(
+            CrosshairApp::memory_view_column_count(145.0 + 210.0 + 3.0 * 100.0, MemoryDisplayType::Float),
+            3
+        );
     }
 
     #[test]
