@@ -2256,6 +2256,7 @@ mod windows_overlay {
         color_pick_preview: Option<ScreenDrawColorPickPreview>,
         pointer_point: POINT,
         text_border: bool,
+        restore_ui_on_deactivate: bool,
     }
 
     fn screen_draw_debug_log(_message: impl AsRef<str>) {}
@@ -2336,6 +2337,7 @@ mod windows_overlay {
                 color_pick_preview: None,
                 pointer_point: POINT { x: 0, y: 0 },
                 text_border: false,
+                restore_ui_on_deactivate: false,
             }
         }
     }
@@ -12419,6 +12421,21 @@ mod windows_overlay {
         if state.crosshair_draw_target.is_some() {
             state.crosshair_draw_target = None;
         }
+        let should_restore_ui = state.restore_ui_on_deactivate;
+        state.restore_ui_on_deactivate = false;
+        if should_restore_ui {
+            #[cfg(windows)]
+            unsafe {
+                if let Some(hwnd) = find_app_ui_window() {
+                    use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNORMAL, SetForegroundWindow, ShowWindow};
+                    let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                    let _ = SetForegroundWindow(hwnd);
+                }
+            }
+            if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
+                let _ = ui_tx.send(UiCommand::ShowWindow);
+            }
+        }
         if let Some(command) = crosshair_draw_finished {
             send_ui_command(UiCommand::UpdateScreenDrawConfig {
                 color: state.color,
@@ -13036,6 +13053,7 @@ mod windows_overlay {
             }
             started_inactive = !state.active;
             if started_inactive {
+                state.restore_ui_on_deactivate = true;
                 let freeze = state.freeze_screen;
                 let captured_frame = if freeze {
                     std::thread::sleep(std::time::Duration::from_millis(60));
@@ -13113,6 +13131,7 @@ mod windows_overlay {
                     {
                         let mut state = SCREEN_DRAW_STATE.lock();
                         activate_screen_draw(&mut state, captured_frame);
+                        state.restore_ui_on_deactivate = true;
                         state.trigger_latched = false;
                         state.trigger_is_down = false;
                         state.trigger_pressed_at = None;
@@ -13127,6 +13146,7 @@ mod windows_overlay {
                 {
                     let mut state = SCREEN_DRAW_STATE.lock();
                     activate_screen_draw(&mut state, None);
+                    state.restore_ui_on_deactivate = true;
                     state.trigger_latched = false;
                     state.trigger_is_down = false;
                     state.trigger_pressed_at = None;
