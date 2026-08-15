@@ -12689,34 +12689,36 @@ mod windows_overlay {
                 state.pending_repaint = true;
             }
             ScreenDrawHit::EffectHighlight => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
-                state.effect = if state.effect == ScreenDrawEffect::Highlight {
-                    ScreenDrawEffect::None
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+                if state.tool == ScreenDrawTool::Highlight && !state.eraser {
+                    state.tool = ScreenDrawTool::Brush;
+                    state.effect = ScreenDrawEffect::None;
                 } else {
-                    ScreenDrawEffect::Highlight
-                };
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                    state.tool = ScreenDrawTool::Highlight;
+                    state.effect = ScreenDrawEffect::Highlight;
+                    state.eraser = false;
+                }
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::EffectBlur => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
-                state.effect = if state.effect == ScreenDrawEffect::Blur {
-                    ScreenDrawEffect::None
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
+                if state.tool == ScreenDrawTool::Blur && !state.eraser {
+                    state.tool = ScreenDrawTool::Brush;
+                    state.effect = ScreenDrawEffect::None;
                 } else {
-                    ScreenDrawEffect::Blur
-                };
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                    state.tool = ScreenDrawTool::Blur;
+                    state.effect = ScreenDrawEffect::Blur;
+                    state.eraser = false;
+                }
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::Color => {
-                // Toggle the inline color palette on the overlay
                 state.color_palette_open = !state.color_palette_open;
-                let full_rect = ScreenDrawDirtyRect {
-                    left: 0,
-                    top: 0,
-                    right: state.canvas_width,
-                    bottom: state.canvas_height,
-                };
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 mark_screen_draw_dirty(&mut state, full_rect);
                 state.committed_dirty = true;
                 state.pending_repaint = true;
@@ -12778,12 +12780,7 @@ mod windows_overlay {
                         session.stroke.color = colors[i];
                     }
                     state.color_palette_open = false;
-                    let full_rect = ScreenDrawDirtyRect {
-                        left: 0,
-                        top: 0,
-                        right: state.canvas_width,
-                        bottom: state.canvas_height,
-                    };
+                    let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                     mark_screen_draw_dirty(&mut state, full_rect);
                     state.committed_dirty = true;
                     state.pending_repaint = true;
@@ -12791,92 +12788,119 @@ mod windows_overlay {
                 }
             }
             ScreenDrawHit::BrushSize => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.active_control = ScreenDrawControl::BrushSize;
                 begin_screen_draw_brush_slider_drag(&mut state, point.x);
-                mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::ToolBrush => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.tool = ScreenDrawTool::Brush;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                state.eraser = false;
+                state.effect = ScreenDrawEffect::None;
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::ToolLine => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.tool = ScreenDrawTool::Line;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                state.eraser = false;
+                state.effect = ScreenDrawEffect::None;
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::ToolArrow => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.tool = ScreenDrawTool::Arrow;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                state.eraser = false;
+                state.effect = ScreenDrawEffect::None;
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::ToolRectangle => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.tool = ScreenDrawTool::Rectangle;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                state.eraser = false;
+                state.effect = ScreenDrawEffect::None;
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::ToolEllipse => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.tool = ScreenDrawTool::Ellipse;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                state.eraser = false;
+                state.effect = ScreenDrawEffect::None;
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::ToolCircle => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.tool = ScreenDrawTool::Circle;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                state.eraser = false;
+                state.effect = ScreenDrawEffect::None;
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::ToolPolygon => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.tool = ScreenDrawTool::Polygon;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                state.eraser = false;
+                state.effect = ScreenDrawEffect::None;
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::ToolText => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.tool = ScreenDrawTool::Text;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                state.eraser = false;
+                state.effect = ScreenDrawEffect::None;
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::PickScreenColor => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
-                let preview_rect = screen_draw_color_pick_panel_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 if state.screen_color_pick_mode {
                     end_screen_draw_color_pick_mode(&mut state);
                 } else {
                     begin_screen_draw_color_pick_mode(&mut state);
                 }
                 state.active_control = ScreenDrawControl::None;
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
-                if let Some(rect) =
-                    preview_rect.or_else(|| screen_draw_color_pick_panel_rect(&state))
-                {
-                    mark_screen_draw_dirty(&mut state, rect);
-                }
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
             }
             ScreenDrawHit::Eraser => {
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.eraser = !state.eraser;
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                if state.eraser {
+                    state.effect = ScreenDrawEffect::None;
+                }
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
+                should_sync_config = true;
             }
             ScreenDrawHit::Smoothing => {
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.smoothing = !state.smoothing;
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
-                mark_screen_draw_dirty(&mut state, toolbar_rect);
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::SmoothingAmount => {
-                let toolbar_rect = screen_draw_toolbar_rect(&state);
+                let full_rect = ScreenDrawDirtyRect::full(state.canvas_width, state.canvas_height);
                 state.active_control = ScreenDrawControl::SmoothingAmount;
                 update_screen_draw_smoothing_slider(&mut state, point.x);
-                mark_screen_draw_toolbar_dirty(&mut state, toolbar_rect);
+                mark_screen_draw_dirty(&mut state, full_rect);
+                state.pending_repaint = true;
                 should_sync_config = true;
             }
             ScreenDrawHit::CaptureRegion => {
@@ -17282,15 +17306,30 @@ mod windows_overlay {
         draw_btn_bg(&mut pixmap, brush_x, 11.0, 28.0, 28.0, brush_active);
         draw_skia_circle_fill(&mut pixmap, brush_x + 14.0, 25.0, 5.0, icon_white);
 
-        // 5. Smooth (x = 130)
+        // 5. Smooth (x = 130) - Toggle Modifier
         let smooth_x = SCREEN_DRAW_TOOLBAR_SMOOTH_X as f32;
-        draw_btn_bg(&mut pixmap, smooth_x, 11.0, 28.0, 28.0, smoothing);
+        let smooth_bg = if smoothing {
+            [36, 68, 60, 220]
+        } else {
+            [40, 50, 68, 140]
+        };
+        let smooth_border = if smoothing {
+            [0, 255, 170, 200]
+        } else {
+            [255, 255, 255, 20]
+        };
+        fill_skia_rounded_rect(&mut pixmap, smooth_x, 11.0, 28.0, 28.0, 6.0, smooth_bg);
+        stroke_skia_rounded_rect(&mut pixmap, smooth_x + 0.5, 11.5, 27.0, 27.0, 6.0, 1.0, smooth_border);
         let mut smooth_pb = tiny_skia::PathBuilder::new();
         smooth_pb.move_to(smooth_x + 6.0, 27.0);
         smooth_pb.cubic_to(smooth_x + 9.0, 19.0, smooth_x + 13.0, 19.0, smooth_x + 14.0, 25.0);
         smooth_pb.cubic_to(smooth_x + 15.0, 31.0, smooth_x + 19.0, 31.0, smooth_x + 22.0, 23.0);
         if let Some(path) = smooth_pb.finish() {
-            stroke_skia_path(&mut pixmap, &path, icon_white, 2.0);
+            let smooth_stroke_col = if smoothing { [0, 255, 170, 255] } else { icon_white };
+            stroke_skia_path(&mut pixmap, &path, smooth_stroke_col, 2.0);
+        }
+        if smoothing {
+            draw_skia_circle_fill(&mut pixmap, smooth_x + 22.0, 16.0, 2.0, [0, 255, 170, 255]);
         }
 
         // 6. Eraser (x = 162)
@@ -17373,7 +17412,7 @@ mod windows_overlay {
         draw_divider(&mut pixmap, 418.0);
 
         // 14. Highlight Effect (x = 424)
-        let highlight_active = effect == ScreenDrawEffect::Highlight;
+        let highlight_active = (tool == ScreenDrawTool::Highlight || effect == ScreenDrawEffect::Highlight) && !eraser;
         let highlight_x = SCREEN_DRAW_TOOLBAR_HIGHLIGHT_X as f32;
         draw_btn_bg(&mut pixmap, highlight_x, 11.0, 28.0, 28.0, highlight_active);
         fill_skia_rounded_rect(&mut pixmap, highlight_x + 5.0, 24.0, 18.0, 6.0, 1.5, [255, 220, 50, 180]);
@@ -17382,7 +17421,7 @@ mod windows_overlay {
         draw_skia_line(&mut pixmap, highlight_x + 19.0, 19.0, highlight_x + 16.5, 21.5, icon_white, 1.8);
 
         // 15. Blur Effect (x = 456)
-        let blur_active = effect == ScreenDrawEffect::Blur;
+        let blur_active = (tool == ScreenDrawTool::Blur || effect == ScreenDrawEffect::Blur) && !eraser;
         let blur_x = SCREEN_DRAW_TOOLBAR_BLUR_X as f32;
         draw_btn_bg(&mut pixmap, blur_x, 11.0, 28.0, 28.0, blur_active);
         stroke_skia_rounded_rect(&mut pixmap, blur_x + 6.5, 18.5, 15.0, 13.0, 2.0, 1.5, icon_white);
