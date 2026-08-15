@@ -13082,9 +13082,17 @@ mod windows_overlay {
             if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
                 return false;
             }
+            #[cfg(windows)]
+            unsafe {
+                if let Some(hwnd) = find_app_ui_window() {
+                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
+            }
             let freeze = SCREEN_DRAW_STATE.lock().freeze_screen;
             if freeze {
                 std::thread::spawn(|| {
+                    std::thread::sleep(std::time::Duration::from_millis(60));
                     let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                     let captured_frame = if screen_w > 0 && screen_h > 0 {
                         window_list::capture_virtual_screen_region(
@@ -17409,10 +17417,49 @@ mod windows_overlay {
         // 15. Eye Dropper (x = 462)
         let pick_x = SCREEN_DRAW_TOOLBAR_PICK_COLOR_X as f32;
         draw_btn_bg(&mut pixmap, pick_x, 11.0, 28.0, 28.0, color_pick_mode);
-        draw_skia_circle_fill(&mut pixmap, pick_x + 19.5, 17.5, 3.5, icon_white);
-        draw_skia_line(&mut pixmap, pick_x + 18.0, 19.0, pick_x + 10.0, 27.0, icon_white, 2.2);
-        draw_skia_circle_fill(&mut pixmap, pick_x + 7.5, 31.0, 2.2, [color.r, color.g, color.b, 255]);
-        draw_skia_circle_outline(&mut pixmap, pick_x + 7.5, 31.0, 2.2, icon_white, 0.8);
+
+        // Pipette bulb (rubber squeeze top at top-right)
+        let mut bulb_pb = tiny_skia::PathBuilder::new();
+        bulb_pb.move_to(pick_x + 16.5, 18.5);
+        bulb_pb.cubic_to(pick_x + 18.0, 14.5, pick_x + 22.5, 15.0, pick_x + 23.5, 17.5);
+        bulb_pb.cubic_to(pick_x + 24.5, 20.0, pick_x + 21.0, 23.5, pick_x + 19.5, 21.5);
+        if let Some(path) = bulb_pb.finish() {
+            let mut fill_paint = tiny_skia::Paint::default();
+            fill_paint.anti_alias = true;
+            fill_paint.set_color(tiny_skia::Color::from_rgba8(200, 215, 235, 160));
+            pixmap.fill_path(&path, &fill_paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+            stroke_skia_path(&mut pixmap, &path, icon_white, 1.6);
+        }
+
+        // Pipette collar / flange (crossbar ring)
+        draw_skia_line(&mut pixmap, pick_x + 15.0, 18.0, pick_x + 21.0, 24.0, icon_white, 2.0);
+
+        // Pipette glass body and tapered nozzle
+        let mut body_pb = tiny_skia::PathBuilder::new();
+        body_pb.move_to(pick_x + 16.0, 20.0);
+        body_pb.line_to(pick_x + 12.0, 24.0);
+        body_pb.line_to(pick_x + 10.5, 27.0);
+        body_pb.line_to(pick_x + 7.0, 31.5); // Fine tip
+        body_pb.line_to(pick_x + 11.5, 28.0);
+        body_pb.line_to(pick_x + 14.5, 26.5);
+        body_pb.line_to(pick_x + 18.5, 22.5);
+        body_pb.close();
+        if let Some(path) = body_pb.finish() {
+            stroke_skia_path(&mut pixmap, &path, icon_white, 1.6);
+        }
+
+        // Color indicator loaded inside the pipette tip
+        let mut tip_pb = tiny_skia::PathBuilder::new();
+        tip_pb.move_to(pick_x + 10.5, 27.0);
+        tip_pb.line_to(pick_x + 7.0, 31.5);
+        tip_pb.line_to(pick_x + 11.5, 28.0);
+        tip_pb.close();
+        if let Some(path) = tip_pb.finish() {
+            let mut col_paint = tiny_skia::Paint::default();
+            col_paint.anti_alias = true;
+            col_paint.set_color(tiny_skia::Color::from_rgba8(color.r, color.g, color.b, 255));
+            pixmap.fill_path(&path, &col_paint, tiny_skia::FillRule::Winding, tiny_skia::Transform::identity(), None);
+        }
 
         // Divider 4
         draw_divider(&mut pixmap, 494.0);
