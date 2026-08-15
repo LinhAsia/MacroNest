@@ -15927,14 +15927,7 @@ mod windows_overlay {
     }
 
     fn screen_draw_shape_points(stroke: &ScreenDrawStroke) -> Cow<'_, [POINT]> {
-        if stroke.tool == ScreenDrawTool::Brush && stroke.smoothing {
-            Cow::Owned(smoothed_screen_draw_points(
-                &stroke.points,
-                stroke.smoothing_amount,
-            ))
-        } else {
-            Cow::Borrowed(&stroke.points)
-        }
+        Cow::Borrowed(&stroke.points)
     }
 
     fn draw_screen_draw_arrow_head(
@@ -16102,20 +16095,61 @@ mod windows_overlay {
                 let mut pb = tiny_skia::PathBuilder::new();
                 pb.move_to(first.x as f32, first.y as f32);
                 if stroke.smoothing && points.len() >= 3 {
-                    let pts: Vec<(f32, f32)> =
-                        points.iter().map(|p| (p.x as f32, p.y as f32)).collect();
-                    for i in 0..pts.len() - 1 {
-                        let p0 = if i > 0 { pts[i - 1] } else { pts[i] };
-                        let p1 = pts[i];
-                        let p2 = pts[i + 1];
-                        let p3 = if i + 2 < pts.len() { pts[i + 2] } else { p2 };
+                    // 1. Filter out redundant subpixel jitter points (distance < 2.5px)
+                    let mut filtered: Vec<(f32, f32)> = Vec::with_capacity(points.len());
+                    for p in points.iter() {
+                        let pt = (p.x as f32, p.y as f32);
+                        if let Some(prev) = filtered.last() {
+                            let dx = pt.0 - prev.0;
+                            let dy = pt.1 - prev.1;
+                            if dx * dx + dy * dy >= 6.25 {
+                                filtered.push(pt);
+                            }
+                        } else {
+                            filtered.push(pt);
+                        }
+                    }
+                    if let Some(last_p) = points.last() {
+                        let last_pt = (last_p.x as f32, last_p.y as f32);
+                        if filtered.last() != Some(&last_pt) {
+                            filtered.push(last_pt);
+                        }
+                    }
 
-                        let cp1_x = p1.0 + (p2.0 - p0.0) / 6.0;
-                        let cp1_y = p1.1 + (p2.0 - p0.0) / 6.0;
-                        let cp2_x = p2.0 - (p3.0 - p1.0) / 6.0;
-                        let cp2_y = p2.1 - (p3.0 - p1.0) / 6.0;
+                    if filtered.len() < 3 {
+                        for pt in filtered.iter().skip(1) {
+                            pb.line_to(pt.0, pt.1);
+                        }
+                    } else {
+                        // 2. Chaikin smoothing passes in pure f32 (never round to i32)
+                        let passes = (1.0 + stroke.smoothing_amount.clamp(0.0, 1.0) * 2.0).round() as usize;
+                        let mut smooth_pts = filtered;
+                        for _ in 0..passes {
+                            if smooth_pts.len() < 3 {
+                                break;
+                            }
+                            let mut next_pts = Vec::with_capacity(smooth_pts.len() * 2);
+                            next_pts.push(smooth_pts[0]);
+                            for i in 0..smooth_pts.len() - 1 {
+                                let p0 = smooth_pts[i];
+                                let p1 = smooth_pts[i + 1];
+                                next_pts.push((p0.0 * 0.75 + p1.0 * 0.25, p0.1 * 0.75 + p1.1 * 0.25));
+                                next_pts.push((p0.0 * 0.25 + p1.0 * 0.75, p0.1 * 0.25 + p1.1 * 0.75));
+                            }
+                            next_pts.push(*smooth_pts.last().unwrap());
+                            smooth_pts = next_pts;
+                        }
 
-                        pb.cubic_to(cp1_x, cp1_y, cp2_x, cp2_y, p2.0, p2.1);
+                        // 3. Connect via midpoint Quadratic Bezier curves (C1 continuous, zero overshoot, perfectly smooth)
+                        for i in 1..smooth_pts.len() - 1 {
+                            let p_curr = smooth_pts[i];
+                            let p_next = smooth_pts[i + 1];
+                            let mid = ((p_curr.0 + p_next.0) * 0.5, (p_curr.1 + p_next.1) * 0.5);
+                            pb.quad_to(p_curr.0, p_curr.1, mid.0, mid.1);
+                        }
+                        if let Some(last_pt) = smooth_pts.last() {
+                            pb.line_to(last_pt.0, last_pt.1);
+                        }
                     }
                 } else {
                     for point in points.iter().skip(1) {
