@@ -1581,14 +1581,14 @@ pub fn scan_memory_range_with_progress(
         .map(|region| region.size / value_type.width())
         .fold(0usize, usize::saturating_add);
     let alignment = options.alignment.unwrap_or(1).max(1);
-    // ponytail: merging worker Vecs temporarily raises peak RAM, so only parallelize unknown
-    // scans whose result storage remains modest; a chunked result store is the upgrade path.
+    // ponytail: large unknown scans use two workers so memory stays bounded while one slow
+    // region cannot make the progress appear stalled; a chunked result store is the upgrade path.
     const MAX_PARALLEL_UNKNOWN_BYTES: usize = 512 * 1024 * 1024;
     let estimated_result_bytes = slots
         .min(result_limit)
         .saturating_mul(std::mem::size_of::<ScanCandidate>());
     let worker_count = if exact.is_none() && estimated_result_bytes > MAX_PARALLEL_UNKNOWN_BYTES {
-        1
+        2.min(regions.len().max(1))
     } else {
         thread::available_parallelism()
             .map(|count| count.get())

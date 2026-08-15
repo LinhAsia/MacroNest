@@ -486,6 +486,7 @@ struct MemoryViewDialog {
     scroll_offset: isize,
     memory_columns: usize,
     reset_memory_scroll: bool,
+    memory_scroll_override: Option<f32>,
     fit_memory_columns: bool,
     stride_address_a: String,
     stride_address_b: String,
@@ -733,6 +734,7 @@ pub(crate) struct MemoryPanelState {
     module_list_dialog: Option<ModuleListDialog>,
     memory_settings_open: bool,
     code_list_open: bool,
+    code_list_actions_validated: bool,
     stable_pointer_dialog: Option<StablePointerDialog>,
     deep_pointer_dialog: Option<DeepPointerDialog>,
     camera_matrix_dialog: Option<CameraMatrixDialog>,
@@ -829,6 +831,7 @@ impl Default for MemoryPanelState {
             module_list_dialog: None,
             memory_settings_open: false,
             code_list_open: false,
+            code_list_actions_validated: false,
             stable_pointer_dialog: None,
             deep_pointer_dialog: None,
             camera_matrix_dialog: None,
@@ -886,6 +889,7 @@ impl CrosshairApp {
             self.memory_panel.edit_description_index = None;
             self.memory_panel.address_dialog = None;
             self.memory_panel.address_group_dialog = None;
+            self.memory_panel.code_list_actions_validated = false;
         }
         self.memory_panel.process_pid = pid;
         #[cfg(windows)]
@@ -3136,6 +3140,7 @@ impl CrosshairApp {
                                         scroll_offset: 0,
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
+                                        memory_scroll_override: None,
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
@@ -3434,6 +3439,7 @@ impl CrosshairApp {
                                         scroll_offset: 0,
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
+                                        memory_scroll_override: None,
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
@@ -3492,6 +3498,7 @@ impl CrosshairApp {
                                         scroll_offset: 0,
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
+                                        memory_scroll_override: None,
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
@@ -4341,7 +4348,9 @@ impl CrosshairApp {
         #[cfg(windows)]
         self.poll_code_entry_relocate();
         let mut corrected_actions = false;
-        if let Some(pid) = self.memory_panel.process_pid {
+        if !self.memory_panel.code_list_actions_validated
+            && let Some(pid) = self.memory_panel.process_pid
+        {
             for entry in &mut self.state.memory_code_list {
                 if let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset)
                     && let Ok(writes) = instruction_writes_memory(pid, address)
@@ -4351,6 +4360,7 @@ impl CrosshairApp {
                     corrected_actions = true;
                 }
             }
+            self.memory_panel.code_list_actions_validated = true;
         }
         if corrected_actions {
             self.persist();
@@ -9121,6 +9131,7 @@ impl CrosshairApp {
                 scroll_offset: 0,
                 memory_columns: 3,
                 reset_memory_scroll: true,
+                memory_scroll_override: None,
                 fit_memory_columns: true,
                 stride_address_a: String::new(),
                 stride_address_b: String::new(),
@@ -10034,12 +10045,46 @@ impl CrosshairApp {
                     scroll_area = scroll_area
                         .horizontal_scroll_offset(0.0)
                         .vertical_scroll_offset(target_row.saturating_sub(3) as f32 * 18.0);
+                } else if let Some(offset) = dialog.memory_scroll_override.take() {
+                    scroll_area = scroll_area.vertical_scroll_offset(offset);
                 }
-                scroll_area.show(ui, |ui| {
+                let output = scroll_area.show(ui, |ui| {
                     Self::render_memory_region_grid(ui, language, dialog, start_address, bytes)
                 });
                 if dialog.reset_memory_scroll {
                     dialog.reset_memory_scroll = false;
+                }
+                let scroll_delta = ui.input(|input| input.raw_scroll_delta.y);
+                let pointer_over_grid = ui
+                    .ctx()
+                    .pointer_latest_pos()
+                    .is_some_and(|pointer| output.inner_rect.contains(pointer));
+                if pointer_over_grid && scroll_delta != 0.0 {
+                    if let Some(region) = region {
+                        let region_end = region.base.saturating_add(region.size);
+                        let page_bytes = (MEMORY_VIEW_READ_BYTES / 2 / row_bytes) * row_bytes;
+                        let max_y = (output.content_size.y - output.inner_rect.height()).max(0.0);
+                        if scroll_delta > 0.0
+                            && output.state.offset.y <= 1.0
+                            && start_address > region.base
+                        {
+                            let shift = page_bytes.min(start_address - region.base);
+                            dialog.scroll_offset = dialog.scroll_offset.saturating_sub(shift as isize);
+                            dialog.memory_scroll_override =
+                                Some((shift / row_bytes) as f32 * 18.0);
+                            ui.ctx().request_repaint();
+                        } else if scroll_delta < 0.0
+                            && output.state.offset.y >= max_y - 1.0
+                            && start_address.saturating_add(bytes.len()) < region_end
+                        {
+                            let remaining = region_end - start_address.saturating_add(bytes.len());
+                            let shift = page_bytes.min(remaining);
+                            dialog.scroll_offset = dialog.scroll_offset.saturating_add(shift as isize);
+                            dialog.memory_scroll_override =
+                                Some((max_y - (shift / row_bytes) as f32 * 18.0).max(0.0));
+                            ui.ctx().request_repaint();
+                        }
+                    }
                 }
             }
             MemoryViewKind::Structure => {
@@ -11955,6 +12000,7 @@ impl CrosshairApp {
         dialog.track_changes = false;
         dialog.scroll_offset = 0;
         dialog.reset_memory_scroll = true;
+        dialog.memory_scroll_override = None;
         dialog.auto_dissected = false;
         dialog.selected_structure_address = None;
         if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
@@ -12003,6 +12049,7 @@ impl CrosshairApp {
             scroll_offset: 0,
             memory_columns: 3,
             reset_memory_scroll: true,
+            memory_scroll_override: None,
             fit_memory_columns: true,
             stride_address_a: String::new(),
             stride_address_b: String::new(),
@@ -13798,6 +13845,7 @@ mod tests {
             scroll_offset: 0,
             memory_columns: 3,
             reset_memory_scroll: true,
+            memory_scroll_override: None,
             fit_memory_columns: true,
             stride_address_a: String::new(),
             stride_address_b: String::new(),
