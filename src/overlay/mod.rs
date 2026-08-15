@@ -269,18 +269,18 @@ mod windows_overlay {
     const SCREEN_DRAW_TOOLBAR_UNDO_X: i32 = 28;
     const SCREEN_DRAW_TOOLBAR_REDO_X: i32 = 60;
     const SCREEN_DRAW_TOOLBAR_BRUSH_X: i32 = 98;
-    const SCREEN_DRAW_TOOLBAR_SMOOTH_X: i32 = 130;
-    const SCREEN_DRAW_TOOLBAR_LINE_X: i32 = 162;
-    const SCREEN_DRAW_TOOLBAR_ARROW_X: i32 = 194;
-    const SCREEN_DRAW_TOOLBAR_RECT_X: i32 = 226;
-    const SCREEN_DRAW_TOOLBAR_ELLIPSE_X: i32 = 258;
-    const SCREEN_DRAW_TOOLBAR_CIRCLE_X: i32 = 290;
-    const SCREEN_DRAW_TOOLBAR_POLYGON_X: i32 = 322;
-    const SCREEN_DRAW_TOOLBAR_TEXT_X: i32 = 354;
-    const SCREEN_DRAW_TOOLBAR_HIGHLIGHT_X: i32 = 392;
-    const SCREEN_DRAW_TOOLBAR_BLUR_X: i32 = 424;
-    const SCREEN_DRAW_TOOLBAR_COLOR_X: i32 = 462;
-    const SCREEN_DRAW_TOOLBAR_PICK_COLOR_X: i32 = 494;
+    const SCREEN_DRAW_TOOLBAR_LINE_X: i32 = 130;
+    const SCREEN_DRAW_TOOLBAR_ARROW_X: i32 = 162;
+    const SCREEN_DRAW_TOOLBAR_RECT_X: i32 = 194;
+    const SCREEN_DRAW_TOOLBAR_ELLIPSE_X: i32 = 226;
+    const SCREEN_DRAW_TOOLBAR_CIRCLE_X: i32 = 258;
+    const SCREEN_DRAW_TOOLBAR_POLYGON_X: i32 = 290;
+    const SCREEN_DRAW_TOOLBAR_TEXT_X: i32 = 322;
+    const SCREEN_DRAW_TOOLBAR_HIGHLIGHT_X: i32 = 360;
+    const SCREEN_DRAW_TOOLBAR_BLUR_X: i32 = 392;
+    const SCREEN_DRAW_TOOLBAR_COLOR_X: i32 = 430;
+    const SCREEN_DRAW_TOOLBAR_PICK_COLOR_X: i32 = 462;
+    const SCREEN_DRAW_TOOLBAR_SMOOTH_X: i32 = 500;
     const SCREEN_DRAW_TOOLBAR_SIZE_X: i32 = 532;
     const SCREEN_DRAW_TOOLBAR_CAPTURE_X: i32 = 628;
     const SCREEN_DRAW_TOOLBAR_CLEAR_X: i32 = 660;
@@ -14299,9 +14299,6 @@ mod windows_overlay {
         if x >= SCREEN_DRAW_TOOLBAR_BRUSH_X && x <= SCREEN_DRAW_TOOLBAR_BRUSH_X + 28 {
             return ScreenDrawHit::ToolBrush;
         }
-        if x >= SCREEN_DRAW_TOOLBAR_SMOOTH_X && x <= SCREEN_DRAW_TOOLBAR_SMOOTH_X + 28 {
-            return ScreenDrawHit::Smoothing;
-        }
         if x >= SCREEN_DRAW_TOOLBAR_LINE_X && x <= SCREEN_DRAW_TOOLBAR_LINE_X + 28 {
             return ScreenDrawHit::ToolLine;
         }
@@ -14334,6 +14331,9 @@ mod windows_overlay {
         }
         if x >= SCREEN_DRAW_TOOLBAR_PICK_COLOR_X && x <= SCREEN_DRAW_TOOLBAR_PICK_COLOR_X + 28 {
             return ScreenDrawHit::PickScreenColor;
+        }
+        if x >= SCREEN_DRAW_TOOLBAR_SMOOTH_X && x <= SCREEN_DRAW_TOOLBAR_SMOOTH_X + 28 {
+            return ScreenDrawHit::Smoothing;
         }
         if x >= SCREEN_DRAW_TOOLBAR_SIZE_X && x <= SCREEN_DRAW_TOOLBAR_SIZE_X + 80 {
             return ScreenDrawHit::BrushSize;
@@ -17302,7 +17302,122 @@ mod windows_overlay {
         draw_btn_bg(&mut pixmap, brush_x, 11.0, 28.0, 28.0, brush_active);
         draw_skia_circle_fill(&mut pixmap, brush_x + 14.0, 25.0, 5.0, icon_white);
 
-        // 5. Smooth (x = 130) - Toggle Modifier
+        // 5. Line (x = 130)
+        let line_active = tool == ScreenDrawTool::Line && !eraser && effect == ScreenDrawEffect::None;
+        let line_x = SCREEN_DRAW_TOOLBAR_LINE_X as f32;
+        draw_btn_bg(&mut pixmap, line_x, 11.0, 28.0, 28.0, line_active);
+        draw_skia_line(&mut pixmap, line_x + 6.0, 32.0, line_x + 22.0, 18.0, icon_white, 2.0);
+
+        // 6. Arrow (x = 162)
+        let arrow_active = tool == ScreenDrawTool::Arrow && !eraser && effect == ScreenDrawEffect::None;
+        let arrow_x = SCREEN_DRAW_TOOLBAR_ARROW_X as f32;
+        draw_btn_bg(&mut pixmap, arrow_x, 11.0, 28.0, 28.0, arrow_active);
+        draw_skia_line(&mut pixmap, arrow_x + 6.0, 32.0, arrow_x + 21.0, 18.0, icon_white, 2.0);
+        draw_skia_line(&mut pixmap, arrow_x + 21.0, 18.0, arrow_x + 14.0, 18.5, icon_white, 2.0);
+        draw_skia_line(&mut pixmap, arrow_x + 21.0, 18.0, arrow_x + 20.5, 25.0, icon_white, 2.0);
+
+        // 7. Rectangle (x = 194)
+        let rect_active = tool == ScreenDrawTool::Rectangle && !eraser && effect == ScreenDrawEffect::None;
+        let rect_x = SCREEN_DRAW_TOOLBAR_RECT_X as f32;
+        draw_btn_bg(&mut pixmap, rect_x, 11.0, 28.0, 28.0, rect_active);
+        stroke_skia_rounded_rect(&mut pixmap, rect_x + 6.5, 18.5, 15.0, 13.0, 2.0, 1.8, icon_white);
+
+        // 8. Ellipse (x = 226)
+        let ellipse_active = tool == ScreenDrawTool::Ellipse && !eraser && effect == ScreenDrawEffect::None;
+        let ellipse_x = SCREEN_DRAW_TOOLBAR_ELLIPSE_X as f32;
+        draw_btn_bg(&mut pixmap, ellipse_x, 11.0, 28.0, 28.0, ellipse_active);
+        let mut ellipse_pb = tiny_skia::PathBuilder::new();
+        if let Some(oval_rect) = tiny_skia::Rect::from_xywh(ellipse_x + 5.5, 19.5, 17.0, 11.0) {
+            ellipse_pb.push_oval(oval_rect);
+        }
+        if let Some(path) = ellipse_pb.finish() {
+            stroke_skia_path(&mut pixmap, &path, icon_white, 1.8);
+        }
+
+        // 9. Circle (x = 258)
+        let circle_active = tool == ScreenDrawTool::Circle && !eraser && effect == ScreenDrawEffect::None;
+        let circle_x = SCREEN_DRAW_TOOLBAR_CIRCLE_X as f32;
+        draw_btn_bg(&mut pixmap, circle_x, 11.0, 28.0, 28.0, circle_active);
+        draw_skia_circle_outline(&mut pixmap, circle_x + 14.0, 25.0, 7.0, icon_white, 1.8);
+
+        // 10. Polygon (x = 290)
+        let poly_active = tool == ScreenDrawTool::Polygon && !eraser && effect == ScreenDrawEffect::None;
+        let poly_x = SCREEN_DRAW_TOOLBAR_POLYGON_X as f32;
+        draw_btn_bg(&mut pixmap, poly_x, 11.0, 28.0, 28.0, poly_active);
+        let mut poly_pb = tiny_skia::PathBuilder::new();
+        let poly_cx = poly_x + 14.0;
+        let poly_cy = 25.0;
+        let poly_r = 7.5;
+        let poly_rot = -std::f32::consts::FRAC_PI_2;
+        for i in 0..5 {
+            let theta = poly_rot + (i as f32 / 5.0) * std::f32::consts::TAU;
+            let px = poly_cx + poly_r * theta.cos();
+            let py = poly_cy + poly_r * theta.sin();
+            if i == 0 {
+                poly_pb.move_to(px, py);
+            } else {
+                poly_pb.line_to(px, py);
+            }
+        }
+        poly_pb.close();
+        if let Some(path) = poly_pb.finish() {
+            stroke_skia_path(&mut pixmap, &path, icon_white, 1.8);
+        }
+
+        // 11. Text (x = 322)
+        let text_active = tool == ScreenDrawTool::Text && !eraser && effect == ScreenDrawEffect::None;
+        let text_x = SCREEN_DRAW_TOOLBAR_TEXT_X as f32;
+        draw_btn_bg(&mut pixmap, text_x, 11.0, 28.0, 28.0, text_active);
+        draw_skia_line(&mut pixmap, text_x + 7.0, 18.0, text_x + 21.0, 18.0, icon_white, 2.0);
+        draw_skia_line(&mut pixmap, text_x + 14.0, 18.0, text_x + 14.0, 32.0, icon_white, 2.0);
+        draw_skia_line(&mut pixmap, text_x + 10.0, 32.0, text_x + 18.0, 32.0, icon_white, 2.0);
+
+        // Divider 2
+        draw_divider(&mut pixmap, 354.0);
+
+        // 12. Highlight Effect (x = 360)
+        let highlight_active = (tool == ScreenDrawTool::Highlight || effect == ScreenDrawEffect::Highlight) && !eraser;
+        let highlight_x = SCREEN_DRAW_TOOLBAR_HIGHLIGHT_X as f32;
+        draw_btn_bg(&mut pixmap, highlight_x, 11.0, 28.0, 28.0, highlight_active);
+        fill_skia_rounded_rect(&mut pixmap, highlight_x + 5.0, 24.0, 18.0, 6.0, 1.5, [255, 220, 50, 180]);
+        draw_skia_line(&mut pixmap, highlight_x + 14.0, 17.0, highlight_x + 14.0, 21.0, icon_white, 1.8);
+        draw_skia_line(&mut pixmap, highlight_x + 9.0, 19.0, highlight_x + 11.5, 21.5, icon_white, 1.8);
+        draw_skia_line(&mut pixmap, highlight_x + 19.0, 19.0, highlight_x + 16.5, 21.5, icon_white, 1.8);
+
+        // 13. Blur Effect (x = 392)
+        let blur_active = (tool == ScreenDrawTool::Blur || effect == ScreenDrawEffect::Blur) && !eraser;
+        let blur_x = SCREEN_DRAW_TOOLBAR_BLUR_X as f32;
+        draw_btn_bg(&mut pixmap, blur_x, 11.0, 28.0, 28.0, blur_active);
+        stroke_skia_rounded_rect(&mut pixmap, blur_x + 6.5, 18.5, 15.0, 13.0, 2.0, 1.5, icon_white);
+        let blur_dots_x = [blur_x + 10.0, blur_x + 14.0, blur_x + 18.0];
+        let blur_dots_y = [21.5, 25.0, 28.5];
+        for bx in &blur_dots_x {
+            for by in &blur_dots_y {
+                draw_skia_circle_fill(&mut pixmap, *bx, *by, 1.0, [255, 255, 255, 180]);
+            }
+        }
+
+        // Divider 3
+        draw_divider(&mut pixmap, 424.0);
+
+        // 14. Color Swatch (x = 430)
+        let color_x = SCREEN_DRAW_TOOLBAR_COLOR_X as f32;
+        draw_btn_bg(&mut pixmap, color_x, 11.0, 28.0, 28.0, color_palette_open);
+        draw_skia_circle_fill(&mut pixmap, color_x + 14.0, 25.0, 8.0, [color.r, color.g, color.b, 255]);
+        draw_skia_circle_outline(&mut pixmap, color_x + 14.0, 25.0, 8.0, [255, 255, 255, 160], 1.2);
+
+        // 15. Eye Dropper (x = 462)
+        let pick_x = SCREEN_DRAW_TOOLBAR_PICK_COLOR_X as f32;
+        draw_btn_bg(&mut pixmap, pick_x, 11.0, 28.0, 28.0, color_pick_mode);
+        draw_skia_circle_fill(&mut pixmap, pick_x + 19.5, 17.5, 3.5, icon_white);
+        draw_skia_line(&mut pixmap, pick_x + 18.0, 19.0, pick_x + 10.0, 27.0, icon_white, 2.2);
+        draw_skia_circle_fill(&mut pixmap, pick_x + 7.5, 31.0, 2.2, [color.r, color.g, color.b, 255]);
+        draw_skia_circle_outline(&mut pixmap, pick_x + 7.5, 31.0, 2.2, icon_white, 0.8);
+
+        // Divider 4
+        draw_divider(&mut pixmap, 494.0);
+
+        // 16. Smooth (x = 500) - Toggle Modifier
         let smooth_x = SCREEN_DRAW_TOOLBAR_SMOOTH_X as f32;
         let smooth_bg = if smoothing {
             [36, 68, 60, 220]
@@ -17327,121 +17442,6 @@ mod windows_overlay {
         if smoothing {
             draw_skia_circle_fill(&mut pixmap, smooth_x + 22.0, 16.0, 2.0, [0, 255, 170, 255]);
         }
-
-        // 6. Line (x = 162)
-        let line_active = tool == ScreenDrawTool::Line && !eraser && effect == ScreenDrawEffect::None;
-        let line_x = SCREEN_DRAW_TOOLBAR_LINE_X as f32;
-        draw_btn_bg(&mut pixmap, line_x, 11.0, 28.0, 28.0, line_active);
-        draw_skia_line(&mut pixmap, line_x + 6.0, 32.0, line_x + 22.0, 18.0, icon_white, 2.0);
-
-        // 7. Arrow (x = 194)
-        let arrow_active = tool == ScreenDrawTool::Arrow && !eraser && effect == ScreenDrawEffect::None;
-        let arrow_x = SCREEN_DRAW_TOOLBAR_ARROW_X as f32;
-        draw_btn_bg(&mut pixmap, arrow_x, 11.0, 28.0, 28.0, arrow_active);
-        draw_skia_line(&mut pixmap, arrow_x + 6.0, 32.0, arrow_x + 21.0, 18.0, icon_white, 2.0);
-        draw_skia_line(&mut pixmap, arrow_x + 21.0, 18.0, arrow_x + 14.0, 18.5, icon_white, 2.0);
-        draw_skia_line(&mut pixmap, arrow_x + 21.0, 18.0, arrow_x + 20.5, 25.0, icon_white, 2.0);
-
-        // 8. Rectangle (x = 226)
-        let rect_active = tool == ScreenDrawTool::Rectangle && !eraser && effect == ScreenDrawEffect::None;
-        let rect_x = SCREEN_DRAW_TOOLBAR_RECT_X as f32;
-        draw_btn_bg(&mut pixmap, rect_x, 11.0, 28.0, 28.0, rect_active);
-        stroke_skia_rounded_rect(&mut pixmap, rect_x + 6.5, 18.5, 15.0, 13.0, 2.0, 1.8, icon_white);
-
-        // 9. Ellipse (x = 258)
-        let ellipse_active = tool == ScreenDrawTool::Ellipse && !eraser && effect == ScreenDrawEffect::None;
-        let ellipse_x = SCREEN_DRAW_TOOLBAR_ELLIPSE_X as f32;
-        draw_btn_bg(&mut pixmap, ellipse_x, 11.0, 28.0, 28.0, ellipse_active);
-        let mut ellipse_pb = tiny_skia::PathBuilder::new();
-        if let Some(oval_rect) = tiny_skia::Rect::from_xywh(ellipse_x + 5.5, 19.5, 17.0, 11.0) {
-            ellipse_pb.push_oval(oval_rect);
-        }
-        if let Some(path) = ellipse_pb.finish() {
-            stroke_skia_path(&mut pixmap, &path, icon_white, 1.8);
-        }
-
-        // 10. Circle (x = 290)
-        let circle_active = tool == ScreenDrawTool::Circle && !eraser && effect == ScreenDrawEffect::None;
-        let circle_x = SCREEN_DRAW_TOOLBAR_CIRCLE_X as f32;
-        draw_btn_bg(&mut pixmap, circle_x, 11.0, 28.0, 28.0, circle_active);
-        draw_skia_circle_outline(&mut pixmap, circle_x + 14.0, 25.0, 7.0, icon_white, 1.8);
-
-        // 11. Polygon (x = 322)
-        let poly_active = tool == ScreenDrawTool::Polygon && !eraser && effect == ScreenDrawEffect::None;
-        let poly_x = SCREEN_DRAW_TOOLBAR_POLYGON_X as f32;
-        draw_btn_bg(&mut pixmap, poly_x, 11.0, 28.0, 28.0, poly_active);
-        let mut poly_pb = tiny_skia::PathBuilder::new();
-        let poly_cx = poly_x + 14.0;
-        let poly_cy = 25.0;
-        let poly_r = 7.5;
-        let poly_rot = -std::f32::consts::FRAC_PI_2;
-        for i in 0..5 {
-            let theta = poly_rot + (i as f32 / 5.0) * std::f32::consts::TAU;
-            let px = poly_cx + poly_r * theta.cos();
-            let py = poly_cy + poly_r * theta.sin();
-            if i == 0 {
-                poly_pb.move_to(px, py);
-            } else {
-                poly_pb.line_to(px, py);
-            }
-        }
-        poly_pb.close();
-        if let Some(path) = poly_pb.finish() {
-            stroke_skia_path(&mut pixmap, &path, icon_white, 1.8);
-        }
-
-        // 12. Text (x = 354)
-        let text_active = tool == ScreenDrawTool::Text && !eraser && effect == ScreenDrawEffect::None;
-        let text_x = SCREEN_DRAW_TOOLBAR_TEXT_X as f32;
-        draw_btn_bg(&mut pixmap, text_x, 11.0, 28.0, 28.0, text_active);
-        draw_skia_line(&mut pixmap, text_x + 7.0, 18.0, text_x + 21.0, 18.0, icon_white, 2.0);
-        draw_skia_line(&mut pixmap, text_x + 14.0, 18.0, text_x + 14.0, 32.0, icon_white, 2.0);
-        draw_skia_line(&mut pixmap, text_x + 10.0, 32.0, text_x + 18.0, 32.0, icon_white, 2.0);
-
-        // Divider 2
-        draw_divider(&mut pixmap, 386.0);
-
-        // 13. Highlight Effect (x = 392)
-        let highlight_active = (tool == ScreenDrawTool::Highlight || effect == ScreenDrawEffect::Highlight) && !eraser;
-        let highlight_x = SCREEN_DRAW_TOOLBAR_HIGHLIGHT_X as f32;
-        draw_btn_bg(&mut pixmap, highlight_x, 11.0, 28.0, 28.0, highlight_active);
-        fill_skia_rounded_rect(&mut pixmap, highlight_x + 5.0, 24.0, 18.0, 6.0, 1.5, [255, 220, 50, 180]);
-        draw_skia_line(&mut pixmap, highlight_x + 14.0, 17.0, highlight_x + 14.0, 21.0, icon_white, 1.8);
-        draw_skia_line(&mut pixmap, highlight_x + 9.0, 19.0, highlight_x + 11.5, 21.5, icon_white, 1.8);
-        draw_skia_line(&mut pixmap, highlight_x + 19.0, 19.0, highlight_x + 16.5, 21.5, icon_white, 1.8);
-
-        // 14. Blur Effect (x = 424)
-        let blur_active = (tool == ScreenDrawTool::Blur || effect == ScreenDrawEffect::Blur) && !eraser;
-        let blur_x = SCREEN_DRAW_TOOLBAR_BLUR_X as f32;
-        draw_btn_bg(&mut pixmap, blur_x, 11.0, 28.0, 28.0, blur_active);
-        stroke_skia_rounded_rect(&mut pixmap, blur_x + 6.5, 18.5, 15.0, 13.0, 2.0, 1.5, icon_white);
-        let blur_dots_x = [blur_x + 10.0, blur_x + 14.0, blur_x + 18.0];
-        let blur_dots_y = [21.5, 25.0, 28.5];
-        for bx in &blur_dots_x {
-            for by in &blur_dots_y {
-                draw_skia_circle_fill(&mut pixmap, *bx, *by, 1.0, [255, 255, 255, 180]);
-            }
-        }
-
-        // Divider 3
-        draw_divider(&mut pixmap, 456.0);
-
-        // 15. Color Swatch (x = 462)
-        let color_x = SCREEN_DRAW_TOOLBAR_COLOR_X as f32;
-        draw_btn_bg(&mut pixmap, color_x, 11.0, 28.0, 28.0, color_palette_open);
-        draw_skia_circle_fill(&mut pixmap, color_x + 14.0, 25.0, 8.0, [color.r, color.g, color.b, 255]);
-        draw_skia_circle_outline(&mut pixmap, color_x + 14.0, 25.0, 8.0, [255, 255, 255, 160], 1.2);
-
-        // 16. Eye Dropper (x = 494)
-        let pick_x = SCREEN_DRAW_TOOLBAR_PICK_COLOR_X as f32;
-        draw_btn_bg(&mut pixmap, pick_x, 11.0, 28.0, 28.0, color_pick_mode);
-        draw_skia_circle_fill(&mut pixmap, pick_x + 19.5, 17.5, 3.5, icon_white);
-        draw_skia_line(&mut pixmap, pick_x + 18.0, 19.0, pick_x + 10.0, 27.0, icon_white, 2.2);
-        draw_skia_circle_fill(&mut pixmap, pick_x + 7.5, 31.0, 2.2, [color.r, color.g, color.b, 255]);
-        draw_skia_circle_outline(&mut pixmap, pick_x + 7.5, 31.0, 2.2, icon_white, 0.8);
-
-        // Divider 4
-        draw_divider(&mut pixmap, 526.0);
 
         // 17. Brush Size Slider (x = 532..612)
         let slider_x = SCREEN_DRAW_TOOLBAR_SIZE_X as f32 + 4.0;
