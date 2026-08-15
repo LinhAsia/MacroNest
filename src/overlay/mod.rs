@@ -13020,6 +13020,13 @@ mod windows_overlay {
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return false;
         }
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = find_app_ui_window() {
+                use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+                let _ = ShowWindow(hwnd, SW_HIDE);
+            }
+        }
         let started_inactive;
         let session_id;
         {
@@ -13031,6 +13038,7 @@ mod windows_overlay {
             if started_inactive {
                 let freeze = state.freeze_screen;
                 let captured_frame = if freeze {
+                    std::thread::sleep(std::time::Duration::from_millis(60));
                     let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                     if screen_w > 0 && screen_h > 0 {
                         window_list::capture_virtual_screen_region(
