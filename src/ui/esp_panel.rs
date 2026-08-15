@@ -522,6 +522,8 @@ impl CrosshairApp {
                             let root_step = *preset
                                 .entity_root_step
                                 .get_or_insert(preset.entity_stride.max(1));
+                            let root_step_multiplier = preset.entity_root_step_multiplier.max(1);
+                            let navigation_step = root_step.saturating_mul(root_step_multiplier);
                             ui.label("Entity root");
                             ui.horizontal(|ui| {
                                 ui.add(
@@ -542,12 +544,14 @@ impl CrosshairApp {
                                 .is_some();
                                 if ui
                                     .add_enabled(raw_root, egui::Button::new("▲"))
-                                    .on_hover_text("Replace the raw root address with root - Step")
+                                    .on_hover_text(
+                                        "Replace the raw root address with root - (Step x multiplier)",
+                                    )
                                     .clicked()
                                 {
                                     if let Some(root) = crate::model::shift_raw_entity_root(
                                         &preset.entity_root,
-                                        root_step,
+                                        navigation_step,
                                         -1,
                                     ) {
                                         preset.entity_root = root;
@@ -555,12 +559,14 @@ impl CrosshairApp {
                                 }
                                 if ui
                                     .add_enabled(raw_root, egui::Button::new("▼"))
-                                    .on_hover_text("Replace the raw root address with root + Step")
+                                    .on_hover_text(
+                                        "Replace the raw root address with root + (Step x multiplier)",
+                                    )
                                     .clicked()
                                 {
                                     if let Some(root) = crate::model::shift_raw_entity_root(
                                         &preset.entity_root,
-                                        root_step,
+                                        navigation_step,
                                         1,
                                     ) {
                                         preset.entity_root = root;
@@ -577,6 +583,14 @@ impl CrosshairApp {
                                             "Raw-address navigation step in hexadecimal bytes; defaults to Stride.",
                                         );
                                 }
+                                ui.label("x");
+                                ui.add(
+                                    DragValue::new(&mut preset.entity_root_step_multiplier)
+                                        .range(1..=1_000_000),
+                                )
+                                .on_hover_text(
+                                    "Decimal multiplier. Each arrow moves Entity root by Step x this value.",
+                                );
                             });
                             ui.end_row();
                             ui.label("Entity layout");

@@ -12247,7 +12247,12 @@ impl CrosshairApp {
 
     fn poll_memory_hotkeys(&mut self, ctx: &egui::Context) {
         let events = crate::overlay::take_memory_trigger_events();
-        if !events.is_empty() {
+        let target_is_foreground = !events.is_empty()
+            && Self::memory_hotkey_target_matches_foreground(
+                self.memory_panel.process_pid,
+                window_list::process_id_for_window(None),
+            );
+        if target_is_foreground {
             let bindings = self
                 .memory_panel
                 .hotkeys
@@ -12265,6 +12270,13 @@ impl CrosshairApp {
         if !self.memory_panel.hotkeys.is_empty() || self.memory_panel.scanning {
             ctx.request_repaint_after(Duration::from_millis(35));
         }
+    }
+
+    fn memory_hotkey_target_matches_foreground(
+        target_pid: Option<u32>,
+        foreground_pid: Option<u32>,
+    ) -> bool {
+        target_pid.is_some() && target_pid == foreground_pid
     }
 
     fn persist_memory_hotkeys(&mut self) {
@@ -13743,6 +13755,22 @@ mod tests {
             ),
             3
         );
+    }
+
+    #[test]
+    fn memory_scan_hotkeys_only_match_the_selected_foreground_process() {
+        assert!(CrosshairApp::memory_hotkey_target_matches_foreground(
+            Some(123),
+            Some(123)
+        ));
+        assert!(!CrosshairApp::memory_hotkey_target_matches_foreground(
+            Some(123),
+            Some(456)
+        ));
+        assert!(!CrosshairApp::memory_hotkey_target_matches_foreground(
+            None,
+            Some(123)
+        ));
     }
 
     #[test]
