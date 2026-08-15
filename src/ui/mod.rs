@@ -16144,7 +16144,805 @@ impl eframe::App for CrosshairApp {
         }
 
         let drawing_active = crate::overlay::screen_draw_active();
+        let capturing_region = crate::overlay::screen_draw_get_capturing_region();
+        let trigger_pending_from_inactive =
+            crate::overlay::screen_draw_trigger_pending_from_inactive();
+        let color_pick_mode = crate::overlay::screen_draw_get_color_pick_mode();
+        let crosshair_draw_mode = crate::overlay::screen_draw_is_crosshair_draw();
         if drawing_active {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
+        let mut color_pick_pending = self.screen_draw_color_pick_pending_at.is_some();
+        if drawing_active {
+            if color_pick_mode {
+                self.screen_draw_color_pick_pending_at = None;
+                color_pick_pending = false;
+            } else if let Some(pending_at) = self.screen_draw_color_pick_pending_at {
+                const SCREEN_DRAW_COLOR_PICK_PENDING_RESET_MS: u64 = 450;
+                if pending_at.elapsed()
+                    >= Duration::from_millis(SCREEN_DRAW_COLOR_PICK_PENDING_RESET_MS)
+                {
+                    self.screen_draw_color_pick_pending_at = None;
+                    color_pick_pending = false;
+                } else {
+                    ctx.send_viewport_cmd_to(
+                        egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                        egui::ViewportCommand::Visible(false),
+                    );
+                    ctx.request_repaint_after(Duration::from_millis(16));
+                }
+            }
+        } else {
+            self.screen_draw_color_pick_pending_at = None;
+            color_pick_pending = false;
+        }
+        let toolbar_visible = !capturing_region
+            && !trigger_pending_from_inactive
+            && (!color_pick_mode || crosshair_draw_mode)
+            && !(color_pick_pending && !crosshair_draw_mode);
+        let was_active = ctx.data(|d| {
+            d.get_temp::<bool>(egui::Id::new("screen_draw_active"))
+                .unwrap_or(false)
+        });
+        if drawing_active != was_active {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("screen_draw_active"), drawing_active));
+            if drawing_active {
+                if !self.state.show_window {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(
+                        -10000.0, -10000.0,
+                    )));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("main_window_hidden_for_drawing"), true)
+                    });
+                }
+                ctx.data_mut(|d| {
+                    d.insert_temp(egui::Id::new("screen_draw_capturing"), capturing_region);
+                    d.insert_temp(
+                        egui::Id::new("screen_draw_color_pick_mode"),
+                        color_pick_mode,
+                    );
+                });
+                ctx.send_viewport_cmd_to(
+                    egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                    egui::ViewportCommand::Visible(toolbar_visible),
+                );
+            } else {
+                let hidden_for_drawing = ctx.data(|d| {
+                    d.get_temp::<bool>(egui::Id::new("main_window_hidden_for_drawing"))
+                        .unwrap_or(false)
+                });
+                if hidden_for_drawing {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    ctx.data_mut(|d| {
+                        d.insert_temp(egui::Id::new("main_window_hidden_for_drawing"), false)
+                    });
+                }
+                ctx.send_viewport_cmd_to(
+                    egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                    egui::ViewportCommand::Visible(false),
+                );
+                // Reset toolbar positioning for the next draw session.
+                ctx.data_mut(|d| {
+                    d.insert_temp(egui::Id::new("toolbar_inited"), false);
+                    d.insert_temp(egui::Id::new("screen_draw_toolbar_ready"), false);
+                });
+            }
+        } else if drawing_active {
+            let was_capturing = ctx.data(|d| {
+                d.get_temp::<bool>(egui::Id::new("screen_draw_capturing"))
+                    .unwrap_or(false)
+            });
+            let was_color_pick_mode = ctx.data(|d| {
+                d.get_temp::<bool>(egui::Id::new("screen_draw_color_pick_mode"))
+                    .unwrap_or(false)
+            });
+            if capturing_region != was_capturing || color_pick_mode != was_color_pick_mode {
+                if toolbar_visible {
+                    let toolbar_pos =
+                        ctx.data(|d| d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_pos")));
+                    if let Some(toolbar_pos) = toolbar_pos {
+                        ctx.send_viewport_cmd_to(
+                            egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                            egui::ViewportCommand::OuterPosition(toolbar_pos),
+                        );
+                    }
+                }
+                ctx.data_mut(|d| {
+                    d.insert_temp(egui::Id::new("screen_draw_capturing"), capturing_region);
+                    d.insert_temp(
+                        egui::Id::new("screen_draw_color_pick_mode"),
+                        color_pick_mode,
+                    );
+                });
+                ctx.send_viewport_cmd_to(
+                    egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                    egui::ViewportCommand::Visible(toolbar_visible),
+                );
+                if toolbar_visible {
+                    ctx.request_repaint();
+                }
+            }
+        }
+
+        if drawing_active {
+            let (screen_x, screen_y, screen_w, screen_h) =
+                crate::window_list::virtual_screen_bounds();
+            const TOOLBAR_ESTIMATED_WIDTH: f32 = 780.0;
+            const TOOLBAR_HEIGHT: f32 = 44.0;
+            let toolbar_width = ctx.data(|d| {
+                d.get_temp::<f32>(egui::Id::new("toolbar_width"))
+                    .unwrap_or(TOOLBAR_ESTIMATED_WIDTH)
+            });
+            let default_x = screen_x as f32 + (screen_w as f32 - toolbar_width) / 2.0;
+            let default_y = screen_y as f32 + 60.0;
+            let default_pos = egui::pos2(default_x, default_y);
+
+            // Only set position on first init. Use a persistent flag so we don't reset every frame.
+            let toolbar_inited = ctx.data(|d| {
+                d.get_temp::<bool>(egui::Id::new("toolbar_inited"))
+                    .unwrap_or(false)
+            });
+            if !toolbar_inited {
+                ctx.data_mut(|d| {
+                    d.insert_temp(egui::Id::new("toolbar_inited"), true);
+                    d.insert_temp(egui::Id::new("toolbar_pos"), default_pos);
+                });
+            }
+
+            let toolbar_pos = ctx.data(|d| {
+                d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_pos"))
+                    .unwrap_or(default_pos)
+            });
+            let toolbar_ready = ctx.data(|d| {
+                d.get_temp::<bool>(egui::Id::new("screen_draw_toolbar_ready"))
+                    .unwrap_or(false)
+            });
+
+            let toolbar_width_px = toolbar_width.round() as i32;
+            let toolbar_height = TOOLBAR_HEIGHT as i32;
+
+            crate::overlay::screen_draw_set_toolbar_rect(
+                (toolbar_pos.x - screen_x as f32) as i32,
+                (toolbar_pos.y - screen_y as f32) as i32,
+                toolbar_width_px,
+                toolbar_height,
+            );
+
+            // Build without position every frame – only set on first init
+            let mut builder = egui::ViewportBuilder::default()
+                .with_title("Drawing Toolbar")
+                .with_inner_size(egui::vec2(toolbar_width, TOOLBAR_HEIGHT))
+                .with_visible(toolbar_visible && toolbar_ready)
+                .with_active(false)
+                .with_decorations(false)
+                .with_transparent(true)
+                .with_always_on_top()
+                .with_resizable(false);
+            if !toolbar_inited {
+                builder = builder.with_position(toolbar_pos);
+            }
+
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("screen_draw_toolbar"),
+                builder,
+                |ctx, class| {
+                    #[cfg(windows)]
+                    {
+                        // Apply WS_EX_NOACTIVATE to the toolbar viewport window (found by title)
+                        // so clicking toolbar buttons doesn't steal focus from the drawing canvas.
+                        // eframe can refresh native styles after viewport updates, so keep
+                        // NOACTIVATE asserted while the toolbar exists.
+                        if !crate::platform::make_window_title_no_activate("Drawing Toolbar") {
+                            ctx.request_repaint_after(Duration::from_millis(16));
+                        }
+                    }
+                    if class == egui::ViewportClass::Immediate {
+                        let measured_width = egui::CentralPanel::default()
+                            .frame(egui::Frame::none()
+                                .fill(egui::Color32::from_rgba_unmultiplied(24, 28, 36, 255))
+                                .corner_radius(8.0)
+                                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(220, 232, 248, 40)))
+                                .inner_margin(egui::Margin::symmetric(12, 8))
+                            )
+                            .show(ctx, |ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
+                                ui.horizontal(|ui| {
+                                    // 1. Drag Handle - uses custom smooth manual dragging on Windows
+                                    let drag_btn = ui.add(
+                                        egui::Button::new(":::")
+                                            .frame(false)
+                                            .min_size(egui::vec2(18.0, 22.0))
+                                            .sense(egui::Sense::drag())
+                                    );
+                                    if drag_btn.hovered() {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                                    }
+                                    #[cfg(windows)]
+                                    {
+                                        if drag_btn.drag_started() {
+                                            ui.ctx().memory_mut(|memory| memory.stop_text_input());
+                                            crate::overlay::screen_draw_toolbar_interacted_from("drag_handle");
+                                            let mut pt = POINT::default();
+                                            if unsafe { GetCursorPos(&mut pt).is_ok() } {
+                                                ui.ctx().data_mut(|d| {
+                                                    d.insert_temp(egui::Id::new("toolbar_drag_start_mouse"), egui::pos2(pt.x as f32, pt.y as f32));
+                                                    let current_pos = d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_pos")).unwrap_or(default_pos);
+                                                    d.insert_temp(egui::Id::new("toolbar_drag_start_window"), current_pos);
+                                                    d.insert_temp(egui::Id::new("toolbar_dragging"), true);
+                                                });
+                                            }
+                                        }
+                                        if drag_btn.dragged() {
+                                            let mut pt = POINT::default();
+                                            if unsafe { GetCursorPos(&mut pt).is_ok() } {
+                                                let (start_mouse, start_window) = ui.ctx().data(|d| {
+                                                    (
+                                                        d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_drag_start_mouse")),
+                                                        d.get_temp::<egui::Pos2>(egui::Id::new("toolbar_drag_start_window")),
+                                                    )
+                                                });
+                                                if let (Some(start_m), Some(start_w)) = (start_mouse, start_window) {
+                                                    let delta = egui::vec2(pt.x as f32 - start_m.x, pt.y as f32 - start_m.y);
+                                                    let new_pos = start_w + delta;
+                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(new_pos));
+                                                    ui.ctx().data_mut(|d| {
+                                                        d.insert_temp(egui::Id::new("toolbar_pos"), new_pos);
+                                                    });
+                                                    crate::overlay::screen_draw_set_toolbar_rect(
+                                                        (new_pos.x - screen_x as f32) as i32,
+                                                        (new_pos.y - screen_y as f32) as i32,
+                                                        toolbar_width_px,
+                                                        toolbar_height,
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        if drag_btn.drag_stopped() {
+                                            ui.ctx().data_mut(|d| {
+                                                d.insert_temp(egui::Id::new("toolbar_dragging"), false);
+                                            });
+                                        }
+                                    }
+                                    #[cfg(not(windows))]
+                                    {
+                                        if drag_btn.drag_started() {
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                                        }
+                                    }
+
+                                    ui.add_space(4.0);
+
+                                    // Helper function for rendering toolbar icons
+                                    fn draw_toolbar_icon(painter: &egui::Painter, rect: egui::Rect, icon_type: &str, color: egui::Color32) {
+                                        let pad = 5.0;
+                                        let stroke = egui::Stroke::new(1.8, color);
+                                        let center = rect.center();
+                                        match icon_type {
+                                            "brush" => {
+                                                // Simple filled circle
+                                                painter.circle_filled(center, 4.5, color);
+                                            }
+                                            "line" => {
+                                                let start = rect.left_bottom() + egui::vec2(pad, -pad);
+                                                let end = rect.right_top() + egui::vec2(-pad, pad);
+                                                painter.line_segment([start, end], stroke);
+                                            }
+                                            "arrow" => {
+                                                let start = rect.left_bottom() + egui::vec2(pad, -pad);
+                                                let end = rect.right_top() + egui::vec2(-pad - 1.0, pad + 1.0);
+                                                painter.line_segment([start, end], stroke);
+                                                let dir = (end - start).normalized();
+                                                let rot = egui::vec2(-dir.y, dir.x);
+                                                painter.line_segment([end, end - dir * 4.5 + rot * 2.5], stroke);
+                                                painter.line_segment([end, end - dir * 4.5 - rot * 2.5], stroke);
+                                            }
+                                            "rect" => {
+                                                painter.rect_stroke(rect.shrink(pad), 2.0, stroke, egui::StrokeKind::Inside);
+                                            }
+                                            "oval" => {
+                                                painter.rect_stroke(rect.shrink2(egui::vec2(pad, pad + 2.0)), 5.0, stroke, egui::StrokeKind::Inside);
+                                            }
+                                            "circle" => {
+                                                painter.circle_stroke(center, rect.width() / 2.0 - pad, stroke);
+                                            }
+                                            "poly" => {
+                                                let r = rect.width() / 2.0 - pad;
+                                                let pts: Vec<egui::Pos2> = (0..5).map(|i| {
+                                                    let angle = (i as f32) * std::f32::consts::TAU / 5.0 - std::f32::consts::FRAC_PI_2;
+                                                    center + egui::vec2(angle.cos() * r, angle.sin() * r)
+                                                }).collect();
+                                                for i in 0..5 {
+                                                    painter.line_segment([pts[i], pts[(i + 1) % 5]], stroke);
+                                                }
+                                            }
+                                            "text" => {
+                                                let top_left = rect.left_top() + egui::vec2(pad, pad);
+                                                let top_right = rect.right_top() + egui::vec2(-pad, pad);
+                                                let top_mid = rect.center_top() + egui::vec2(0.0, pad);
+                                                let bottom_mid = rect.center_bottom() + egui::vec2(0.0, -pad);
+                                                painter.line_segment([top_left, top_right], stroke);
+                                                painter.line_segment([top_mid, bottom_mid], stroke);
+                                            }
+                                            "smooth" => {
+                                                let left = rect.left() + pad;
+                                                let right = rect.right() - pad;
+                                                let width = right - left;
+                                                let points = (0..=12).map(|i| {
+                                                    let t = i as f32 / 12.0;
+                                                    egui::pos2(
+                                                        left + width * t,
+                                                        center.y + (t * std::f32::consts::TAU).sin() * 3.0,
+                                                    )
+                                                });
+                                                painter.add(egui::Shape::line(points.collect(), stroke));
+                                            }
+                                            "effect_highlight" => {
+                                                let bar = egui::Rect::from_center_size(
+                                                    center + egui::vec2(0.0, 3.0),
+                                                    egui::vec2(rect.width() - pad * 2.0, 5.0),
+                                                );
+                                                painter.rect_filled(
+                                                    bar,
+                                                    1.0,
+                                                    egui::Color32::from_rgba_premultiplied(255, 220, 50, 150),
+                                                );
+                                                painter.line_segment(
+                                                    [center + egui::vec2(0.0, -7.0), center + egui::vec2(0.0, -2.0)],
+                                                    stroke,
+                                                );
+                                                painter.line_segment(
+                                                    [center + egui::vec2(-5.0, -5.0), center + egui::vec2(-2.0, -2.0)],
+                                                    stroke,
+                                                );
+                                                painter.line_segment(
+                                                    [center + egui::vec2(5.0, -5.0), center + egui::vec2(2.0, -2.0)],
+                                                    stroke,
+                                                );
+                                            }
+                                            "blur" => {
+                                                let body = rect.shrink2(egui::vec2(pad, pad));
+                                                let cols = [0.22, 0.5, 0.78];
+                                                let rows = [0.28, 0.5, 0.72];
+                                                for (ry, row) in rows.iter().enumerate() {
+                                                    for (cx, col) in cols.iter().enumerate() {
+                                                        let alpha = match (ry, cx) {
+                                                            (1, 1) => 0.86,
+                                                            (1, _) | (_, 1) => 0.58,
+                                                            _ => 0.33,
+                                                        };
+                                                        painter.circle_filled(
+                                                            egui::pos2(
+                                                                egui::lerp(body.left()..=body.right(), *col),
+                                                                egui::lerp(body.top()..=body.bottom(), *row),
+                                                            ),
+                                                            if ry == 1 && cx == 1 { 2.0 } else { 1.4 },
+                                                            color.linear_multiply(alpha),
+                                                        );
+                                                    }
+                                                }
+                                                painter.rect_stroke(body, 2.0, stroke, egui::StrokeKind::Inside);
+                                            }
+                                            "eraser" => {
+                                                let body = rect.shrink2(egui::vec2(pad + 1.0, pad));
+                                                painter.rect_filled(body, 2.0, color.linear_multiply(0.25));
+                                                painter.rect_stroke(body, 2.0, stroke, egui::StrokeKind::Inside);
+                                                painter.line_segment([body.left_center(), body.right_center()], stroke);
+                                            }
+                                            "undo" => {
+                                                let arrow_end = rect.left_center() + egui::vec2(pad, 0.0);
+                                                let arrow_start = rect.right_center() + egui::vec2(-pad, 0.0);
+                                                painter.line_segment([arrow_end, arrow_start], stroke);
+                                                painter.line_segment([arrow_end, arrow_end + egui::vec2(4.0, -3.0)], stroke);
+                                                painter.line_segment([arrow_end, arrow_end + egui::vec2(4.0, 3.0)], stroke);
+                                            }
+                                            "redo" => {
+                                                let arrow_start = rect.left_center() + egui::vec2(pad, 0.0);
+                                                let arrow_end = rect.right_center() + egui::vec2(-pad, 0.0);
+                                                painter.line_segment([arrow_start, arrow_end], stroke);
+                                                painter.line_segment([arrow_end, arrow_end + egui::vec2(-4.0, -3.0)], stroke);
+                                                painter.line_segment([arrow_end, arrow_end + egui::vec2(-4.0, 3.0)], stroke);
+                                            }
+                                            "clear" => {
+                                                // Draw a simple trash bin
+                                                let top_y = rect.top() + pad + 2.0;
+                                                let bot_y = rect.bottom() - pad;
+                                                // lid
+                                                painter.line_segment(
+                                                    [egui::pos2(rect.left() + pad - 1.0, top_y), egui::pos2(rect.right() - pad + 1.0, top_y)],
+                                                    stroke,
+                                                );
+                                                // lid handle
+                                                painter.line_segment(
+                                                    [egui::pos2(center.x - 2.0, top_y - 2.0), egui::pos2(center.x + 2.0, top_y - 2.0)],
+                                                    stroke,
+                                                );
+                                                painter.line_segment(
+                                                    [egui::pos2(center.x - 2.0, top_y - 2.0), egui::pos2(center.x - 2.0, top_y)],
+                                                    stroke,
+                                                );
+                                                painter.line_segment(
+                                                    [egui::pos2(center.x + 2.0, top_y - 2.0), egui::pos2(center.x + 2.0, top_y)],
+                                                    stroke,
+                                                );
+                                                // bucket
+                                                let left_x = rect.left() + pad + 1.0;
+                                                let right_x = rect.right() - pad - 1.0;
+                                                painter.line_segment([egui::pos2(left_x, top_y), egui::pos2(left_x + 1.0, bot_y)], stroke);
+                                                painter.line_segment([egui::pos2(right_x, top_y), egui::pos2(right_x - 1.0, bot_y)], stroke);
+                                                painter.line_segment([egui::pos2(left_x + 1.0, bot_y), egui::pos2(right_x - 1.0, bot_y)], stroke);
+                                            }
+                                            "exit" => {
+                                                let pad_x = pad + 1.0;
+                                                painter.line_segment([rect.left_top() + egui::vec2(pad_x, pad_x), rect.right_bottom() + egui::vec2(-pad_x, -pad_x)], stroke);
+                                                painter.line_segment([rect.right_top() + egui::vec2(-pad_x, pad_x), rect.left_bottom() + egui::vec2(pad_x, -pad_x)], stroke);
+                                            }
+                                            "capture" => {
+                                                let body = egui::Rect::from_min_max(
+                                                    rect.left_top() + egui::vec2(pad - 0.5, pad + 3.2),
+                                                    rect.right_bottom() + egui::vec2(-pad + 0.5, -pad + 0.6),
+                                                );
+                                                painter.rect_stroke(body, 2.8, stroke, egui::StrokeKind::Inside);
+                                                let top = egui::Rect::from_min_max(
+                                                    egui::pos2(body.left() + 3.2, body.top() - 2.4),
+                                                    egui::pos2(body.left() + 8.4, body.top() + 0.2),
+                                                );
+                                                painter.rect_filled(top, 1.4, color);
+                                                painter.circle_stroke(body.center() + egui::vec2(0.0, 0.2), 3.7, stroke);
+                                            }
+                                            "dropper" => {
+                                                let body_start =
+                                                    rect.left_bottom() + egui::vec2(pad + 2.8, -pad - 1.2);
+                                                let body_end =
+                                                    rect.right_top() + egui::vec2(-pad - 5.2, pad + 5.4);
+                                                painter.line_segment(
+                                                    [body_start, body_end],
+                                                    egui::Stroke::new(3.2, color),
+                                                );
+                                                painter.line_segment(
+                                                    [
+                                                        body_start + egui::vec2(1.1, 1.1),
+                                                        body_end + egui::vec2(1.1, 1.1),
+                                                    ],
+                                                    egui::Stroke::new(
+                                                        1.0,
+                                                        color.linear_multiply(0.55),
+                                                    ),
+                                                );
+
+                                                let bulb = egui::Rect::from_center_size(
+                                                    body_start + egui::vec2(1.2, -0.8),
+                                                    egui::vec2(6.0, 6.0),
+                                                );
+                                                painter.rect_filled(bulb, 1.8, color);
+
+                                                let head_center = body_end + egui::vec2(1.8, -1.8);
+                                                let tip_top = head_center + egui::vec2(-1.4, -3.0);
+                                                let tip_right = head_center + egui::vec2(3.0, 1.4);
+                                                let tip_bottom = head_center + egui::vec2(1.4, 3.0);
+                                                let tip_left = head_center + egui::vec2(-3.0, -1.4);
+                                                painter.add(egui::Shape::convex_polygon(
+                                                    vec![tip_top, tip_right, tip_bottom, tip_left],
+                                                    egui::Color32::TRANSPARENT,
+                                                    egui::Stroke::new(1.6, color),
+                                                ));
+
+                                                painter.circle_filled(
+                                                    head_center + egui::vec2(2.2, 2.2),
+                                                    1.5,
+                                                    egui::Color32::from_rgb(255, 208, 96),
+                                                );
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+
+                                    // Helper closure for custom icon button instantiation
+                                    let mut icon_btn = |ui: &mut egui::Ui, selected: bool, icon_type: &str, tooltip: &str| -> (egui::Response, bool) {
+                                        let button_size = egui::vec2(22.0, 22.0);
+                                        let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+                                        let visuals = if selected {
+                                            &ui.visuals().widgets.active
+                                        } else if response.hovered() {
+                                            &ui.visuals().widgets.hovered
+                                        } else {
+                                            &ui.visuals().widgets.inactive
+                                        };
+                                        if selected {
+                                            ui.painter().rect_filled(rect, 4.0, ui.visuals().selection.bg_fill);
+                                        } else if response.hovered() {
+                                            ui.painter().rect_filled(rect, 4.0, visuals.bg_fill);
+                                        }
+                                        let color = if selected {
+                                            egui::Color32::WHITE
+                                        } else if response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        };
+                                        draw_toolbar_icon(ui.painter(), rect, icon_type, color);
+                                        let response = response.on_hover_text(tooltip);
+                                        let pressed_now = response.is_pointer_button_down_on();
+                                        let press_id = response.id.with("press_edge");
+                                        let was_pressed = ui.ctx().data(|d| {
+                                            d.get_temp::<bool>(press_id).unwrap_or(false)
+                                        });
+                                        ui.ctx().data_mut(|d| {
+                                            if pressed_now {
+                                                d.insert_temp(press_id, true);
+                                            } else {
+                                                d.remove::<bool>(press_id);
+                                            }
+                                        });
+                                        let activated = !was_pressed && (pressed_now || response.clicked());
+                                        if activated {
+                                            #[cfg(windows)]
+                                            {
+                                                let _ = crate::platform::make_window_title_no_activate(
+                                                    "Drawing Toolbar",
+                                                );
+                                            }
+                                            response.surrender_focus();
+                                            ui.ctx().memory_mut(|memory| memory.stop_text_input());
+                                            crate::overlay::screen_draw_toolbar_interacted();
+                                        }
+                                        (response, activated)
+                                    };
+
+                                    // 2. Undo / Redo
+                                    if icon_btn(ui, false, "undo", "Undo (Ctrl+Z)").1 {
+                                        crate::overlay::screen_draw_undo();
+                                    }
+                                    if icon_btn(ui, false, "redo", "Redo (Ctrl+Shift+Z / Ctrl+Y)").1 {
+                                        crate::overlay::screen_draw_redo();
+                                    }
+
+                                    ui.separator();
+
+                                    // 3. Tools
+                                    let current_tool = crate::overlay::screen_draw_get_tool();
+                                    let eraser_active = crate::overlay::screen_draw_get_eraser();
+
+                                    let mut tool_btn = |ui: &mut egui::Ui, tool: crate::model::QuickScreenDrawTool, icon_type: &str, name: &str| {
+                                        let selected = current_tool == tool && !eraser_active;
+                                        if icon_btn(ui, selected, icon_type, name).1 {
+                                            crate::overlay::screen_draw_set_tool(tool);
+                                            crate::overlay::screen_draw_set_eraser(false);
+                                        }
+                                    };
+
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Brush, "brush", self.tr("Brush", "Cọ"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Line, "line", self.tr("Line", "Đường"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Arrow, "arrow", self.tr("Arrow", "Mũi tên"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Rectangle, "rect", self.tr("Rectangle", "Hình chữ nhật"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Ellipse, "oval", self.tr("Ellipse", "Elip"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Circle, "circle", self.tr("Circle", "Hình tròn"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Polygon, "poly", self.tr("Polygon", "Đa giác"));
+                                    tool_btn(ui, crate::model::QuickScreenDrawTool::Text, "text", self.tr("Text", "Chữ"));
+                                    // Eraser
+                                    if icon_btn(ui, eraser_active, "eraser", self.tr("Eraser", "Tẩy")).1 {
+                                        crate::overlay::screen_draw_set_eraser(!eraser_active);
+                                    }
+                                    let smoothing = crate::overlay::screen_draw_get_smoothing();
+                                    let smoothing_clicked = icon_btn(
+                                        ui,
+                                        smoothing,
+                                        "smooth",
+                                        self.tr("Smooth line", "Làm mượt nét"),
+                                    )
+                                    .1;
+                                    if smoothing_clicked {
+                                        crate::overlay::screen_draw_set_smoothing(!smoothing);
+                                        crate::overlay::screen_draw_toolbar_interacted();
+                                    }
+                                    let smoothing_enabled =
+                                        if smoothing_clicked { !smoothing } else { smoothing };
+                                    if smoothing_enabled {
+                                        let mut amount =
+                                            crate::overlay::screen_draw_get_smoothing_amount();
+                                        let amount_response = ui
+                                            .add_sized(
+                                                [44.0, 20.0],
+                                                egui::DragValue::new(&mut amount)
+                                                    .range(0.0..=1.0)
+                                                    .speed(0.01)
+                                                    .fixed_decimals(2),
+                                            )
+                                            .on_hover_text(self.tr(
+                                                "Smoothing amount",
+                                                "Mức làm mượt",
+                                            ));
+                                        if amount_response.changed() {
+                                            crate::overlay::screen_draw_set_smoothing_amount(amount);
+                                        }
+                                    }
+
+                                    ui.separator();
+
+                                    // 4. Color Presets (No clipping popups)
+                                    let color_presets = [
+                                        (self.tr("Red", "Đỏ"), egui::Color32::from_rgb(255, 80, 80), crate::model::RgbaColor { r: 255, g: 80, b: 80, a: 255 }),
+                                        (self.tr("Green", "Xanh lá"), egui::Color32::from_rgb(80, 220, 100), crate::model::RgbaColor { r: 80, g: 220, b: 100, a: 255 }),
+                                        (self.tr("Blue", "Xanh dương"), egui::Color32::from_rgb(80, 150, 255), crate::model::RgbaColor { r: 80, g: 150, b: 255, a: 255 }),
+                                        (self.tr("Yellow", "Vàng"), egui::Color32::from_rgb(255, 220, 50), crate::model::RgbaColor { r: 255, g: 220, b: 50, a: 255 }),
+                                        (self.tr("White", "Trắng"), egui::Color32::WHITE, crate::model::RgbaColor { r: 255, g: 255, b: 255, a: 255 }),
+                                    ];
+                                    let active_color = crate::overlay::screen_draw_get_color();
+                                    for (name, c32, rgba) in color_presets.iter() {
+                                        let is_selected = active_color == *rgba;
+                                        let (rect, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
+                                        ui.painter().circle_filled(rect.center(), 7.0, *c32);
+                                        if is_selected {
+                                            ui.painter().circle_stroke(rect.center(), 9.0, egui::Stroke::new(1.5, egui::Color32::WHITE));
+                                        } else if resp.hovered() {
+                                            ui.painter().circle_stroke(rect.center(), 9.0, egui::Stroke::new(1.0, egui::Color32::LIGHT_GRAY));
+                                        }
+                                        if resp.clicked() {
+                                            #[cfg(windows)]
+                                            {
+                                                let _ = crate::platform::make_window_title_no_activate(
+                                                    "Drawing Toolbar",
+                                                );
+                                            }
+                                            resp.surrender_focus();
+                                            ui.ctx().memory_mut(|memory| memory.stop_text_input());
+                                            crate::overlay::screen_draw_set_color(*rgba);
+                                            crate::overlay::screen_draw_toolbar_interacted();
+                                        }
+                                        resp.on_hover_text(*name);
+                                    }
+                                    let (pick_color_resp, pick_color_activated) = icon_btn(
+                                        ui,
+                                        crate::overlay::screen_draw_get_color_pick_mode(),
+                                        "dropper",
+                                        self.tr("Pick color from screen", "Lấy màu từ màn hình"),
+                                    );
+                                    if (crosshair_draw_mode && pick_color_resp.clicked())
+                                        || (!crosshair_draw_mode && pick_color_activated)
+                                    {
+                                        if crosshair_draw_mode {
+                                            crate::overlay::screen_draw_toggle_color_pick_mode();
+                                        } else {
+                                            const SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS: u64 = 160;
+                                            self.screen_draw_color_pick_pending_at = Some(Instant::now());
+                                            crate::overlay::screen_draw_set_color_pick_cursor();
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                                                egui::pos2(-10000.0, -10000.0),
+                                            ));
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                                            std::thread::spawn(|| {
+                                                #[cfg(windows)]
+                                                unsafe {
+                                                    let _ = DwmFlush();
+                                                }
+                                                std::thread::sleep(Duration::from_millis(32));
+                                                #[cfg(windows)]
+                                                unsafe {
+                                                    let _ = DwmFlush();
+                                                }
+                                                std::thread::sleep(Duration::from_millis(
+                                                    SCREEN_DRAW_COLOR_PICK_HIDE_DELAY_MS,
+                                                ));
+                                                if crate::overlay::screen_draw_active()
+                                                    && !crate::overlay::screen_draw_get_color_pick_mode()
+                                                {
+                                                    crate::overlay::screen_draw_toggle_color_pick_mode();
+                                                }
+                                            });
+                                        }
+                                    }
+
+                                    if !crosshair_draw_mode {
+                                        ui.separator();
+                                        let effect = crate::overlay::screen_draw_get_effect();
+                                        if icon_btn(
+                                            ui,
+                                            effect == 1,
+                                            "effect_highlight",
+                                            self.tr("Highlight effect", "Hiệu ứng tô sáng"),
+                                        ).1 {
+                                            crate::overlay::screen_draw_toggle_effect(1);
+                                            crate::overlay::screen_draw_toolbar_interacted();
+                                        }
+                                        if icon_btn(
+                                            ui,
+                                            effect == 2,
+                                            "blur",
+                                            self.tr("Blur effect", "Hiệu ứng làm mờ"),
+                                        ).1 {
+                                            crate::overlay::screen_draw_toggle_effect(2);
+                                            crate::overlay::screen_draw_toolbar_interacted();
+                                        }
+                                    }
+
+                                    ui.separator();
+
+                                    // 5. Brush Size Slider
+                                    let mut brush_size = crate::overlay::screen_draw_get_brush_size();
+                                    ui.add_space(4.0);
+                                    ui.add(egui::Label::new(self.tr("Size:", "Cỡ:")));
+                                    let slider_resp = ui.add_sized(
+                                        [56.0, 20.0],
+                                        egui::DragValue::new(&mut brush_size)
+                                            .range(2.0..=80.0)
+                                            .speed(0.15)
+                                            .fixed_decimals(0),
+                                    );
+                                    crate::overlay::screen_draw_set_brush_size_preview_active(
+                                        slider_resp.dragged()
+                                            || slider_resp.is_pointer_button_down_on(),
+                                    );
+                                    if slider_resp.changed() {
+                                        brush_size = brush_size.round().clamp(2.0, 80.0);
+                                        crate::overlay::screen_draw_set_brush_size(brush_size);
+                                    }
+
+                                    ui.separator();
+
+                                    // 6. Capture Region
+                                    if !crosshair_draw_mode {
+                                        if icon_btn(ui, false, "capture", self.tr("Capture Region", "Chụp vùng")).1 {
+                                            crate::overlay::screen_draw_trigger_capture_region_from_toolbar();
+                                        }
+                                    }
+                                    // 7. Clear Canvas
+                                    if icon_btn(ui, false, "clear", self.tr("Clear Canvas", "Xóa nét vẽ")).1 {
+                                        crate::overlay::screen_draw_clear();
+                                    }
+
+                                    // 8. Exit Drawing Mode
+                                    let (exit_resp, exit_activated) =
+                                        icon_btn(ui, false, "exit", self.tr("Exit Drawing Mode", "Thoát chế độ vẽ"));
+                                    if exit_resp.is_pointer_button_down_on() {
+                                        crate::overlay::screen_draw_deactivate_from_toolbar();
+                                    }
+                                    if exit_activated {
+                                        crate::overlay::screen_draw_deactivate_from_toolbar();
+                                    }
+
+                                    ui.add_space(2.0);
+                                });
+                                ui.min_rect().width() + 24.0
+                            }).inner;
+                        let measured_width = measured_width.ceil().max(1.0);
+                        if (measured_width - toolbar_width).abs() > 1.0 {
+                            let recentered_pos = egui::pos2(
+                                toolbar_pos.x - (measured_width - toolbar_width) * 0.5,
+                                toolbar_pos.y,
+                            );
+                            ctx.data_mut(|d| {
+                                d.insert_temp(egui::Id::new("toolbar_width"), measured_width);
+                                d.insert_temp(egui::Id::new("toolbar_pos"), recentered_pos);
+                            });
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                                measured_width,
+                                TOOLBAR_HEIGHT,
+                            )));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(
+                                recentered_pos,
+                            ));
+                            crate::overlay::screen_draw_set_toolbar_rect(
+                                (recentered_pos.x - screen_x as f32) as i32,
+                                (recentered_pos.y - screen_y as f32) as i32,
+                                measured_width.round() as i32,
+                                toolbar_height,
+                            );
+                            ctx.request_repaint();
+                        }
+                        if !toolbar_ready {
+                            ctx.data_mut(|d| {
+                                d.insert_temp(
+                                    egui::Id::new("screen_draw_toolbar_ready"),
+                                    true,
+                                )
+                            });
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(toolbar_visible));
+                            ctx.request_repaint();
+                        }
+                    }
+                }
+            );
             return;
         }
 
