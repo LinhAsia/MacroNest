@@ -2280,10 +2280,10 @@ mod windows_overlay {
                 smoothing_amount: 0.45,
                 tool: ScreenDrawTool::Brush,
                 effect: ScreenDrawEffect::None,
-                toolbar_x: 24,
-                toolbar_y: 24,
-                toolbar_w: 640,
-                toolbar_h: 42,
+                toolbar_x: 0,
+                toolbar_y: 40,
+                toolbar_w: SCREEN_DRAW_TOOLBAR_WIDTH,
+                toolbar_h: SCREEN_DRAW_TOOLBAR_HEIGHT,
                 active_control: ScreenDrawControl::None,
                 brush_size_preview_active: false,
                 brush_slider_drag_start_x: 0,
@@ -12466,7 +12466,12 @@ mod windows_overlay {
         state.active_control = ScreenDrawControl::None;
         state.toolbar_w = SCREEN_DRAW_TOOLBAR_WIDTH;
         state.toolbar_h = SCREEN_DRAW_TOOLBAR_HEIGHT;
-        let screen_w = state.canvas_width.max(1) as i32;
+        let (_, _, virt_w, _) = window_list::virtual_screen_bounds();
+        let screen_w = if virt_w > 0 {
+            virt_w
+        } else {
+            state.canvas_width.max(1) as i32
+        };
         state.toolbar_x = ((screen_w - SCREEN_DRAW_TOOLBAR_WIDTH) / 2).max(10);
         state.toolbar_y = 40;
         state.color_palette_open = false;
@@ -15894,6 +15899,10 @@ mod windows_overlay {
         let byte_len = width.saturating_mul(height).saturating_mul(4);
         state.canvas_width = width;
         state.canvas_height = height;
+        if state.toolbar_x <= 0 {
+            state.toolbar_x = ((width as i32 - SCREEN_DRAW_TOOLBAR_WIDTH) / 2).max(10);
+            state.toolbar_y = 40;
+        }
         state.committed_rgba.clear();
         if let Some(background) = state.canvas_background.as_ref() {
             state.committed_rgba.resize(byte_len, 0);
