@@ -50,6 +50,7 @@ use super::CrosshairApp;
 use super::{GetCursorPos, POINT};
 
 const DEFAULT_SCAN_LIMIT: usize = usize::MAX;
+const MEMORY_VIEW_READ_BYTES: usize = 4096;
 // ponytail: keep live polling bounded; add paged candidate refresh before raising this ceiling.
 const MAX_VISIBLE_RESULTS: usize = 1_000;
 const MAX_VISIBLE_INSTRUCTIONS: usize = 64;
@@ -486,6 +487,8 @@ struct MemoryViewDialog {
     memory_columns: usize,
     reset_memory_scroll: bool,
     fit_memory_columns: bool,
+    stride_address_a: String,
+    stride_address_b: String,
 }
 
 #[cfg(windows)]
@@ -3132,6 +3135,8 @@ impl CrosshairApp {
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
                                         fit_memory_columns: true,
+                                        stride_address_a: String::new(),
+                                        stride_address_b: String::new(),
                                     });
                                 }
                             }
@@ -3421,6 +3426,8 @@ impl CrosshairApp {
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
                                         fit_memory_columns: true,
+                                        stride_address_a: String::new(),
+                                        stride_address_b: String::new(),
                                     });
                                     ui.close();
                                 }
@@ -3477,6 +3484,8 @@ impl CrosshairApp {
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
                                         fit_memory_columns: true,
+                                        stride_address_a: String::new(),
+                                        stride_address_b: String::new(),
                                     });
                                     ui.close();
                                 }
@@ -9065,6 +9074,8 @@ impl CrosshairApp {
                 memory_columns: 3,
                 reset_memory_scroll: true,
                 fit_memory_columns: true,
+                stride_address_a: String::new(),
+                stride_address_b: String::new(),
             });
         }
         if open {
@@ -9660,11 +9671,15 @@ impl CrosshairApp {
         let unit = memory_display_width(dialog.display_type);
         let row_bytes = unit * dialog.memory_columns.max(1);
         let three_column_width = Self::memory_view_width_for_columns(dialog.display_type, 3);
-
+        let region = self
+            .memory_panel
+            .process_pid
+            .and_then(|pid| query_memory_region(pid, address).ok());
         let (start_address, read_size) = match kind {
-            MemoryViewKind::Bytes => (
+            MemoryViewKind::Bytes => Self::memory_view_read_window(
                 Self::memory_view_window_start(address, row_bytes, dialog.scroll_offset),
-                4096,
+                MEMORY_VIEW_READ_BYTES,
+                region.as_ref(),
             ),
             MemoryViewKind::Structure => (address, 1024),
         };
@@ -9680,10 +9695,6 @@ impl CrosshairApp {
                     })
                     .ok()
             });
-        let region = self
-            .memory_panel
-            .process_pid
-            .and_then(|pid| query_memory_region(pid, address).ok());
         let mut open = true;
         if dialog.pinned {
             let fit_columns = dialog.fit_memory_columns;
@@ -9895,6 +9906,10 @@ impl CrosshairApp {
                     next_address = Some(dialog.address.saturating_add(step.unwrap()));
                 }
                 ui.separator();
+                if ui.small_button("Center").clicked() {
+                    dialog.scroll_offset = 0;
+                    dialog.reset_memory_scroll = true;
+                }
                 let tracking_label = if dialog.track_changes {
                     Self::tr_lang(language, "Stop tracking", "Dừng theo dõi")
                 } else {
@@ -9923,6 +9938,30 @@ impl CrosshairApp {
             if let Some(address) = next_address {
                 Self::move_memory_view_highlight(dialog, address, row_bytes);
             }
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Stride").small().strong());
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.stride_address_a)
+                        .desired_width(150.0)
+                        .hint_text("first address"),
+                );
+                ui.label("to");
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.stride_address_b)
+                        .desired_width(150.0)
+                        .hint_text("second address"),
+                );
+                if let Some(stride) = Self::memory_address_stride(
+                    &dialog.stride_address_a,
+                    &dialog.stride_address_b,
+                ) {
+                    let result = format!("0x{stride:X} ({stride} bytes)");
+                    ui.label(RichText::new(&result).monospace());
+                    if ui.small_button("Copy").clicked() {
+                        ui.ctx().copy_text(format!("{stride:X}"));
+                    }
+                }
+            });
             if let Some(region) = region {
                 ui.label(
                     RichText::new(format!(
@@ -9945,37 +9984,11 @@ impl CrosshairApp {
                     .show(ui, |ui| {
                         Self::render_memory_region_grid(ui, language, dialog, start_address, bytes)
                     });
-                let wheel = ui.input(|input| input.smooth_scroll_delta.y);
-                let hovered = ui
-                    .ctx()
-                    .pointer_latest_pos()
-                    .is_some_and(|position| output.inner_rect.contains(position));
-                let max_scroll = (output.content_size.y - output.inner_rect.height()).max(0.0);
-                const PAGE_ROWS: usize = 12;
-                let page_bytes = row_bytes * PAGE_ROWS;
-                let mut page_changed = false;
                 if dialog.reset_memory_scroll {
-                    output.state.offset = egui::Vec2::ZERO;
+                    let target_row = dialog.address.saturating_sub(start_address) / row_bytes;
+                    output.state.offset.x = 0.0;
+                    output.state.offset.y = target_row.saturating_sub(3) as f32 * 18.0;
                     dialog.reset_memory_scroll = false;
-                    page_changed = true;
-                } else if hovered && wheel > 0.0 && output.state.offset.y <= 0.5 {
-                    dialog.scroll_offset = dialog
-                        .scroll_offset
-                        .saturating_sub(page_bytes as isize);
-                    output.state.offset.y += PAGE_ROWS as f32 * 18.0;
-                    page_changed = true;
-                } else if hovered
-                    && wheel < 0.0
-                    && output.state.offset.y >= max_scroll - 0.5
-                {
-                    dialog.scroll_offset = dialog
-                        .scroll_offset
-                        .saturating_add(page_bytes as isize);
-                    output.state.offset.y =
-                        (output.state.offset.y - PAGE_ROWS as f32 * 18.0).max(0.0);
-                    page_changed = true;
-                }
-                if page_changed {
                     output.state.store(ui.ctx(), output.id);
                     ui.ctx().request_repaint();
                 }
@@ -11788,10 +11801,29 @@ impl CrosshairApp {
 
     fn memory_view_window_start(address: usize, row_bytes: usize, scroll_offset: isize) -> usize {
         let aligned = address / row_bytes * row_bytes;
+        let rows_before = (MEMORY_VIEW_READ_BYTES / 2 / row_bytes).max(3);
         aligned
-            .saturating_sub(row_bytes * 3)
+            .saturating_sub(row_bytes * rows_before)
             .checked_add_signed(scroll_offset)
             .unwrap_or(if scroll_offset < 0 { 0 } else { usize::MAX })
+    }
+
+    fn memory_view_read_window(
+        desired_start: usize,
+        requested_size: usize,
+        region: Option<&MemoryRegionInfo>,
+    ) -> (usize, usize) {
+        let Some(region) = region else {
+            return (desired_start, requested_size);
+        };
+        let region_end = region.base.saturating_add(region.size);
+        let latest_start = region_end.saturating_sub(requested_size).max(region.base);
+        let start = desired_start.clamp(region.base, latest_start);
+        (start, region_end.saturating_sub(start).min(requested_size))
+    }
+
+    fn memory_address_stride(first: &str, second: &str) -> Option<usize> {
+        Some(parse_memory_address(first)?.abs_diff(parse_memory_address(second)?))
     }
 
     fn memory_view_width_for_columns(display_type: MemoryDisplayType, columns: usize) -> f32 {
@@ -11923,6 +11955,8 @@ impl CrosshairApp {
             memory_columns: 3,
             reset_memory_scroll: true,
             fit_memory_columns: true,
+            stride_address_a: String::new(),
+            stride_address_b: String::new(),
         });
     }
 
@@ -13716,6 +13750,8 @@ mod tests {
             memory_columns: 3,
             reset_memory_scroll: true,
             fit_memory_columns: true,
+            stride_address_a: String::new(),
+            stride_address_b: String::new(),
         };
 
         CrosshairApp::navigate_memory_view_dialog(&mut dialog, 0x2000);
@@ -13748,6 +13784,24 @@ mod tests {
         let initial = CrosshairApp::memory_view_window_start(0x1000, 12, 0);
         let paged_up = CrosshairApp::memory_view_window_start(0x1000, 12, -96);
         assert_eq!(initial - paged_up, 96);
+        assert_eq!(
+            CrosshairApp::memory_view_window_start(0x5000, 0x20, 0),
+            0x4800
+        );
+        assert_eq!(
+            CrosshairApp::memory_address_stride("0x25B19B2E388", "25B19B2E394"),
+            Some(0xC)
+        );
+        let region = MemoryRegionInfo {
+            allocation_base: 0x4000,
+            base: 0x4000,
+            size: 0x1800,
+            protect: 0,
+        };
+        assert_eq!(
+            CrosshairApp::memory_view_read_window(0x3000, 0x1000, Some(&region)),
+            (0x4000, 0x1000)
+        );
         assert_eq!(
             CrosshairApp::memory_view_column_count(
                 CrosshairApp::memory_view_width_for_columns(MemoryDisplayType::Float, 3) - 50.0,
