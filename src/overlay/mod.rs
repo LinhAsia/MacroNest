@@ -390,6 +390,8 @@ mod windows_overlay {
     pub(crate) static HOOK_STATE: Lazy<Mutex<HookState>> =
         Lazy::new(|| Mutex::new(HookState::default()));
     static ESP_WORKER_GENERATION: AtomicU64 = AtomicU64::new(0);
+    static ESP_SAMPLER_THREAD: Lazy<Mutex<Option<thread::Thread>>> =
+        Lazy::new(|| Mutex::new(None));
     static ESP_CALIBRATION_SAMPLES: Lazy<
         Mutex<HashMap<u32, Vec<crate::model::EspCalibrationSample>>>,
     > = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -10114,6 +10116,9 @@ mod windows_overlay {
                     HOOK_STATE.lock().esp_presets = presets;
                     ESP_PRESET_REVISION.fetch_add(1, Ordering::Release);
                     ensure_esp_worker();
+                    if let Some(worker) = ESP_SAMPLER_THREAD.lock().as_ref() {
+                        worker.unpark();
+                    }
                 }
 
                 OverlayCommand::CaptureEspCalibration(preset) => {
@@ -26281,6 +26286,7 @@ mod windows_overlay {
             }
         });
         thread::spawn(move || {
+            *ESP_SAMPLER_THREAD.lock() = Some(thread::current());
             // Keep a fixed frame deadline instead of sleeping after every read/render pass.
             // This prevents the read cost from accumulating on top of the requested interval.
             let mut next_frame = Instant::now();
@@ -26331,7 +26337,7 @@ mod windows_overlay {
                         }
                     }
                     next_frame = Instant::now() + Duration::from_millis(16);
-                    thread::sleep(Duration::from_millis(16));
+                    thread::park_timeout(Duration::from_millis(16));
                     continue;
                 }
 
@@ -26372,7 +26378,7 @@ mod windows_overlay {
                 next_frame += Duration::from_millis(interval as u64);
                 let now = Instant::now();
                 if next_frame > now {
-                    thread::sleep(next_frame - now);
+                    thread::park_timeout(next_frame - now);
                 } else {
                     // A slow frame must not make every following frame late.
                     next_frame = now;

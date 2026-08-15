@@ -525,6 +525,7 @@ struct InstructionHit {
 #[cfg(windows)]
 struct InstructionWatchDialog {
     address: usize,
+    addresses: Vec<usize>,
     writes_only: bool,
     status: String,
     hits: Vec<InstructionHit>,
@@ -533,6 +534,7 @@ struct InstructionWatchDialog {
     active: Option<ActiveInstructionWatch>,
     pinned: bool,
     pending_code_add: Option<usize>,
+    pending_code_add_all: bool,
     pending_disassembler: Option<usize>,
     auto_stop_on_hit: bool,
     hits_sort: u8,
@@ -3097,13 +3099,13 @@ impl CrosshairApp {
                                 self.memory_panel.selected_saved.insert(index);
                                 self.memory_panel.saved_selection_anchor = Some(index);
                                 if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
-                                    view.address = saved.address;
+                                    Self::navigate_memory_view_dialog(view, saved.address);
                                 } else {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
                                         tracked_base: None,
                                         kind: MemoryViewKind::Bytes,
-                                        display_type: MemoryDisplayType::ByteHex,
+                                        display_type: MemoryDisplayType::Float,
                                         relative_addresses: false,
                                         pinned: true,
                                         elements: default_structure_elements(),
@@ -3280,9 +3282,10 @@ impl CrosshairApp {
                                     ui.close();
                                 }
                                 ui.separator();
+                                let debugger_selection_valid = (1..=4).contains(&selected_count);
                                 if ui
                                     .add_enabled(
-                                        single_target,
+                                        debugger_selection_valid,
                                         Button::new(format!(
                                             "{} ({debugger_arch})",
                                             self.tr(
@@ -3291,6 +3294,9 @@ impl CrosshairApp {
                                             )
                                         )),
                                     )
+                                    .on_disabled_hover_text(
+                                        "Select 1 to 4 addresses (CPU hardware watchpoint limit)",
+                                    )
                                     .clicked()
                                 {
                                     instruction_watch = Some(true);
@@ -3298,7 +3304,7 @@ impl CrosshairApp {
                                 }
                                 if ui
                                     .add_enabled(
-                                        single_target,
+                                        debugger_selection_valid,
                                         Button::new(format!(
                                             "{} ({debugger_arch})",
                                             self.tr(
@@ -3306,6 +3312,9 @@ impl CrosshairApp {
                                                 "Tìm lệnh ghi vào địa chỉ này"
                                             )
                                         )),
+                                    )
+                                    .on_disabled_hover_text(
+                                        "Select 1 to 4 addresses (CPU hardware watchpoint limit)",
                                     )
                                     .clicked()
                                 {
@@ -3394,7 +3403,7 @@ impl CrosshairApp {
                                         address: saved.address,
                                         tracked_base: None,
                                         kind: MemoryViewKind::Bytes,
-                                        display_type: MemoryDisplayType::ByteHex,
+                                        display_type: MemoryDisplayType::Float,
                                         relative_addresses: false,
                                         pinned: true,
                                         elements: default_structure_elements(),
@@ -3532,7 +3541,14 @@ impl CrosshairApp {
                             });
                             #[cfg(windows)]
                             if let Some(reads_and_writes) = instruction_watch {
-                                self.open_instruction_watch(saved.address, reads_and_writes);
+                                let addresses = self
+                                    .memory_panel
+                                    .selected_saved
+                                    .iter()
+                                    .filter_map(|index| self.memory_panel.saved.get(*index))
+                                    .map(|entry| entry.address)
+                                    .collect();
+                                self.open_instruction_watch_many(addresses, reads_and_writes);
                             }
                             if find_stable_pointer {
                                 self.start_stable_pointer_scan(&saved);
@@ -8005,7 +8021,11 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn open_instruction_watch(&mut self, address: usize, reads_and_writes: bool) {
+    fn open_instruction_watch_many(
+        &mut self,
+        mut addresses: Vec<usize>,
+        reads_and_writes: bool,
+    ) {
         let Some(pid) = self.memory_panel.process_pid else {
             self.memory_panel.status = "Select a process".to_owned();
             return;
@@ -8015,23 +8035,29 @@ impl CrosshairApp {
                 "VEH debugger requires the injected helper and is not available yet".to_owned();
             return;
         }
+        addresses.sort_unstable();
+        addresses.dedup();
+        let Some(&address) = addresses.first() else {
+            self.memory_panel.status = "Select at least one address".to_owned();
+            return;
+        };
         self.close_memory_debuggers();
         let (tx, rx) = mpsc::channel();
         let notify = move |event| {
             let _ = tx.send(event);
         };
         let started = if reads_and_writes {
-            AddressAccessWatch::start(
+            AddressAccessWatch::start_many(
                 pid,
-                address,
+                &addresses,
                 self.state.memory_debugger_architecture,
                 notify,
             )
             .map(ActiveInstructionWatch::Accesses)
         } else {
-            WriteWatch::start(
+            WriteWatch::start_many(
                 pid,
-                address,
+                &addresses,
                 self.state.memory_debugger_architecture,
                 notify,
             )
@@ -8043,6 +8069,7 @@ impl CrosshairApp {
         };
         self.memory_panel.instruction_watch_dialog = Some(InstructionWatchDialog {
             address,
+            addresses,
             writes_only: !reads_and_writes,
             status,
             hits: Vec::new(),
@@ -8051,6 +8078,7 @@ impl CrosshairApp {
             active,
             pinned: true,
             pending_code_add: None,
+            pending_code_add_all: false,
             pending_disassembler: None,
             auto_stop_on_hit: false,
             hits_sort: 0,
@@ -8142,7 +8170,11 @@ impl CrosshairApp {
             } else {
                 "accessing"
             },
-            format_prefixed_memory_address(dialog.address)
+            if dialog.addresses.len() == 1 {
+                format_prefixed_memory_address(dialog.address)
+            } else {
+                format!("{} selected addresses", dialog.addresses.len())
+            }
         );
         let mut start_requested = false;
         if dialog.pinned {
@@ -8202,6 +8234,17 @@ impl CrosshairApp {
         {
             self.add_instruction_to_code_list(hit.address, &hit.instruction, dialog.writes_only);
         }
+        if dialog.pending_code_add_all {
+            dialog.pending_code_add_all = false;
+            let hits: Vec<_> = dialog
+                .hits
+                .iter()
+                .map(|hit| (hit.address, hit.instruction.clone()))
+                .collect();
+            for (address, instruction) in hits {
+                self.add_instruction_to_code_list(address, &instruction, dialog.writes_only);
+            }
+        }
         if let Some(index) = dialog.pending_disassembler.take()
             && let Some(hit) = dialog.hits.get(index)
         {
@@ -8254,20 +8297,19 @@ impl CrosshairApp {
         let notify = move |event| {
             let _ = tx.send(event);
         };
-        let address = dialog.address;
         let reads_and_writes = !dialog.writes_only;
         let started = if reads_and_writes {
-            AddressAccessWatch::start(
+            AddressAccessWatch::start_many(
                 pid,
-                address,
+                &dialog.addresses,
                 self.state.memory_debugger_architecture,
                 notify,
             )
             .map(ActiveInstructionWatch::Accesses)
         } else {
-            WriteWatch::start(
+            WriteWatch::start_many(
                 pid,
-                address,
+                &dialog.addresses,
                 self.state.memory_debugger_architecture,
                 notify,
             )
@@ -8319,6 +8361,12 @@ impl CrosshairApp {
             ui.add(egui::Label::new(&dialog.status).selectable(true));
             ui.checkbox(&mut dialog.auto_stop_on_hit, "Auto-stop on 1st hit");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add_enabled(!dialog.hits.is_empty(), Button::new("Add all to code list"))
+                    .clicked()
+                {
+                    dialog.pending_code_add_all = true;
+                }
                 if ui
                     .add_enabled(dialog.selected.is_some(), Button::new("Add to code list"))
                     .clicked()
@@ -9042,7 +9090,7 @@ impl CrosshairApp {
                 address,
                 tracked_base: Some(address),
                 kind: MemoryViewKind::Bytes,
-                display_type: MemoryDisplayType::ByteHex,
+                display_type: MemoryDisplayType::Float,
                 relative_addresses: false,
                 pinned: true,
                 elements: default_structure_elements(),
@@ -9978,19 +10026,20 @@ impl CrosshairApp {
         }
         match dialog.kind {
             MemoryViewKind::Bytes => {
-                let mut output = egui::ScrollArea::both()
+                let target_row = dialog.address.saturating_sub(start_address) / row_bytes;
+                let mut scroll_area = egui::ScrollArea::both()
                     .id_salt("memory-region-grid")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        Self::render_memory_region_grid(ui, language, dialog, start_address, bytes)
-                    });
+                    .auto_shrink([false, false]);
                 if dialog.reset_memory_scroll {
-                    let target_row = dialog.address.saturating_sub(start_address) / row_bytes;
-                    output.state.offset.x = 0.0;
-                    output.state.offset.y = target_row.saturating_sub(3) as f32 * 18.0;
+                    scroll_area = scroll_area
+                        .horizontal_scroll_offset(0.0)
+                        .vertical_scroll_offset(target_row.saturating_sub(3) as f32 * 18.0);
+                }
+                scroll_area.show(ui, |ui| {
+                    Self::render_memory_region_grid(ui, language, dialog, start_address, bytes)
+                });
+                if dialog.reset_memory_scroll {
                     dialog.reset_memory_scroll = false;
-                    output.state.store(ui.ctx(), output.id);
-                    ui.ctx().request_repaint();
                 }
             }
             MemoryViewKind::Structure => {

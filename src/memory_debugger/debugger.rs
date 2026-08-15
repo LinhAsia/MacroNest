@@ -334,10 +334,22 @@ impl WriteWatch {
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
-        let aligned = address & !3;
+        Self::start_many(pid, &[address], architecture, notify)
+    }
+
+    pub fn start_many<F>(
+        pid: u32,
+        addresses: &[usize],
+        architecture: MemoryDebuggerArchitecture,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        let addresses = hardware_watch_addresses(addresses)?;
         WatchSession::start(
             pid,
-            WatchKind::Write { address: aligned },
+            WatchKind::Write { addresses },
             architecture,
             notify,
         )
@@ -361,10 +373,22 @@ impl AddressAccessWatch {
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
-        let aligned = address & !3;
+        Self::start_many(pid, &[address], architecture, notify)
+    }
+
+    pub fn start_many<F>(
+        pid: u32,
+        addresses: &[usize],
+        architecture: MemoryDebuggerArchitecture,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        let addresses = hardware_watch_addresses(addresses)?;
         WatchSession::start(
             pid,
-            WatchKind::ReadWrite { address: aligned },
+            WatchKind::ReadWrite { addresses },
             architecture,
             notify,
         )
@@ -514,10 +538,10 @@ impl AccessWatch {
 
 enum WatchKind {
     Write {
-        address: usize,
+        addresses: Vec<usize>,
     },
     ReadWrite {
-        address: usize,
+        addresses: Vec<usize>,
     },
     Execute {
         address: usize,
@@ -531,21 +555,33 @@ enum WatchKind {
 const EXECUTE_CAPTURE_LIMIT: usize = 64;
 
 impl WatchKind {
-    fn address(&self) -> usize {
+    fn addresses(&self) -> &[usize] {
         match self {
-            Self::Write { address }
-            | Self::ReadWrite { address }
-            | Self::Execute { address, .. } => *address,
+            Self::Write { addresses } | Self::ReadWrite { addresses } => addresses,
+            Self::Execute { address, .. } => std::slice::from_ref(address),
         }
     }
 
     fn dr7(&self) -> u64 {
         match self {
-            Self::Write { .. } => write_breakpoint_dr7(),
-            Self::ReadWrite { .. } => read_write_breakpoint_dr7(),
+            Self::Write { addresses } => write_breakpoint_dr7(addresses.len()),
+            Self::ReadWrite { addresses } => read_write_breakpoint_dr7(addresses.len()),
             Self::Execute { .. } => 1,
         }
     }
+}
+
+fn hardware_watch_addresses(addresses: &[usize]) -> io::Result<Vec<usize>> {
+    let mut aligned: Vec<_> = addresses.iter().map(|address| address & !3).collect();
+    aligned.sort_unstable();
+    aligned.dedup();
+    if aligned.is_empty() || aligned.len() > 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "select between 1 and 4 distinct addresses (CPU hardware watchpoint limit)",
+        ));
+    }
+    Ok(aligned)
 }
 
 fn target_architecture(
@@ -659,14 +695,19 @@ fn watch_loop<F>(
             EXCEPTION_DEBUG_EVENT => unsafe {
                 let exception = event.u.Exception.ExceptionRecord.ExceptionCode;
                 if exception == EXCEPTION_SINGLE_STEP || exception == STATUS_WX86_SINGLE_STEP {
-                    if let Some(context) = threads
+                    if let Some((context, hit_mask)) = threads
                         .get(&event.dwThreadId)
                         .and_then(|&thread| read_hit(thread, architecture))
                     {
                         let context = context.as_amd64();
                         match &kind {
-                            WatchKind::Write { address } | WatchKind::ReadWrite { address } => {
+                            WatchKind::Write { addresses }
+                            | WatchKind::ReadWrite { addresses } => {
                                 let read_write = matches!(kind, WatchKind::ReadWrite { .. });
+                                for (slot, address) in addresses.iter().enumerate() {
+                                    if hit_mask & (1 << slot) == 0 {
+                                        continue;
+                                    }
                                 if !capture_limit_reached
                                     && let Some((instruction_address, decoded, instruction_decoded)) =
                                         decode_previous_access(
@@ -705,6 +746,7 @@ fn watch_loop<F>(
                                         details,
                                         likely_stack_copy,
                                     });
+                                }
                                 }
                             }
                             WatchKind::Execute {
@@ -903,10 +945,13 @@ unsafe fn arm_thread(
             if unsafe { Wow64GetThreadContext(thread, &mut context) } == 0 {
                 return Err(io::Error::last_os_error());
             }
-            context.Dr0 = kind.address() as u32;
+            let addresses = kind.addresses();
+            context.Dr0 = addresses.first().copied().unwrap_or_default() as u32;
+            context.Dr1 = addresses.get(1).copied().unwrap_or_default() as u32;
+            context.Dr2 = addresses.get(2).copied().unwrap_or_default() as u32;
+            context.Dr3 = addresses.get(3).copied().unwrap_or_default() as u32;
             context.Dr6 = 0;
-            context.Dr7 &= !0xF0003;
-            context.Dr7 |= kind.dr7() as u32;
+            context.Dr7 = kind.dr7() as u32;
             return if unsafe { Wow64SetThreadContext(thread, &context) } == 0 {
                 Err(io::Error::last_os_error())
             } else {
@@ -919,10 +964,13 @@ unsafe fn arm_thread(
         if unsafe { GetThreadContext(thread, context) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        context.Dr0 = kind.address() as u64;
+        let addresses = kind.addresses();
+        context.Dr0 = addresses.first().copied().unwrap_or_default() as u64;
+        context.Dr1 = addresses.get(1).copied().unwrap_or_default() as u64;
+        context.Dr2 = addresses.get(2).copied().unwrap_or_default() as u64;
+        context.Dr3 = addresses.get(3).copied().unwrap_or_default() as u64;
         context.Dr6 = 0;
-        context.Dr7 &= !0xF0003;
-        context.Dr7 |= kind.dr7();
+        context.Dr7 = kind.dr7();
         if unsafe { SetThreadContext(thread, context) } == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -962,7 +1010,7 @@ impl CapturedContext {
     }
 }
 
-fn read_hit(thread: HANDLE, architecture: TargetArchitecture) -> Option<CapturedContext> {
+fn read_hit(thread: HANDLE, architecture: TargetArchitecture) -> Option<(CapturedContext, u8)> {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
             ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS
@@ -971,27 +1019,27 @@ fn read_hit(thread: HANDLE, architecture: TargetArchitecture) -> Option<Captured
             ..WOW64_CONTEXT::default()
         };
         let captured = unsafe { Wow64GetThreadContext(thread, &mut context) } != 0;
-        let hit = captured && context.Dr6 & 1 != 0;
+        let hit_mask = (context.Dr6 & 0xF) as u8;
         if captured {
             context.Dr6 = 0;
             context.EFlags |= RESUME_FLAG;
             unsafe { Wow64SetThreadContext(thread, &context) };
         }
-        return hit.then_some(CapturedContext::X86(context));
+        return (captured && hit_mask != 0).then_some((CapturedContext::X86(context), hit_mask));
     }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
     context.ContextFlags =
         CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64 | CONTEXT_INTEGER_AMD64;
     let context_read = unsafe { GetThreadContext(thread, context) } != 0;
-    let hit = context_read && context.Dr6 & 1 != 0;
-    let captured = hit.then_some(*context);
+    let hit_mask = (context.Dr6 & 0xF) as u8;
+    let captured = (context_read && hit_mask != 0).then_some(*context);
     if context_read {
         context.Dr6 = 0;
         context.EFlags |= RESUME_FLAG;
         unsafe { SetThreadContext(thread, context) };
     }
-    captured.map(CapturedContext::X64)
+    captured.map(|context| (CapturedContext::X64(context), hit_mask))
 }
 
 fn decode_at(
@@ -1428,12 +1476,24 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
     }
 }
 
-const fn write_breakpoint_dr7() -> u64 {
-    1 | (1 << 16) | (3 << 18)
+const fn data_breakpoint_dr7(count: usize, access_mode: u64) -> u64 {
+    let mut dr7 = 0;
+    let mut slot = 0;
+    while slot < count {
+        dr7 |= 1 << (slot * 2);
+        dr7 |= access_mode << (16 + slot * 4);
+        dr7 |= 3 << (18 + slot * 4);
+        slot += 1;
+    }
+    dr7
 }
 
-const fn read_write_breakpoint_dr7() -> u64 {
-    1 | (3 << 16) | (3 << 18)
+const fn write_breakpoint_dr7(count: usize) -> u64 {
+    data_breakpoint_dr7(count, 1)
+}
+
+const fn read_write_breakpoint_dr7(count: usize) -> u64 {
+    data_breakpoint_dr7(count, 3)
 }
 
 #[cfg(test)]
@@ -1451,7 +1511,7 @@ mod tests {
 
     #[test]
     fn dr7_enables_local_four_byte_write_watchpoint_in_slot_zero() {
-        let dr7 = write_breakpoint_dr7();
+        let dr7 = write_breakpoint_dr7(1);
         assert_eq!(dr7 & 1, 1);
         assert_eq!((dr7 >> 16) & 0b11, 0b01);
         assert_eq!((dr7 >> 18) & 0b11, 0b11);
@@ -1459,10 +1519,18 @@ mod tests {
 
     #[test]
     fn dr7_read_write_watchpoint_uses_the_access_mode() {
-        let dr7 = read_write_breakpoint_dr7();
+        let dr7 = read_write_breakpoint_dr7(1);
         assert_eq!(dr7 & 1, 1);
         assert_eq!((dr7 >> 16) & 0b11, 0b11);
         assert_eq!((dr7 >> 18) & 0b11, 0b11);
+    }
+
+    #[test]
+    fn dr7_enables_two_independent_data_watchpoints() {
+        let dr7 = write_breakpoint_dr7(2);
+        assert_eq!(dr7 & 0b0101, 0b0101);
+        assert_eq!((dr7 >> 20) & 0b11, 0b01);
+        assert_eq!((dr7 >> 22) & 0b11, 0b11);
     }
 
     #[test]
