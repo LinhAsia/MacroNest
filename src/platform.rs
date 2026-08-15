@@ -488,13 +488,6 @@ mod windows_platform {
                     SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE,
                 );
             }
-            if let Some(overlay_hwnd) = crate::overlay::screen_draw_hwnd() {
-                let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowLongPtrW(
-                    hwnd,
-                    windows::Win32::UI::WindowsAndMessaging::GWL_HWNDPARENT,
-                    overlay_hwnd.0 as isize,
-                );
-            }
         }
         true
     }
