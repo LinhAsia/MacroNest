@@ -9646,8 +9646,6 @@ mod windows_overlay {
         if started_from_inactive {
             let freeze = SCREEN_DRAW_STATE.lock().freeze_screen;
             if freeze {
-                hide_ui_window_native();
-                std::thread::sleep(std::time::Duration::from_millis(50));
                 let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                 if screen_w > 0 && screen_h > 0 {
                     captured_frame = window_list::capture_virtual_screen_region(
@@ -12447,10 +12445,6 @@ mod windows_overlay {
             });
             send_ui_command(command);
         }
-        show_ui_window_native();
-        if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
-            let _ = tx.send(UiCommand::ShowWindow);
-        }
     }
 
     fn activate_screen_draw(state: &mut ScreenDrawState, captured_frame: Option<Vec<u8>>) {
@@ -13021,8 +13015,6 @@ mod windows_overlay {
             if started_inactive {
                 let freeze = state.freeze_screen;
                 let captured_frame = if freeze {
-                    hide_ui_window_native();
-                    std::thread::sleep(std::time::Duration::from_millis(50));
                     let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                     if screen_w > 0 && screen_h > 0 {
                         window_list::capture_virtual_screen_region(
@@ -13077,8 +13069,6 @@ mod windows_overlay {
             let freeze = SCREEN_DRAW_STATE.lock().freeze_screen;
             if freeze {
                 std::thread::spawn(|| {
-                    hide_ui_window_native();
-                    std::thread::sleep(std::time::Duration::from_millis(60));
                     let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
                     let captured_frame = if screen_w > 0 && screen_h > 0 {
                         window_list::capture_virtual_screen_region(
