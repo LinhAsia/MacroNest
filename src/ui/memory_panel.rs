@@ -7435,17 +7435,41 @@ impl CrosshairApp {
                 const ADDRESS_WIDTH: f32 = 145.0;
                 const VALUE_WIDTH: f32 = 92.0;
                 const CURRENT_WIDTH: f32 = 92.0;
+                let single_target = dialog.source_addresses.first().copied();
+                let show_target_column = single_target.is_some_and(|target| {
+                    dialog
+                        .source_addresses
+                        .iter()
+                        .skip(1)
+                        .any(|other| *other != target)
+                });
+                if !show_target_column {
+                    if let Some(target) = single_target {
+                        ui.label(format!(
+                            "Target: {}",
+                            format_prefixed_memory_address(target)
+                        ));
+                    }
+                }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    for (width, title) in [
-                        (TARGET_WIDTH, "Target"),
+                    let columns = [
                         (STATUS_WIDTH, "Status"),
                         (ROOT_WIDTH, "Root"),
                         (OFFSETS_WIDTH, "Offsets"),
                         (ADDRESS_WIDTH, "Resolved"),
                         (VALUE_WIDTH, "Value"),
                         (CURRENT_WIDTH, "Current"),
-                    ] {
+                    ];
+                    if show_target_column {
+                        Self::memory_label_cell(
+                            ui,
+                            TARGET_WIDTH,
+                            20.0,
+                            egui::Label::new(RichText::new("Target").strong()).truncate(),
+                        );
+                    }
+                    for (width, title) in columns {
                         Self::memory_label_cell(
                             ui,
                             width,
@@ -7488,7 +7512,7 @@ impl CrosshairApp {
                         dialog.last_live_refresh = Instant::now();
                     }
                     ui.set_min_width(
-                        TARGET_WIDTH
+                        if show_target_column { TARGET_WIDTH } else { 0.0 }
                             + STATUS_WIDTH
                             + ROOT_WIDTH
                             + OFFSETS_WIDTH
@@ -7548,11 +7572,19 @@ impl CrosshairApp {
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
-                                for (width, text) in [
-                                    (
+                                if show_target_column {
+                                    Self::memory_label_cell(
+                                        ui,
                                         TARGET_WIDTH,
-                                        format_prefixed_memory_address(candidate.source_address),
-                                    ),
+                                        24.0,
+                                        egui::Label::new(format_prefixed_memory_address(
+                                            candidate.source_address,
+                                        ))
+                                        .truncate()
+                                        .selectable(false),
+                                    );
+                                }
+                                for (width, text) in [
                                     (STATUS_WIDTH, state.to_owned()),
                                     (ROOT_WIDTH, root),
                                     (OFFSETS_WIDTH, offsets),
