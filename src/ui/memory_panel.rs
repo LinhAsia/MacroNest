@@ -592,6 +592,14 @@ struct CodeCompareDialog {
     pinned: bool,
 }
 
+#[cfg(windows)]
+struct CodeCompareCandidate {
+    start: usize,
+    end: usize,
+    instructions: Vec<usize>,
+    hits: usize,
+}
+
 struct ScanJobResult {
     pid: u32,
     action: MemoryScanAction,
@@ -9092,7 +9100,7 @@ impl CrosshairApp {
     #[cfg(windows)]
     fn code_compare_candidates(
         dialog: &CodeCompareDialog,
-    ) -> Vec<(usize, usize, usize, usize)> {
+    ) -> Vec<CodeCompareCandidate> {
         let gap = if dialog.nearby {
             parse_hex_offset(&dialog.max_gap).unwrap_or(0)
         } else {
@@ -9112,23 +9120,36 @@ impl CrosshairApp {
         let mut seen = HashSet::new();
         for left in 0..accesses.len() {
             let start = accesses[left].0;
+            let mut end = start;
             let mut instructions = HashSet::new();
             let mut total_hits = 0;
             for &(address, instruction, count) in &accesses[left..] {
                 if address.saturating_sub(start) > gap {
                     break;
                 }
+                end = address;
                 instructions.insert(instruction);
                 total_hits += count;
-                if instructions.len() == dialog.instruction_addresses.len()
-                    && seen.insert((start, address))
-                {
-                    candidates.push((start, address, instructions.len(), total_hits));
-                    break;
-                }
+            }
+            if instructions.len() >= 2 && seen.insert((start, end)) {
+                let mut instructions = instructions.into_iter().collect::<Vec<_>>();
+                instructions.sort_unstable();
+                candidates.push(CodeCompareCandidate {
+                    start,
+                    end,
+                    instructions,
+                    hits: total_hits,
+                });
             }
         }
-        candidates.sort_unstable_by_key(|(start, end, _, _)| (*end - *start, *start));
+        candidates.sort_unstable_by(|left, right| {
+            right
+                .instructions
+                .len()
+                .cmp(&left.instructions.len())
+                .then_with(|| (left.end - left.start).cmp(&(right.end - right.start)))
+                .then_with(|| left.start.cmp(&right.start))
+        });
         candidates.truncate(512);
         candidates
     }
@@ -9206,8 +9227,8 @@ impl CrosshairApp {
         let builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_position(egui::pos2(0.0, 0.0))
-            .with_inner_size(vec2(720.0, 520.0))
-            .with_min_inner_size(vec2(520.0, 300.0))
+            .with_inner_size(vec2(1100.0, 520.0))
+            .with_min_inner_size(vec2(760.0, 300.0))
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
             .with_resizable(true)
@@ -9259,28 +9280,68 @@ impl CrosshairApp {
                                 .collect::<Vec<_>>()
                                 .join("  |  "),
                         );
+                        if dialog.completed_batches >= dialog.total_batches {
+                            if candidates.is_empty() {
+                                ui.label(
+                                    "No address was captured by at least two selected instructions",
+                                );
+                            } else {
+                                ui.label(format!(
+                                    "{} candidate(s) — groups with the most matching instructions are first",
+                                    candidates.len()
+                                ));
+                            }
+                        }
                         ui.separator();
                         ui.horizontal(|ui| {
-                            Self::memory_view_cell(ui, 180.0, "Candidate");
-                            Self::memory_view_cell(ui, 100.0, "Span");
-                            Self::memory_view_cell(ui, 100.0, "Instructions");
-                            Self::memory_view_cell(ui, 100.0, "Hits");
+                            Self::memory_view_cell(ui, 170.0, "Candidate");
+                            Self::memory_view_cell(ui, 80.0, "Span");
+                            Self::memory_view_cell(ui, 70.0, "Matches");
+                            Self::memory_view_cell(ui, 70.0, "Hits");
+                            Self::memory_view_cell(ui, 620.0, "Matched instructions");
                         });
                         egui::ScrollArea::vertical().show(ui, |ui| {
-                            for &(start, end, matched, hits) in &candidates {
+                            for candidate in &candidates {
+                                let instruction_list = candidate
+                                    .instructions
+                                    .iter()
+                                    .map(|address| {
+                                        let name = dialog
+                                            .instruction_names
+                                            .get(address)
+                                            .cloned()
+                                            .unwrap_or_else(|| "instruction".to_owned());
+                                        format!(
+                                            "{} @ {}",
+                                            name,
+                                            format_prefixed_memory_address(*address)
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("  |  ");
                                 ui.horizontal(|ui| {
                                     Self::memory_view_cell(
                                         ui,
-                                        180.0,
-                                        &format_prefixed_memory_address(start),
+                                        170.0,
+                                        &format_prefixed_memory_address(candidate.start),
                                     );
                                     Self::memory_view_cell(
                                         ui,
-                                        100.0,
-                                        &format!("0x{:X}", end - start),
+                                        80.0,
+                                        &format!("0x{:X}", candidate.end - candidate.start),
                                     );
-                                    Self::memory_view_cell(ui, 100.0, &matched.to_string());
-                                    Self::memory_view_cell(ui, 100.0, &hits.to_string());
+                                    Self::memory_view_cell(
+                                        ui,
+                                        70.0,
+                                        &candidate.instructions.len().to_string(),
+                                    );
+                                    Self::memory_view_cell(
+                                        ui,
+                                        70.0,
+                                        &candidate.hits.to_string(),
+                                    );
+                                    Self::memory_view_cell(ui, 620.0, &instruction_list)
+                                        .on_hover_text(&instruction_list);
                                 });
                             }
                         });
@@ -14357,12 +14418,13 @@ mod tests {
     fn code_compare_supports_exact_and_nearby_matches() {
         let (_tx, rx) = mpsc::channel();
         let mut dialog = CodeCompareDialog {
-            instruction_addresses: vec![0x10, 0x20],
+            instruction_addresses: vec![0x10, 0x20, 0x30],
             instruction_names: HashMap::new(),
             status: String::new(),
             hits: HashMap::from([
                 (0x10, HashMap::from([(0x1000, 2)])),
                 (0x20, HashMap::from([(0x1000, 3), (0x1010, 1)])),
+                (0x30, HashMap::from([(0x2000, 1)])),
             ]),
             nearby: false,
             max_gap: "10".to_owned(),
@@ -14373,11 +14435,13 @@ mod tests {
             active: None,
             pinned: true,
         };
-        assert_eq!(CrosshairApp::code_compare_candidates(&dialog)[0].0, 0x1000);
+        let candidates = CrosshairApp::code_compare_candidates(&dialog);
+        assert_eq!(candidates[0].start, 0x1000);
+        assert_eq!(candidates[0].instructions, vec![0x10, 0x20]);
         dialog.hits.get_mut(&0x20).unwrap().remove(&0x1000);
         assert!(CrosshairApp::code_compare_candidates(&dialog).is_empty());
         dialog.nearby = true;
-        assert_eq!(CrosshairApp::code_compare_candidates(&dialog)[0].1, 0x1010);
+        assert_eq!(CrosshairApp::code_compare_candidates(&dialog)[0].end, 0x1010);
     }
 
     #[test]
