@@ -1051,6 +1051,38 @@ pub fn query_memory_region(pid: u32, address: usize) -> io::Result<MemoryRegionI
     })
 }
 
+pub fn adjacent_readable_memory_region(
+    pid: u32,
+    address: usize,
+    forward: bool,
+) -> io::Result<Option<MemoryRegionInfo>> {
+    let process = ScanProcess::open(pid, false)?;
+    let regions = scan_regions_for(
+        &process,
+        MemoryScanOptions {
+            writable: false,
+            executable: true,
+            copy_on_write: true,
+            active_memory_only: false,
+            mem_private: true,
+            mem_image: true,
+            mem_mapped: true,
+            alignment: None,
+        },
+    );
+    let candidate = if forward {
+        regions.into_iter().find(|region| region.base >= address)
+    } else {
+        regions
+            .into_iter()
+            .rev()
+            .find(|region| region.base.saturating_add(region.size) <= address)
+    };
+    candidate
+        .map(|region| query_memory_region(pid, region.base))
+        .transpose()
+}
+
 pub fn read_memory_bytes(pid: u32, address: usize, length: usize) -> io::Result<Vec<u8>> {
     let mut bytes = vec![0; length];
     let read = with_cached_read_process(pid, |process| process.read(address, &mut bytes))?;

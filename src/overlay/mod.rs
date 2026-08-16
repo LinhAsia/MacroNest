@@ -32309,7 +32309,7 @@ mod windows_overlay {
             let mut exact_candidate = None;
             while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
                 match rx.recv_timeout(remaining) {
-                    Ok(WatchEvent::AccessHit { data_address }) => {
+                    Ok(WatchEvent::AccessHit { data_address, .. }) => {
                         if !candidates.contains(&data_address) {
                             candidates.push(data_address);
                             if has_signature {

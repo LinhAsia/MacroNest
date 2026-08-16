@@ -207,7 +207,7 @@ impl CrosshairApp {
         while let Ok(event) = capture.rx.try_recv() {
             match event {
                 WatchEvent::Started { .. } => {}
-                WatchEvent::AccessHit { data_address } => {
+                WatchEvent::AccessHit { data_address, .. } => {
                     capture.addresses.push(data_address);
                     changed = true;
                 }

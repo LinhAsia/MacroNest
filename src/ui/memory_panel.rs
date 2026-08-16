@@ -22,7 +22,7 @@ use crate::{
         MemoryScanOptions, PausedProcess, PointerMap, PointerPath, PointerPathComparison,
         PointerScanLimits, ScanCandidate, ScanComparison, ScanValue,
         ScanValueType, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
-        capture_pointer_map_with_budget,
+        adjacent_readable_memory_region, capture_pointer_map_with_budget,
         compare_pointer_paths, filter_aob_scan_candidates, filter_scan_candidates,
         filter_scan_candidates_with_progress, filter_text_scan_candidates, query_memory_region,
         read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
@@ -487,6 +487,7 @@ struct MemoryViewDialog {
     memory_columns: usize,
     reset_memory_scroll: bool,
     memory_scroll_override: Option<f32>,
+    memory_region_override: Option<MemoryRegionInfo>,
     fit_memory_columns: bool,
     stride_address_a: String,
     stride_address_b: String,
@@ -573,6 +574,19 @@ struct CodeAccessDialog {
     value_filter_enabled: bool,
     value_filter_min: String,
     value_filter_max: String,
+}
+
+#[cfg(windows)]
+struct CodeCompareDialog {
+    instruction_addresses: Vec<usize>,
+    instruction_names: HashMap<usize, String>,
+    status: String,
+    hits: HashMap<usize, HashMap<usize, usize>>,
+    nearby: bool,
+    max_gap: String,
+    rx: Receiver<WatchEvent>,
+    active: Option<AccessWatch>,
+    pinned: bool,
 }
 
 struct ScanJobResult {
@@ -735,6 +749,9 @@ pub(crate) struct MemoryPanelState {
     memory_settings_open: bool,
     code_list_open: bool,
     code_list_actions_validated: bool,
+    selected_code: HashSet<usize>,
+    code_selection_anchor: Option<usize>,
+    code_compare_gap: String,
     stable_pointer_dialog: Option<StablePointerDialog>,
     deep_pointer_dialog: Option<DeepPointerDialog>,
     camera_matrix_dialog: Option<CameraMatrixDialog>,
@@ -746,6 +763,8 @@ pub(crate) struct MemoryPanelState {
     disassembler_dialog: Option<DisassemblerDialog>,
     #[cfg(windows)]
     code_access_dialog: Option<CodeAccessDialog>,
+    #[cfg(windows)]
+    code_compare_dialog: Option<CodeCompareDialog>,
     last_refresh: Instant,
     last_saved_refresh: Instant,
     visible_scan_ranges: [Option<(usize, usize, Instant)>; 2],
@@ -832,6 +851,9 @@ impl Default for MemoryPanelState {
             memory_settings_open: false,
             code_list_open: false,
             code_list_actions_validated: false,
+            selected_code: HashSet::new(),
+            code_selection_anchor: None,
+            code_compare_gap: "100".to_owned(),
             stable_pointer_dialog: None,
             deep_pointer_dialog: None,
             camera_matrix_dialog: None,
@@ -843,6 +865,8 @@ impl Default for MemoryPanelState {
             disassembler_dialog: None,
             #[cfg(windows)]
             code_access_dialog: None,
+            #[cfg(windows)]
+            code_compare_dialog: None,
             last_refresh: Instant::now(),
             last_saved_refresh: Instant::now(),
             visible_scan_ranges: [None, None],
@@ -890,6 +914,8 @@ impl CrosshairApp {
             self.memory_panel.address_dialog = None;
             self.memory_panel.address_group_dialog = None;
             self.memory_panel.code_list_actions_validated = false;
+            self.memory_panel.selected_code.clear();
+            self.memory_panel.code_selection_anchor = None;
         }
         self.memory_panel.process_pid = pid;
         #[cfg(windows)]
@@ -1135,6 +1161,7 @@ impl CrosshairApp {
         self.render_disassembler_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_code_access_dialog(ui.ctx());
+        self.render_code_compare_dialog(ui.ctx());
         self.render_dll_studio_window(ui.ctx());
         self.sync_memory_freeze_targets();
     }
@@ -3141,6 +3168,7 @@ impl CrosshairApp {
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
                                         memory_scroll_override: None,
+                                        memory_region_override: None,
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
@@ -3440,6 +3468,7 @@ impl CrosshairApp {
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
                                         memory_scroll_override: None,
+                                        memory_region_override: None,
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
@@ -3499,6 +3528,7 @@ impl CrosshairApp {
                                         memory_columns: 3,
                                         reset_memory_scroll: true,
                                         memory_scroll_override: None,
+                                        memory_region_override: None,
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
@@ -4375,6 +4405,7 @@ impl CrosshairApp {
             Rename(usize),
             Delete(usize),
             ReplaceAll,
+            Compare(bool),
         }
 
         let mut pending_action = None;
@@ -4412,6 +4443,37 @@ impl CrosshairApp {
                 }
 
                 ui.horizontal(|ui| {
+                    let selected_count = self.memory_panel.selected_code.len();
+                    ui.label(format!("Selected: {selected_count}"));
+                    if ui
+                        .add_enabled(
+                            (2..=4).contains(&selected_count),
+                            Button::new("Compare exact"),
+                        )
+                        .on_disabled_hover_text("Select 2 to 4 instructions")
+                        .clicked()
+                    {
+                        pending_action = Some(CodeAction::Compare(false));
+                    }
+                    ui.label("Nearby 0x");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.memory_panel.code_compare_gap)
+                            .desired_width(64.0),
+                    );
+                    if ui
+                        .add_enabled(
+                            (2..=4).contains(&selected_count),
+                            Button::new("Compare nearby"),
+                        )
+                        .on_disabled_hover_text(
+                            "Select 2 to 4 instructions (four CPU hardware breakpoints)",
+                        )
+                        .clicked()
+                    {
+                        pending_action = Some(CodeAction::Compare(true));
+                    }
+                });
+                ui.horizontal(|ui| {
                     Self::memory_view_cell(ui, 190.0, "Address / Module");
                     Self::memory_view_cell(ui, 310.0, "Name / Instruction");
                     Self::memory_view_cell(ui, 320.0, "Action / Status");
@@ -4426,6 +4488,7 @@ impl CrosshairApp {
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
+                        let selected = self.memory_panel.selected_code.contains(&index);
                         let address_str = format!("{}+{:X}", entry.module, entry.offset);
                         let instruction_text = if entry.replaced {
                             format!("{} (Replaced: NOP)", entry.name)
@@ -4491,6 +4554,15 @@ impl CrosshairApp {
                                     .union(delete_response)
                             })
                             .inner;
+
+                        if selected {
+                            ui.painter().rect_stroke(
+                                row_res.rect,
+                                2.0,
+                                egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
 
                         row_res.context_menu(|ui| {
                             if ui.button("Copy code entry").clicked() {
@@ -4579,6 +4651,37 @@ impl CrosshairApp {
                                 ui.close_menu();
                             }
                         });
+                        if row_res.clicked() {
+                            let (shift, additive) = ui.input(|input| {
+                                (
+                                    input.modifiers.shift,
+                                    input.modifiers.ctrl || input.modifiers.command,
+                                )
+                            });
+                            if shift
+                                && let Some(anchor) = self.memory_panel.code_selection_anchor
+                            {
+                                if !additive {
+                                    self.memory_panel.selected_code.clear();
+                                }
+                                let (start, end) = if anchor <= index {
+                                    (anchor, index)
+                                } else {
+                                    (index, anchor)
+                                };
+                                self.memory_panel.selected_code.extend(start..=end);
+                            } else {
+                                if !additive {
+                                    self.memory_panel.selected_code.clear();
+                                }
+                                if additive && selected {
+                                    self.memory_panel.selected_code.remove(&index);
+                                } else {
+                                    self.memory_panel.selected_code.insert(index);
+                                }
+                                self.memory_panel.code_selection_anchor = Some(index);
+                            }
+                        }
                     }
                 });
                 if self.state.memory_code_list.is_empty() {
@@ -4626,6 +4729,8 @@ impl CrosshairApp {
                     self.restore_code_entry_with_original_bytes(index);
                 }
                 self.state.memory_code_list.remove(index);
+                self.memory_panel.selected_code.clear();
+                self.memory_panel.code_selection_anchor = None;
                 crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
                 self.persist();
             }
@@ -4637,6 +4742,10 @@ impl CrosshairApp {
                         self.replace_code_entry_with_nop(i);
                     }
                 }
+            }
+            Some(CodeAction::Compare(nearby)) => {
+                #[cfg(windows)]
+                self.open_code_compare_watch(nearby);
             }
             None => {}
         }
@@ -4953,6 +5062,58 @@ impl CrosshairApp {
         self.memory_panel.code_list_open = true;
         self.memory_panel.status = "Instruction and AOB added to code list".to_owned();
         self.persist();
+    }
+
+    #[cfg(windows)]
+    fn open_code_compare_watch(&mut self, nearby: bool) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process".to_owned();
+            return;
+        };
+        let mut instruction_addresses = Vec::new();
+        let mut instruction_names = HashMap::new();
+        for index in self.memory_panel.selected_code.iter().copied() {
+            let Some(entry) = self.state.memory_code_list.get(index) else {
+                continue;
+            };
+            let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset) else {
+                continue;
+            };
+            instruction_addresses.push(address);
+            instruction_names.insert(address, entry.name.clone());
+        }
+        instruction_addresses.sort_unstable();
+        instruction_addresses.dedup();
+        if !(2..=4).contains(&instruction_addresses.len()) {
+            self.memory_panel.status =
+                "Select 2 to 4 resolvable instructions for comparison".to_owned();
+            return;
+        }
+        self.close_memory_debuggers();
+        let (tx, rx) = mpsc::channel();
+        let started = AccessWatch::start_many(
+            pid,
+            &instruction_addresses,
+            self.state.memory_debugger_architecture,
+            move |event| {
+                let _ = tx.send(event);
+            },
+        );
+        let (active, status) = match started {
+            Ok(active) => (Some(active), "Attaching debugger…".to_owned()),
+            Err(error) => (None, format!("Unable to start debugger: {error}")),
+        };
+        self.memory_panel.code_compare_dialog = Some(CodeCompareDialog {
+            instruction_addresses,
+            instruction_names,
+            status,
+            hits: HashMap::new(),
+            nearby,
+            max_gap: self.memory_panel.code_compare_gap.clone(),
+            rx,
+            active,
+            pinned: true,
+        });
     }
 
     #[cfg(windows)]
@@ -8905,6 +9066,190 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
+    fn code_compare_candidates(
+        dialog: &CodeCompareDialog,
+    ) -> Vec<(usize, usize, usize, usize)> {
+        let gap = if dialog.nearby {
+            parse_hex_offset(&dialog.max_gap).unwrap_or(0)
+        } else {
+            0
+        };
+        let mut accesses = dialog
+            .hits
+            .iter()
+            .flat_map(|(instruction, addresses)| {
+                addresses
+                    .iter()
+                    .map(|(address, count)| (*address, *instruction, *count))
+            })
+            .collect::<Vec<_>>();
+        accesses.sort_unstable_by_key(|(address, instruction, _)| (*address, *instruction));
+        let mut candidates = Vec::new();
+        let mut seen = HashSet::new();
+        for left in 0..accesses.len() {
+            let start = accesses[left].0;
+            let mut instructions = HashSet::new();
+            let mut total_hits = 0;
+            for &(address, instruction, count) in &accesses[left..] {
+                if address.saturating_sub(start) > gap {
+                    break;
+                }
+                instructions.insert(instruction);
+                total_hits += count;
+                if instructions.len() == dialog.instruction_addresses.len()
+                    && seen.insert((start, address))
+                {
+                    candidates.push((start, address, instructions.len(), total_hits));
+                    break;
+                }
+            }
+        }
+        candidates.sort_unstable_by_key(|(start, end, _, _)| (*end - *start, *start));
+        candidates.truncate(512);
+        candidates
+    }
+
+    #[cfg(windows)]
+    fn render_code_compare_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.memory_panel.code_compare_dialog.take() else {
+            return;
+        };
+        while let Ok(event) = dialog.rx.try_recv() {
+            match event {
+                WatchEvent::Started {
+                    armed_threads,
+                    total_threads,
+                } => {
+                    dialog.status = format!(
+                        "Debugger running — {armed_threads}/{total_threads} thread(s) armed"
+                    );
+                }
+                WatchEvent::AccessHit {
+                    instruction_address,
+                    data_address,
+                } => {
+                    let addresses = dialog.hits.entry(instruction_address).or_default();
+                    if addresses.len() < 100_000 || addresses.contains_key(&data_address) {
+                        *addresses.entry(data_address).or_default() += 1;
+                    }
+                    let captured: usize = dialog.hits.values().map(HashMap::len).sum();
+                    dialog.status = format!("{captured} unique access(es) captured");
+                }
+                WatchEvent::Error(error) => {
+                    dialog.status = format!("Debugger stopped: {error}");
+                    dialog.active = None;
+                }
+                WatchEvent::Stopped => {
+                    dialog.status = "Debugger stopped".to_owned();
+                    dialog.active = None;
+                }
+                WatchEvent::CaptureLimitReached(_) | WatchEvent::AddressHit { .. } => {}
+            }
+        }
+        let title = if dialog.nearby {
+            "Compare code accesses — Nearby"
+        } else {
+            "Compare code accesses — Exact"
+        };
+        let candidates = Self::code_compare_candidates(&dialog);
+        let mut open = true;
+        let mut unpin = false;
+        let builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_position(egui::pos2(0.0, 0.0))
+            .with_inner_size(vec2(720.0, 520.0))
+            .with_min_inner_size(vec2(520.0, 300.0))
+            .with_clamp_size_to_monitor_size(true)
+            .with_decorations(false)
+            .with_resizable(true)
+            .with_always_on_top();
+        ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of("memory-code-compare"),
+            builder,
+            |ctx, _| {
+                Self::constrain_memory_popup_to_monitor(ctx);
+                if ctx.input(|input| input.viewport().close_requested()) {
+                    open = false;
+                }
+                Self::render_memory_popup_titlebar(
+                    ctx,
+                    self.state.ui_language,
+                    title,
+                    &mut unpin,
+                    &mut open,
+                );
+                egui::CentralPanel::default()
+                    .frame(Self::memory_popup_frame(ctx))
+                    .show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Label::new(&dialog.status).selectable(true));
+                            if dialog.active.is_some() && ui.button("Stop").clicked() {
+                                if let Some(mut active) = dialog.active.take() {
+                                    active.stop();
+                                    dialog.status = "Debugger stopped".to_owned();
+                                }
+                            }
+                            if dialog.nearby {
+                                ui.label("Max gap 0x");
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut dialog.max_gap)
+                                        .desired_width(64.0),
+                                );
+                            }
+                        });
+                        ui.label(
+                            dialog
+                                .instruction_addresses
+                                .iter()
+                                .map(|address| {
+                                    dialog.instruction_names.get(address).cloned().unwrap_or_else(|| {
+                                        format_prefixed_memory_address(*address)
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                                .join("  |  "),
+                        );
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            Self::memory_view_cell(ui, 180.0, "Candidate");
+                            Self::memory_view_cell(ui, 100.0, "Span");
+                            Self::memory_view_cell(ui, 100.0, "Instructions");
+                            Self::memory_view_cell(ui, 100.0, "Hits");
+                        });
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for &(start, end, matched, hits) in &candidates {
+                                ui.horizontal(|ui| {
+                                    Self::memory_view_cell(
+                                        ui,
+                                        180.0,
+                                        &format_prefixed_memory_address(start),
+                                    );
+                                    Self::memory_view_cell(
+                                        ui,
+                                        100.0,
+                                        &format!("0x{:X}", end - start),
+                                    );
+                                    Self::memory_view_cell(ui, 100.0, &matched.to_string());
+                                    Self::memory_view_cell(ui, 100.0, &hits.to_string());
+                                });
+                            }
+                        });
+                    });
+                Self::render_memory_popup_resize_handles(ctx);
+            },
+        );
+        if unpin {
+            dialog.pinned = false;
+        }
+        if open {
+            self.memory_panel.code_compare_dialog = Some(dialog);
+            ctx.request_repaint_after(Duration::from_millis(35));
+        } else if let Some(mut active) = dialog.active {
+            active.stop();
+        }
+    }
+
+    #[cfg(windows)]
     fn render_code_access_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.memory_panel.code_access_dialog.take() else {
             return;
@@ -8919,7 +9264,7 @@ impl CrosshairApp {
                         "Debugger running — {armed_threads}/{total_threads} thread(s) armed"
                     )
                 }
-                WatchEvent::AccessHit { data_address } => {
+                WatchEvent::AccessHit { data_address, .. } => {
                     let selected_address = dialog
                         .selected
                         .and_then(|index| dialog.addresses.get(index))
@@ -9132,6 +9477,7 @@ impl CrosshairApp {
                 memory_columns: 3,
                 reset_memory_scroll: true,
                 memory_scroll_override: None,
+                memory_region_override: None,
                 fit_memory_columns: true,
                 stride_address_a: String::new(),
                 stride_address_b: String::new(),
@@ -9730,10 +10076,11 @@ impl CrosshairApp {
         let unit = memory_display_width(dialog.display_type);
         let row_bytes = unit * dialog.memory_columns.max(1);
         let three_column_width = Self::memory_view_width_for_columns(dialog.display_type, 3);
-        let region = self
-            .memory_panel
-            .process_pid
-            .and_then(|pid| query_memory_region(pid, address).ok());
+        let region = dialog.memory_region_override.or_else(|| {
+            self.memory_panel
+                .process_pid
+                .and_then(|pid| query_memory_region(pid, address).ok())
+        });
         let (start_address, read_size) = match kind {
             MemoryViewKind::Bytes => Self::memory_view_read_window(
                 Self::memory_view_window_start(address, row_bytes, dialog.scroll_offset),
@@ -10073,6 +10420,28 @@ impl CrosshairApp {
                             dialog.memory_scroll_override =
                                 Some((shift / row_bytes) as f32 * 18.0);
                             ui.ctx().request_repaint();
+                        } else if scroll_delta > 0.0
+                            && output.state.offset.y <= 1.0
+                            && start_address == region.base
+                            && let Some(pid) = process_pid
+                            && let Ok(Some(previous)) =
+                                adjacent_readable_memory_region(pid, region.base, false)
+                        {
+                            let desired_start = previous
+                                .base
+                                .saturating_add(previous.size)
+                                .saturating_sub(MEMORY_VIEW_READ_BYTES)
+                                .max(previous.base);
+                            let base = Self::memory_view_window_start(
+                                dialog.address,
+                                row_bytes,
+                                0,
+                            );
+                            dialog.scroll_offset =
+                                Self::memory_view_offset_between(desired_start, base);
+                            dialog.memory_region_override = Some(previous);
+                            dialog.memory_scroll_override = Some(max_y);
+                            ui.ctx().request_repaint();
                         } else if scroll_delta < 0.0
                             && output.state.offset.y >= max_y - 1.0
                             && start_address.saturating_add(bytes.len()) < region_end
@@ -10082,6 +10451,23 @@ impl CrosshairApp {
                             dialog.scroll_offset = dialog.scroll_offset.saturating_add(shift as isize);
                             dialog.memory_scroll_override =
                                 Some((max_y - (shift / row_bytes) as f32 * 18.0).max(0.0));
+                            ui.ctx().request_repaint();
+                        } else if scroll_delta < 0.0
+                            && output.state.offset.y >= max_y - 1.0
+                            && start_address.saturating_add(bytes.len()) >= region_end
+                            && let Some(pid) = process_pid
+                            && let Ok(Some(next)) =
+                                adjacent_readable_memory_region(pid, region_end, true)
+                        {
+                            let base = Self::memory_view_window_start(
+                                dialog.address,
+                                row_bytes,
+                                0,
+                            );
+                            dialog.scroll_offset =
+                                Self::memory_view_offset_between(next.base, base);
+                            dialog.memory_region_override = Some(next);
+                            dialog.memory_scroll_override = Some(0.0);
                             ui.ctx().request_repaint();
                         }
                     }
@@ -11713,6 +12099,11 @@ impl CrosshairApp {
         {
             active.stop();
         }
+        if let Some(mut dialog) = self.memory_panel.code_compare_dialog.take()
+            && let Some(mut active) = dialog.active.take()
+        {
+            active.stop();
+        }
     }
 
     fn poll_memory_job(&mut self) {
@@ -12001,6 +12392,7 @@ impl CrosshairApp {
         dialog.scroll_offset = 0;
         dialog.reset_memory_scroll = true;
         dialog.memory_scroll_override = None;
+        dialog.memory_region_override = None;
         dialog.auto_dissected = false;
         dialog.selected_structure_address = None;
         if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
@@ -12050,6 +12442,7 @@ impl CrosshairApp {
             memory_columns: 3,
             reset_memory_scroll: true,
             memory_scroll_override: None,
+            memory_region_override: None,
             fit_memory_columns: true,
             stride_address_a: String::new(),
             stride_address_b: String::new(),
@@ -13846,6 +14239,7 @@ mod tests {
             memory_columns: 3,
             reset_memory_scroll: true,
             memory_scroll_override: None,
+            memory_region_override: None,
             fit_memory_columns: true,
             stride_address_a: String::new(),
             stride_address_b: String::new(),
@@ -13906,6 +14300,31 @@ mod tests {
             ),
             3
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn code_compare_supports_exact_and_nearby_matches() {
+        let (_tx, rx) = mpsc::channel();
+        let mut dialog = CodeCompareDialog {
+            instruction_addresses: vec![0x10, 0x20],
+            instruction_names: HashMap::new(),
+            status: String::new(),
+            hits: HashMap::from([
+                (0x10, HashMap::from([(0x1000, 2)])),
+                (0x20, HashMap::from([(0x1000, 3), (0x1010, 1)])),
+            ]),
+            nearby: false,
+            max_gap: "10".to_owned(),
+            rx,
+            active: None,
+            pinned: true,
+        };
+        assert_eq!(CrosshairApp::code_compare_candidates(&dialog)[0].0, 0x1000);
+        dialog.hits.get_mut(&0x20).unwrap().remove(&0x1000);
+        assert!(CrosshairApp::code_compare_candidates(&dialog).is_empty());
+        dialog.nearby = true;
+        assert_eq!(CrosshairApp::code_compare_candidates(&dialog)[0].1, 0x1010);
     }
 
     #[test]

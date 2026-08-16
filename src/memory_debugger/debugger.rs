@@ -275,6 +275,7 @@ pub enum WatchEvent {
         likely_stack_copy: bool,
     },
     AccessHit {
+        instruction_address: usize,
         data_address: usize,
     },
     CaptureLimitReached(usize),
@@ -425,6 +426,37 @@ impl AccessWatch {
         Self::start_with_limit(pid, instruction_address, architecture, usize::MAX, notify)
     }
 
+    pub fn start_many<F>(
+        pid: u32,
+        instruction_addresses: &[usize],
+        architecture: MemoryDebuggerArchitecture,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        let addresses = hardware_execute_addresses(instruction_addresses)?;
+        let target = target_architecture(pid, architecture)?;
+        let process = Process::open(pid)?;
+        let instructions = addresses
+            .iter()
+            .map(|address| decode_at(&process, *address, target))
+            .collect::<io::Result<Vec<_>>>()?;
+        WatchSession::start(
+            pid,
+            WatchKind::Execute {
+                addresses,
+                instructions,
+                capture_limit: usize::MAX,
+                matcher: None,
+                unique_addresses: false,
+            },
+            architecture,
+            notify,
+        )
+        .map(Self)
+    }
+
     pub fn start_once<F>(
         pid: u32,
         instruction_address: usize,
@@ -519,8 +551,8 @@ impl AccessWatch {
         WatchSession::start(
             pid,
             WatchKind::Execute {
-                address: instruction_address,
-                instruction,
+                addresses: vec![instruction_address],
+                instructions: vec![instruction],
                 capture_limit,
                 matcher,
                 unique_addresses,
@@ -544,8 +576,8 @@ enum WatchKind {
         addresses: Vec<usize>,
     },
     Execute {
-        address: usize,
-        instruction: Instruction,
+        addresses: Vec<usize>,
+        instructions: Vec<Instruction>,
         capture_limit: usize,
         matcher: Option<ExecuteMatcher>,
         unique_addresses: bool,
@@ -558,7 +590,7 @@ impl WatchKind {
     fn addresses(&self) -> &[usize] {
         match self {
             Self::Write { addresses } | Self::ReadWrite { addresses } => addresses,
-            Self::Execute { address, .. } => std::slice::from_ref(address),
+            Self::Execute { addresses, .. } => addresses,
         }
     }
 
@@ -566,7 +598,7 @@ impl WatchKind {
         match self {
             Self::Write { addresses } => write_breakpoint_dr7(addresses.len()),
             Self::ReadWrite { addresses } => read_write_breakpoint_dr7(addresses.len()),
-            Self::Execute { .. } => 1,
+            Self::Execute { addresses, .. } => execute_breakpoint_dr7(addresses.len()),
         }
     }
 }
@@ -582,6 +614,19 @@ fn hardware_watch_addresses(addresses: &[usize]) -> io::Result<Vec<usize>> {
         ));
     }
     Ok(aligned)
+}
+
+fn hardware_execute_addresses(addresses: &[usize]) -> io::Result<Vec<usize>> {
+    let mut addresses = addresses.to_vec();
+    addresses.sort_unstable();
+    addresses.dedup();
+    if addresses.is_empty() || addresses.len() > 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "select between 1 and 4 distinct instructions (CPU hardware breakpoint limit)",
+        ));
+    }
+    Ok(addresses)
 }
 
 fn target_architecture(
@@ -750,16 +795,22 @@ fn watch_loop<F>(
                                 }
                             }
                             WatchKind::Execute {
-                                instruction,
+                                addresses,
+                                instructions,
                                 capture_limit,
                                 matcher,
                                 unique_addresses,
-                                ..
                             } => {
-                                if !capture_limit_reached
-                                    && let Some(data_address) =
-                                        effective_address(instruction, &context)
+                                for (slot, (instruction_address, instruction)) in
+                                    addresses.iter().zip(instructions).enumerate()
                                 {
+                                    if capture_limit_reached || hit_mask & (1 << slot) == 0 {
+                                        continue;
+                                    }
+                                    let Some(data_address) = effective_address(instruction, &context)
+                                    else {
+                                        continue;
+                                    };
                                     let matches = matcher
                                         .as_ref()
                                         .map_or(true, |matcher| matcher(data_address))
@@ -779,7 +830,10 @@ fn watch_loop<F>(
                                             capture_limit_reached = true;
                                             stop.store(true, Ordering::Release);
                                         }
-                                        notify(WatchEvent::AccessHit { data_address });
+                                        notify(WatchEvent::AccessHit {
+                                            instruction_address: *instruction_address,
+                                            data_address,
+                                        });
                                         if should_stop {
                                             notify(WatchEvent::CaptureLimitReached(access_hits));
                                         }
@@ -1496,6 +1550,16 @@ const fn read_write_breakpoint_dr7(count: usize) -> u64 {
     data_breakpoint_dr7(count, 3)
 }
 
+const fn execute_breakpoint_dr7(count: usize) -> u64 {
+    let mut dr7 = 0;
+    let mut slot = 0;
+    while slot < count {
+        dr7 |= 1 << (slot * 2);
+        slot += 1;
+    }
+    dr7
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1531,6 +1595,13 @@ mod tests {
         assert_eq!(dr7 & 0b0101, 0b0101);
         assert_eq!((dr7 >> 20) & 0b11, 0b01);
         assert_eq!((dr7 >> 22) & 0b11, 0b11);
+    }
+
+    #[test]
+    fn dr7_enables_four_execute_breakpoints_without_data_modes() {
+        let dr7 = execute_breakpoint_dr7(4);
+        assert_eq!(dr7 & 0x55, 0x55);
+        assert_eq!(dr7 >> 16, 0);
     }
 
     #[test]
@@ -1667,7 +1738,7 @@ mod tests {
         .unwrap();
         let accessed = loop {
             match receiver.recv_timeout(Duration::from_secs(4)).unwrap() {
-                WatchEvent::AccessHit { data_address } => break data_address,
+                WatchEvent::AccessHit { data_address, .. } => break data_address,
                 WatchEvent::Error(error) => panic!("access watch failed: {error}"),
                 WatchEvent::Stopped => panic!("access watch stopped before an access"),
                 _ => {}
