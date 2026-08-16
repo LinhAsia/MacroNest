@@ -584,6 +584,7 @@ struct CodeCompareDialog {
     hits: HashMap<usize, HashMap<usize, usize>>,
     nearby: bool,
     max_gap: String,
+    batch_seconds: String,
     rx: Receiver<WatchEvent>,
     active: Option<AccessWatch>,
     pinned: bool,
@@ -752,6 +753,7 @@ pub(crate) struct MemoryPanelState {
     selected_code: HashSet<usize>,
     code_selection_anchor: Option<usize>,
     code_compare_gap: String,
+    code_compare_batch_seconds: String,
     stable_pointer_dialog: Option<StablePointerDialog>,
     deep_pointer_dialog: Option<DeepPointerDialog>,
     camera_matrix_dialog: Option<CameraMatrixDialog>,
@@ -854,6 +856,7 @@ impl Default for MemoryPanelState {
             selected_code: HashSet::new(),
             code_selection_anchor: None,
             code_compare_gap: "100".to_owned(),
+            code_compare_batch_seconds: "3".to_owned(),
             stable_pointer_dialog: None,
             deep_pointer_dialog: None,
             camera_matrix_dialog: None,
@@ -3315,7 +3318,7 @@ impl CrosshairApp {
                                     ui.close();
                                 }
                                 ui.separator();
-                                let debugger_selection_valid = (1..=4).contains(&selected_count);
+                                let debugger_selection_valid = selected_count > 0;
                                 if ui
                                     .add_enabled(
                                         debugger_selection_valid,
@@ -3327,9 +3330,7 @@ impl CrosshairApp {
                                             )
                                         )),
                                     )
-                                    .on_disabled_hover_text(
-                                        "Select 1 to 4 addresses (CPU hardware watchpoint limit)",
-                                    )
+                                    .on_hover_text("More than four addresses rotate in batches of four")
                                     .clicked()
                                 {
                                     instruction_watch = Some(true);
@@ -3346,9 +3347,7 @@ impl CrosshairApp {
                                             )
                                         )),
                                     )
-                                    .on_disabled_hover_text(
-                                        "Select 1 to 4 addresses (CPU hardware watchpoint limit)",
-                                    )
+                                    .on_hover_text("More than four addresses rotate in batches of four")
                                     .clicked()
                                 {
                                     instruction_watch = Some(false);
@@ -4447,10 +4446,10 @@ impl CrosshairApp {
                     ui.label(format!("Selected: {selected_count}"));
                     if ui
                         .add_enabled(
-                            (2..=4).contains(&selected_count),
+                            selected_count >= 2,
                             Button::new("Compare exact"),
                         )
-                        .on_disabled_hover_text("Select 2 to 4 instructions")
+                        .on_disabled_hover_text("Select at least two instructions")
                         .clicked()
                     {
                         pending_action = Some(CodeAction::Compare(false));
@@ -4462,16 +4461,24 @@ impl CrosshairApp {
                     );
                     if ui
                         .add_enabled(
-                            (2..=4).contains(&selected_count),
+                            selected_count >= 2,
                             Button::new("Compare nearby"),
                         )
-                        .on_disabled_hover_text(
-                            "Select 2 to 4 instructions (four CPU hardware breakpoints)",
-                        )
+                        .on_disabled_hover_text("Select at least two instructions")
                         .clicked()
                     {
                         pending_action = Some(CodeAction::Compare(true));
                     }
+                    ui.label("Batch seconds");
+                    ui.add(
+                        egui::TextEdit::singleline(
+                            &mut self.memory_panel.code_compare_batch_seconds,
+                        )
+                        .desired_width(48.0),
+                    )
+                    .on_hover_text(
+                        "Listen to four selected instructions for this long, retain their data, then rotate to the next four",
+                    );
                 });
                 ui.horizontal(|ui| {
                     Self::memory_view_cell(ui, 190.0, "Address / Module");
@@ -5084,17 +5091,28 @@ impl CrosshairApp {
         }
         instruction_addresses.sort_unstable();
         instruction_addresses.dedup();
-        if !(2..=4).contains(&instruction_addresses.len()) {
+        if instruction_addresses.len() < 2 {
             self.memory_panel.status =
-                "Select 2 to 4 resolvable instructions for comparison".to_owned();
+                "Select at least two resolvable instructions for comparison".to_owned();
             return;
         }
+        let batch_seconds = self
+            .memory_panel
+            .code_compare_batch_seconds
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+            .unwrap_or(3.0);
+        let batch_ms = (batch_seconds * 1_000.0).round().max(1.0) as u64;
+        self.memory_panel.code_compare_batch_seconds = batch_seconds.to_string();
         self.close_memory_debuggers();
         let (tx, rx) = mpsc::channel();
-        let started = AccessWatch::start_many(
+        let started = AccessWatch::start_many_with_batch_ms(
             pid,
             &instruction_addresses,
             self.state.memory_debugger_architecture,
+            batch_ms,
             move |event| {
                 let _ = tx.send(event);
             },
@@ -5110,6 +5128,7 @@ impl CrosshairApp {
             hits: HashMap::new(),
             nearby,
             max_gap: self.memory_panel.code_compare_gap.clone(),
+            batch_seconds: batch_seconds.to_string(),
             rx,
             active,
             pinned: true,
@@ -9196,6 +9215,7 @@ impl CrosshairApp {
                                         .desired_width(64.0),
                                 );
                             }
+                            ui.label(format!("Batch: 4 / {}s", dialog.batch_seconds));
                         });
                         ui.label(
                             dialog
@@ -14316,6 +14336,7 @@ mod tests {
             ]),
             nearby: false,
             max_gap: "10".to_owned(),
+            batch_seconds: "3".to_owned(),
             rx,
             active: None,
             pinned: true,

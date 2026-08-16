@@ -14,6 +14,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 use windows_sys::Win32::{
     Foundation::{
@@ -350,7 +351,10 @@ impl WriteWatch {
         let addresses = hardware_watch_addresses(addresses)?;
         WatchSession::start(
             pid,
-            WatchKind::Write { addresses },
+            WatchKind::Write {
+                addresses,
+                rotation_ms: 1_000,
+            },
             architecture,
             notify,
         )
@@ -389,7 +393,10 @@ impl AddressAccessWatch {
         let addresses = hardware_watch_addresses(addresses)?;
         WatchSession::start(
             pid,
-            WatchKind::ReadWrite { addresses },
+            WatchKind::ReadWrite {
+                addresses,
+                rotation_ms: 1_000,
+            },
             architecture,
             notify,
         )
@@ -435,6 +442,19 @@ impl AccessWatch {
     where
         F: Fn(WatchEvent) + Send + 'static,
     {
+        Self::start_many_with_batch_ms(pid, instruction_addresses, architecture, 1_000, notify)
+    }
+
+    pub fn start_many_with_batch_ms<F>(
+        pid: u32,
+        instruction_addresses: &[usize],
+        architecture: MemoryDebuggerArchitecture,
+        batch_ms: u64,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
         let addresses = hardware_execute_addresses(instruction_addresses)?;
         let target = target_architecture(pid, architecture)?;
         let process = Process::open(pid)?;
@@ -450,6 +470,7 @@ impl AccessWatch {
                 capture_limit: usize::MAX,
                 matcher: None,
                 unique_addresses: false,
+                rotation_ms: batch_ms.max(1),
             },
             architecture,
             notify,
@@ -556,6 +577,7 @@ impl AccessWatch {
                 capture_limit,
                 matcher,
                 unique_addresses,
+                rotation_ms: 1_000,
             },
             architecture,
             notify,
@@ -571,9 +593,11 @@ impl AccessWatch {
 enum WatchKind {
     Write {
         addresses: Vec<usize>,
+        rotation_ms: u64,
     },
     ReadWrite {
         addresses: Vec<usize>,
+        rotation_ms: u64,
     },
     Execute {
         addresses: Vec<usize>,
@@ -581,6 +605,7 @@ enum WatchKind {
         capture_limit: usize,
         matcher: Option<ExecuteMatcher>,
         unique_addresses: bool,
+        rotation_ms: u64,
     },
 }
 
@@ -589,28 +614,48 @@ const EXECUTE_CAPTURE_LIMIT: usize = 64;
 impl WatchKind {
     fn addresses(&self) -> &[usize] {
         match self {
-            Self::Write { addresses } | Self::ReadWrite { addresses } => addresses,
+            Self::Write { addresses, .. } | Self::ReadWrite { addresses, .. } => addresses,
             Self::Execute { addresses, .. } => addresses,
         }
     }
 
-    fn dr7(&self) -> u64 {
+    fn rotation_interval(&self) -> Duration {
+        let milliseconds = match self {
+            Self::Write { rotation_ms, .. }
+            | Self::ReadWrite { rotation_ms, .. }
+            | Self::Execute { rotation_ms, .. } => *rotation_ms,
+        };
+        Duration::from_millis(milliseconds.max(1))
+    }
+
+    fn active_addresses(&self, start: usize) -> &[usize] {
+        let addresses = self.addresses();
+        let start = start.min(addresses.len());
+        &addresses[start..(start + 4).min(addresses.len())]
+    }
+
+    fn dr7(&self, start: usize) -> u64 {
+        let count = self.active_addresses(start).len();
         match self {
-            Self::Write { addresses } => write_breakpoint_dr7(addresses.len()),
-            Self::ReadWrite { addresses } => read_write_breakpoint_dr7(addresses.len()),
-            Self::Execute { addresses, .. } => execute_breakpoint_dr7(addresses.len()),
+            Self::Write { .. } => write_breakpoint_dr7(count),
+            Self::ReadWrite { .. } => read_write_breakpoint_dr7(count),
+            Self::Execute { .. } => execute_breakpoint_dr7(count),
         }
     }
+}
+
+fn next_watch_batch_start(start: usize, address_count: usize) -> usize {
+    if start + 4 >= address_count { 0 } else { start + 4 }
 }
 
 fn hardware_watch_addresses(addresses: &[usize]) -> io::Result<Vec<usize>> {
     let mut aligned: Vec<_> = addresses.iter().map(|address| address & !3).collect();
     aligned.sort_unstable();
     aligned.dedup();
-    if aligned.is_empty() || aligned.len() > 4 {
+    if aligned.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "select between 1 and 4 distinct addresses (CPU hardware watchpoint limit)",
+            "select at least one distinct address",
         ));
     }
     Ok(aligned)
@@ -620,10 +665,10 @@ fn hardware_execute_addresses(addresses: &[usize]) -> io::Result<Vec<usize>> {
     let mut addresses = addresses.to_vec();
     addresses.sort_unstable();
     addresses.dedup();
-    if addresses.is_empty() || addresses.len() > 4 {
+    if addresses.is_empty() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "select between 1 and 4 distinct instructions (CPU hardware breakpoint limit)",
+            "select at least one distinct instruction",
         ));
     }
     Ok(addresses)
@@ -708,7 +753,17 @@ fn watch_loop<F>(
     let mut unique_execute_addresses = HashSet::new();
     let mut capture_limit_reached = false;
     let mut seen_instruction_details = HashMap::<usize, (String, String)>::new();
+    let mut active_slot_start = 0usize;
+    let mut last_slot_rotation = Instant::now();
     while !stop.load(Ordering::Acquire) {
+        if debugger_started
+            && kind.addresses().len() > 4
+            && last_slot_rotation.elapsed() >= kind.rotation_interval()
+        {
+            active_slot_start = next_watch_batch_start(active_slot_start, kind.addresses().len());
+            rearm_existing_threads(&threads, &kind, architecture, active_slot_start);
+            last_slot_rotation = Instant::now();
+        }
         let mut event = DEBUG_EVENT::default();
         if unsafe { WaitForDebugEvent(&mut event, 100) } == 0 {
             if io::Error::last_os_error().raw_os_error() == Some(ERROR_SEM_TIMEOUT) {
@@ -728,7 +783,10 @@ fn watch_loop<F>(
             },
             CREATE_THREAD_DEBUG_EVENT => unsafe {
                 let thread = event.u.CreateThread.hThread;
-                if debugger_started && let Err(error) = arm_thread(thread, &kind, architecture) {
+                if debugger_started
+                    && let Err(error) =
+                        arm_thread(thread, &kind, architecture, active_slot_start)
+                {
                     notify(WatchEvent::Error(format!(
                         "unable to arm new game thread {}: {error}",
                         event.dwThreadId
@@ -746,10 +804,15 @@ fn watch_loop<F>(
                     {
                         let context = context.as_amd64();
                         match &kind {
-                            WatchKind::Write { addresses }
-                            | WatchKind::ReadWrite { addresses } => {
+                            WatchKind::Write { addresses, .. }
+                            | WatchKind::ReadWrite { addresses, .. } => {
                                 let read_write = matches!(kind, WatchKind::ReadWrite { .. });
-                                for (slot, address) in addresses.iter().enumerate() {
+                                for (slot, address) in addresses
+                                    .iter()
+                                    .skip(active_slot_start)
+                                    .take(4)
+                                    .enumerate()
+                                {
                                     if hit_mask & (1 << slot) == 0 {
                                         continue;
                                     }
@@ -800,9 +863,14 @@ fn watch_loop<F>(
                                 capture_limit,
                                 matcher,
                                 unique_addresses,
+                                ..
                             } => {
-                                for (slot, (instruction_address, instruction)) in
-                                    addresses.iter().zip(instructions).enumerate()
+                                for (slot, (instruction_address, instruction)) in addresses
+                                    .iter()
+                                    .zip(instructions)
+                                    .skip(active_slot_start)
+                                    .take(4)
+                                    .enumerate()
                                 {
                                     if capture_limit_reached || hit_mask & (1 << slot) == 0 {
                                         continue;
@@ -860,8 +928,13 @@ fn watch_loop<F>(
                     first_breakpoint = false;
                     // Windows sends synthetic thread events before the attach breakpoint. Arm only
                     // after that breakpoint so WOW64 context calls operate on initialized threads.
-                    let (armed, total, last_error) =
-                        arm_process_threads(pid, &mut threads, &kind, architecture);
+                    let (armed, total, last_error) = arm_process_threads(
+                        pid,
+                        &mut threads,
+                        &kind,
+                        architecture,
+                        active_slot_start,
+                    );
                     if armed == 0 {
                         notify(WatchEvent::Error(format!(
                             "unable to arm a hardware breakpoint on any game thread{}",
@@ -872,6 +945,7 @@ fn watch_loop<F>(
                         stop.store(true, Ordering::Release);
                     } else {
                         debugger_started = true;
+                        last_slot_rotation = Instant::now();
                         notify(WatchEvent::Started {
                             armed_threads: armed,
                             total_threads: total,
@@ -946,6 +1020,7 @@ fn arm_process_threads(
     threads: &mut HashMap<u32, HANDLE>,
     kind: &WatchKind,
     architecture: TargetArchitecture,
+    active_slot_start: usize,
 ) -> (usize, usize, Option<io::Error>) {
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
     if snapshot != INVALID_HANDLE_VALUE {
@@ -976,7 +1051,7 @@ fn arm_process_threads(
     let mut armed = 0;
     let mut last_error = None;
     for &thread in threads.values() {
-        match unsafe { arm_thread(thread, kind, architecture) } {
+        match unsafe { arm_thread(thread, kind, architecture, active_slot_start) } {
             Ok(()) => armed += 1,
             Err(error) => last_error = Some(error),
         }
@@ -988,6 +1063,7 @@ unsafe fn arm_thread(
     thread: HANDLE,
     kind: &WatchKind,
     architecture: TargetArchitecture,
+    active_slot_start: usize,
 ) -> io::Result<()> {
     let _ = unsafe { SuspendThread(thread) };
     let result = (|| {
@@ -999,13 +1075,13 @@ unsafe fn arm_thread(
             if unsafe { Wow64GetThreadContext(thread, &mut context) } == 0 {
                 return Err(io::Error::last_os_error());
             }
-            let addresses = kind.addresses();
+            let addresses = kind.active_addresses(active_slot_start);
             context.Dr0 = addresses.first().copied().unwrap_or_default() as u32;
             context.Dr1 = addresses.get(1).copied().unwrap_or_default() as u32;
             context.Dr2 = addresses.get(2).copied().unwrap_or_default() as u32;
             context.Dr3 = addresses.get(3).copied().unwrap_or_default() as u32;
             context.Dr6 = 0;
-            context.Dr7 = kind.dr7() as u32;
+            context.Dr7 = kind.dr7(active_slot_start) as u32;
             return if unsafe { Wow64SetThreadContext(thread, &context) } == 0 {
                 Err(io::Error::last_os_error())
             } else {
@@ -1018,13 +1094,13 @@ unsafe fn arm_thread(
         if unsafe { GetThreadContext(thread, context) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        let addresses = kind.addresses();
+        let addresses = kind.active_addresses(active_slot_start);
         context.Dr0 = addresses.first().copied().unwrap_or_default() as u64;
         context.Dr1 = addresses.get(1).copied().unwrap_or_default() as u64;
         context.Dr2 = addresses.get(2).copied().unwrap_or_default() as u64;
         context.Dr3 = addresses.get(3).copied().unwrap_or_default() as u64;
         context.Dr6 = 0;
-        context.Dr7 = kind.dr7();
+        context.Dr7 = kind.dr7(active_slot_start);
         if unsafe { SetThreadContext(thread, context) } == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -1033,6 +1109,17 @@ unsafe fn arm_thread(
     })();
     let _ = unsafe { ResumeThread(thread) };
     result
+}
+
+fn rearm_existing_threads(
+    threads: &HashMap<u32, HANDLE>,
+    kind: &WatchKind,
+    architecture: TargetArchitecture,
+    active_slot_start: usize,
+) {
+    for &thread in threads.values() {
+        let _ = unsafe { arm_thread(thread, kind, architecture, active_slot_start) };
+    }
 }
 
 enum CapturedContext {
@@ -1602,6 +1689,13 @@ mod tests {
         let dr7 = execute_breakpoint_dr7(4);
         assert_eq!(dr7 & 0x55, 0x55);
         assert_eq!(dr7 >> 16, 0);
+    }
+
+    #[test]
+    fn watch_batches_cover_every_address_before_wrapping() {
+        assert_eq!(next_watch_batch_start(0, 9), 4);
+        assert_eq!(next_watch_batch_start(4, 9), 8);
+        assert_eq!(next_watch_batch_start(8, 9), 0);
     }
 
     #[test]
