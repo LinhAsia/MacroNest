@@ -14,7 +14,7 @@ use eframe::egui::{self, Button, Color32, Frame, RichText, Sense, vec2};
 use crate::{
     hotkey,
     model::{
-        EspPreset, HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture,
+        AppPanel, EspPreset, HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture,
         MemoryDebuggerMethod, MemoryPointerEntry,
     },
     process_memory::{
@@ -759,6 +759,7 @@ pub(crate) struct MemoryPanelState {
     module_list_dialog: Option<ModuleListDialog>,
     memory_settings_open: bool,
     code_list_open: bool,
+    unpinned_memory_popups: HashSet<&'static str>,
     code_list_actions_validated: bool,
     selected_code: HashSet<usize>,
     code_selection_anchor: Option<usize>,
@@ -862,6 +863,7 @@ impl Default for MemoryPanelState {
             module_list_dialog: None,
             memory_settings_open: false,
             code_list_open: false,
+            unpinned_memory_popups: HashSet::new(),
             code_list_actions_validated: false,
             selected_code: HashSet::new(),
             code_selection_anchor: None,
@@ -1190,32 +1192,43 @@ impl CrosshairApp {
         if !active {
             return true;
         }
+        let pinned = !self.memory_panel.unpinned_memory_popups.contains(id);
         let mut open = true;
-        let builder = egui::ViewportBuilder::default()
+        let mut toggle_pin = false;
+        let mut builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_position(egui::pos2(40.0, 40.0))
             .with_inner_size(vec2(860.0, 620.0))
             .with_min_inner_size(vec2(480.0, 280.0))
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
-            .with_resizable(true)
-            .with_always_on_top();
+            .with_resizable(true);
+        if pinned {
+            builder = builder.with_always_on_top();
+        }
         ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
             Self::constrain_memory_popup_to_monitor(ctx);
             if ctx.input(|input| input.viewport().close_requested()) {
                 open = false;
             }
-            let mut unpin = false;
             Self::render_memory_popup_titlebar(
                 ctx,
                 self.state.ui_language,
                 title,
-                &mut unpin,
+                pinned,
+                &mut toggle_pin,
                 &mut open,
             );
             render(self, ctx);
             Self::render_memory_popup_resize_handles(ctx);
         });
+        if toggle_pin {
+            if pinned {
+                self.memory_panel.unpinned_memory_popups.insert(id);
+            } else {
+                self.memory_panel.unpinned_memory_popups.remove(id);
+            }
+        }
         open
     }
 
@@ -1223,6 +1236,108 @@ impl CrosshairApp {
         self.poll_memory_hotkeys(ctx);
         self.render_pinned_scan_results(ctx);
         self.render_pinned_address_list(ctx);
+        if self.state.active_panel != AppPanel::Memory {
+            self.render_memory_tool_viewports(ctx);
+        }
+    }
+
+    fn render_memory_tool_viewports(&mut self, ctx: &egui::Context) {
+        self.render_memory_address_dialog(ctx);
+        let group_open = self.memory_panel.address_group_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-address-group-host",
+            "Add to new group",
+            group_open,
+            Self::render_memory_address_group_dialog,
+        ) {
+            self.memory_panel.address_group_dialog = None;
+        }
+        self.render_memory_view_dialog(ctx);
+        #[cfg(windows)]
+        {
+            let active = self.memory_panel.module_list_dialog.is_some();
+            if !self.render_detached_memory_popup(
+                ctx,
+                "memory-modules-host",
+                "Enumerate modules / DLLs",
+                active,
+                Self::render_memory_module_list,
+            ) {
+                self.memory_panel.module_list_dialog = None;
+            }
+        }
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-settings-host",
+            "Memory settings",
+            self.memory_panel.memory_settings_open,
+            Self::render_memory_settings,
+        ) {
+            self.memory_panel.memory_settings_open = false;
+        }
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-code-list-host",
+            "Advanced options — Code list",
+            self.memory_panel.code_list_open,
+            Self::render_memory_code_list,
+        ) {
+            self.memory_panel.code_list_open = false;
+        }
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-saved-host",
+            "Saved addresses",
+            self.memory_panel.saved_library_open,
+            Self::render_saved_address_library,
+        ) {
+            self.memory_panel.saved_library_open = false;
+        }
+        let stable_active = self.memory_panel.stable_pointer_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-stable-pointer-host",
+            "Find stable pointer",
+            stable_active,
+            Self::render_stable_pointer_dialog,
+        ) {
+            self.memory_panel.stable_pointer_dialog = None;
+        }
+        self.render_deep_pointer_dialog(ctx);
+        let camera_active = self.memory_panel.camera_matrix_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-camera-matrix-host",
+            "Find camera matrix",
+            camera_active,
+            Self::render_camera_matrix_dialog,
+        ) {
+            self.memory_panel.camera_matrix_dialog = None;
+        }
+        let entity_list_active = self.memory_panel.entity_list_dialog.is_some();
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-entity-list-host",
+            "Find entity list",
+            entity_list_active,
+            Self::render_entity_list_dialog,
+        ) {
+            if let Some(dialog) = self.memory_panel.entity_list_dialog.as_mut() {
+                dialog.cancel.store(true, Ordering::Release);
+                dialog.root_cancel.store(true, Ordering::Release);
+            }
+            self.memory_panel.entity_list_dialog = None;
+        }
+        #[cfg(windows)]
+        self.render_instruction_watch_dialog(ctx);
+        #[cfg(windows)]
+        self.render_disassembler_dialog(ctx);
+        #[cfg(windows)]
+        self.render_code_access_dialog(ctx);
+        self.render_code_compare_dialog(ctx);
+        self.render_dll_studio_window(ctx);
+        self.sync_memory_freeze_targets();
     }
 
     fn render_pinned_scan_results(&mut self, ctx: &egui::Context) {
@@ -1358,6 +1473,7 @@ impl CrosshairApp {
                     ctx,
                     self.state.ui_language,
                     title,
+                    true,
                     &mut unpin,
                     &mut open,
                 );
@@ -1485,7 +1601,8 @@ impl CrosshairApp {
         ctx: &egui::Context,
         language: crate::model::UiLanguage,
         title: &str,
-        unpin: &mut bool,
+        pinned: bool,
+        toggle_pin: &mut bool,
         open: &mut bool,
     ) {
         egui::TopBottomPanel::top("memory-tool-pinned-titlebar")
@@ -1508,12 +1625,16 @@ impl CrosshairApp {
                     if drag.drag_started() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                     }
-                    let unpin_label = Self::tr_lang(language, "Unpin", "Bỏ ghim");
+                    let pin_label = if pinned {
+                        Self::tr_lang(language, "Unpin", "Bỏ ghim")
+                    } else {
+                        Self::tr_lang(language, "Pin", "Ghim")
+                    };
                     if ui
-                        .add_sized([58.0, 28.0], Button::new(unpin_label))
+                        .add_sized([58.0, 28.0], Button::new(pin_label))
                         .clicked()
                     {
-                        *unpin = true;
+                        *toggle_pin = true;
                     }
                     if ui
                         .add_sized(
@@ -7548,29 +7669,34 @@ impl CrosshairApp {
         let mut add_one = None;
         let mut use_entity_source = None;
         let title = "Deep pointer scan - map comparison";
-        let builder = egui::ViewportBuilder::default()
+        let popup_id = "memory-deep-pointer-scan";
+        let pinned = !self.memory_panel.unpinned_memory_popups.contains(popup_id);
+        let mut toggle_pin = false;
+        let mut builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_position(egui::pos2(0.0, 0.0))
             .with_inner_size(vec2(760.0, 520.0))
             .with_min_inner_size(vec2(520.0, 300.0))
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
-            .with_resizable(true)
-            .with_always_on_top();
+            .with_resizable(true);
+        if pinned {
+            builder = builder.with_always_on_top();
+        }
         ctx.show_viewport_immediate(
-            egui::ViewportId::from_hash_of("memory-deep-pointer-scan"),
+            egui::ViewportId::from_hash_of(popup_id),
             builder,
             |ctx, _| {
                 Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     open = false;
                 }
-                let mut unpin = false;
                 Self::render_memory_popup_titlebar(
                     ctx,
                     self.state.ui_language,
                     title,
-                    &mut unpin,
+                    pinned,
+                    &mut toggle_pin,
                     &mut open,
                 );
                 egui::CentralPanel::default()
@@ -7966,6 +8092,13 @@ impl CrosshairApp {
                 Self::render_memory_popup_resize_handles(ctx);
             },
         );
+        if toggle_pin {
+            if pinned {
+                self.memory_panel.unpinned_memory_popups.insert(popup_id);
+            } else {
+                self.memory_panel.unpinned_memory_popups.remove(popup_id);
+            }
+        }
         if let Some(index) = use_entity_source
             && let Some(path) = dialog.candidates.get(index)
             && let Some(preset_id) = dialog.entity_preset_id
@@ -8403,6 +8536,7 @@ impl CrosshairApp {
                         ctx,
                         self.state.ui_language,
                         &title,
+                        true,
                         &mut unpin,
                         &mut open,
                     );
@@ -9223,16 +9357,18 @@ impl CrosshairApp {
         };
         let candidates = Self::code_compare_candidates(&dialog);
         let mut open = true;
-        let mut unpin = false;
-        let builder = egui::ViewportBuilder::default()
+        let mut toggle_pin = false;
+        let mut builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_position(egui::pos2(0.0, 0.0))
             .with_inner_size(vec2(1100.0, 520.0))
             .with_min_inner_size(vec2(760.0, 300.0))
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
-            .with_resizable(true)
-            .with_always_on_top();
+            .with_resizable(true);
+        if dialog.pinned {
+            builder = builder.with_always_on_top();
+        }
         ctx.show_viewport_immediate(
             egui::ViewportId::from_hash_of("memory-code-compare"),
             builder,
@@ -9245,7 +9381,8 @@ impl CrosshairApp {
                     ctx,
                     self.state.ui_language,
                     title,
-                    &mut unpin,
+                    dialog.pinned,
+                    &mut toggle_pin,
                     &mut open,
                 );
                 egui::CentralPanel::default()
@@ -9349,8 +9486,8 @@ impl CrosshairApp {
                 Self::render_memory_popup_resize_handles(ctx);
             },
         );
-        if unpin {
-            dialog.pinned = false;
+        if toggle_pin {
+            dialog.pinned = !dialog.pinned;
         }
         if open {
             self.memory_panel.code_compare_dialog = Some(dialog);
@@ -9474,6 +9611,7 @@ impl CrosshairApp {
                         ctx,
                         self.state.ui_language,
                         &title,
+                        true,
                         &mut unpin,
                         &mut open,
                     );
@@ -10239,6 +10377,7 @@ impl CrosshairApp {
                         ctx,
                         self.state.ui_language,
                         &title,
+                        true,
                         &mut unpin,
                         &mut open,
                     );
@@ -10537,6 +10676,7 @@ impl CrosshairApp {
                             && let Some(pid) = process_pid
                             && let Ok(Some(previous)) =
                                 adjacent_readable_memory_region(pid, region.base, false)
+                            && Self::memory_regions_are_contiguous(&previous, &region)
                         {
                             let desired_start = previous
                                 .base
@@ -10569,6 +10709,7 @@ impl CrosshairApp {
                             && let Some(pid) = process_pid
                             && let Ok(Some(next)) =
                                 adjacent_readable_memory_region(pid, region_end, true)
+                            && Self::memory_regions_are_contiguous(&region, &next)
                         {
                             let base = Self::memory_view_window_start(
                                 dialog.address,
@@ -12416,6 +12557,13 @@ impl CrosshairApp {
         let latest_start = region_end.saturating_sub(requested_size).max(region.base);
         let start = desired_start.clamp(region.base, latest_start);
         (start, region_end.saturating_sub(start).min(requested_size))
+    }
+
+    fn memory_regions_are_contiguous(
+        lower: &MemoryRegionInfo,
+        upper: &MemoryRegionInfo,
+    ) -> bool {
+        lower.base.saturating_add(lower.size) == upper.base
     }
 
     fn memory_address_stride(first: &str, second: &str) -> Option<usize> {
@@ -14404,6 +14552,22 @@ mod tests {
             CrosshairApp::memory_view_read_window(0x3000, 0x1000, Some(&region)),
             (0x4000, 0x1000)
         );
+        let contiguous = MemoryRegionInfo {
+            base: region.base + region.size,
+            ..region
+        };
+        let separated = MemoryRegionInfo {
+            base: contiguous.base + 0x1000,
+            ..region
+        };
+        assert!(CrosshairApp::memory_regions_are_contiguous(
+            &region,
+            &contiguous
+        ));
+        assert!(!CrosshairApp::memory_regions_are_contiguous(
+            &region,
+            &separated
+        ));
         assert_eq!(
             CrosshairApp::memory_view_column_count(
                 CrosshairApp::memory_view_width_for_columns(MemoryDisplayType::Float, 3) - 50.0,
