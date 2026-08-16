@@ -585,6 +585,8 @@ struct CodeCompareDialog {
     nearby: bool,
     max_gap: String,
     batch_seconds: String,
+    completed_batches: usize,
+    total_batches: usize,
     rx: Receiver<WatchEvent>,
     active: Option<AccessWatch>,
     pinned: bool,
@@ -5121,6 +5123,7 @@ impl CrosshairApp {
             Ok(active) => (Some(active), "Attaching debugger…".to_owned()),
             Err(error) => (None, format!("Unable to start debugger: {error}")),
         };
+        let total_batches = instruction_addresses.len().div_ceil(4);
         self.memory_panel.code_compare_dialog = Some(CodeCompareDialog {
             instruction_addresses,
             instruction_names,
@@ -5129,6 +5132,8 @@ impl CrosshairApp {
             nearby,
             max_gap: self.memory_panel.code_compare_gap.clone(),
             batch_seconds: batch_seconds.to_string(),
+            completed_batches: 0,
+            total_batches,
             rx,
             active,
             pinned: true,
@@ -8330,7 +8335,7 @@ impl CrosshairApp {
                         dialog.status = "First hit captured — debugger detached safely".to_owned();
                     }
                 }
-                WatchEvent::AccessHit { .. } => {}
+                WatchEvent::AccessHit { .. } | WatchEvent::BatchProgress { .. } => {}
                 WatchEvent::CaptureLimitReached(limit) => {
                     dialog.status = if limit == 1 {
                         "First hit captured — debugger detached safely".to_owned()
@@ -9152,14 +9157,39 @@ impl CrosshairApp {
                         *addresses.entry(data_address).or_default() += 1;
                     }
                     let captured: usize = dialog.hits.values().map(HashMap::len).sum();
-                    dialog.status = format!("{captured} unique access(es) captured");
+                    let active_batch = (dialog.completed_batches + 1).min(dialog.total_batches);
+                    dialog.status = format!(
+                        "Batch {active_batch}/{} — {captured} unique access(es) captured",
+                        dialog.total_batches
+                    );
+                }
+                WatchEvent::BatchProgress {
+                    completed_batches,
+                    total_batches,
+                } => {
+                    dialog.completed_batches = completed_batches;
+                    dialog.total_batches = total_batches;
+                    let captured: usize = dialog.hits.values().map(HashMap::len).sum();
+                    dialog.status = if completed_batches >= total_batches {
+                        format!(
+                            "Complete — {total_batches} batch(es), {captured} unique access(es) captured"
+                        )
+                    } else {
+                        format!(
+                            "Batch {}/{} — {captured} unique access(es) captured",
+                            completed_batches + 1,
+                            total_batches
+                        )
+                    };
                 }
                 WatchEvent::Error(error) => {
                     dialog.status = format!("Debugger stopped: {error}");
                     dialog.active = None;
                 }
                 WatchEvent::Stopped => {
-                    dialog.status = "Debugger stopped".to_owned();
+                    if dialog.completed_batches < dialog.total_batches {
+                        dialog.status = "Debugger stopped".to_owned();
+                    }
                     dialog.active = None;
                 }
                 WatchEvent::CaptureLimitReached(_) | WatchEvent::AddressHit { .. } => {}
@@ -9341,7 +9371,7 @@ impl CrosshairApp {
                     dialog.status = "Debugger stopped".to_owned();
                     dialog.active = None;
                 }
-                WatchEvent::AddressHit { .. } => {}
+                WatchEvent::AddressHit { .. } | WatchEvent::BatchProgress { .. } => {}
             }
         }
         let entry = self.state.memory_code_list.get(dialog.code_index);
@@ -14337,6 +14367,8 @@ mod tests {
             nearby: false,
             max_gap: "10".to_owned(),
             batch_seconds: "3".to_owned(),
+            completed_batches: 0,
+            total_batches: 1,
             rx,
             active: None,
             pinned: true,

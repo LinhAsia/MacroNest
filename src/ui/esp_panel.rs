@@ -226,7 +226,9 @@ impl CrosshairApp {
                         "Debugger stopped before a complete Stride group was found".to_owned()
                     })
                 }
-                WatchEvent::Stopped | WatchEvent::AddressHit { .. } => {}
+                WatchEvent::Stopped
+                | WatchEvent::AddressHit { .. }
+                | WatchEvent::BatchProgress { .. } => {}
             }
         }
         let ordered = capture

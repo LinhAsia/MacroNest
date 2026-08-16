@@ -279,6 +279,10 @@ pub enum WatchEvent {
         instruction_address: usize,
         data_address: usize,
     },
+    BatchProgress {
+        completed_batches: usize,
+        total_batches: usize,
+    },
     CaptureLimitReached(usize),
     Error(String),
     Stopped,
@@ -471,6 +475,7 @@ impl AccessWatch {
                 matcher: None,
                 unique_addresses: false,
                 rotation_ms: batch_ms.max(1),
+                single_pass: true,
             },
             architecture,
             notify,
@@ -578,6 +583,7 @@ impl AccessWatch {
                 matcher,
                 unique_addresses,
                 rotation_ms: 1_000,
+                single_pass: false,
             },
             architecture,
             notify,
@@ -606,6 +612,7 @@ enum WatchKind {
         matcher: Option<ExecuteMatcher>,
         unique_addresses: bool,
         rotation_ms: u64,
+        single_pass: bool,
     },
 }
 
@@ -634,6 +641,14 @@ impl WatchKind {
         &addresses[start..(start + 4).min(addresses.len())]
     }
 
+    fn single_pass(&self) -> bool {
+        matches!(self, Self::Execute { single_pass: true, .. })
+    }
+
+    fn batch_count(&self) -> usize {
+        self.addresses().len().div_ceil(4)
+    }
+
     fn dr7(&self, start: usize) -> u64 {
         let count = self.active_addresses(start).len();
         match self {
@@ -646,6 +661,10 @@ impl WatchKind {
 
 fn next_watch_batch_start(start: usize, address_count: usize) -> usize {
     if start + 4 >= address_count { 0 } else { start + 4 }
+}
+
+fn completed_watch_batch_pass(start: usize, address_count: usize) -> bool {
+    start + 4 >= address_count
 }
 
 fn hardware_watch_addresses(addresses: &[usize]) -> io::Result<Vec<usize>> {
@@ -757,12 +776,28 @@ fn watch_loop<F>(
     let mut last_slot_rotation = Instant::now();
     while !stop.load(Ordering::Acquire) {
         if debugger_started
-            && kind.addresses().len() > 4
+            && (kind.addresses().len() > 4 || kind.single_pass())
             && last_slot_rotation.elapsed() >= kind.rotation_interval()
         {
-            active_slot_start = next_watch_batch_start(active_slot_start, kind.addresses().len());
+            if kind.single_pass()
+                && completed_watch_batch_pass(active_slot_start, kind.addresses().len())
+            {
+                notify(WatchEvent::BatchProgress {
+                    completed_batches: kind.batch_count(),
+                    total_batches: kind.batch_count(),
+                });
+                break;
+            }
+            let next_slot_start = next_watch_batch_start(active_slot_start, kind.addresses().len());
+            active_slot_start = next_slot_start;
             rearm_existing_threads(&threads, &kind, architecture, active_slot_start);
             last_slot_rotation = Instant::now();
+            if kind.single_pass() {
+                notify(WatchEvent::BatchProgress {
+                    completed_batches: active_slot_start / 4,
+                    total_batches: kind.batch_count(),
+                });
+            }
         }
         let mut event = DEBUG_EVENT::default();
         if unsafe { WaitForDebugEvent(&mut event, 100) } == 0 {
@@ -950,6 +985,12 @@ fn watch_loop<F>(
                             armed_threads: armed,
                             total_threads: total,
                         });
+                        if kind.single_pass() {
+                            notify(WatchEvent::BatchProgress {
+                                completed_batches: 0,
+                                total_batches: kind.batch_count(),
+                            });
+                        }
                     }
                 } else {
                     status = DBG_EXCEPTION_NOT_HANDLED;
@@ -1696,6 +1737,8 @@ mod tests {
         assert_eq!(next_watch_batch_start(0, 9), 4);
         assert_eq!(next_watch_batch_start(4, 9), 8);
         assert_eq!(next_watch_batch_start(8, 9), 0);
+        assert!(!completed_watch_batch_pass(4, 9));
+        assert!(completed_watch_batch_pass(8, 9));
     }
 
     #[test]
@@ -1790,6 +1833,7 @@ mod tests {
                     ..
                 } => break (instruction_address, instruction, details),
                 WatchEvent::AccessHit { .. } => {}
+                WatchEvent::BatchProgress { .. } => {}
                 WatchEvent::Error(error) => panic!("watch failed: {error}"),
                 WatchEvent::Stopped => panic!("watch stopped before a write"),
                 WatchEvent::Started { .. } => {}
