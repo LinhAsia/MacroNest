@@ -315,9 +315,12 @@ pub(crate) fn entity_root_from_instruction_hits(
     required: u32,
     stride: u32,
 ) -> Result<usize, &'static str> {
-    entity_instruction_hit_progress(hits, required, stride)
-        .0
-        .ok_or("no complete group matches the configured Stride")
+    let (candidate, matched) = entity_instruction_hit_progress(hits, required, stride);
+    if matched >= required.max(1) as usize {
+        candidate.ok_or("no complete group matches the configured Stride")
+    } else {
+        Err("no complete group matches the configured Stride")
+    }
 }
 
 pub(crate) fn entity_instruction_hit_progress(
@@ -327,10 +330,12 @@ pub(crate) fn entity_instruction_hit_progress(
 ) -> (Option<usize>, usize) {
     let required = required.max(1) as usize;
     let stride = stride.max(1) as usize;
+    let min_stride_consensus = 3.min(required);
     let mut hits = hits.to_vec();
     hits.sort_unstable();
     hits.dedup();
     let mut best = 0;
+    let mut best_start = None;
     for &start in &hits {
         let mut matched = 1;
         while matched < required {
@@ -345,12 +350,20 @@ pub(crate) fn entity_instruction_hit_progress(
             }
             matched += 1;
         }
-        best = best.max(matched);
+        if matched > best {
+            best = matched;
+            best_start = Some(start);
+        }
         if matched == required {
             return (Some(start), required);
         }
     }
-    (None, best.min(required))
+    let candidate = if best >= min_stride_consensus {
+        best_start
+    } else {
+        None
+    };
+    (candidate, best.min(required))
 }
 
 pub(crate) fn entity_hits_in_capture_order(hits: &[usize], required: u32) -> Option<Vec<usize>> {
@@ -418,7 +431,11 @@ mod entity_address_tests {
         assert!(entity_root_from_instruction_hits(&[0x1010, 0x1030, 0x1080], 3, 0x20).is_err());
         assert_eq!(
             entity_instruction_hit_progress(&[0x9001, 0x1010, 0x1050, 0x1030], 5, 0x20),
-            (None, 3)
+            (Some(0x1010), 3)
+        );
+        assert_eq!(
+            entity_instruction_hit_progress(&[0x9001, 0x1010, 0x1030], 5, 0x20),
+            (None, 2)
         );
     }
 

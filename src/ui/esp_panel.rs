@@ -241,12 +241,28 @@ impl CrosshairApp {
             })
             .flatten();
         let (candidate, matched) = if capture.hit_order {
+            let unique_addresses: Vec<usize> = {
+                let mut list = Vec::new();
+                for &addr in &capture.addresses {
+                    if !list.contains(&addr) {
+                        list.push(addr);
+                    }
+                }
+                list
+            };
+            let count = unique_addresses.len().min(capture.required);
+            let early_cand = if count >= 3.min(capture.required) {
+                unique_addresses.first().copied()
+            } else {
+                None
+            };
             (
                 ordered
                     .as_ref()
                     .and_then(|addresses| addresses.first())
-                    .copied(),
-                capture.addresses.len().min(capture.required),
+                    .copied()
+                    .or(early_cand),
+                count,
             )
         } else {
             self.state
@@ -262,6 +278,100 @@ impl CrosshairApp {
                 })
                 .unwrap_or((None, 0))
         };
+
+        if let Some(candidate_root) = candidate {
+            if let Some(preset) = self
+                .state
+                .esp_presets
+                .iter_mut()
+                .find(|preset| preset.id == capture.preset_id)
+            {
+                let formatted_root = format!("0x{candidate_root:X}");
+                let mut needs_sync = false;
+                if preset.entity_root != formatted_root {
+                    preset.entity_root = formatted_root;
+                    needs_sync = true;
+                }
+                if !preset.entity_list_enabled {
+                    preset.entity_list_enabled = true;
+                    needs_sync = true;
+                }
+                if capture.hit_order {
+                    let early_order: Vec<usize> = capture
+                        .addresses
+                        .iter()
+                        .copied()
+                        .fold(Vec::new(), |mut acc, addr| {
+                            if !acc.contains(&addr) && acc.len() < capture.required {
+                                acc.push(addr);
+                            }
+                            acc
+                        });
+                    if preset.entity_hit_order_addresses != early_order {
+                        preset.entity_hit_order_addresses = early_order;
+                        needs_sync = true;
+                    }
+                }
+                if needs_sync {
+                    self.persist_esp_presets();
+                }
+            }
+        }
+
+        let is_complete = matched >= capture.required;
+        if is_complete {
+            if let Some(mut active) = capture.active.take() {
+                active.stop();
+            }
+            if capture.hit_order && let Some(addresses) = ordered {
+                if let Some(preset) = self
+                    .state
+                    .esp_presets
+                    .iter_mut()
+                    .find(|preset| preset.id == capture.preset_id)
+                {
+                    if let Some(root) = candidate {
+                        preset.entity_root = format!("0x{root:X}");
+                    }
+                    preset.entity_hit_order_addresses = addresses;
+                    preset.entity_count = capture.required as u32;
+                    preset.entity_list_enabled = true;
+                }
+                self.esp_entity_capture_feedback.insert(
+                    capture.preset_id,
+                    format!("Captured {} entities in hit order", capture.required),
+                );
+                self.show_esp_entity_capture_hud(
+                    capture.hud_preset_id,
+                    format!("Entity scan {}/{} - order saved", capture.required, capture.required),
+                );
+            } else if let Some(root) = candidate {
+                if let Some(preset) = self
+                    .state
+                    .esp_presets
+                    .iter_mut()
+                    .find(|preset| preset.id == capture.preset_id)
+                {
+                    preset.entity_root = format!("0x{root:X}");
+                    preset.entity_list_enabled = true;
+                }
+                self.esp_entity_capture_feedback.insert(
+                    capture.preset_id,
+                    format!("Root updated: 0x{root:X} ({}/{})", capture.required, capture.required),
+                );
+                self.show_esp_entity_capture_hud(
+                    capture.hud_preset_id,
+                    format!("Entity scan {}/{} - root found", capture.required, capture.required),
+                );
+            }
+            if capture.hud_preset_id.is_some() {
+                self.esp_entity_capture_hud_hide_at =
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+            }
+            self.persist_esp_presets();
+            return;
+        }
+
         if changed {
             self.esp_entity_capture_feedback.insert(
                 capture.preset_id,
@@ -276,100 +386,34 @@ impl CrosshairApp {
                 format!("Entity scan {matched}/{}", capture.required),
             );
         }
-        if let Some(candidate) = candidate {
+
+        if let Some(status) = stopped {
             if let Some(mut active) = capture.active.take() {
                 active.stop();
             }
-            if capture.hit_order && let Some(addresses) = ordered {
-                if let Some(preset) = self
-                    .state
-                    .esp_presets
-                    .iter_mut()
-                    .find(|preset| preset.id == capture.preset_id)
-                {
-                    preset.entity_root = format!("0x{candidate:X}");
-                    preset.entity_hit_order_addresses = addresses;
-                    preset.entity_count = capture.required as u32;
-                    preset.entity_list_enabled = true;
-                }
+            if let Some(root) = candidate {
                 self.esp_entity_capture_feedback.insert(
                     capture.preset_id,
-                    format!("Captured {} entities in hit order", capture.required),
+                    format!("Root updated: 0x{root:X} ({matched}/{})", capture.required),
                 );
                 self.show_esp_entity_capture_hud(
                     capture.hud_preset_id,
-                    format!("Entity scan {}/{} - order saved", capture.required, capture.required),
+                    format!("Entity scan {matched}/{} - stopped", capture.required),
                 );
                 if capture.hud_preset_id.is_some() {
                     self.esp_entity_capture_hud_hide_at =
                         Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
                 }
-                self.persist_esp_presets();
-                return;
-            }
-            let result = self
-                .state
-                .esp_presets
-                .iter()
-                .find(|preset| preset.id == capture.preset_id)
-                .map(|preset| {
-                    crate::model::entity_root_from_instruction_hits(
-                        &capture.addresses,
-                        capture.required as u32,
-                        preset.entity_stride,
-                    )
-                });
-            match result {
-                Some(Ok(root)) => {
-                    if let Some(preset) = self
-                        .state
-                        .esp_presets
-                        .iter_mut()
-                        .find(|preset| preset.id == capture.preset_id)
-                    {
-                        preset.entity_root = format!("0x{root:X}");
-                        preset.entity_list_enabled = true;
-                    }
-                    self.esp_entity_capture_feedback.insert(
-                        capture.preset_id,
-                        format!("Root updated: 0x{root:X}"),
-                    );
-                    self.show_esp_entity_capture_hud(
-                        capture.hud_preset_id,
-                        format!("Entity scan {}/{} - root found", capture.required, capture.required),
-                    );
-                    if capture.hud_preset_id.is_some() {
-                        self.esp_entity_capture_hud_hide_at =
-                            Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
-                    }
-                    self.persist_esp_presets();
+            } else {
+                self.esp_entity_capture_feedback
+                    .insert(capture.preset_id, status);
+                if capture.hud_preset_id.is_some() {
+                    let _ = self
+                        .overlay_tx
+                        .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
                 }
-                Some(Err(error)) => {
-                    self.esp_entity_capture_feedback.insert(
-                        capture.preset_id,
-                        format!("Matched {matched}/{}, but {error}", capture.required),
-                    );
-                    if capture.hud_preset_id.is_some() {
-                        let _ = self
-                            .overlay_tx
-                            .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
-                    }
-                }
-                None => {}
             }
-            return;
-        }
-        if let Some(status) = stopped {
-            if let Some(mut active) = capture.active.take() {
-                active.stop();
-            }
-            self.esp_entity_capture_feedback
-                .insert(capture.preset_id, status);
-            if capture.hud_preset_id.is_some() {
-                let _ = self
-                    .overlay_tx
-                    .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
-            }
+            self.persist_esp_presets();
             return;
         }
         self.esp_entity_root_capture = Some(capture);
