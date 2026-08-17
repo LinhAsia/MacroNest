@@ -52,7 +52,7 @@ pub enum EspOrientationSource {
 }
 
 fn default_entity_auto_hit_step() -> u32 {
-    2
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -191,7 +191,7 @@ impl EspPreset {
             entity_auto_code_offset: 0,
             entity_auto_capture_count: 5,
             entity_auto_hit_order: false,
-            entity_auto_hit_step: 2,
+            entity_auto_hit_step: 1,
             entity_hit_order_drop_nearest: false,
             entity_hit_order_addresses: Vec::new(),
             entity_auto_hud_enabled: false,
@@ -389,49 +389,46 @@ pub(crate) fn entity_hits_in_capture_order(
     }
 }
 
-pub(crate) fn entity_hits_clustered_progress(
-    hits: &[usize],
-    required: u32,
-) -> (Vec<usize>, usize) {
-    const STRUCT_PROXIMITY_THRESHOLD: usize = 0x200;
-    let required = required.max(1) as usize;
-    let mut clusters: Vec<usize> = Vec::new();
-
-    for &address in hits {
-        if address == 0 {
-            continue;
-        }
-        let mut found_cluster = false;
-        for cluster_base in clusters.iter_mut() {
-            let diff = if address >= *cluster_base {
-                address - *cluster_base
-            } else {
-                *cluster_base - address
-            };
-            if diff < STRUCT_PROXIMITY_THRESHOLD {
-                if address < *cluster_base {
-                    *cluster_base = address;
-                }
-                found_cluster = true;
-                break;
-            }
-        }
-        if !found_cluster {
-            clusters.push(address);
-        }
-    }
-
-    let count = clusters.len().min(required);
-    let selected = clusters.into_iter().take(required).collect::<Vec<_>>();
-    (selected, count)
-}
-
 pub(crate) fn entity_hits_in_capture_order_progress(
     hits: &[usize],
     required: u32,
-    _hit_step: u32,
+    hit_step: u32,
 ) -> (Vec<usize>, usize) {
-    entity_hits_clustered_progress(hits, required)
+    let required = required.max(1) as usize;
+    let hit_step = hit_step.max(1) as usize;
+    let mut raw_unique = Vec::with_capacity(hits.len());
+    for &address in hits {
+        if !raw_unique.contains(&address) {
+            raw_unique.push(address);
+        }
+    }
+    if raw_unique.is_empty() {
+        return (Vec::new(), 0);
+    }
+    if hit_step == 1 {
+        let count = raw_unique.len().min(required);
+        let selected = raw_unique.into_iter().take(required).collect::<Vec<_>>();
+        return (selected, count);
+    }
+    let cluster_size = hit_step.min(raw_unique.len());
+    let min_offset = raw_unique[0..cluster_size]
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, addr)| *addr)
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+
+    let mut selected = Vec::with_capacity(required);
+    let mut idx = min_offset;
+    while idx < raw_unique.len() {
+        selected.push(raw_unique[idx]);
+        if selected.len() == required {
+            break;
+        }
+        idx += hit_step;
+    }
+    let count = selected.len();
+    (selected, count)
 }
 
 #[cfg(test)]
@@ -494,21 +491,18 @@ mod entity_address_tests {
 
     #[test]
     fn instruction_hits_keep_first_seen_order_without_stride_grouping() {
-        let hits = [
-            0x1EC9A49E9A8,
-            0x1EC9A49E9C0,
-            0x1EC9A49E9D8,
-            0x1EC9A49E9F0,
-            0x1EC9A49EA08,
-            0x1ECA4B789B8,
-            0x1ECA4B789D0,
-            0x1ECA4B789E8,
-            0x1ECA4B78A00,
-            0x1ECA4B78A18,
-        ];
-        let (entities, count) = entity_hits_clustered_progress(&hits, 5);
-        assert_eq!(count, 2);
-        assert_eq!(entities, vec![0x1EC9A49E9A8, 0x1ECA4B789B8]);
+        assert_eq!(
+            entity_hits_in_capture_order(&[0x3000, 0x1000, 0x3000, 0x2200], 3, 1),
+            Some(vec![0x3000, 0x1000, 0x2200])
+        );
+        assert_eq!(
+            entity_hits_in_capture_order(
+                &[0x100C, 0x1000, 0x200C, 0x2000, 0x300C, 0x3000],
+                3,
+                2
+            ),
+            Some(vec![0x1000, 0x2000, 0x3000])
+        );
     }
 }
 
