@@ -398,6 +398,7 @@ impl CrosshairApp {
                     Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
             }
             self.persist_esp_presets();
+            ctx.request_repaint();
             return;
         }
 
@@ -414,6 +415,7 @@ impl CrosshairApp {
                 capture.hud_preset_id,
                 format!("Entity scan {matched}/{}", capture.required),
             );
+            ctx.request_repaint();
         }
 
         if let Some(status) = stopped {
@@ -443,6 +445,7 @@ impl CrosshairApp {
                 }
             }
             self.persist_esp_presets();
+            ctx.request_repaint();
             return;
         }
         self.esp_entity_root_capture = Some(capture);
