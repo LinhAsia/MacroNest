@@ -51,6 +51,10 @@ pub enum EspOrientationSource {
     DirectionPairPitch,
 }
 
+fn default_entity_auto_hit_step() -> u32 {
+    2
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EspPreset {
@@ -75,6 +79,8 @@ pub struct EspPreset {
     pub entity_auto_code_offset: usize,
     pub entity_auto_capture_count: u32,
     pub entity_auto_hit_order: bool,
+    #[serde(default = "default_entity_auto_hit_step")]
+    pub entity_auto_hit_step: u32,
     pub entity_hit_order_addresses: Vec<usize>,
     pub entity_auto_hud_enabled: bool,
     pub entity_auto_hud_preset_id: Option<u32>,
@@ -183,6 +189,7 @@ impl EspPreset {
             entity_auto_code_offset: 0,
             entity_auto_capture_count: 5,
             entity_auto_hit_order: false,
+            entity_auto_hit_step: 2,
             entity_hit_order_addresses: Vec::new(),
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,
@@ -366,19 +373,55 @@ pub(crate) fn entity_instruction_hit_progress(
     (candidate, best.min(required))
 }
 
-pub(crate) fn entity_hits_in_capture_order(hits: &[usize], required: u32) -> Option<Vec<usize>> {
+pub(crate) fn entity_hits_in_capture_order(
+    hits: &[usize],
+    required: u32,
+    hit_step: u32,
+) -> Option<Vec<usize>> {
+    let (selected, _) = entity_hits_in_capture_order_progress(hits, required, hit_step);
+    if selected.len() >= required.max(1) as usize {
+        Some(selected)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn entity_hits_in_capture_order_progress(
+    hits: &[usize],
+    required: u32,
+    hit_step: u32,
+) -> (Vec<usize>, usize) {
     let required = required.max(1) as usize;
-    let mut ordered = Vec::with_capacity(required);
+    let hit_step = hit_step.max(1) as usize;
+    let mut raw_unique = Vec::with_capacity(hits.len());
     // ponytail: captures are capped at 512; use a HashSet too if that ceiling grows.
     for &address in hits {
-        if !ordered.contains(&address) {
-            ordered.push(address);
-            if ordered.len() == required {
-                return Some(ordered);
-            }
+        if !raw_unique.contains(&address) {
+            raw_unique.push(address);
         }
     }
-    None
+    if raw_unique.is_empty() {
+        return (Vec::new(), 0);
+    }
+    let cluster_size = hit_step.min(raw_unique.len());
+    let min_offset = raw_unique[0..cluster_size]
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, addr)| *addr)
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+
+    let mut selected = Vec::with_capacity(required);
+    let mut idx = min_offset;
+    while idx < raw_unique.len() {
+        selected.push(raw_unique[idx]);
+        if selected.len() == required {
+            break;
+        }
+        idx += hit_step;
+    }
+    let count = selected.len();
+    (selected, count)
 }
 
 #[cfg(test)]
@@ -442,10 +485,26 @@ mod entity_address_tests {
     #[test]
     fn instruction_hits_keep_first_seen_order_without_stride_grouping() {
         assert_eq!(
-            entity_hits_in_capture_order(&[0x3000, 0x1000, 0x3000, 0x2200], 3),
+            entity_hits_in_capture_order(&[0x3000, 0x1000, 0x3000, 0x2200], 3, 1),
             Some(vec![0x3000, 0x1000, 0x2200])
         );
-        assert_eq!(entity_hits_in_capture_order(&[0x3000, 0x1000], 3), None);
+        assert_eq!(entity_hits_in_capture_order(&[0x3000, 0x1000], 3, 1), None);
+        assert_eq!(
+            entity_hits_in_capture_order(
+                &[0x100C, 0x1000, 0x200C, 0x2000, 0x300C, 0x3000],
+                3,
+                2
+            ),
+            Some(vec![0x1000, 0x2000, 0x3000])
+        );
+        assert_eq!(
+            entity_hits_in_capture_order(
+                &[0x1000, 0x100C, 0x2000, 0x200C, 0x3000, 0x300C],
+                3,
+                2
+            ),
+            Some(vec![0x1000, 0x2000, 0x3000])
+        );
     }
 }
 

@@ -18,6 +18,7 @@ pub(super) struct EspEntityRootCapture {
     pub(super) preset_id: u32,
     required: usize,
     hit_order: bool,
+    hit_step: usize,
     addresses: Vec<usize>,
     rx: std::sync::mpsc::Receiver<WatchEvent>,
     active: Option<AccessWatch>,
@@ -140,13 +141,14 @@ impl CrosshairApp {
         self.close_memory_debuggers();
         let required = preset.entity_auto_capture_count.clamp(1, 512) as usize;
         let hit_order = preset.entity_auto_hit_order;
+        let hit_step = preset.entity_auto_hit_step.clamp(1, 32) as usize;
         let (tx, rx) = std::sync::mpsc::channel();
         let started = AccessWatch::start_unique(
             pid,
             instruction_address,
             self.state.memory_debugger_architecture,
             if hit_order {
-                required
+                required.saturating_mul(hit_step).max(required)
             } else {
                 // ponytail: bound menu/loading noise; raise this cap if a game legitimately
                 // touches more unique entity addresses before the wanted group appears.
@@ -162,7 +164,12 @@ impl CrosshairApp {
                     preset_id,
                     required,
                     hit_order,
-                    addresses: Vec::with_capacity(required),
+                    hit_step,
+                    addresses: Vec::with_capacity(if hit_order {
+                        required.saturating_mul(hit_step)
+                    } else {
+                        required
+                    }),
                     rx,
                     active: Some(active),
                     hud_preset_id,
@@ -237,35 +244,21 @@ impl CrosshairApp {
                 crate::model::entity_hits_in_capture_order(
                     &capture.addresses,
                     capture.required as u32,
+                    capture.hit_step as u32,
                 )
             })
             .flatten();
-        let (candidate, matched) = if capture.hit_order {
-            let unique_addresses: Vec<usize> = {
-                let mut list = Vec::new();
-                for &addr in &capture.addresses {
-                    if !list.contains(&addr) {
-                        list.push(addr);
-                    }
-                }
-                list
-            };
-            let count = unique_addresses.len().min(capture.required);
-            let early_cand = if count >= 3.min(capture.required) {
-                unique_addresses.first().copied()
-            } else {
-                None
-            };
-            (
-                ordered
-                    .as_ref()
-                    .and_then(|addresses| addresses.first())
-                    .copied()
-                    .or(early_cand),
-                count,
-            )
+        let (candidate, matched, filtered_hit_order) = if capture.hit_order {
+            let (filtered, count) = crate::model::entity_hits_in_capture_order_progress(
+                &capture.addresses,
+                capture.required as u32,
+                capture.hit_step as u32,
+            );
+            let candidate_root = filtered.first().copied();
+            (candidate_root, count, Some(filtered))
         } else {
-            self.state
+            let (cand, count) = self
+                .state
                 .esp_presets
                 .iter()
                 .find(|preset| preset.id == capture.preset_id)
@@ -276,7 +269,8 @@ impl CrosshairApp {
                         preset.entity_stride,
                     )
                 })
-                .unwrap_or((None, 0))
+                .unwrap_or((None, 0));
+            (cand, count, None)
         };
 
         if let Some(candidate_root) = candidate {
@@ -297,19 +291,12 @@ impl CrosshairApp {
                     needs_sync = true;
                 }
                 if capture.hit_order {
-                    let early_order: Vec<usize> = capture
-                        .addresses
-                        .iter()
-                        .copied()
-                        .fold(Vec::new(), |mut acc, addr| {
-                            if !acc.contains(&addr) && acc.len() < capture.required {
-                                acc.push(addr);
-                            }
-                            acc
-                        });
-                    if preset.entity_hit_order_addresses != early_order {
-                        preset.entity_hit_order_addresses = early_order;
-                        needs_sync = true;
+                    if let Some(filtered) = &filtered_hit_order {
+                        if &preset.entity_hit_order_addresses != filtered {
+                            preset.entity_hit_order_addresses = filtered.clone();
+                            preset.entity_count = filtered.len() as u32;
+                            needs_sync = true;
+                        }
                     }
                 }
                 if needs_sync {
@@ -323,17 +310,20 @@ impl CrosshairApp {
             if let Some(mut active) = capture.active.take() {
                 active.stop();
             }
-            if capture.hit_order && let Some(addresses) = ordered {
+            if capture.hit_order {
+                let final_addresses = ordered
+                    .or(filtered_hit_order)
+                    .unwrap_or_default();
                 if let Some(preset) = self
                     .state
                     .esp_presets
                     .iter_mut()
                     .find(|preset| preset.id == capture.preset_id)
                 {
-                    if let Some(root) = candidate {
-                        preset.entity_root = format!("0x{root:X}");
+                    if let Some(first_addr) = final_addresses.first() {
+                        preset.entity_root = format!("0x{first_addr:X}");
                     }
-                    preset.entity_hit_order_addresses = addresses;
+                    preset.entity_hit_order_addresses = final_addresses;
                     preset.entity_count = capture.required as u32;
                     preset.entity_list_enabled = true;
                 }
@@ -717,10 +707,20 @@ impl CrosshairApp {
                                         .range(1..=512),
                                 )
                                 .on_hover_text(if preset.entity_auto_hit_order {
-                                    "Stop after this many unique addresses are captured."
+                                    "Stop after this many filtered entities are captured."
                                 } else {
                                     "Stop only after this many addresses form one group at the configured Stride."
                                 });
+                                if preset.entity_auto_hit_order {
+                                    ui.label("Step");
+                                    ui.add(
+                                        DragValue::new(&mut preset.entity_auto_hit_step)
+                                            .range(1..=32),
+                                    )
+                                    .on_hover_text(
+                                        "Number of address hits per entity (e.g. 2 for AABB min/max pair). Automatically selects the smaller base address in each pair (even or odd index).",
+                                    );
+                                }
                                 ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
                                 if preset.entity_auto_hud_enabled {
                                     let hud_name = preset
