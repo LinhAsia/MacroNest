@@ -20,6 +20,7 @@ pub(super) struct EspEntityRootCapture {
     required: usize,
     hit_order: bool,
     hit_step: usize,
+    merge_pairs: bool,
     drop_nearest: bool,
     addresses: Vec<usize>,
     rx: std::sync::mpsc::Receiver<WatchEvent>,
@@ -144,6 +145,7 @@ impl CrosshairApp {
         let required = preset.entity_auto_capture_count.clamp(1, 512) as usize;
         let hit_order = preset.entity_auto_hit_order;
         let hit_step = preset.entity_auto_hit_step.clamp(1, 32) as usize;
+        let merge_pairs = preset.entity_hit_order_merge_pairs;
         let drop_nearest = preset.entity_hit_order_drop_nearest;
         let (tx, rx) = std::sync::mpsc::channel();
         let started = AccessWatch::start_unique(
@@ -172,6 +174,7 @@ impl CrosshairApp {
                     required,
                     hit_order,
                     hit_step,
+                    merge_pairs,
                     drop_nearest,
                     addresses: Vec::with_capacity(128),
                     rx,
@@ -318,6 +321,20 @@ impl CrosshairApp {
                 let mut final_addresses = ordered
                     .or(filtered_hit_order)
                     .unwrap_or_default();
+                if capture.merge_pairs {
+                    if let Some(preset) = self
+                        .state
+                        .esp_presets
+                        .iter()
+                        .find(|p| p.id == capture.preset_id)
+                    {
+                        final_addresses = merge_entity_addresses_by_3d_proximity(
+                            capture.pid,
+                            preset,
+                            &final_addresses,
+                        );
+                    }
+                }
                 let mut dropped_self = false;
                 if capture.drop_nearest && final_addresses.len() > 1 {
                     if let Some(preset) = self
@@ -346,17 +363,21 @@ impl CrosshairApp {
                         preset.entity_root = format!("0x{first_addr:X}");
                     }
                     preset.entity_count = final_addresses.len() as u32;
-                    preset.entity_hit_order_addresses = final_addresses;
+                    preset.entity_hit_order_addresses = final_addresses.clone();
                     preset.entity_list_enabled = true;
                 }
                 let feedback_msg = if dropped_self {
                     format!(
-                        "Captured {} entities (dropped nearest self -> {} remaining)",
+                        "Captured {} entities (merged/dropped -> {} active)",
                         capture.required,
-                        capture.required.saturating_sub(1)
+                        final_addresses.len()
                     )
                 } else {
-                    format!("Captured {} entities in hit order", capture.required)
+                    format!(
+                        "Captured {} entities ({} active)",
+                        capture.required,
+                        final_addresses.len()
+                    )
                 };
                 self.esp_entity_capture_feedback
                     .insert(capture.preset_id, feedback_msg);
@@ -763,11 +784,18 @@ impl CrosshairApp {
                                         "Number of address hits per entity (e.g. 2 for AABB min/max pair). Automatically selects the smaller base address in each pair (even or odd index).",
                                     );
                                     ui.checkbox(
+                                        &mut preset.entity_hit_order_merge_pairs,
+                                        "Merge pairs",
+                                    )
+                                    .on_hover_text(
+                                        "Merge captured addresses that share the same 3D world position into a single entity.",
+                                    );
+                                    ui.checkbox(
                                         &mut preset.entity_hit_order_drop_nearest,
                                         "Drop self",
                                     )
                                     .on_hover_text(
-                                        "After capturing all N entities, remove the entity with the smallest distance to camera (local player).",
+                                        "After capturing all entities, remove the entity with the smallest distance to camera (local player).",
                                     );
                                 }
                                 ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
@@ -1623,6 +1651,110 @@ fn find_nearest_entity_index(
     }
 
     min_index
+}
+
+#[cfg(windows)]
+fn merge_entity_addresses_by_3d_proximity(
+    pid: u32,
+    preset: &crate::model::EspPreset,
+    addresses: &[usize],
+) -> Vec<usize> {
+    if addresses.is_empty() {
+        return Vec::new();
+    }
+
+    struct Sample {
+        address: usize,
+        pos: Option<[f32; 3]>,
+    }
+
+    let mut samples: Vec<Sample> = Vec::with_capacity(addresses.len());
+
+    for &entity_address in addresses {
+        let Some(x_address) =
+            crate::model::entity_field_address(entity_address, 0, 1, preset.entity_x_offset)
+        else {
+            samples.push(Sample {
+                address: entity_address,
+                pos: None,
+            });
+            continue;
+        };
+        let Some(y_address) =
+            crate::model::entity_field_address(entity_address, 0, 1, preset.entity_y_offset)
+        else {
+            samples.push(Sample {
+                address: entity_address,
+                pos: None,
+            });
+            continue;
+        };
+        let Some(z_address) =
+            crate::model::entity_field_address(entity_address, 0, 1, preset.entity_z_offset)
+        else {
+            samples.push(Sample {
+                address: entity_address,
+                pos: None,
+            });
+            continue;
+        };
+
+        let mut read_comp = |addr: usize| -> Option<f32> {
+            let first = read_esp_f32_from_address(pid, addr, preset.value_type)?;
+            if !preset.entity_aabb_center {
+                return Some(first);
+            }
+            let second_addr = crate::model::entity_field_address(
+                addr,
+                0,
+                1,
+                preset.entity_aabb_pair_offset,
+            )?;
+            let second = read_esp_f32_from_address(pid, second_addr, preset.value_type)?;
+            Some(crate::model::aabb_center_component(first, second))
+        };
+
+        let (Some(x), Some(y), Some(z)) = (read_comp(x_address), read_comp(y_address), read_comp(z_address)) else {
+            samples.push(Sample {
+                address: entity_address,
+                pos: None,
+            });
+            continue;
+        };
+
+        samples.push(Sample {
+            address: entity_address,
+            pos: Some([x, y, z]),
+        });
+    }
+
+    // Merge samples whose 3D distance is within 5.0 game units
+    let mut merged: Vec<Sample> = Vec::with_capacity(samples.len());
+    for sample in samples {
+        let mut found = false;
+        if let Some(pos) = sample.pos {
+            for existing in &mut merged {
+                if let Some(existing_pos) = existing.pos {
+                    let dx = pos[0] - existing_pos[0];
+                    let dy = pos[1] - existing_pos[1];
+                    let dz = pos[2] - existing_pos[2];
+                    let dist_sq = dx * dx + dy * dy + dz * dz;
+                    if dist_sq <= 25.0 {
+                        if sample.address < existing.address {
+                            existing.address = sample.address;
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !found {
+            merged.push(sample);
+        }
+    }
+
+    merged.into_iter().map(|s| s.address).collect()
 }
 
 #[cfg(windows)]
