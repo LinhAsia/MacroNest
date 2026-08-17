@@ -410,16 +410,14 @@ pub(crate) fn entity_hits_in_capture_order_progress(
         let selected = raw_unique.into_iter().take(required).collect::<Vec<_>>();
         return (selected, count);
     }
-    let cluster_size = hit_step.min(raw_unique.len());
-    let min_offset = raw_unique[0..cluster_size]
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, addr)| *addr)
-        .map(|(idx, _)| idx)
-        .unwrap_or(0);
-
+    // Sort by address so that within each min/max pair the min bound is always
+    // at an even index (0, 2, 4, ...).  Without sorting, capture arrival order
+    // is non-deterministic (different threads may fire max before min), causing
+    // min_offset to flip between 0 and 1 and selecting a mix of min and max
+    // bounds across entities, which places some entity markers at wrong positions.
+    raw_unique.sort_unstable();
     let mut selected = Vec::with_capacity(required);
-    let mut idx = min_offset;
+    let mut idx = 0;
     while idx < raw_unique.len() {
         selected.push(raw_unique[idx]);
         if selected.len() == required {
