@@ -9469,6 +9469,8 @@ impl CrosshairApp {
                             Self::memory_view_cell(ui, 70.0, "Hits");
                             Self::memory_view_cell(ui, 620.0, "Matched instructions");
                         });
+                        let mut open_browse_addr = None;
+                        let mut open_dissect_addr = None;
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             for candidate in &candidates {
                                 let instruction_list = candidate
@@ -9488,32 +9490,126 @@ impl CrosshairApp {
                                     })
                                     .collect::<Vec<_>>()
                                     .join("  |  ");
-                                ui.horizontal(|ui| {
-                                    Self::memory_view_cell(
-                                        ui,
-                                        170.0,
-                                        &format_prefixed_memory_address(candidate.start),
+                                let candidate_addr = candidate.start;
+                                let candidate_addr_str = format_prefixed_memory_address(candidate.start);
+                                let row_response = ui.horizontal(|ui| {
+                                    let c1 = ui.add_sized(
+                                        [170.0, 18.0],
+                                        egui::Label::new(RichText::new(&candidate_addr_str).monospace()).selectable(true),
                                     );
-                                    Self::memory_view_cell(
-                                        ui,
-                                        80.0,
-                                        &format!("0x{:X}", candidate.end - candidate.start),
+                                    let c2 = ui.add_sized(
+                                        [80.0, 18.0],
+                                        egui::Label::new(RichText::new(format!("0x{:X}", candidate.end - candidate.start)).monospace()).selectable(true),
                                     );
-                                    Self::memory_view_cell(
-                                        ui,
-                                        70.0,
-                                        &candidate.instructions.len().to_string(),
+                                    let c3 = ui.add_sized(
+                                        [70.0, 18.0],
+                                        egui::Label::new(RichText::new(candidate.instructions.len().to_string()).monospace()).selectable(true),
                                     );
-                                    Self::memory_view_cell(
-                                        ui,
-                                        70.0,
-                                        &candidate.hits.to_string(),
+                                    let c4 = ui.add_sized(
+                                        [70.0, 18.0],
+                                        egui::Label::new(RichText::new(candidate.hits.to_string()).monospace()).selectable(true),
                                     );
-                                    Self::memory_view_cell(ui, 620.0, &instruction_list)
-                                        .on_hover_text(&instruction_list);
+                                    let c5 = ui.add_sized(
+                                        [620.0, 18.0],
+                                        egui::Label::new(RichText::new(&instruction_list).monospace()).selectable(true).truncate(),
+                                    ).on_hover_text(&instruction_list);
+
+                                    c1.union(c2).union(c3).union(c4).union(c5)
+                                }).inner;
+
+                                row_response.context_menu(|ui| {
+                                    if ui.button(Self::tr_lang(self.state.ui_language, "Copy address", "Sao chép địa chỉ")).clicked() {
+                                        ui.ctx().copy_text(candidate_addr_str.clone());
+                                        ui.close_menu();
+                                    }
+                                    if ui.button(Self::tr_lang(self.state.ui_language, "Browse this memory region", "Duyệt vùng bộ nhớ này")).clicked() {
+                                        open_browse_addr = Some(candidate_addr);
+                                        ui.close_menu();
+                                    }
+                                    if ui.button(Self::tr_lang(self.state.ui_language, "Dissect data/structure", "Phân tích dữ liệu/cấu trúc")).clicked() {
+                                        open_dissect_addr = Some(candidate_addr);
+                                        ui.close_menu();
+                                    }
                                 });
                             }
                         });
+                        if let Some(addr) = open_browse_addr {
+                            let pid = self.memory_panel.process_pid;
+                            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                                address: addr,
+                                tracked_base: None,
+                                kind: MemoryViewKind::Bytes,
+                                display_type: MemoryDisplayType::ByteHex,
+                                relative_addresses: false,
+                                pinned: true,
+                                elements: Vec::new(),
+                                pending_add: None,
+                                pending_track: None,
+                                pointer_width: pid.and_then(|p| process_pointer_width(p).ok()).unwrap_or(8),
+                                previous_bytes: Vec::new(),
+                                previous_byte_map: HashMap::new(),
+                                track_changes: false,
+                                changed_addresses: HashSet::new(),
+                                classes: Vec::new(),
+                                selected_class: 0,
+                                history: Vec::new(),
+                                class_detection_attempted: false,
+                                class_detection_status: String::new(),
+                                auto_dissected: false,
+                                structure_back_step: "C".to_owned(),
+                                structure_forward_step: "C".to_owned(),
+                                selected_structure_address: None,
+                                scroll_offset: 0,
+                                reset_memory_scroll: true,
+                                memory_columns: 16,
+                                memory_scroll_override: None,
+                                memory_region_override: None,
+                                fit_memory_columns: true,
+                                stride_address_a: String::new(),
+                                stride_address_b: String::new(),
+                            });
+                        }
+                        if let Some(addr) = open_dissect_addr {
+                            let pid = self.memory_panel.process_pid;
+                            let elements = default_structure_elements();
+                            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                                address: addr,
+                                tracked_base: None,
+                                kind: MemoryViewKind::Structure,
+                                display_type: MemoryDisplayType::ByteHex,
+                                relative_addresses: true,
+                                pinned: true,
+                                elements: elements.clone(),
+                                pending_add: None,
+                                pending_track: None,
+                                pointer_width: pid.and_then(|p| process_pointer_width(p).ok()).unwrap_or(8),
+                                previous_bytes: Vec::new(),
+                                previous_byte_map: HashMap::new(),
+                                track_changes: false,
+                                changed_addresses: HashSet::new(),
+                                classes: vec![StructureClass {
+                                    name: "Class_0".to_owned(),
+                                    address: addr,
+                                    elements,
+                                }],
+                                selected_class: 0,
+                                history: Vec::new(),
+                                class_detection_attempted: false,
+                                class_detection_status: String::new(),
+                                auto_dissected: false,
+                                structure_back_step: "C".to_owned(),
+                                structure_forward_step: "C".to_owned(),
+                                selected_structure_address: None,
+                                scroll_offset: 0,
+                                reset_memory_scroll: true,
+                                memory_columns: 16,
+                                memory_scroll_override: None,
+                                memory_region_override: None,
+                                fit_memory_columns: true,
+                                stride_address_a: String::new(),
+                                stride_address_b: String::new(),
+                            });
+                        }
                     });
                 Self::render_memory_popup_resize_handles(ctx);
             },
@@ -10363,25 +10459,22 @@ impl CrosshairApp {
                 .and_then(|pid| query_memory_region(pid, address).ok())
         });
         let (start_address, read_size) = match kind {
-            MemoryViewKind::Bytes => Self::memory_view_read_window(
-                Self::memory_view_window_start(address, row_bytes, dialog.scroll_offset),
-                MEMORY_VIEW_READ_BYTES,
-                region.as_ref(),
-            ),
+            MemoryViewKind::Bytes => {
+                let aligned = address / row_bytes * row_bytes;
+                let start = aligned.wrapping_add_signed(dialog.scroll_offset);
+                (start, 2048)
+            }
             MemoryViewKind::Structure => (address, 1024),
         };
-        let mut actual_start_address = start_address;
-        let bytes = self
+        let region = self
             .memory_panel
             .process_pid
-            .and_then(|pid| {
-                read_memory_bytes(pid, start_address, read_size)
-                    .or_else(|_| {
-                        actual_start_address = address;
-                        read_memory_bytes(pid, address, 512)
-                    })
-                    .ok()
-            });
+            .and_then(|pid| query_memory_region(pid, start_address).ok());
+        let (bytes, valid_mask) = if let Some(pid) = self.memory_panel.process_pid {
+            Self::read_memory_bytes_with_mask(pid, start_address, read_size)
+        } else {
+            (vec![0u8; read_size], vec![false; read_size])
+        };
         let mut open = true;
         if dialog.pinned {
             let fit_columns = dialog.fit_memory_columns;
@@ -10421,8 +10514,9 @@ impl CrosshairApp {
                                 self.state.ui_language,
                                 self.memory_panel.process_pid,
                                 &mut dialog,
-                                actual_start_address,
-                                bytes.as_deref(),
+                                start_address,
+                                &bytes,
+                                &valid_mask,
                                 region,
                             );
                         });
@@ -10459,8 +10553,9 @@ impl CrosshairApp {
                     self.state.ui_language,
                     self.memory_panel.process_pid,
                     &mut dialog,
-                    actual_start_address,
-                    bytes.as_deref(),
+                    start_address,
+                    &bytes,
+                    &valid_mask,
                     region,
                 );
             });
@@ -10480,53 +10575,57 @@ impl CrosshairApp {
         process_pid: Option<u32>,
         dialog: &mut MemoryViewDialog,
         start_address: usize,
-        bytes: Option<&[u8]>,
+        bytes: &[u8],
+        valid_mask: &[bool],
         region: Option<MemoryRegionInfo>,
     ) {
-        let Some(bytes) = bytes else {
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    if !dialog.history.is_empty() {
-                        if ui
-                            .button(Self::tr_lang(language, "◀ Back", "◀ Quay lại"))
-                            .clicked()
-                        {
-                            if let Some(prev_addr) = dialog.history.pop() {
-                                dialog.address = prev_addr;
-                                if let Some(idx) =
-                                    dialog.classes.iter().position(|c| c.address == prev_addr)
-                                {
-                                    dialog.selected_class = idx;
-                                    dialog.elements = dialog.classes[idx].elements.clone();
+        if matches!(dialog.kind, MemoryViewKind::Structure) {
+            let is_readable = !bytes.is_empty() && valid_mask.iter().any(|&v| v);
+            if !is_readable {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        if !dialog.history.is_empty() {
+                            if ui
+                                .button(Self::tr_lang(language, "◀ Back", "◀ Quay lại"))
+                                .clicked()
+                            {
+                                if let Some(prev_addr) = dialog.history.pop() {
+                                    dialog.address = prev_addr;
+                                    if let Some(idx) =
+                                        dialog.classes.iter().position(|c| c.address == prev_addr)
+                                    {
+                                        dialog.selected_class = idx;
+                                        dialog.elements = dialog.classes[idx].elements.clone();
+                                    }
+                                    dialog.previous_bytes.clear();
+                                    dialog.auto_dissected = false;
                                 }
-                                dialog.previous_bytes.clear();
-                                dialog.auto_dissected = false;
                             }
                         }
+                        ui.label(
+                            RichText::new(format!(
+                                "{}: {}",
+                                Self::tr_lang(
+                                    language,
+                                    "Unable to read memory region",
+                                    "Không thể đọc vùng bộ nhớ"
+                                ),
+                                format_prefixed_memory_address(dialog.address)
+                            ))
+                            .color(Color32::from_rgb(255, 100, 100)),
+                        );
+                    });
+                    if !dialog.class_detection_status.is_empty() {
+                        ui.label(
+                            RichText::new(&dialog.class_detection_status)
+                                .small()
+                                .color(Color32::from_rgb(255, 170, 70)),
+                        );
                     }
-                    ui.label(
-                        RichText::new(format!(
-                            "{}: {}",
-                            Self::tr_lang(
-                                language,
-                                "Unable to read memory region",
-                                "Không thể đọc vùng bộ nhớ"
-                            ),
-                            format_prefixed_memory_address(dialog.address)
-                        ))
-                        .color(Color32::from_rgb(255, 100, 100)),
-                    );
                 });
-                if !dialog.class_detection_status.is_empty() {
-                    ui.label(
-                        RichText::new(&dialog.class_detection_status)
-                            .small()
-                            .color(Color32::from_rgb(255, 170, 70)),
-                    );
-                }
-            });
-            return;
-        };
+                return;
+            }
+        }
         if dialog.track_changes {
             Self::track_memory_changes(
                 &mut dialog.previous_byte_map,
@@ -10549,6 +10648,10 @@ impl CrosshairApp {
                         -1
                     } else if input.key_pressed(egui::Key::ArrowDown) {
                         1
+                    } else if input.key_pressed(egui::Key::PageUp) {
+                        -16
+                    } else if input.key_pressed(egui::Key::PageDown) {
+                        16
                     } else {
                         0
                     }
@@ -10557,12 +10660,9 @@ impl CrosshairApp {
                 0
             };
             if move_rows != 0 {
-                let address = if move_rows < 0 {
-                    dialog.address.saturating_sub(row_bytes)
-                } else {
-                    dialog.address.saturating_add(row_bytes)
-                };
-                Self::move_memory_view_highlight(dialog, address, row_bytes);
+                let offset_change = move_rows * (row_bytes as isize);
+                dialog.scroll_offset = dialog.scroll_offset.saturating_add(offset_change);
+                ui.ctx().request_repaint();
             }
             let step = parse_hex_offset(&dialog.structure_forward_step);
             let mut next_address = None;
@@ -10576,7 +10676,7 @@ impl CrosshairApp {
                     .on_hover_text("Move to a lower address by the hexadecimal step")
                     .clicked()
                 {
-                    next_address = Some(dialog.address.saturating_sub(step.unwrap()));
+                    next_address = Some(dialog.address.wrapping_sub(step.unwrap()));
                 }
                 ui.label("0x");
                 ui.add(
@@ -10591,7 +10691,7 @@ impl CrosshairApp {
                     .on_hover_text("Move to a higher address by the hexadecimal step")
                     .clicked()
                 {
-                    next_address = Some(dialog.address.saturating_add(step.unwrap()));
+                    next_address = Some(dialog.address.wrapping_add(step.unwrap()));
                 }
                 ui.separator();
                 if ui.small_button("Center").clicked() {
@@ -10624,7 +10724,9 @@ impl CrosshairApp {
                 }
             });
             if let Some(address) = next_address {
-                Self::move_memory_view_highlight(dialog, address, row_bytes);
+                dialog.address = address;
+                dialog.scroll_offset = 0;
+                dialog.reset_memory_scroll = true;
             }
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Stride").small().strong());
@@ -10661,100 +10763,45 @@ impl CrosshairApp {
                     ))
                     .monospace(),
                 );
-                ui.separator();
+            } else {
+                ui.label(
+                    RichText::new("Protect: None / Unmapped (Inaccessible)").monospace().color(Color32::from_rgb(140, 145, 155)),
+                );
             }
+            ui.separator();
         }
         match dialog.kind {
             MemoryViewKind::Bytes => {
-                let target_row = dialog.address.saturating_sub(start_address) / row_bytes;
-                let mut scroll_area = egui::ScrollArea::both()
+                let scroll_area = egui::ScrollArea::both()
                     .id_salt("memory-region-grid")
                     .auto_shrink([false, false]);
-                if dialog.reset_memory_scroll {
-                    scroll_area = scroll_area
-                        .horizontal_scroll_offset(0.0)
-                        .vertical_scroll_offset(target_row.saturating_sub(3) as f32 * 18.0);
-                } else if let Some(offset) = dialog.memory_scroll_override.take() {
-                    scroll_area = scroll_area.vertical_scroll_offset(offset);
-                }
                 let output = scroll_area.show(ui, |ui| {
-                    Self::render_memory_region_grid(ui, language, dialog, start_address, bytes)
+                    Self::render_memory_region_grid(
+                        ui,
+                        language,
+                        dialog,
+                        start_address,
+                        bytes,
+                        valid_mask,
+                    )
                 });
-                if dialog.reset_memory_scroll {
-                    dialog.reset_memory_scroll = false;
-                }
                 let scroll_delta = ui.input(|input| input.raw_scroll_delta.y);
                 let pointer_over_grid = ui
                     .ctx()
                     .pointer_latest_pos()
                     .is_some_and(|pointer| output.inner_rect.contains(pointer));
                 if pointer_over_grid && scroll_delta != 0.0 {
-                    if let Some(region) = region {
-                        let region_end = region.base.saturating_add(region.size);
-                        let page_bytes = (MEMORY_VIEW_READ_BYTES / 2 / row_bytes) * row_bytes;
-                        let max_y = (output.content_size.y - output.inner_rect.height()).max(0.0);
-                        if scroll_delta > 0.0
-                            && output.state.offset.y <= 1.0
-                            && start_address > region.base
-                        {
-                            let shift = page_bytes.min(start_address - region.base);
-                            dialog.scroll_offset = dialog.scroll_offset.saturating_sub(shift as isize);
-                            dialog.memory_scroll_override =
-                                Some((shift / row_bytes) as f32 * 18.0);
-                            ui.ctx().request_repaint();
-                        } else if scroll_delta > 0.0
-                            && output.state.offset.y <= 1.0
-                            && start_address == region.base
-                            && let Some(pid) = process_pid
-                            && let Ok(Some(previous)) =
-                                adjacent_readable_memory_region(pid, region.base, false)
-                            && Self::memory_regions_are_contiguous(&previous, &region)
-                        {
-                            let desired_start = previous
-                                .base
-                                .saturating_add(previous.size)
-                                .saturating_sub(MEMORY_VIEW_READ_BYTES)
-                                .max(previous.base);
-                            let base = Self::memory_view_window_start(
-                                dialog.address,
-                                row_bytes,
-                                0,
-                            );
-                            dialog.scroll_offset =
-                                Self::memory_view_offset_between(desired_start, base);
-                            dialog.memory_region_override = Some(previous);
-                            dialog.memory_scroll_override = Some(max_y);
-                            ui.ctx().request_repaint();
-                        } else if scroll_delta < 0.0
-                            && output.state.offset.y >= max_y - 1.0
-                            && start_address.saturating_add(bytes.len()) < region_end
-                        {
-                            let remaining = region_end - start_address.saturating_add(bytes.len());
-                            let shift = page_bytes.min(remaining);
-                            dialog.scroll_offset = dialog.scroll_offset.saturating_add(shift as isize);
-                            dialog.memory_scroll_override =
-                                Some((max_y - (shift / row_bytes) as f32 * 18.0).max(0.0));
-                            ui.ctx().request_repaint();
-                        } else if scroll_delta < 0.0
-                            && output.state.offset.y >= max_y - 1.0
-                            && start_address.saturating_add(bytes.len()) >= region_end
-                            && let Some(pid) = process_pid
-                            && let Ok(Some(next)) =
-                                adjacent_readable_memory_region(pid, region_end, true)
-                            && Self::memory_regions_are_contiguous(&region, &next)
-                        {
-                            let base = Self::memory_view_window_start(
-                                dialog.address,
-                                row_bytes,
-                                0,
-                            );
-                            dialog.scroll_offset =
-                                Self::memory_view_offset_between(next.base, base);
-                            dialog.memory_region_override = Some(next);
-                            dialog.memory_scroll_override = Some(0.0);
-                            ui.ctx().request_repaint();
-                        }
-                    }
+                    let rows_to_scroll = (scroll_delta / 18.0).round() as isize;
+                    let delta_rows = if rows_to_scroll != 0 {
+                        rows_to_scroll
+                    } else if scroll_delta > 0.0 {
+                        1
+                    } else {
+                        -1
+                    };
+                    let offset_change = -delta_rows * (row_bytes as isize);
+                    dialog.scroll_offset = dialog.scroll_offset.saturating_add(offset_change);
+                    ui.ctx().request_repaint();
                 }
             }
             MemoryViewKind::Structure => {
@@ -10960,6 +11007,7 @@ impl CrosshairApp {
         dialog: &mut MemoryViewDialog,
         start_address: usize,
         bytes: &[u8],
+        valid_mask: &[bool],
     ) {
         let unit = memory_display_width(dialog.display_type);
         let value_width = memory_display_cell_width(dialog.display_type);
@@ -10986,88 +11034,113 @@ impl CrosshairApp {
         ui.separator();
 
         for (row, chunk) in bytes.chunks(row_bytes).enumerate() {
-            let row_address = start_address.saturating_add(row * row_bytes);
+            let row_address = start_address.wrapping_add(row * row_bytes);
             let is_target_row = (row_address <= dialog.address)
                 && (dialog.address < row_address.saturating_add(row_bytes));
 
             ui.horizontal(|ui| {
-                    let relative_offset = (row_address as isize) - (dialog.address as isize);
-                    let shown_address = if dialog.relative_addresses {
-                        if relative_offset >= 0 {
-                            format!("+{:04X}", relative_offset)
-                        } else {
-                            format!("-{:04X}", relative_offset.abs())
-                        }
+                let relative_offset = (row_address as isize) - (dialog.address as isize);
+                let shown_address = if dialog.relative_addresses {
+                    if relative_offset >= 0 {
+                        format!("+{:04X}", relative_offset)
                     } else {
-                        format_memory_address(row_address)
-                    };
-                    let address_cell =
-                        Self::memory_view_cell(ui, address_width, &shown_address)
-                            .on_hover_text("Double-click or right-click to copy this address");
-                    if is_target_row {
-                        ui.painter().rect_filled(
-                            address_cell.rect,
-                            2.0,
-                            Color32::from_rgba_unmultiplied(60, 130, 220, 75),
-                        );
+                        format!("-{:04X}", relative_offset.abs())
                     }
-                    if address_cell.double_clicked() {
+                } else {
+                    format_memory_address(row_address)
+                };
+                let address_cell =
+                    Self::memory_view_cell(ui, address_width, &shown_address)
+                        .on_hover_text("Double-click or right-click to copy this address");
+                if is_target_row {
+                    ui.painter().rect_filled(
+                        address_cell.rect,
+                        2.0,
+                        Color32::from_rgba_unmultiplied(60, 130, 220, 75),
+                    );
+                }
+                if address_cell.double_clicked() {
+                    ui.ctx()
+                        .copy_text(format_prefixed_memory_address(row_address));
+                }
+                if address_cell.clicked_by(egui::PointerButton::Middle) {
+                    dialog.pending_add = Some((
+                        row_address,
+                        memory_display_scan_type(dialog.display_type),
+                    ));
+                }
+                address_cell.context_menu(|ui| {
+                    if ui.button("Copy address").clicked() {
                         ui.ctx()
                             .copy_text(format_prefixed_memory_address(row_address));
+                        ui.close();
                     }
-                    if address_cell.clicked_by(egui::PointerButton::Middle) {
+                });
+                for (column, value) in chunk.chunks(unit).take(columns).enumerate() {
+                    let cell_byte_offset = row * row_bytes + column * unit;
+                    let is_valid = valid_mask
+                        .get(cell_byte_offset..cell_byte_offset + value.len())
+                        .is_some_and(|m| !m.is_empty() && m.iter().all(|&v| v));
+
+                    let text = if is_valid && value.len() == unit {
+                        format_memory_display(value, dialog.display_type)
+                    } else {
+                        match dialog.display_type {
+                            MemoryDisplayType::ByteHex => "??".to_owned(),
+                            MemoryDisplayType::ByteDecimal => "???".to_owned(),
+                            MemoryDisplayType::I16Hex => "????".to_owned(),
+                            MemoryDisplayType::I16Decimal => "?????".to_owned(),
+                            MemoryDisplayType::I32Hex => "????????".to_owned(),
+                            MemoryDisplayType::I32Decimal => "??????????".to_owned(),
+                            MemoryDisplayType::I64Hex => "????????????????".to_owned(),
+                            MemoryDisplayType::I64Decimal => "????????????????????".to_owned(),
+                            MemoryDisplayType::Float => "?.??????".to_owned(),
+                            MemoryDisplayType::Double => "?.??????????????".to_owned(),
+                        }
+                    };
+
+                    let cell = if is_valid {
+                        Self::memory_view_cell(ui, value_width, &text)
+                    } else {
+                        Self::memory_view_cell_unmapped(ui, value_width, &text)
+                    };
+
+                    let cell_address = row_address.wrapping_add(column * unit);
+                    let changed = (0..value.len()).any(|byte| {
+                        dialog
+                            .changed_addresses
+                            .contains(&cell_address.wrapping_add(byte))
+                    });
+                    if changed && is_valid {
+                        ui.painter().rect_filled(
+                            cell.rect,
+                            2.0,
+                            Color32::from_rgba_unmultiplied(230, 190, 70, 24),
+                        );
+                    }
+                    let is_target_cell = (cell_address <= dialog.address)
+                        && (dialog.address < cell_address.saturating_add(unit));
+                    if is_target_cell {
+                        ui.painter().rect_stroke(
+                            cell.rect,
+                            2.0,
+                            egui::Stroke::new(1.5, Color32::from_rgb(80, 180, 255)),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                    if is_valid && cell.clicked_by(egui::PointerButton::Middle) {
                         dialog.pending_add = Some((
-                            row_address,
+                            cell_address,
                             memory_display_scan_type(dialog.display_type),
                         ));
                     }
-                    address_cell.context_menu(|ui| {
+                    cell.context_menu(|ui| {
                         if ui.button("Copy address").clicked() {
                             ui.ctx()
-                                .copy_text(format_prefixed_memory_address(row_address));
+                                .copy_text(format_prefixed_memory_address(cell_address));
                             ui.close();
                         }
-                    });
-                    for (column, value) in chunk.chunks(unit).take(columns).enumerate() {
-                        let text = (value.len() == unit)
-                            .then(|| format_memory_display(value, dialog.display_type))
-                            .unwrap_or_default();
-                        let cell = Self::memory_view_cell(ui, value_width, &text);
-                        let cell_address = row_address.saturating_add(column * unit);
-                        let changed = (0..value.len()).any(|byte| {
-                            dialog
-                                .changed_addresses
-                                .contains(&cell_address.saturating_add(byte))
-                        });
-                        if changed {
-                            ui.painter().rect_filled(
-                                cell.rect,
-                                2.0,
-                                Color32::from_rgba_unmultiplied(230, 190, 70, 24),
-                            );
-                        }
-                        let is_target_cell = (cell_address <= dialog.address)
-                            && (dialog.address < cell_address.saturating_add(unit));
-                        if is_target_cell {
-                            ui.painter().rect_stroke(
-                                cell.rect,
-                                2.0,
-                                egui::Stroke::new(1.5, Color32::from_rgb(80, 180, 255)),
-                                egui::StrokeKind::Outside,
-                            );
-                        }
-                        if cell.clicked_by(egui::PointerButton::Middle) {
-                            dialog.pending_add = Some((
-                                cell_address,
-                                memory_display_scan_type(dialog.display_type),
-                            ));
-                        }
-                        cell.context_menu(|ui| {
-                            if ui.button("Copy address").clicked() {
-                                ui.ctx()
-                                    .copy_text(format_prefixed_memory_address(cell_address));
-                                ui.close();
-                            }
+                        if is_valid {
                             let add_label = Self::tr_lang(
                                 language,
                                 "Add this address to the list",
@@ -11084,55 +11157,61 @@ impl CrosshairApp {
                                 dialog.pending_track = Some(cell_address);
                                 ui.close();
                             }
-                            ui.separator();
-                            let display_label =
-                                Self::tr_lang(language, "Display Type", "Kiểu hiển thị");
-                            ui.menu_button(display_label, |ui| {
-                                for (display_type, label) in memory_display_types() {
-                                    if ui
-                                        .selectable_value(
-                                            &mut dialog.display_type,
-                                            display_type,
-                                            label,
-                                        )
-                                        .clicked()
-                                    {
-                                        dialog.scroll_offset = 0;
-                                        dialog.memory_columns = 3;
-                                        dialog.reset_memory_scroll = true;
-                                        dialog.fit_memory_columns = true;
-                                        ui.close();
-                                    }
+                        }
+                        ui.separator();
+                        let display_label =
+                            Self::tr_lang(language, "Display Type", "Kiểu hiển thị");
+                        ui.menu_button(display_label, |ui| {
+                            for (display_type, label) in memory_display_types() {
+                                if ui
+                                    .selectable_value(
+                                        &mut dialog.display_type,
+                                        display_type,
+                                        label,
+                                    )
+                                    .clicked()
+                                {
+                                    dialog.scroll_offset = 0;
+                                    dialog.memory_columns = 3;
+                                    dialog.reset_memory_scroll = true;
+                                    dialog.fit_memory_columns = true;
+                                    ui.close();
                                 }
-                            });
-                            let rel_label = Self::tr_lang(
-                                language,
-                                "Show relative addresses",
-                                "Hiện địa chỉ tương đối",
-                            );
-                            ui.checkbox(&mut dialog.relative_addresses, rel_label);
-                            let dissect_label = Self::tr_lang(
-                                language,
-                                "Open in dissect data/structure",
-                                "Mở trong phân tích dữ liệu/cấu trúc",
-                            );
-                            if ui.button(dissect_label).clicked() {
-                                dialog.kind = MemoryViewKind::Structure;
-                                ui.close();
                             }
                         });
-                    }
-                    let ascii = chunk
-                        .iter()
-                        .map(|byte| {
-                            if byte.is_ascii_graphic() {
-                                *byte as char
-                            } else {
-                                '.'
-                            }
-                        })
-                        .collect::<String>();
-                    Self::memory_view_cell(ui, ascii_width, &ascii);
+                        let rel_label = Self::tr_lang(
+                            language,
+                            "Show relative addresses",
+                            "Hiện địa chỉ tương đối",
+                        );
+                        ui.checkbox(&mut dialog.relative_addresses, rel_label);
+                        let dissect_label = Self::tr_lang(
+                            language,
+                            "Open in dissect data/structure",
+                            "Mở trong phân tích dữ liệu/cấu trúc",
+                        );
+                        if ui.button(dissect_label).clicked() {
+                            dialog.kind = MemoryViewKind::Structure;
+                            ui.close();
+                        }
+                    });
+                }
+                let ascii = chunk
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, byte)| {
+                        let cell_byte_offset = row * row_bytes + idx;
+                        let is_byte_valid = valid_mask.get(cell_byte_offset).copied().unwrap_or(false);
+                        if !is_byte_valid {
+                            '?'
+                        } else if byte.is_ascii_graphic() {
+                            *byte as char
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect::<String>();
+                Self::memory_view_cell(ui, ascii_width, &ascii);
             });
         }
     }
@@ -11628,6 +11707,63 @@ impl CrosshairApp {
                 .sense(Sense::click()),
         )
         .on_hover_cursor(egui::CursorIcon::Default)
+    }
+
+    fn memory_view_cell_unmapped(ui: &mut egui::Ui, width: f32, text: &str) -> egui::Response {
+        let (rect, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
+        let mut cell = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        cell.add_sized(
+            rect.size(),
+            egui::Label::new(
+                RichText::new(text)
+                    .monospace()
+                    .color(Color32::from_rgb(110, 118, 130)),
+            )
+            .selectable(false)
+            .sense(Sense::click()),
+        )
+        .on_hover_cursor(egui::CursorIcon::Default)
+    }
+
+    fn read_memory_bytes_with_mask(
+        pid: u32,
+        start_address: usize,
+        length: usize,
+    ) -> (Vec<u8>, Vec<bool>) {
+        let mut bytes = vec![0u8; length];
+        let mut mask = vec![false; length];
+
+        if let Ok(data) = read_memory_bytes(pid, start_address, length) {
+            if data.len() == length {
+                return (data, vec![true; length]);
+            }
+            for (i, b) in data.iter().enumerate() {
+                bytes[i] = *b;
+                mask[i] = true;
+            }
+        }
+
+        let chunk_size = 64;
+        for offset in (0..length).step_by(chunk_size) {
+            if mask[offset] {
+                continue;
+            }
+            let chunk_len = chunk_size.min(length - offset);
+            let chunk_addr = start_address.wrapping_add(offset);
+            if let Ok(chunk_data) = read_memory_bytes(pid, chunk_addr, chunk_len) {
+                for (i, b) in chunk_data.iter().enumerate() {
+                    if offset + i < length {
+                        bytes[offset + i] = *b;
+                        mask[offset + i] = true;
+                    }
+                }
+            }
+        }
+        (bytes, mask)
     }
 
     fn render_memory_address_dialog(&mut self, ctx: &egui::Context) {
