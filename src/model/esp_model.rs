@@ -396,48 +396,38 @@ pub(crate) fn entity_hits_in_capture_order_progress(
 ) -> (Vec<usize>, usize) {
     let required = required.max(1) as usize;
     let hit_step = hit_step.max(1) as usize;
-    if hit_step == 1 {
-        let mut raw_unique = Vec::with_capacity(hits.len());
-        for &address in hits {
-            if address != 0 && !raw_unique.contains(&address) {
-                raw_unique.push(address);
-            }
+    let mut raw_unique = Vec::with_capacity(hits.len());
+    for &address in hits {
+        if address != 0 && !raw_unique.contains(&address) {
+            raw_unique.push(address);
         }
+    }
+    if raw_unique.is_empty() {
+        return (Vec::new(), 0);
+    }
+    if hit_step == 1 {
         let count = raw_unique.len().min(required);
         let selected = raw_unique.into_iter().take(required).collect::<Vec<_>>();
         return (selected, count);
     }
+    let cluster_size = hit_step.min(raw_unique.len());
+    let min_offset = raw_unique[0..cluster_size]
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, addr)| *addr)
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
 
-    // When hit_step >= 2 (paired min/max hits per entity, e.g. AABB pair at delta 12 bytes):
-    // Group addresses that are within 16 bytes of each other as the same entity,
-    // and always record the minimum address (min AABB) as the entity base.
-    const PAIR_DELTA_THRESHOLD: usize = 16;
-    let mut entities: Vec<usize> = Vec::new();
-    for &address in hits {
-        if address == 0 {
-            continue;
+    let mut selected = Vec::with_capacity(required);
+    let mut idx = min_offset;
+    while idx < raw_unique.len() {
+        selected.push(raw_unique[idx]);
+        if selected.len() == required {
+            break;
         }
-        let mut found = false;
-        for base in entities.iter_mut() {
-            let diff = if address >= *base {
-                address - *base
-            } else {
-                *base - address
-            };
-            if diff <= PAIR_DELTA_THRESHOLD {
-                if address < *base {
-                    *base = address;
-                }
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            entities.push(address);
-        }
+        idx += hit_step;
     }
-    let count = entities.len().min(required);
-    let selected = entities.into_iter().take(required).collect::<Vec<_>>();
+    let count = selected.len();
     (selected, count)
 }
 
