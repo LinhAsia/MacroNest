@@ -26745,6 +26745,15 @@ mod windows_overlay {
         }
     }
 
+    pub(crate) fn evaluate_esp_expression_float(
+        pid: u32,
+        expression: &str,
+        value_type: crate::model::MemoryValueType,
+    ) -> Option<f32> {
+        let mut frame = EspReadFrame::default();
+        frame.read_value(pid, expression, value_type).ok()
+    }
+
     fn esp_value_type_tag(value_type: crate::model::MemoryValueType) -> u8 {
         match value_type {
             crate::model::MemoryValueType::I8 => 0,

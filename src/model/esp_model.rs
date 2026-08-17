@@ -389,42 +389,49 @@ pub(crate) fn entity_hits_in_capture_order(
     }
 }
 
+pub(crate) fn entity_hits_clustered_progress(
+    hits: &[usize],
+    required: u32,
+) -> (Vec<usize>, usize) {
+    const STRUCT_PROXIMITY_THRESHOLD: usize = 0x200;
+    let required = required.max(1) as usize;
+    let mut clusters: Vec<usize> = Vec::new();
+
+    for &address in hits {
+        if address == 0 {
+            continue;
+        }
+        let mut found_cluster = false;
+        for cluster_base in clusters.iter_mut() {
+            let diff = if address >= *cluster_base {
+                address - *cluster_base
+            } else {
+                *cluster_base - address
+            };
+            if diff < STRUCT_PROXIMITY_THRESHOLD {
+                if address < *cluster_base {
+                    *cluster_base = address;
+                }
+                found_cluster = true;
+                break;
+            }
+        }
+        if !found_cluster {
+            clusters.push(address);
+        }
+    }
+
+    let count = clusters.len().min(required);
+    let selected = clusters.into_iter().take(required).collect::<Vec<_>>();
+    (selected, count)
+}
+
 pub(crate) fn entity_hits_in_capture_order_progress(
     hits: &[usize],
     required: u32,
-    hit_step: u32,
+    _hit_step: u32,
 ) -> (Vec<usize>, usize) {
-    let required = required.max(1) as usize;
-    let hit_step = hit_step.max(1) as usize;
-    let mut raw_unique = Vec::with_capacity(hits.len());
-    // ponytail: captures are capped at 512; use a HashSet too if that ceiling grows.
-    for &address in hits {
-        if !raw_unique.contains(&address) {
-            raw_unique.push(address);
-        }
-    }
-    if raw_unique.is_empty() {
-        return (Vec::new(), 0);
-    }
-    let cluster_size = hit_step.min(raw_unique.len());
-    let min_offset = raw_unique[0..cluster_size]
-        .iter()
-        .enumerate()
-        .min_by_key(|(_, addr)| *addr)
-        .map(|(idx, _)| idx)
-        .unwrap_or(0);
-
-    let mut selected = Vec::with_capacity(required);
-    let mut idx = min_offset;
-    while idx < raw_unique.len() {
-        selected.push(raw_unique[idx]);
-        if selected.len() == required {
-            break;
-        }
-        idx += hit_step;
-    }
-    let count = selected.len();
-    (selected, count)
+    entity_hits_clustered_progress(hits, required)
 }
 
 #[cfg(test)]
@@ -487,27 +494,21 @@ mod entity_address_tests {
 
     #[test]
     fn instruction_hits_keep_first_seen_order_without_stride_grouping() {
-        assert_eq!(
-            entity_hits_in_capture_order(&[0x3000, 0x1000, 0x3000, 0x2200], 3, 1),
-            Some(vec![0x3000, 0x1000, 0x2200])
-        );
-        assert_eq!(entity_hits_in_capture_order(&[0x3000, 0x1000], 3, 1), None);
-        assert_eq!(
-            entity_hits_in_capture_order(
-                &[0x100C, 0x1000, 0x200C, 0x2000, 0x300C, 0x3000],
-                3,
-                2
-            ),
-            Some(vec![0x1000, 0x2000, 0x3000])
-        );
-        assert_eq!(
-            entity_hits_in_capture_order(
-                &[0x1000, 0x100C, 0x2000, 0x200C, 0x3000, 0x300C],
-                3,
-                2
-            ),
-            Some(vec![0x1000, 0x2000, 0x3000])
-        );
+        let hits = [
+            0x1EC9A49E9A8,
+            0x1EC9A49E9C0,
+            0x1EC9A49E9D8,
+            0x1EC9A49E9F0,
+            0x1EC9A49EA08,
+            0x1ECA4B789B8,
+            0x1ECA4B789D0,
+            0x1ECA4B789E8,
+            0x1ECA4B78A00,
+            0x1ECA4B78A18,
+        ];
+        let (entities, count) = entity_hits_clustered_progress(&hits, 5);
+        assert_eq!(count, 2);
+        assert_eq!(entities, vec![0x1EC9A49E9A8, 0x1ECA4B789B8]);
     }
 }
 

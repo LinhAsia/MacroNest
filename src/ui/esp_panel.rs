@@ -150,19 +150,22 @@ impl CrosshairApp {
             pid,
             instruction_address,
             self.state.memory_debugger_architecture,
-            if hit_order {
-                required.saturating_mul(hit_step).max(required)
-            } else {
-                // ponytail: bound menu/loading noise; raise this cap if a game legitimately
-                // touches more unique entity addresses before the wanted group appears.
-                ESP_ENTITY_ROOT_CAPTURE_LIMIT
-            },
+            ESP_ENTITY_ROOT_CAPTURE_LIMIT,
             move |event| {
                 let _ = tx.send(event);
             },
         );
         match started {
             Ok(active) => {
+                if let Some(preset) = self
+                    .state
+                    .esp_presets
+                    .iter_mut()
+                    .find(|preset| preset.id == preset_id)
+                {
+                    preset.entity_hit_order_addresses.clear();
+                }
+                self.persist_esp_presets();
                 self.esp_entity_root_capture = Some(EspEntityRootCapture {
                     preset_id,
                     pid,
@@ -170,11 +173,7 @@ impl CrosshairApp {
                     hit_order,
                     hit_step,
                     drop_nearest,
-                    addresses: Vec::with_capacity(if hit_order {
-                        required.saturating_mul(hit_step)
-                    } else {
-                        required
-                    }),
+                    addresses: Vec::with_capacity(128),
                     rx,
                     active: Some(active),
                     hud_preset_id,
@@ -1560,9 +1559,9 @@ fn find_nearest_entity_index(
     if addresses.is_empty() {
         return None;
     }
-    let cam_x = read_esp_coordinate_expression(pid, &preset.camera_x, preset.value_type)?;
-    let cam_y = read_esp_coordinate_expression(pid, &preset.camera_y, preset.value_type)?;
-    let cam_z = read_esp_coordinate_expression(pid, &preset.camera_z, preset.value_type)?;
+    let cam_x = crate::overlay::evaluate_esp_expression_float(pid, &preset.camera_x, preset.value_type)?;
+    let cam_y = crate::overlay::evaluate_esp_expression_float(pid, &preset.camera_y, preset.value_type)?;
+    let cam_z = crate::overlay::evaluate_esp_expression_float(pid, &preset.camera_z, preset.value_type)?;
 
     let mut min_dist_sq = f32::MAX;
     let mut min_index = None;
@@ -1621,100 +1620,6 @@ fn find_nearest_entity_index(
     }
 
     min_index
-}
-
-#[cfg(windows)]
-fn read_esp_coordinate_expression(
-    pid: u32,
-    expression: &str,
-    value_type: crate::model::MemoryValueType,
-) -> Option<f32> {
-    let expr = expression.trim();
-    if expr.is_empty() {
-        return None;
-    }
-    if let Ok(val) = expr.parse::<f32>() {
-        return Some(val);
-    }
-    let address = resolve_esp_expression_address(pid, expr)?;
-    read_esp_f32_from_address(pid, address, value_type)
-}
-
-#[cfg(windows)]
-fn resolve_esp_expression_address(pid: u32, expression: &str) -> Option<usize> {
-    let expr = expression.trim();
-    if expr.is_empty() {
-        return None;
-    }
-    if let Some((module, module_offset, offsets)) = parse_esp_pointer_expression(expr) {
-        let base = crate::memory_debugger::debugger::resolve_module_offset(pid, &module, module_offset).ok()?;
-        return resolve_esp_pointer_chain(pid, base, &offsets);
-    }
-    if let Some((module, offset_str)) = expr.rsplit_once('+') {
-        let module = module.trim();
-        if let Some(offset) = parse_esp_hex_offset(offset_str) {
-            if let Ok(addr) = crate::memory_debugger::debugger::resolve_module_offset(pid, module, offset) {
-                return Some(addr);
-            }
-        }
-    }
-    parse_esp_memory_address(expr)
-}
-
-#[cfg(windows)]
-fn resolve_esp_pointer_chain(pid: u32, mut address: usize, offsets: &[usize]) -> Option<usize> {
-    let pointer_width = 8;
-    for (i, &offset) in offsets.iter().enumerate() {
-        if i + 1 == offsets.len() {
-            return address.checked_add(offset);
-        }
-        let bytes = crate::process_memory::read_memory_bytes(pid, address.checked_add(offset)?, pointer_width).ok()?;
-        address = usize::from_le_bytes(bytes.get(0..8)?.try_into().ok()?);
-        if address == 0 {
-            return None;
-        }
-    }
-    Some(address)
-}
-
-#[cfg(windows)]
-fn parse_esp_hex_offset(text: &str) -> Option<usize> {
-    let text = text.trim();
-    let text = text
-        .strip_prefix("0x")
-        .or_else(|| text.strip_prefix("0X"))
-        .unwrap_or(text);
-    usize::from_str_radix(text, 16).ok()
-}
-
-#[cfg(windows)]
-fn parse_esp_pointer_expression(text: &str) -> Option<(String, usize, Vec<usize>)> {
-    let text = text.trim();
-    let offsets_start = text.rfind('[')?;
-    let offsets_text = text.get(offsets_start + 1..)?.strip_suffix(']')?;
-    let (module, module_offset) = text[..offsets_start].trim().rsplit_once('+')?;
-    let module = module.trim();
-    if module.is_empty() {
-        return None;
-    }
-    let offsets = offsets_text
-        .split([',', ';'])
-        .map(parse_esp_hex_offset)
-        .collect::<Option<Vec<_>>>()?;
-    if offsets.is_empty() {
-        return None;
-    }
-    Some((module.to_owned(), parse_esp_hex_offset(module_offset)?, offsets))
-}
-
-#[cfg(windows)]
-fn parse_esp_memory_address(text: &str) -> Option<usize> {
-    let compact = text.trim().replace([' ', '_'], "");
-    let digits = compact
-        .strip_prefix("0x")
-        .or_else(|| compact.strip_prefix("0X"))
-        .unwrap_or(&compact);
-    usize::from_str_radix(digits, 16).ok()
 }
 
 #[cfg(windows)]
