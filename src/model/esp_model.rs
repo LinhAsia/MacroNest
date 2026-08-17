@@ -81,6 +81,8 @@ pub struct EspPreset {
     pub entity_auto_hit_order: bool,
     #[serde(default = "default_entity_auto_hit_step")]
     pub entity_auto_hit_step: u32,
+    #[serde(default)]
+    pub entity_hit_order_drop_nearest: bool,
     pub entity_hit_order_addresses: Vec<usize>,
     pub entity_auto_hud_enabled: bool,
     pub entity_auto_hud_preset_id: Option<u32>,
@@ -190,6 +192,7 @@ impl EspPreset {
             entity_auto_capture_count: 5,
             entity_auto_hit_order: false,
             entity_auto_hit_step: 2,
+            entity_hit_order_drop_nearest: false,
             entity_hit_order_addresses: Vec::new(),
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,

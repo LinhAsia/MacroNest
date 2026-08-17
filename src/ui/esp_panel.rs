@@ -16,9 +16,11 @@ use crate::memory_debugger::debugger::{
 #[cfg(windows)]
 pub(super) struct EspEntityRootCapture {
     pub(super) preset_id: u32,
+    pid: u32,
     required: usize,
     hit_order: bool,
     hit_step: usize,
+    drop_nearest: bool,
     addresses: Vec<usize>,
     rx: std::sync::mpsc::Receiver<WatchEvent>,
     active: Option<AccessWatch>,
@@ -142,6 +144,7 @@ impl CrosshairApp {
         let required = preset.entity_auto_capture_count.clamp(1, 512) as usize;
         let hit_order = preset.entity_auto_hit_order;
         let hit_step = preset.entity_auto_hit_step.clamp(1, 32) as usize;
+        let drop_nearest = preset.entity_hit_order_drop_nearest;
         let (tx, rx) = std::sync::mpsc::channel();
         let started = AccessWatch::start_unique(
             pid,
@@ -162,9 +165,11 @@ impl CrosshairApp {
             Ok(active) => {
                 self.esp_entity_root_capture = Some(EspEntityRootCapture {
                     preset_id,
+                    pid,
                     required,
                     hit_order,
                     hit_step,
+                    drop_nearest,
                     addresses: Vec::with_capacity(if hit_order {
                         required.saturating_mul(hit_step)
                     } else {
@@ -311,9 +316,27 @@ impl CrosshairApp {
                 active.stop();
             }
             if capture.hit_order {
-                let final_addresses = ordered
+                let mut final_addresses = ordered
                     .or(filtered_hit_order)
                     .unwrap_or_default();
+                let mut dropped_self = false;
+                if capture.drop_nearest && final_addresses.len() > 1 {
+                    if let Some(preset) = self
+                        .state
+                        .esp_presets
+                        .iter()
+                        .find(|p| p.id == capture.preset_id)
+                    {
+                        if let Some(dropped_idx) = find_nearest_entity_index(
+                            capture.pid,
+                            preset,
+                            &final_addresses,
+                        ) {
+                            final_addresses.remove(dropped_idx);
+                            dropped_self = true;
+                        }
+                    }
+                }
                 if let Some(preset) = self
                     .state
                     .esp_presets
@@ -323,17 +346,34 @@ impl CrosshairApp {
                     if let Some(first_addr) = final_addresses.first() {
                         preset.entity_root = format!("0x{first_addr:X}");
                     }
+                    preset.entity_count = final_addresses.len() as u32;
                     preset.entity_hit_order_addresses = final_addresses;
-                    preset.entity_count = capture.required as u32;
                     preset.entity_list_enabled = true;
                 }
-                self.esp_entity_capture_feedback.insert(
-                    capture.preset_id,
-                    format!("Captured {} entities in hit order", capture.required),
-                );
+                let feedback_msg = if dropped_self {
+                    format!(
+                        "Captured {} entities (dropped nearest self -> {} remaining)",
+                        capture.required,
+                        capture.required.saturating_sub(1)
+                    )
+                } else {
+                    format!("Captured {} entities in hit order", capture.required)
+                };
+                self.esp_entity_capture_feedback
+                    .insert(capture.preset_id, feedback_msg);
                 self.show_esp_entity_capture_hud(
                     capture.hud_preset_id,
-                    format!("Entity scan {}/{} - order saved", capture.required, capture.required),
+                    if dropped_self {
+                        format!(
+                            "Entity scan {}/{} - self removed",
+                            capture.required, capture.required
+                        )
+                    } else {
+                        format!(
+                            "Entity scan {}/{} - order saved",
+                            capture.required, capture.required
+                        )
+                    },
                 );
             } else if let Some(root) = candidate {
                 if let Some(preset) = self
@@ -719,6 +759,13 @@ impl CrosshairApp {
                                     )
                                     .on_hover_text(
                                         "Number of address hits per entity (e.g. 2 for AABB min/max pair). Automatically selects the smaller base address in each pair (even or odd index).",
+                                    );
+                                    ui.checkbox(
+                                        &mut preset.entity_hit_order_drop_nearest,
+                                        "Drop self",
+                                    )
+                                    .on_hover_text(
+                                        "After capturing all N entities, remove the entity with the smallest distance to camera (local player).",
                                     );
                                 }
                                 ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
@@ -1502,4 +1549,203 @@ fn angle_unit(ui: &mut egui::Ui, label: &str, id: u32, unit: &mut EspAngleUnit) 
             ui.selectable_value(unit, EspAngleUnit::Degrees, "Degrees");
             ui.selectable_value(unit, EspAngleUnit::Radians, "Radians");
         });
+}
+
+#[cfg(windows)]
+fn find_nearest_entity_index(
+    pid: u32,
+    preset: &crate::model::EspPreset,
+    addresses: &[usize],
+) -> Option<usize> {
+    if addresses.is_empty() {
+        return None;
+    }
+    let cam_x = read_esp_coordinate_expression(pid, &preset.camera_x, preset.value_type)?;
+    let cam_y = read_esp_coordinate_expression(pid, &preset.camera_y, preset.value_type)?;
+    let cam_z = read_esp_coordinate_expression(pid, &preset.camera_z, preset.value_type)?;
+
+    let mut min_dist_sq = f32::MAX;
+    let mut min_index = None;
+
+    for (index, &entity_address) in addresses.iter().enumerate() {
+        let Some(x_address) =
+            crate::model::entity_field_address(entity_address, 0, 1, preset.entity_x_offset)
+        else {
+            continue;
+        };
+        let Some(y_address) =
+            crate::model::entity_field_address(entity_address, 0, 1, preset.entity_y_offset)
+        else {
+            continue;
+        };
+        let Some(z_address) =
+            crate::model::entity_field_address(entity_address, 0, 1, preset.entity_z_offset)
+        else {
+            continue;
+        };
+
+        let mut read_comp = |addr: usize| -> Option<f32> {
+            let first = read_esp_f32_from_address(pid, addr, preset.value_type)?;
+            if !preset.entity_aabb_center {
+                return Some(first);
+            }
+            let second_addr = crate::model::entity_field_address(
+                addr,
+                0,
+                1,
+                preset.entity_aabb_pair_offset,
+            )?;
+            let second = read_esp_f32_from_address(pid, second_addr, preset.value_type)?;
+            Some(crate::model::aabb_center_component(first, second))
+        };
+
+        let Some(x) = read_comp(x_address) else {
+            continue;
+        };
+        let Some(y) = read_comp(y_address) else {
+            continue;
+        };
+        let Some(z) = read_comp(z_address) else {
+            continue;
+        };
+
+        let dx = x - cam_x;
+        let dy = y - cam_y;
+        let dz = z - cam_z;
+        let dist_sq = dx * dx + dy * dy + dz * dz;
+
+        if dist_sq < min_dist_sq {
+            min_dist_sq = dist_sq;
+            min_index = Some(index);
+        }
+    }
+
+    min_index
+}
+
+#[cfg(windows)]
+fn read_esp_coordinate_expression(
+    pid: u32,
+    expression: &str,
+    value_type: crate::model::MemoryValueType,
+) -> Option<f32> {
+    let expr = expression.trim();
+    if expr.is_empty() {
+        return None;
+    }
+    if let Ok(val) = expr.parse::<f32>() {
+        return Some(val);
+    }
+    let address = resolve_esp_expression_address(pid, expr)?;
+    read_esp_f32_from_address(pid, address, value_type)
+}
+
+#[cfg(windows)]
+fn resolve_esp_expression_address(pid: u32, expression: &str) -> Option<usize> {
+    let expr = expression.trim();
+    if expr.is_empty() {
+        return None;
+    }
+    if let Some((module, module_offset, offsets)) = parse_esp_pointer_expression(expr) {
+        let base = crate::memory_debugger::debugger::resolve_module_offset(pid, &module, module_offset).ok()?;
+        return resolve_esp_pointer_chain(pid, base, &offsets);
+    }
+    if let Some((module, offset_str)) = expr.rsplit_once('+') {
+        let module = module.trim();
+        if let Some(offset) = parse_esp_hex_offset(offset_str) {
+            if let Ok(addr) = crate::memory_debugger::debugger::resolve_module_offset(pid, module, offset) {
+                return Some(addr);
+            }
+        }
+    }
+    parse_esp_memory_address(expr)
+}
+
+#[cfg(windows)]
+fn resolve_esp_pointer_chain(pid: u32, mut address: usize, offsets: &[usize]) -> Option<usize> {
+    let pointer_width = 8;
+    for (i, &offset) in offsets.iter().enumerate() {
+        if i + 1 == offsets.len() {
+            return address.checked_add(offset);
+        }
+        let bytes = crate::process_memory::read_memory_bytes(pid, address.checked_add(offset)?, pointer_width).ok()?;
+        address = usize::from_le_bytes(bytes.get(0..8)?.try_into().ok()?);
+        if address == 0 {
+            return None;
+        }
+    }
+    Some(address)
+}
+
+#[cfg(windows)]
+fn parse_esp_hex_offset(text: &str) -> Option<usize> {
+    let text = text.trim();
+    let text = text
+        .strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .unwrap_or(text);
+    usize::from_str_radix(text, 16).ok()
+}
+
+#[cfg(windows)]
+fn parse_esp_pointer_expression(text: &str) -> Option<(String, usize, Vec<usize>)> {
+    let text = text.trim();
+    let offsets_start = text.rfind('[')?;
+    let offsets_text = text.get(offsets_start + 1..)?.strip_suffix(']')?;
+    let (module, module_offset) = text[..offsets_start].trim().rsplit_once('+')?;
+    let module = module.trim();
+    if module.is_empty() {
+        return None;
+    }
+    let offsets = offsets_text
+        .split([',', ';'])
+        .map(parse_esp_hex_offset)
+        .collect::<Option<Vec<_>>>()?;
+    if offsets.is_empty() {
+        return None;
+    }
+    Some((module.to_owned(), parse_esp_hex_offset(module_offset)?, offsets))
+}
+
+#[cfg(windows)]
+fn parse_esp_memory_address(text: &str) -> Option<usize> {
+    let compact = text.trim().replace([' ', '_'], "");
+    let digits = compact
+        .strip_prefix("0x")
+        .or_else(|| compact.strip_prefix("0X"))
+        .unwrap_or(&compact);
+    usize::from_str_radix(digits, 16).ok()
+}
+
+#[cfg(windows)]
+fn read_esp_f32_from_address(
+    pid: u32,
+    address: usize,
+    value_type: crate::model::MemoryValueType,
+) -> Option<f32> {
+    let width = match value_type {
+        crate::model::MemoryValueType::I8 => 1,
+        crate::model::MemoryValueType::I16 => 2,
+        crate::model::MemoryValueType::I32 | crate::model::MemoryValueType::F32 => 4,
+        crate::model::MemoryValueType::I64 | crate::model::MemoryValueType::F64 => 8,
+    };
+    let bytes = crate::process_memory::read_memory_bytes(pid, address, width).ok()?;
+    match value_type {
+        crate::model::MemoryValueType::I8 => bytes.first().map(|&b| b as i8 as f32),
+        crate::model::MemoryValueType::I16 => {
+            bytes.get(0..2).and_then(|b| b.try_into().ok()).map(|b| i16::from_le_bytes(b) as f32)
+        }
+        crate::model::MemoryValueType::I32 => {
+            bytes.get(0..4).and_then(|b| b.try_into().ok()).map(|b| i32::from_le_bytes(b) as f32)
+        }
+        crate::model::MemoryValueType::F32 => {
+            bytes.get(0..4).and_then(|b| b.try_into().ok()).map(f32::from_le_bytes)
+        }
+        crate::model::MemoryValueType::I64 => {
+            bytes.get(0..8).and_then(|b| b.try_into().ok()).map(|b| i64::from_le_bytes(b) as f32)
+        }
+        crate::model::MemoryValueType::F64 => {
+            bytes.get(0..8).and_then(|b| b.try_into().ok()).map(|b| f64::from_le_bytes(b) as f32)
+        }
+    }
 }
