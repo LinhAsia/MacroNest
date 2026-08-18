@@ -381,20 +381,6 @@ impl CrosshairApp {
                 };
                 self.esp_entity_capture_feedback
                     .insert(capture.preset_id, feedback_msg);
-                self.show_esp_entity_capture_hud(
-                    capture.hud_preset_id,
-                    if dropped_self {
-                        format!(
-                            "Entity scan {}/{} - self removed",
-                            capture.required, capture.required
-                        )
-                    } else {
-                        format!(
-                            "Entity scan {}/{} - order saved",
-                            capture.required, capture.required
-                        )
-                    },
-                );
             } else if let Some(root) = candidate {
                 if let Some(preset) = self
                     .state
@@ -409,14 +395,12 @@ impl CrosshairApp {
                     capture.preset_id,
                     format!("Root updated: 0x{root:X} ({}/{})", capture.required, capture.required),
                 );
-                self.show_esp_entity_capture_hud(
-                    capture.hud_preset_id,
-                    format!("Entity scan {}/{} - root found", capture.required, capture.required),
-                );
             }
             if capture.hud_preset_id.is_some() {
-                self.esp_entity_capture_hud_hide_at =
-                    Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+                self.esp_entity_capture_hud_hide_at = None;
+                let _ = self
+                    .overlay_tx
+                    .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
             }
             self.persist_esp_presets();
             ctx.request_repaint();
