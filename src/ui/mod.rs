@@ -375,7 +375,7 @@ pub(crate) struct PersistSnapshot {
     state: AppState,
 }
 
-fn spawn_persist_worker(paths: AppPaths, ui_tx: Sender<UiCommand>) -> Sender<PersistSnapshot> {
+pub(crate) fn spawn_persist_worker(paths: AppPaths, ui_tx: Sender<UiCommand>) -> Sender<PersistSnapshot> {
     let (tx, rx) = crossbeam_channel::unbounded::<PersistSnapshot>();
     std::thread::spawn(move || {
         while let Ok(mut snapshot) = rx.recv() {
@@ -893,6 +893,7 @@ pub struct CrosshairApp {
     arduino_flash_progress: Arc<parking_lot::Mutex<Option<String>>>,
     interception_installed: bool,
     copy_folder_feedback_until: Option<Instant>,
+    pub(crate) reset_folder_feedback_until: Option<Instant>,
     macro_group_export_feedback_until: Option<Instant>,
     macro_group_export_feedback_target: Option<u32>,
     macro_preset_export_feedback_until: Option<Instant>,
@@ -1248,6 +1249,7 @@ impl CrosshairApp {
             arduino_flash_progress: Arc::new(parking_lot::Mutex::new(None)),
             interception_installed: false, // will update below
             copy_folder_feedback_until: None,
+            reset_folder_feedback_until: None,
             macro_group_export_feedback_until: None,
             macro_group_export_feedback_target: None,
             macro_preset_export_feedback_until: None,
@@ -3924,6 +3926,8 @@ impl CrosshairApp {
         preset: &mut MacroPreset,
         capture_target: Option<&CaptureRequest>,
         capture_hotkey_combo_keys: Option<&Vec<String>>,
+        next_capture_target: &mut Option<CaptureRequest>,
+        cancel_active_capture: &mut bool,
     ) -> bool {
         if preset.trigger_mode == MacroTriggerMode::WindowFocus {
             let target = preset
@@ -3938,8 +3942,35 @@ impl CrosshairApp {
         }
 
         let bindings = Self::macro_trigger_bindings(preset);
+        let this_capture_target = CaptureRequest::MacroPresetHotkey(group_id, preset.id);
+        let is_capturing = capture_target == Some(&this_capture_target);
+
         if bindings.is_empty() {
-            ui.label(Self::tr_lang(language, "Not set", "Not set"));
+            let hint_btn = if is_capturing {
+                ui.add(
+                    Button::new(Self::capture_button_text(language, true))
+                        .min_size(vec2(0.0, 22.0))
+                        .fill(Color32::from_rgba_premultiplied(72, 156, 116, 120))
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(126, 224, 182))),
+                )
+            } else {
+                ui.add(
+                    Button::new(RichText::new(Self::tr_lang(language, "+ Set key", "+ Đặt phím")).weak())
+                        .min_size(vec2(0.0, 22.0)),
+                )
+            };
+            let hint_response = hint_btn.on_hover_text(Self::tr_lang(
+                language,
+                "Click to set trigger key for this macro",
+                "Nhấn để đặt phím kích hoạt cho macro này",
+            ));
+            if hint_response.clicked() {
+                if is_capturing {
+                    *cancel_active_capture = true;
+                } else {
+                    *next_capture_target = Some(this_capture_target.clone());
+                }
+            }
         } else {
             let mut remove_binding = None;
             ui.horizontal_wrapped(|ui| {
@@ -3966,10 +3997,7 @@ impl CrosshairApp {
             }
         }
 
-        if let Some(CaptureRequest::MacroPresetHotkey(capture_group_id, capture_preset_id)) =
-            capture_target
-            && *capture_group_id == group_id
-            && *capture_preset_id == preset.id
+        if is_capturing
             && let Some(pending) = capture_hotkey_combo_keys
         {
             let preview = Self::hotkey_binding_from_combo_keys(pending.clone());

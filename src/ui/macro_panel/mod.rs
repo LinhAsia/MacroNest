@@ -6855,6 +6855,8 @@ impl CrosshairApp {
                                                             preset,
                                                             capture_target_snapshot.as_ref(),
                                                             capture_hotkey_combo_keys_snapshot.as_ref(),
+                                                            &mut next_capture_target,
+                                                            &mut cancel_active_capture,
                                                         );
                                                     }
                                                     if !preset.collapsed && !referenced_vars.is_empty() {

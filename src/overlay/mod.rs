@@ -1812,6 +1812,7 @@ mod windows_overlay {
 
     #[derive(Debug, Clone)]
     pub enum OverlayCommand {
+        UpdatePaths(AppPaths),
         Update(CrosshairStyle),
         UpdateProfiles(Vec<ProfileRecord>),
         UpdateCrosshairProfile {
@@ -9992,6 +9993,14 @@ mod windows_overlay {
                 OverlayCommand::UpdateWindowLayouts(layouts) => {
                     runtime.window_layouts = layouts;
                     let _ = sync_window_hotkeys(hwnd, runtime);
+                }
+
+                OverlayCommand::UpdatePaths(new_paths) => {
+                    runtime.paths = new_paths.clone();
+                    let mut hook_state = HOOK_STATE.lock();
+                    hook_state.vision_dir = new_paths.vision_dir.clone();
+                    hook_state.opencv_dll_path = new_paths.opencv_dll.clone();
+                    hook_state.interception_dll_path = new_paths.interception_dll.clone();
                 }
 
                 OverlayCommand::ApplyWindowLayout(layout) => {
@@ -40254,6 +40263,7 @@ mod fallback {
 
     #[derive(Debug, Clone)]
     pub enum OverlayCommand {
+        UpdatePaths(AppPaths),
         Update(CrosshairStyle),
         UpdateProfiles(Vec<ProfileRecord>),
         UpdateCrosshairProfile {

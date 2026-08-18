@@ -427,32 +427,71 @@ impl CrosshairApp {
                                         if let Err(e) = crate::storage::AppPaths::set_custom_data_root(Some(&folder)) {
                                             self.status = format!("Failed to set data folder: {e}");
                                         } else {
-                                            self.status = format!(
-                                                "{}: {}. {}",
-                                                Self::tr_lang(language, "Data folder changed to", "Đã đổi thư mục dữ liệu sang"),
-                                                folder.display(),
-                                                Self::tr_lang(language, "Please restart MacroNest to apply.", "Vui lòng khởi động lại MacroNest để áp dụng.")
-                                            );
+                                            match crate::storage::AppPaths::from_root(folder.clone()) {
+                                                Ok(new_paths) => {
+                                                    if let Err(e) = self.switch_active_data_folder(ui.ctx(), new_paths) {
+                                                        self.status = format!("Failed to switch data folder: {e}");
+                                                    } else {
+                                                        self.status = format!(
+                                                            "{}: {}",
+                                                            Self::tr_lang(language, "Data folder changed to", "Đã đổi thư mục dữ liệu sang"),
+                                                            folder.display(),
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    self.status = format!("Failed to resolve new data paths: {e}");
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                                if self.paths.is_custom_root() {
+                                let is_reset = self
+                                    .reset_folder_feedback_until
+                                    .map(|until| Instant::now() < until)
+                                    .unwrap_or(false);
+                                if self.paths.is_custom_root() || is_reset {
                                     ui.add_space(6.0);
-                                    if Self::settings_action_button(
-                                        ui,
-                                        Self::tr_lang(language, "Reset default", "Đặt lại mặc định"),
-                                    )
-                                    .clicked()
-                                    {
+                                    let reset_label = if is_reset {
+                                        Self::tr_lang(language, "Reset!", "Đã đặt lại!")
+                                    } else {
+                                        Self::tr_lang(language, "Reset default", "Đặt lại mặc định")
+                                    };
+
+                                    let reset_btn = if is_reset {
+                                        ui.add(
+                                            Button::new(RichText::new(reset_label).strong())
+                                                .min_size(egui::vec2(0.0, 24.0))
+                                                .fill(Color32::from_rgba_premultiplied(72, 156, 116, 140))
+                                                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(126, 224, 182))),
+                                        )
+                                    } else {
+                                        Self::settings_action_button(ui, reset_label)
+                                    };
+
+                                    if reset_btn.clicked() {
                                         if let Err(e) = crate::storage::AppPaths::set_custom_data_root(None) {
                                             self.status = format!("Failed to reset data folder: {e}");
                                         } else {
-                                            self.status = Self::tr_lang(
-                                                language,
-                                                "Data folder reset to default. Please restart MacroNest to apply.",
-                                                "Đã đặt lại thư mục dữ liệu về mặc định. Vui lòng khởi động lại MacroNest để áp dụng.",
-                                            )
-                                            .to_owned();
+                                            match crate::storage::AppPaths::default_root().and_then(crate::storage::AppPaths::from_root) {
+                                                Ok(default_paths) => {
+                                                    if let Err(e) = self.switch_active_data_folder(ui.ctx(), default_paths) {
+                                                        self.status = format!("Failed to switch to default folder: {e}");
+                                                    } else {
+                                                        self.reset_folder_feedback_until =
+                                                            Some(Instant::now() + Duration::from_secs(2));
+                                                        self.status = Self::tr_lang(
+                                                            language,
+                                                            "Data folder reset to default.",
+                                                            "Đã đặt lại thư mục dữ liệu về mặc định.",
+                                                        )
+                                                        .to_owned();
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    self.status = format!("Failed to resolve default data paths: {e}");
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -2315,5 +2354,72 @@ impl CrosshairApp {
                 self.status = format!("Failed to open data folder: {error}");
             }
         }
+    }
+
+    pub(crate) fn switch_active_data_folder(
+        &mut self,
+        ctx: &egui::Context,
+        new_paths: crate::storage::AppPaths,
+    ) -> anyhow::Result<()> {
+        let _ = self.paths.save_profiles(&self.state.profiles);
+        let _ = self.paths.save_state(&self.state);
+
+        self.paths = new_paths.clone();
+        let _ = self.paths.ensure_dirs_and_assets();
+
+        self.persist_tx = crate::ui::spawn_persist_worker(self.paths.clone(), self.ui_tx.clone());
+
+        let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::UpdatePaths(self.paths.clone()));
+
+        let (mut loaded_state, state_dirty) = match self.paths.load_state() {
+            Ok((s, _)) => (s, false),
+            Err(_) => (AppState::default(), true),
+        };
+        if let Ok(profiles) = self.paths.load_profiles() {
+            loaded_state.profiles = profiles;
+        }
+        let needs_cjk = std::fs::read_to_string(&self.paths.state_file)
+            .map(|json| crate::ui::text_has_cjk(&json))
+            .unwrap_or(false);
+
+        self.last_synced_profiles = None;
+        self.last_synced_audio_settings = None;
+        self.last_synced_groq_settings = None;
+        self.last_synced_vision_settings = None;
+        self.last_synced_macro_groups = None;
+        self.last_synced_window_presets = None;
+        self.last_synced_window_focus_presets = None;
+        self.last_synced_pin_presets = None;
+        self.last_synced_mouse_path_presets = None;
+        self.last_synced_window_layouts = None;
+        self.last_synced_vision_presets = None;
+        self.last_synced_ocr_presets = None;
+        self.last_synced_hud_presets = None;
+        self.last_synced_command_presets = None;
+        self.last_synced_timer_presets = None;
+        self.last_synced_audio_sense_presets = None;
+        self.last_synced_geometry_presets = None;
+        self.last_synced_esp_presets = None;
+        self.last_synced_mouse_sensitivity_presets = None;
+
+        self.apply_loaded_startup_state(ctx, loaded_state, state_dirty, needs_cjk);
+
+        self.persist_after_syncs([
+            Self::sync_profiles,
+            Self::sync_window_presets,
+            Self::sync_window_layouts,
+            Self::sync_mouse_sensitivity_presets,
+            Self::sync_hud_presets,
+            Self::sync_command_presets,
+            Self::sync_vision_presets,
+            Self::sync_ocr_presets,
+            Self::sync_geometry_presets,
+            Self::sync_audio_sense_presets,
+            Self::sync_timer_presets,
+            Self::sync_esp_presets,
+            Self::sync_reconciled_macro_presets,
+        ]);
+
+        Ok(())
     }
 }
