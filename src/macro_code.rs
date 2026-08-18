@@ -5,9 +5,9 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::io::{Read, Write};
 
 use crate::model::{
-    AudioSensePreset, CommandPreset, GeometryPreset, HudPreset, MacroGroup, MacroPreset, MacroStep,
-    MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset, ProfileRecord, TimerPreset,
-    VisionPreset, WindowFocusPreset, WindowLayout, WindowPreset, ZoomPreset,
+    AudioSensePreset, CommandPreset, EspPreset, GeometryPreset, HudPreset, MacroGroup, MacroPreset,
+    MacroStep, MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset, ProfileRecord,
+    TimerPreset, VisionPreset, WindowFocusPreset, WindowLayout, WindowPreset, ZoomPreset,
 };
 
 const PREFIX_STEP: &str = "MN_STEP:";
@@ -186,6 +186,8 @@ pub struct MacroShareResources {
     pub audio_sense_presets: Vec<AudioSensePreset>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub timer_presets: Vec<TimerPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub esp_presets: Vec<EspPreset>,
 }
 
 impl MacroShareResources {
@@ -518,7 +520,12 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
     if field.starts_with("esp_") {
         return matches!(
             action,
-            MacroAction::EnableEspPreset | MacroAction::DisableEspPreset
+            MacroAction::EnableEspPreset
+                | MacroAction::DisableEspPreset
+                | MacroAction::StartEspScan
+                | MacroAction::StopEspScan
+                | MacroAction::ReadEspTarget
+                | MacroAction::Esp3DAimLock
         );
     }
     if field.starts_with("ocr_") {

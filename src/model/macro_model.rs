@@ -113,6 +113,8 @@ pub enum MacroAction {
     HideGeometryPreset,
     EnableEspPreset,
     DisableEspPreset,
+    StartEspScan,
+    StopEspScan,
     ReadEspTarget,
     Esp3DAimLock,
     FunnyMemeReply,

@@ -9614,6 +9614,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
+                                                    | MacroAction::StartEspScan
+                                                    | MacroAction::StopEspScan
                                                     | MacroAction::ReadEspTarget
                                                     | MacroAction::Esp3DAimLock
                                                     | MacroAction::StartAudioSensePreset
@@ -9626,6 +9628,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::HideGeometryPreset
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
+                                                        | MacroAction::StartEspScan
+                                                        | MacroAction::StopEspScan
                                                         | MacroAction::ReadEspTarget
                                                         | MacroAction::Esp3DAimLock
                                                 ) {
@@ -11929,6 +11933,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
+                                                    | MacroAction::StartEspScan
+                                                    | MacroAction::StopEspScan
                                                     | MacroAction::ReadEspTarget
                                                     | MacroAction::Esp3DAimLock
                                                     | MacroAction::StartAudioSensePreset
@@ -11941,6 +11947,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::HideGeometryPreset
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
+                                                        | MacroAction::StartEspScan
+                                                        | MacroAction::StopEspScan
                                                         | MacroAction::ReadEspTarget
                                                         | MacroAction::Esp3DAimLock
                                                 ) {
@@ -15611,6 +15619,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
+                                                    | MacroAction::StartEspScan
+                                                    | MacroAction::StopEspScan
                                                     | MacroAction::ReadEspTarget
                                                     | MacroAction::Esp3DAimLock
                                                     | MacroAction::StartAudioSensePreset
@@ -15831,6 +15841,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     | MacroAction::HideGeometryPreset
                                                     | MacroAction::EnableEspPreset
                                                     | MacroAction::DisableEspPreset
+                                                    | MacroAction::StartEspScan
+                                                    | MacroAction::StopEspScan
                                                     | MacroAction::ReadEspTarget
                                                     | MacroAction::Esp3DAimLock
                                                     | MacroAction::StartAudioSensePreset
@@ -15843,6 +15855,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         | MacroAction::HideGeometryPreset
                                                         | MacroAction::EnableEspPreset
                                                         | MacroAction::DisableEspPreset
+                                                        | MacroAction::StartEspScan
+                                                        | MacroAction::StopEspScan
                                                         | MacroAction::ReadEspTarget
                                                         | MacroAction::Esp3DAimLock
                                                 ) {
@@ -18019,6 +18033,8 @@ if supports_move_mouse || show_detection_tuning {
         &[
             MacroAction::EnableEspPreset,
             MacroAction::DisableEspPreset,
+            MacroAction::StartEspScan,
+            MacroAction::StopEspScan,
             MacroAction::ReadEspTarget,
             MacroAction::Esp3DAimLock,
         ]
@@ -20293,6 +20309,8 @@ if supports_move_mouse || show_detection_tuning {
                 }
                 MacroAction::EnableEspPreset
                 | MacroAction::DisableEspPreset
+                | MacroAction::StartEspScan
+                | MacroAction::StopEspScan
                 | MacroAction::ReadEspTarget
                 | MacroAction::Esp3DAimLock => {
                     ui.horizontal(|ui| {

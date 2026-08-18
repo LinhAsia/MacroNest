@@ -2373,6 +2373,12 @@ mod windows_overlay {
             preset_id: u32,
             enabled: bool,
         },
+        StartEspScan {
+            preset_id: u32,
+        },
+        StopEspScan {
+            preset_id: u32,
+        },
         EspCalibrationUpdated {
             preset_id: u32,
             sample_count: usize,
@@ -30178,6 +30184,22 @@ mod windows_overlay {
                     }
                 }
 
+                MacroAction::StartEspScan => {
+                    if let Some(esp_preset_id) = step.esp_preset_id {
+                        send_ui_command(UiCommand::StartEspScan {
+                            preset_id: esp_preset_id,
+                        });
+                    }
+                }
+
+                MacroAction::StopEspScan => {
+                    if let Some(esp_preset_id) = step.esp_preset_id {
+                        send_ui_command(UiCommand::StopEspScan {
+                            preset_id: esp_preset_id,
+                        });
+                    }
+                }
+
                 MacroAction::ReadEspTarget => {
                     read_esp_target_snapshot(step);
                 }
@@ -30958,6 +30980,22 @@ mod windows_overlay {
                             esp_preset_id,
                             step.action == MacroAction::EnableEspPreset,
                         );
+                    }
+                }
+
+                MacroAction::StartEspScan => {
+                    if let Some(esp_preset_id) = step.esp_preset_id {
+                        send_ui_command(UiCommand::StartEspScan {
+                            preset_id: esp_preset_id,
+                        });
+                    }
+                }
+
+                MacroAction::StopEspScan => {
+                    if let Some(esp_preset_id) = step.esp_preset_id {
+                        send_ui_command(UiCommand::StopEspScan {
+                            preset_id: esp_preset_id,
+                        });
                     }
                 }
 
@@ -40293,6 +40331,12 @@ mod fallback {
         EspPresetEnabled {
             preset_id: u32,
             enabled: bool,
+        },
+        StartEspScan {
+            preset_id: u32,
+        },
+        StopEspScan {
+            preset_id: u32,
         },
         UpdateScreenDrawConfig {
             color: crate::model::RgbaColor,

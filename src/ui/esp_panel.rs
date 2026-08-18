@@ -73,7 +73,7 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn start_esp_entity_root_capture(&mut self, preset_id: u32) {
+    pub(crate) fn start_esp_entity_root_capture(&mut self, preset_id: u32) {
         self.stop_esp_entity_root_capture(Some("Stopped"));
         let Some(preset) = self
             .state

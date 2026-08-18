@@ -276,6 +276,7 @@ struct MacroShareCollectSeen {
     ocr_presets: HashSet<u32>,
     audio_sense_presets: HashSet<u32>,
     timer_presets: HashSet<u32>,
+    esp_presets: HashSet<u32>,
 }
 
 #[derive(Default)]
@@ -295,6 +296,7 @@ struct ImportedMacroShareMaps {
     ocr_presets: HashMap<u32, u32>,
     audio_sense_presets: HashMap<u32, u32>,
     timer_presets: HashMap<u32, u32>,
+    esp_presets: HashMap<u32, u32>,
 }
 
 #[derive(Clone)]
@@ -1725,6 +1727,34 @@ impl CrosshairApp {
                     resources.timer_presets.push(preset.clone());
                 }
             }
+            MacroAction::EnableEspPreset
+            | MacroAction::DisableEspPreset
+            | MacroAction::StartEspScan
+            | MacroAction::StopEspScan
+            | MacroAction::ReadEspTarget
+            | MacroAction::Esp3DAimLock => {
+                if let Some(preset_id) = step.esp_preset_id
+                    && let Some(preset) = self
+                        .state
+                        .esp_presets
+                        .iter()
+                        .find(|item| item.id == preset_id)
+                    && seen.esp_presets.insert(preset.id)
+                {
+                    resources.esp_presets.push(preset.clone());
+                    if preset.entity_auto_hud_enabled
+                        && let Some(hud_id) = preset.entity_auto_hud_preset_id
+                        && let Some(hud_preset) = self
+                            .state
+                            .hud_presets
+                            .iter()
+                            .find(|item| item.id == hud_id)
+                        && seen.hud_presets.insert(hud_preset.id)
+                    {
+                        resources.hud_presets.push(hud_preset.clone());
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -1983,6 +2013,23 @@ impl CrosshairApp {
             self.state.timer_presets.push(preset);
         }
 
+        for mut preset in resources.esp_presets {
+            let old_id = preset.id;
+            preset.id = Self::allocate_next_id(
+                &self.state.esp_presets,
+                &mut self.state.next_esp_preset_id,
+                |item| item.id,
+            );
+            preset.collapsed = true;
+            if let Some(old_hud_id) = preset.entity_auto_hud_preset_id {
+                if let Some(new_hud_id) = maps.hud_presets.get(&old_hud_id) {
+                    preset.entity_auto_hud_preset_id = Some(*new_hud_id);
+                }
+            }
+            maps.esp_presets.insert(old_id, preset.id);
+            self.state.esp_presets.push(preset);
+        }
+
         maps
     }
 
@@ -2094,6 +2141,18 @@ impl CrosshairApp {
                     step.timer_preset_id = Some(*new_id);
                 }
             }
+            MacroAction::EnableEspPreset
+            | MacroAction::DisableEspPreset
+            | MacroAction::StartEspScan
+            | MacroAction::StopEspScan
+            | MacroAction::ReadEspTarget
+            | MacroAction::Esp3DAimLock => {
+                if let Some(old_id) = step.esp_preset_id
+                    && let Some(new_id) = maps.esp_presets.get(&old_id)
+                {
+                    step.esp_preset_id = Some(*new_id);
+                }
+            }
             _ => {}
         }
 
@@ -2190,6 +2249,7 @@ impl CrosshairApp {
                         Self::sync_geometry_presets,
                         Self::sync_audio_sense_presets,
                         Self::sync_timer_presets,
+                        Self::sync_esp_presets,
                         Self::sync_macro_presets,
                     ]);
                     self.status = Self::tr_lang(
@@ -2270,6 +2330,7 @@ impl CrosshairApp {
                         Self::sync_geometry_presets,
                         Self::sync_audio_sense_presets,
                         Self::sync_timer_presets,
+                        Self::sync_esp_presets,
                         Self::sync_reconciled_macro_presets,
                     ]);
                     self.status = Self::tr_lang(
@@ -2375,6 +2436,7 @@ impl CrosshairApp {
                     Self::sync_geometry_presets,
                     Self::sync_audio_sense_presets,
                     Self::sync_timer_presets,
+                    Self::sync_esp_presets,
                     Self::sync_reconciled_macro_presets,
                 ]);
                 self.status = Self::tr_lang(
@@ -9583,6 +9645,8 @@ impl CrosshairApp {
             MacroAction::HideGeometryPreset => "HideGeometry",
             MacroAction::EnableEspPreset => "EnableESP",
             MacroAction::DisableEspPreset => "DisableESP",
+            MacroAction::StartEspScan => "StartESPScan",
+            MacroAction::StopEspScan => "StopESPScan",
             MacroAction::ReadEspTarget => "ReadESPTarget",
             MacroAction::Esp3DAimLock => "Esp3DAimLock",
             MacroAction::StartTimerPreset => "StartTimerPreset",
@@ -9917,6 +9981,14 @@ impl CrosshairApp {
                 "macro_action_tooltip.disable_esp_preset",
                 "Disable one shared ESP preset from the ESP tab.",
             ),
+            MacroAction::StartEspScan => (
+                "macro_action_tooltip.start_esp_scan",
+                "Start automatic entity root address scan for the selected ESP preset.",
+            ),
+            MacroAction::StopEspScan => (
+                "macro_action_tooltip.stop_esp_scan",
+                "Stop active entity root address scan for the selected ESP preset.",
+            ),
             MacroAction::ReadEspTarget => (
                 "macro_action_tooltip.read_esp_target",
                 "Read the selected ESP preset's latest projected target data into macro variables.",
@@ -10057,6 +10129,8 @@ impl CrosshairApp {
             MacroAction::HideGeometryPreset => 0xe8f5,
             MacroAction::EnableEspPreset => 0xe8f4,
             MacroAction::DisableEspPreset => 0xe8f5,
+            MacroAction::StartEspScan => 0xe8b6,
+            MacroAction::StopEspScan => 0xe047,
             MacroAction::ReadEspTarget => 0xe8b6,
             MacroAction::Esp3DAimLock => 0xe876,
             MacroAction::StartTimerPreset => 0xe425,
@@ -10235,6 +10309,12 @@ impl CrosshairApp {
             MacroAction::DisableEspPreset => {
                 ("macro_action_short_label.disable_esp_preset", "ESP Off")
             }
+            MacroAction::StartEspScan => {
+                ("macro_action_short_label.start_esp_scan", "ESP Scan")
+            }
+            MacroAction::StopEspScan => {
+                ("macro_action_short_label.stop_esp_scan", "Stop Scan")
+            }
             MacroAction::ReadEspTarget => ("macro_action_short_label.read_esp_target", "ESP Data"),
             MacroAction::Esp3DAimLock => ("macro_action_short_label.esp_3d_aim_lock", "3D Lock"),
             MacroAction::FunnyMemeReply => ("macro_action_short_label.funny_meme_reply", "Meme"),
@@ -10257,6 +10337,7 @@ impl CrosshairApp {
             MacroAction::LockKeys | MacroAction::UnlockKeys => Some("KLOCK"),
             MacroAction::LockMouse | MacroAction::UnlockMouse => Some("MLOCK"),
             MacroAction::HideTaskbar | MacroAction::ShowTaskbar => Some("TASKBAR"),
+            MacroAction::StartEspScan | MacroAction::StopEspScan => Some("ESPSCAN"),
             _ => None,
         }
     }
@@ -14913,6 +14994,20 @@ impl eframe::App for CrosshairApp {
                     {
                         preset.enabled = enabled;
                         self.persist_esp_presets();
+                    }
+                }
+                UiCommand::StartEspScan { preset_id } => {
+                    #[cfg(windows)]
+                    {
+                        self.start_esp_entity_root_capture(preset_id);
+                        ctx.request_repaint();
+                    }
+                }
+                UiCommand::StopEspScan { preset_id: _ } => {
+                    #[cfg(windows)]
+                    {
+                        self.stop_esp_entity_root_capture(Some("Stopped by macro"));
+                        ctx.request_repaint();
                     }
                 }
                 UiCommand::EspCalibrationUpdated {
