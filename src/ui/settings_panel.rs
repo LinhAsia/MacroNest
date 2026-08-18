@@ -384,6 +384,15 @@ impl CrosshairApp {
                             ui.label(
                                 RichText::new(format!(
                                     "{}: {}",
+                                    Self::tr_lang(language, "Location", "Đường dẫn"),
+                                    self.paths.root.display()
+                                ))
+                                .small()
+                                .weak(),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}: {}",
                                     Self::tr_lang(language, "Total size", "Tổng dung lượng"),
                                     Self::format_file_size(total_size)
                                 ))
@@ -399,6 +408,53 @@ impl CrosshairApp {
                                 .clicked()
                                 {
                                     self.open_app_data_folder();
+                                }
+                                ui.add_space(6.0);
+                                if Self::settings_action_button(
+                                    ui,
+                                    Self::tr_lang(language, "Change folder", "Đổi thư mục"),
+                                )
+                                .clicked()
+                                {
+                                    if let Some(folder) = rfd::FileDialog::new()
+                                        .set_title(Self::tr_lang(
+                                            language,
+                                            "Select MacroNest data folder",
+                                            "Chọn thư mục dữ liệu MacroNest",
+                                        ))
+                                        .pick_folder()
+                                    {
+                                        if let Err(e) = crate::storage::AppPaths::set_custom_data_root(Some(&folder)) {
+                                            self.status = format!("Failed to set data folder: {e}");
+                                        } else {
+                                            self.status = format!(
+                                                "{}: {}. {}",
+                                                Self::tr_lang(language, "Data folder changed to", "Đã đổi thư mục dữ liệu sang"),
+                                                folder.display(),
+                                                Self::tr_lang(language, "Please restart MacroNest to apply.", "Vui lòng khởi động lại MacroNest để áp dụng.")
+                                            );
+                                        }
+                                    }
+                                }
+                                if self.paths.is_custom_root() {
+                                    ui.add_space(6.0);
+                                    if Self::settings_action_button(
+                                        ui,
+                                        Self::tr_lang(language, "Reset default", "Đặt lại mặc định"),
+                                    )
+                                    .clicked()
+                                    {
+                                        if let Err(e) = crate::storage::AppPaths::set_custom_data_root(None) {
+                                            self.status = format!("Failed to reset data folder: {e}");
+                                        } else {
+                                            self.status = Self::tr_lang(
+                                                language,
+                                                "Data folder reset to default. Please restart MacroNest to apply.",
+                                                "Đã đặt lại thư mục dữ liệu về mặc định. Vui lòng khởi động lại MacroNest để áp dụng.",
+                                            )
+                                            .to_owned();
+                                        }
+                                    }
                                 }
                                 ui.add_space(6.0);
                                 let is_copied = self

@@ -46,19 +46,39 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
-    pub fn discover() -> Result<Self> {
+    pub fn default_root() -> Result<PathBuf> {
         let dirs = ProjectDirs::from("com", "", "MacroNest")
             .context("Failed to locate the application data folder")?;
-        let root = dirs.data_local_dir().to_path_buf();
+        Ok(dirs.data_local_dir().to_path_buf())
+    }
 
-        // Migrate from old Crosshair/Crosshair directory to new single MacroNest directory
-        if let Some(old_dirs) = ProjectDirs::from("com", "Crosshair", "Crosshair") {
-            let old_root = old_dirs.data_local_dir().to_path_buf();
-            if old_root.exists() && !root.exists() {
-                let _ = fs::create_dir_all(root.parent().unwrap());
-                let _ = fs::rename(&old_root, &root);
-            }
+    pub fn custom_data_dir_file() -> Result<PathBuf> {
+        let default_root = Self::default_root()?;
+        Ok(default_root.parent().unwrap_or(&default_root).join("custom_data_dir.txt"))
+    }
+
+    pub fn is_custom_root(&self) -> bool {
+        if let Ok(default_root) = Self::default_root() {
+            self.root != default_root
+        } else {
+            false
         }
+    }
+
+    pub fn set_custom_data_root(custom_path: Option<&Path>) -> Result<()> {
+        let file = Self::custom_data_dir_file()?;
+        if let Some(parent) = file.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Some(path) = custom_path {
+            fs::write(&file, path.to_string_lossy().trim())?;
+        } else {
+            let _ = fs::remove_file(&file);
+        }
+        Ok(())
+    }
+
+    pub fn from_root(root: PathBuf) -> Result<Self> {
         let state_file = root.join("state.json");
         let profiles_dir = root.join("profiles");
         let asset_dir = root.join("custom-crosshairs");
@@ -114,6 +134,37 @@ impl AppPaths {
             avrdude_conf,
             arduino_firmware_hex,
         })
+    }
+
+    pub fn discover() -> Result<Self> {
+        if let Ok(custom_env) = env::var("MACRONEST_DATA_DIR") {
+            let custom_path = PathBuf::from(custom_env.trim());
+            if !custom_path.as_os_str().is_empty() {
+                return Self::from_root(custom_path);
+            }
+        }
+
+        if let Ok(file) = Self::custom_data_dir_file() {
+            if file.exists() {
+                if let Ok(content) = fs::read_to_string(&file) {
+                    let custom_path = PathBuf::from(content.trim());
+                    if !custom_path.as_os_str().is_empty() {
+                        return Self::from_root(custom_path);
+                    }
+                }
+            }
+        }
+
+        let default_root = Self::default_root()?;
+        // Migrate from old Crosshair/Crosshair directory to new single MacroNest directory
+        if let Some(old_dirs) = ProjectDirs::from("com", "Crosshair", "Crosshair") {
+            let old_root = old_dirs.data_local_dir().to_path_buf();
+            if old_root.exists() && !default_root.exists() {
+                let _ = fs::create_dir_all(default_root.parent().unwrap());
+                let _ = fs::rename(&old_root, &default_root);
+            }
+        }
+        Self::from_root(default_root)
     }
 
     pub fn ensure_dirs_and_assets(&self) -> Result<()> {
