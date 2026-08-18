@@ -8801,6 +8801,25 @@ impl CrosshairApp {
             ui.checkbox(&mut dialog.auto_stop_on_hit, "Auto-stop on 1st hit");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
+                    .add_enabled(!dialog.hits.is_empty(), Button::new("Copy all"))
+                    .on_hover_text("Copy all captured instructions, hits, and details to clipboard")
+                    .clicked()
+                {
+                    let mut text = String::from("#\tAddress\tHits\tInstruction\tDetails\n");
+                    for (i, hit) in dialog.hits.iter().enumerate() {
+                        text.push_str(&format!(
+                            "{}\t0x{:X}\t{}\t{}\t{}\n",
+                            i + 1,
+                            hit.address,
+                            hit.count,
+                            hit.instruction,
+                            hit.details
+                        ));
+                    }
+                    ui.ctx().copy_text(text);
+                    dialog.status = format!("Copied {} instructions to clipboard", dialog.hits.len());
+                }
+                if ui
                     .add_enabled(!dialog.hits.is_empty(), Button::new("Add all to code list"))
                     .clicked()
                 {
@@ -10008,6 +10027,23 @@ impl CrosshairApp {
                 start_requested = true;
             }
             ui.checkbox(&mut dialog.auto_stop_on_hit, "Auto-stop on 1st hit");
+            if ui
+                .add_enabled(!dialog.addresses.is_empty(), Button::new("Copy all"))
+                .on_hover_text("Copy all captured addresses, hits, and values to clipboard")
+                .clicked()
+            {
+                let mut text = String::from("#\tAddress\tHits\tValue\n");
+                for (i, (address, hits)) in dialog.addresses.iter().enumerate() {
+                    let value = dialog
+                        .values
+                        .get(address)
+                        .cloned()
+                        .unwrap_or_else(|| "-".to_owned());
+                    text.push_str(&format!("{}\t0x{:X}\t{}\t{}\n", i + 1, address, hits, value));
+                }
+                ui.ctx().copy_text(text);
+                dialog.status = format!("Copied {} addresses to clipboard", dialog.addresses.len());
+            }
             if ui
                 .add_enabled(dialog.selected.is_some(), Button::new("Add selected"))
                 .clicked()

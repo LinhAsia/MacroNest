@@ -9775,14 +9775,20 @@ if supports_move_mouse || show_detection_tuning {
                                                 MacroAction::ShowHud
                                                     | MacroAction::EnableCrosshairProfile
                                                     | MacroAction::EnablePinPreset
+                                                    | MacroAction::StartEspScan
                                             ) {
                                                 let duration_id = ui.id().with((group.id, preset.id, "duration-expr-hold-stop"));
                                                 ui.scope(|ui| {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 21.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                        let mut is_permanent = step.duration_is_permanent();
-                                                    let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
+                                                    let mut is_permanent = step.duration_is_permanent();
+                                                    let cb_label = if step.action == MacroAction::StartEspScan {
+                                                        Self::tr_lang(language, "Until full", "Quét đủ")
+                                                    } else {
+                                                        Self::tr_lang(language, "Permanent", "Permanent")
+                                                    };
+                                                    let cb_response = ui.checkbox(&mut is_permanent, cb_label);
                                                     if cb_response.changed() {
                                                         Self::handle_duration_permanent_toggle(step, is_permanent);
                                                         live_sync = true;
@@ -9807,11 +9813,19 @@ if supports_move_mouse || show_detection_tuning {
                                                             &timer_names,
                                                             language,
                                                         );
-                                                        let tooltip_text = Self::tr_lang(
-                                                            language,
-                                                            "Display duration (0 = show until macro/overlay ends, supports variables/math)",
-                                                            "Display duration (0 = show until macro/overlay ends, supports variables/math)",
-                                                        );
+                                                        let tooltip_text = if step.action == MacroAction::StartEspScan {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Scan timeout in ms (stops scan when time expires, even if not all entities are found)",
+                                                                "Thời gian scan tối đa (ms), hết giờ sẽ dừng scan kể cả chưa quét đủ",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Display duration (0 = show until macro/overlay ends, supports variables/math)",
+                                                                "Display duration (0 = show until macro/overlay ends, supports variables/math)",
+                                                            )
+                                                        };
                                                         response.clone().on_hover_text(tooltip_text);
                                                     }
                                                 });
@@ -12097,14 +12111,20 @@ if supports_move_mouse || show_detection_tuning {
                                                 MacroAction::ShowHud
                                                     | MacroAction::EnableCrosshairProfile
                                                     | MacroAction::EnablePinPreset
+                                                    | MacroAction::StartEspScan
                                             ) {
                                                 let duration_id = ui.id().with((group.id, preset.id, "duration-expr-hold-stop"));
                                                 ui.scope(|ui| {
                                                     ui.spacing_mut().item_spacing.x = 2.0;
                                                     ui.spacing_mut().interact_size.y = 21.0;
                                                     ui.spacing_mut().button_padding.y = 0.0;
-                        let mut is_permanent = step.duration_is_permanent();
-                                                    let cb_response = ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
+                                                    let mut is_permanent = step.duration_is_permanent();
+                                                    let cb_label = if step.action == MacroAction::StartEspScan {
+                                                        Self::tr_lang(language, "Until full", "Quét đủ")
+                                                    } else {
+                                                        Self::tr_lang(language, "Permanent", "Permanent")
+                                                    };
+                                                    let cb_response = ui.checkbox(&mut is_permanent, cb_label);
                                                     if cb_response.changed() {
                                                         Self::handle_duration_permanent_toggle(step, is_permanent);
                                                         live_sync = true;
@@ -12129,11 +12149,19 @@ if supports_move_mouse || show_detection_tuning {
                                                             &timer_names,
                                                             language,
                                                         );
-                                                        let tooltip_text = Self::tr_lang(
-                                                            language,
-                                                            "Display duration (0 = show until macro/overlay ends, supports variables/math)",
-                                                            "Display duration (0 = show until macro/overlay ends, supports variables/math)",
-                                                        );
+                                                        let tooltip_text = if step.action == MacroAction::StartEspScan {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Scan timeout in ms (stops scan when time expires, even if not all entities are found)",
+                                                                "Thời gian scan tối đa (ms), hết giờ sẽ dừng scan kể cả chưa quét đủ",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Display duration (0 = show until macro/overlay ends, supports variables/math)",
+                                                                "Display duration (0 = show until macro/overlay ends, supports variables/math)",
+                                                            )
+                                                        };
                                                         response.clone().on_hover_text(tooltip_text);
                                                     }
                                                 });
@@ -15925,6 +15953,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 MacroAction::DrawGeometry
                                                     | MacroAction::EnableCrosshairProfile
                                                     | MacroAction::EnablePinPreset
+                                                    | MacroAction::StartEspScan
                                             ) {
                                                 let duration_id = ui.id().with((group.id, preset.id, step_index, "duration-expr-full"));
                                                 ui.scope(|ui| {
@@ -15942,7 +15971,12 @@ if supports_move_mouse || show_detection_tuning {
                                                     child_ui.spacing_mut().item_spacing.x = 2.0;
                                                     child_ui.spacing_mut().button_padding.y = 0.0;
                                                     child_ui.spacing_mut().interact_size.y = 21.0;
-                                                    let cb_response = child_ui.checkbox(&mut is_permanent, Self::tr_lang(language, "Permanent", "Permanent"));
+                                                    let cb_label = if step.action == MacroAction::StartEspScan {
+                                                        Self::tr_lang(language, "Until full", "Quét đủ")
+                                                    } else {
+                                                        Self::tr_lang(language, "Permanent", "Permanent")
+                                                    };
+                                                    let cb_response = child_ui.checkbox(&mut is_permanent, cb_label);
                                                     if cb_response.changed() {
                                                         Self::handle_duration_permanent_toggle(step, is_permanent);
                                                         live_sync = true;
@@ -15976,11 +16010,19 @@ if supports_move_mouse || show_detection_tuning {
                                                             &timer_names,
                                                             language,
                                                         );
-                                                        let tooltip_text = Self::tr_lang(
-                                                            language,
-                                                            "Display duration (0 = show until macro/overlay ends, supports variables/math)",
-                                                            "Display duration (0 = show until macro/overlay ends, supports variables/math)",
-                                                        );
+                                                        let tooltip_text = if step.action == MacroAction::StartEspScan {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Scan timeout in ms (stops scan when time expires, even if not all entities are found)",
+                                                                "Thời gian scan tối đa (ms), hết giờ sẽ dừng scan kể cả chưa quét đủ",
+                                                            )
+                                                        } else {
+                                                            Self::tr_lang(
+                                                                language,
+                                                                "Display duration (0 = show until macro/overlay ends, supports variables/math)",
+                                                                "Display duration (0 = show until macro/overlay ends, supports variables/math)",
+                                                            )
+                                                        };
                                                         response.clone().on_hover_text(tooltip_text);
                                                     }
                                                 });

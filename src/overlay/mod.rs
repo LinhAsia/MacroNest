@@ -2376,6 +2376,7 @@ mod windows_overlay {
         },
         StartEspScan {
             preset_id: u32,
+            timeout_ms: Option<u64>,
         },
         StopEspScan {
             preset_id: u32,
@@ -30215,8 +30216,20 @@ mod windows_overlay {
 
                 MacroAction::StartEspScan => {
                     if let Some(esp_preset_id) = step.esp_preset_id {
+                        let timeout_ms = if step.timed_override {
+                            let expr = step.duration_expr.trim();
+                            if !expr.is_empty() {
+                                let interpolated = interpolate_variables(expr);
+                                Some(evaluate_math_expression(&interpolated).max(0) as u64)
+                            } else {
+                                Some(step.duration_override_ms)
+                            }
+                        } else {
+                            None
+                        };
                         send_ui_command(UiCommand::StartEspScan {
                             preset_id: esp_preset_id,
+                            timeout_ms,
                         });
                     }
                 }
@@ -31014,8 +31027,20 @@ mod windows_overlay {
 
                 MacroAction::StartEspScan => {
                     if let Some(esp_preset_id) = step.esp_preset_id {
+                        let timeout_ms = if step.timed_override {
+                            let expr = step.duration_expr.trim();
+                            if !expr.is_empty() {
+                                let interpolated = interpolate_variables(expr);
+                                Some(evaluate_math_expression(&interpolated).max(0) as u64)
+                            } else {
+                                Some(step.duration_override_ms)
+                            }
+                        } else {
+                            None
+                        };
                         send_ui_command(UiCommand::StartEspScan {
                             preset_id: esp_preset_id,
+                            timeout_ms,
                         });
                     }
                 }
@@ -40380,6 +40405,7 @@ mod fallback {
         },
         StartEspScan {
             preset_id: u32,
+            timeout_ms: Option<u64>,
         },
         StopEspScan {
             preset_id: u32,

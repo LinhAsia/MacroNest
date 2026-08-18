@@ -15059,10 +15059,13 @@ impl eframe::App for CrosshairApp {
                         self.persist_esp_presets();
                     }
                 }
-                UiCommand::StartEspScan { preset_id } => {
+                UiCommand::StartEspScan {
+                    preset_id,
+                    timeout_ms,
+                } => {
                     #[cfg(windows)]
                     {
-                        self.start_esp_entity_root_capture(preset_id);
+                        self.start_esp_entity_root_capture(preset_id, timeout_ms);
                         ctx.request_repaint();
                     }
                 }
