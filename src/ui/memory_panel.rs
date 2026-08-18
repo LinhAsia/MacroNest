@@ -7416,8 +7416,8 @@ impl CrosshairApp {
                     }
                     let filter_resp = ui.add(
                         egui::TextEdit::singleline(&mut dialog.filter)
-                            .desired_width(150.0)
-                            .hint_text(RichText::new("Search module...").weak()),
+                            .desired_width(170.0)
+                            .hint_text(RichText::new("Filter module, value, address...").weak()),
                     );
                     Self::apply_vietnamese_input_if_changed(
                         &filter_resp,
@@ -7486,9 +7486,51 @@ impl CrosshairApp {
                     .enumerate()
                     .filter_map(|(index, candidate)| {
                         let module = candidate.path.module.to_ascii_lowercase();
-                        (!(dialog.exe_only && !module.ends_with(".exe"))
-                            && (filter.is_empty() || module.contains(&filter)))
-                        .then_some(index)
+                        if dialog.exe_only && !module.ends_with(".exe") {
+                            return None;
+                        }
+                        if filter.is_empty() {
+                            return Some(index);
+                        }
+
+                        let module_match = module.contains(&filter);
+                        let root_match = format!("{}+{:x}", module, candidate.path.module_offset).contains(&filter);
+                        let offsets_match = candidate
+                            .path
+                            .offsets
+                            .iter()
+                            .any(|offset| format!("{offset:x}").contains(&filter));
+                        let address_match = candidate.resolved_address.is_some_and(|addr| {
+                            format!("{addr:x}").contains(&filter) || format!("0x{addr:x}").contains(&filter)
+                        });
+                        let target_match = format!("{:x}", candidate.source_address).contains(&filter)
+                            || format!("0x{:x}", candidate.source_address).contains(&filter);
+                        let value_match = candidate.observed_value.is_some_and(|v| {
+                            editable_scan_value(v, false).to_ascii_lowercase().contains(&filter)
+                        });
+                        let live_match = candidate.live_value.is_some_and(|v| {
+                            editable_scan_value(v, false).to_ascii_lowercase().contains(&filter)
+                        });
+                        let expected_match =
+                            editable_scan_value(candidate.expected_value, false).to_ascii_lowercase().contains(&filter);
+                        let state_match = match candidate.valid {
+                            Some(true) => "verified",
+                            Some(false) => "broken",
+                            None if candidate.observed_value.is_some() => "value changed",
+                            None => "not checked",
+                        }
+                        .contains(&filter);
+
+                        (module_match
+                            || root_match
+                            || offsets_match
+                            || address_match
+                            || target_match
+                            || value_match
+                            || live_match
+                            || expected_match
+                            || state_match)
+                            .then_some(index)
                     })
                     .collect::<Vec<_>>();
                 let refresh_visible_values = dialog.validation_pid.is_none()
@@ -7503,10 +7545,38 @@ impl CrosshairApp {
                             for visible_row in rows.clone() {
                                 let candidate =
                                     &mut dialog.candidates[visible_indices[visible_row]];
-                                candidate.live_value =
-                                    candidate.resolved_address.and_then(|address| {
-                                        read_scan_value(pid, address, dialog.value_type).ok()
-                                    });
+                                let base = candidate.resolved_base.or_else(|| {
+                                    resolve_module_offset(
+                                        pid,
+                                        &candidate.path.module,
+                                        candidate.path.module_offset,
+                                    )
+                                    .ok()
+                                });
+                                candidate.resolved_base = base;
+                                if let Some(base) = base {
+                                    let pointer = PointerSpec {
+                                        base,
+                                        module: Some((
+                                            candidate.path.module.clone(),
+                                            candidate.path.module_offset,
+                                        )),
+                                        offsets: candidate.path.offsets.clone(),
+                                    };
+                                    if let Ok(address) =
+                                        resolve_memory_address(pid, base, Some(&pointer))
+                                    {
+                                        candidate.resolved_address = Some(address);
+                                        candidate.live_value =
+                                            read_scan_value(pid, address, dialog.value_type).ok();
+                                    } else {
+                                        candidate.resolved_address = None;
+                                        candidate.live_value = None;
+                                    }
+                                } else if let Some(address) = candidate.resolved_address {
+                                    candidate.live_value =
+                                        read_scan_value(pid, address, dialog.value_type).ok();
+                                }
                             }
                         }
                         dialog.last_live_refresh = Instant::now();
