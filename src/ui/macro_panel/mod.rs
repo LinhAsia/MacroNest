@@ -20313,7 +20313,8 @@ if supports_move_mouse || show_detection_tuning {
                 | MacroAction::StopEspScan
                 | MacroAction::ReadEspTarget
                 | MacroAction::Esp3DAimLock => {
-                    ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.spacing_mut().interact_size.y = 18.0;
                         let selected = step
                             .esp_preset_id
                             .and_then(|id| {
