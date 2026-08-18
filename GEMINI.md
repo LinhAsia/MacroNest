@@ -31,5 +31,5 @@ Bug fix = root cause, not symptom: a report names a symptom. Grep every caller o
 ## Workflow rules
 
 - After finishing each request, make a non-interactive git commit that summarizes the completed work before sending the final response.
-- If the current repository is a Rust application, run cargo build after completing the requested work and before making that commit. DONT RUN "CARGO BUILD --RELEASE OR TEST"
+- If the current repository is a Rust application, run cargo build --release after completing the requested work and before making that commit.
 - If the release build fails, do not skip it silently: report the failure clearly in the final response and do not claim the task is complete.
