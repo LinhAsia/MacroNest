@@ -166,7 +166,7 @@ impl CrosshairApp {
             if capture.hud_preset_id.is_some() {
                 self.show_esp_entity_capture_hud(
                     capture.hud_preset_id,
-                    format!("Entity scan {}/{} - done", final_addresses.len(), capture.required),
+                    format!("Entity scan: done ({} active)", final_addresses.len()),
                 );
                 self.esp_entity_capture_hud_hide_at =
                     Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
@@ -193,7 +193,7 @@ impl CrosshairApp {
             if capture.hud_preset_id.is_some() {
                 self.show_esp_entity_capture_hud(
                     capture.hud_preset_id,
-                    format!("Entity scan {matched}/{} - done", capture.required),
+                    format!("Entity scan: done ({matched} active)"),
                 );
                 self.esp_entity_capture_hud_hide_at =
                     Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
@@ -336,7 +336,7 @@ impl CrosshairApp {
                 self.esp_entity_capture_hud_hide_at = None;
                 self.show_esp_entity_capture_hud(
                     hud_preset_id,
-                    format!("Entity scan 0/{required}"),
+                    format!("Entity scan: 0/{required}"),
                 );
             }
             Err(error) => {
@@ -467,7 +467,7 @@ impl CrosshairApp {
             );
             self.show_esp_entity_capture_hud(
                 capture.hud_preset_id,
-                format!("Entity scan {matched}/{}", capture.required),
+                format!("Entity scan: {matched}/{}", capture.required),
             );
             ctx.request_repaint();
         }
