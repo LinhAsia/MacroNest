@@ -10237,10 +10237,17 @@ mod windows_overlay {
                         STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
                         deactivate_hold_macro(preset_id);
                     }
+                    let mut newly_enabled = Vec::new();
                     for (&preset_id, &is_enabled) in &next_enabled {
                         if is_enabled {
                             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
+                            if !previous_enabled.get(&preset_id).copied().unwrap_or(false) {
+                                newly_enabled.push(preset_id);
+                            }
                         }
+                    }
+                    if !newly_enabled.is_empty() {
+                        trigger_window_focus_macros(Some(&newly_enabled));
                     }
                 }
 
@@ -10276,6 +10283,9 @@ mod windows_overlay {
 
                     drop(hook_state);
                     let _ = update_tray_icon(hwnd, enabled);
+                    if enabled {
+                        trigger_window_focus_macros(None);
+                    }
                 }
 
                 OverlayCommand::SetWindowsKeyLocked(locked) => {
@@ -28927,15 +28937,23 @@ mod windows_overlay {
         let ui_tx = hook_state.ui_tx.clone();
         drop(hook_state);
 
+        let mut newly_enabled = Vec::new();
         for (preset_id, enabled) in &applied {
             if !enabled {
                 STOP_REQUESTED_MACRO_PRESETS.lock().insert(*preset_id);
                 deactivate_hold_macro(*preset_id);
+            } else {
+                STOP_REQUESTED_MACRO_PRESETS.lock().remove(preset_id);
+                newly_enabled.push(*preset_id);
             }
         }
 
         if let Some(tx) = ui_tx {
             let _ = tx.send(UiCommand::SyncMacroGroups(updated_groups, status));
+        }
+
+        if !newly_enabled.is_empty() {
+            trigger_window_focus_macros(Some(&newly_enabled));
         }
 
         Ok(())
@@ -36757,6 +36775,16 @@ mod windows_overlay {
     }
 
     fn trigger_macros_on_window_focus_change() {
+        trigger_window_focus_macros(None);
+    }
+
+    fn trigger_window_focus_macros(filter_preset_ids: Option<&[u32]>) {
+        #[cfg(windows)]
+        unsafe {
+            let fg = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            let _ = update_foreground_window(fg);
+        }
+
         let matches = {
             let hook_state = HOOK_STATE.lock();
             if !hook_state.macros_master_enabled {
@@ -36775,6 +36803,12 @@ mod windows_overlay {
                 for preset in &group.presets {
                     if !preset.enabled || preset.trigger_mode != MacroTriggerMode::WindowFocus {
                         continue;
+                    }
+
+                    if let Some(filter_ids) = filter_preset_ids {
+                        if !filter_ids.contains(&preset.id) {
+                            continue;
+                        }
                     }
 
                     if !window_focus_matches(
