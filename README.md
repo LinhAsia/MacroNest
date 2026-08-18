@@ -17,7 +17,7 @@ The modules below are built to work with the macro system, so you can combine th
 
 | Module | What it does | How macros use it |
 | :--- | :--- | :--- |
-| **Macro Engine** | Run key presses, mouse actions, loops, waits, and conditional branches | Build logic: click buttons, enter input fields, loop tasks, and branch flow using variables |
+| **Macro Engine** | Run key presses, mouse actions, loops, waits, conditional branches, and shareable presets | Build logic: click buttons, enter input fields, loop tasks, branch flow with variables, and export/import compact preset codes via clipboard |
 | **Computer Vision** | Find images on screen, watch colors, and count matching pixels | Scan screen: locate game icons, wait for color changes, or trigger actions when an enemy bar fills up |
 | **OCR** | Extract text/numbers from screen regions and check if specific text is found | Save scan results to variables (e.g. read coordinates/scores) and branch macro logic based on text matches |
 | **Window Control** | Move, resize, layout (arrange in grid), pin, and zoom windows | Setup workspace: tile windows side-by-side, crop active regions, or center windows for precise clicking |
@@ -48,7 +48,7 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | Get Color | Sample a screen color and optionally copy the hex value |
 | Key Display | Show a live key overlay with normal and mascot display modes |
 | Draw | Toggle the screen drawing overlay and configure its hotkey |
-| Screen Recorder | Record the full screen, focused window, selected window, or a selected region at 30, 60, or 144 FPS with system audio. Tap the trigger to start or stop, or hold it while idle to select a region with the Draw capture overlay and release to record. Uses hardware H.264 when available, supports save-folder access, and optional automatic video copy for pasting into apps such as Discord |
+| Screen Recorder | Record the full screen, focused window, selected window, or a selected region at 30, 60, or 144 FPS with WASAPI system audio. Features an integrated Video Library with 60 FPS playback, video trimming, and fast video compression for easy sharing |
 | Clear Overlays | Clear active geometry, HUD, and pin overlays from the screen |
 | Key Sound | Play keyboard sound effects with selectable switch style and volume |
 
