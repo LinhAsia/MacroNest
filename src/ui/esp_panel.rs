@@ -171,7 +171,33 @@ impl CrosshairApp {
                 self.esp_entity_capture_hud_hide_at =
                     Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
             }
-        } else if let Some(root) = candidate {
+        } else if let Some(mut root) = candidate {
+            let mut final_count = matched.max(1) as u32;
+            let mut dropped_self = false;
+            if capture.drop_nearest && final_count > 1 {
+                if let Some(preset) = self
+                    .state
+                    .esp_presets
+                    .iter()
+                    .find(|p| p.id == capture.preset_id)
+                {
+                    let stride = preset.entity_stride.max(1) as usize;
+                    let addresses: Vec<usize> = (0..final_count as usize)
+                        .map(|i| root.saturating_add(i * stride))
+                        .collect();
+                    if let Some(dropped_idx) = find_nearest_entity_index(
+                        capture.pid,
+                        preset,
+                        &addresses,
+                    ) {
+                        if dropped_idx == 0 {
+                            root = root.saturating_add(stride);
+                        }
+                        final_count = final_count.saturating_sub(1).max(1);
+                        dropped_self = true;
+                    }
+                }
+            }
             if let Some(preset) = self
                 .state
                 .esp_presets
@@ -179,12 +205,14 @@ impl CrosshairApp {
                 .find(|preset| preset.id == capture.preset_id)
             {
                 preset.entity_root = format!("0x{root:X}");
-                preset.entity_count = matched.max(1) as u32;
+                preset.entity_count = final_count;
                 preset.entity_list_enabled = true;
                 preset.enabled = true;
             }
             let msg = if let Some(status) = status_override {
                 status.to_owned()
+            } else if dropped_self {
+                format!("Root updated: 0x{root:X} (dropped self -> {final_count} active)")
             } else {
                 format!("Root updated: 0x{root:X} ({matched}/{})", capture.required)
             };
@@ -193,7 +221,7 @@ impl CrosshairApp {
             if capture.hud_preset_id.is_some() {
                 self.show_esp_entity_capture_hud(
                     capture.hud_preset_id,
-                    format!("Entity scan: done ({matched} active)"),
+                    format!("Entity scan: done ({final_count} active)"),
                 );
                 self.esp_entity_capture_hud_hide_at =
                     Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
@@ -212,6 +240,7 @@ impl CrosshairApp {
         }
 
         self.persist_esp_presets();
+        crate::platform::trim_working_set();
     }
 
     #[cfg(windows)]
@@ -793,14 +822,14 @@ impl CrosshairApp {
                                     .on_hover_text(
                                         "Merge captured addresses that share the same 3D world position into a single entity.",
                                     );
-                                    ui.checkbox(
-                                        &mut preset.entity_hit_order_drop_nearest,
-                                        "Drop self",
-                                    )
-                                    .on_hover_text(
-                                        "After capturing all entities, remove the entity with the smallest distance to camera (local player).",
-                                    );
                                 }
+                                ui.checkbox(
+                                    &mut preset.entity_hit_order_drop_nearest,
+                                    "Drop self",
+                                )
+                                .on_hover_text(
+                                    "After capturing all entities, remove the entity with the smallest distance to camera (local player).",
+                                );
                                 ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
                                 if preset.entity_auto_hud_enabled {
                                     let hud_name = preset

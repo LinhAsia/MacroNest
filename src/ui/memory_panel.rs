@@ -12630,6 +12630,7 @@ impl CrosshairApp {
                 self.memory_panel.status = format!("{} failed: {error}", action.label());
             }
         }
+        crate::platform::trim_working_set();
     }
 
     fn reset_memory_scan(&mut self, status: &str) {
@@ -12646,6 +12647,7 @@ impl CrosshairApp {
         self.memory_panel.has_scan_session = false;
         self.memory_panel.status = status.to_owned();
         self.memory_panel.last_action = status.to_owned();
+        crate::platform::trim_working_set();
     }
 
     fn add_selected_memory_results(&mut self) {
