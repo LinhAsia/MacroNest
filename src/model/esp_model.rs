@@ -51,6 +51,14 @@ pub enum EspOrientationSource {
     DirectionPairPitch,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum EspAutoScanMode {
+    #[default]
+    Stride,
+    MultiStride,
+    HitOrder,
+}
+
 fn default_entity_auto_hit_step() -> u32 {
     1
 }
@@ -79,6 +87,10 @@ pub struct EspPreset {
     pub entity_auto_code_offset: usize,
     pub entity_auto_capture_count: u32,
     pub entity_auto_hit_order: bool,
+    #[serde(default)]
+    pub entity_auto_scan_mode: EspAutoScanMode,
+    #[serde(default)]
+    pub entity_multi_strides: String,
     #[serde(default = "default_entity_auto_hit_step")]
     pub entity_auto_hit_step: u32,
     #[serde(default)]
@@ -193,6 +205,8 @@ impl EspPreset {
             entity_auto_code_offset: 0,
             entity_auto_capture_count: 5,
             entity_auto_hit_order: false,
+            entity_auto_scan_mode: EspAutoScanMode::Stride,
+            entity_multi_strides: String::new(),
             entity_auto_hit_step: 1,
             entity_hit_order_merge_pairs: false,
             entity_hit_order_drop_nearest: false,
@@ -287,6 +301,16 @@ impl EspPreset {
             return true;
         }
         false
+    }
+
+    pub fn scan_mode(&self) -> EspAutoScanMode {
+        if self.entity_auto_scan_mode != EspAutoScanMode::default() {
+            self.entity_auto_scan_mode
+        } else if self.entity_auto_hit_order {
+            EspAutoScanMode::HitOrder
+        } else {
+            EspAutoScanMode::Stride
+        }
     }
 }
 
@@ -432,6 +456,93 @@ pub(crate) fn entity_hits_in_capture_order_progress(
     (selected, count)
 }
 
+pub fn parse_multi_strides(input: &str) -> Vec<usize> {
+    let mut strides = Vec::new();
+    for part in input.split(|c: char| c == ',' || c == ';' || c.is_whitespace()) {
+        let trimmed = part.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let parsed = if let Some(hex) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+            usize::from_str_radix(hex, 16).ok()
+        } else if let Ok(val) = usize::from_str_radix(trimmed, 16) {
+            Some(val)
+        } else {
+            trimmed.parse::<usize>().ok()
+        };
+        if let Some(stride) = parsed {
+            if stride > 0 && !strides.contains(&stride) {
+                strides.push(stride);
+            }
+        }
+    }
+    strides
+}
+
+pub(crate) fn entity_multi_stride_hit_progress(
+    hits: &[usize],
+    required: u32,
+    allowed_strides: &[usize],
+) -> (Option<Vec<usize>>, usize) {
+    let required = required.max(1) as usize;
+    if allowed_strides.is_empty() {
+        return (None, 0);
+    }
+    let mut hits = hits.to_vec();
+    hits.sort_unstable();
+    hits.dedup();
+
+    let mut best_chain: Vec<usize> = Vec::new();
+
+    for &start in &hits {
+        let mut chain = vec![start];
+        find_multi_stride_dfs(&hits, &mut chain, allowed_strides, required, &mut best_chain);
+        if best_chain.len() >= required {
+            best_chain.truncate(required);
+            return (Some(best_chain.clone()), required);
+        }
+    }
+
+    let count = best_chain.len().min(required);
+    let candidate = if count >= 2.min(required) {
+        Some(best_chain)
+    } else {
+        None
+    };
+    (candidate, count)
+}
+
+fn find_multi_stride_dfs(
+    hits: &[usize],
+    chain: &mut Vec<usize>,
+    allowed_strides: &[usize],
+    required: usize,
+    best_chain: &mut Vec<usize>,
+) {
+    if chain.len() > best_chain.len() {
+        *best_chain = chain.clone();
+    }
+    if chain.len() >= required {
+        return;
+    }
+    let current = *chain.last().unwrap();
+    for &stride in allowed_strides {
+        if stride == 0 {
+            continue;
+        }
+        if let Some(next) = current.checked_add(stride) {
+            if hits.binary_search(&next).is_ok() && !chain.contains(&next) {
+                chain.push(next);
+                find_multi_stride_dfs(hits, chain, allowed_strides, required, best_chain);
+                if best_chain.len() >= required {
+                    return;
+                }
+                chain.pop();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod entity_address_tests {
     use super::{
@@ -525,6 +636,34 @@ mod entity_address_tests {
                 0x29A9456B118,
                 0x29A9456B130,
                 0x29A9456B148
+            ])
+        );
+    }
+
+    #[test]
+    fn multi_stride_chain_discovers_variable_struct_sizes() {
+        let strides = super::parse_multi_strides("2260, 25D0");
+        assert_eq!(strides, vec![0x2260, 0x25D0]);
+
+        let hits = [
+            0x9999, // noise
+            0x27FB3103D80, // #1
+            0x27FB3105FE0, // #2 (+0x2260)
+            0x27FB31085B0, // #3 (+0x25D0)
+            0x27FB310AB80, // #4 (+0x25D0)
+            0x27FB310CDE0, // #5 (+0x2260)
+            0x1111, // noise
+        ];
+        let (chain, count) = super::entity_multi_stride_hit_progress(&hits, 5, &strides);
+        assert_eq!(count, 5);
+        assert_eq!(
+            chain,
+            Some(vec![
+                0x27FB3103D80,
+                0x27FB3105FE0,
+                0x27FB31085B0,
+                0x27FB310AB80,
+                0x27FB310CDE0,
             ])
         );
     }

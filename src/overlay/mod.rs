@@ -26904,9 +26904,11 @@ mod windows_overlay {
 
         let count = preset.entity_count.clamp(1, 512);
         let stride = preset.entity_stride.max(1);
-        let (target_pid, entity_addresses) = if preset.entity_auto_hit_order {
+        let uses_hit_list = preset.scan_mode() != crate::model::EspAutoScanMode::Stride
+            || preset.entity_auto_hit_order;
+        let (target_pid, entity_addresses) = if uses_hit_list {
             if preset.entity_hit_order_addresses.is_empty() {
-                return Err("Hit-order entity list has not been captured".to_owned());
+                return Err("Entity list has not been captured".to_owned());
             }
             (
                 pid,
