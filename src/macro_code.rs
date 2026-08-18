@@ -6,8 +6,9 @@ use std::io::{Read, Write};
 
 use crate::model::{
     AudioSensePreset, CommandPreset, EspPreset, GeometryPreset, HudPreset, MacroGroup, MacroPreset,
-    MacroStep, MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset, ProfileRecord,
-    TimerPreset, VisionPreset, WindowFocusPreset, WindowLayout, WindowPreset, ZoomPreset,
+    MacroStep, MemoryCodeEntry, MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset,
+    ProfileRecord, TimerPreset, VisionPreset, WindowFocusPreset, WindowLayout, WindowPreset,
+    ZoomPreset,
 };
 
 const PREFIX_STEP: &str = "MN_STEP:";
@@ -188,6 +189,8 @@ pub struct MacroShareResources {
     pub timer_presets: Vec<TimerPreset>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub esp_presets: Vec<EspPreset>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub memory_code_list: Vec<MemoryCodeEntry>,
 }
 
 impl MacroShareResources {
@@ -487,7 +490,20 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
     use crate::model::MacroAction;
 
     if field == "if_variable_name" {
-        return matches!(action, MacroAction::IfStart | MacroAction::SetVariable);
+        return matches!(
+            action,
+            MacroAction::IfStart | MacroAction::SetVariable | MacroAction::ReadMemory
+        );
+    }
+    if field == "trigger_macro_group_id" {
+        return matches!(
+            action,
+            MacroAction::TriggerMacroPreset
+                | MacroAction::TriggerMacroPresetIfEnabled
+                | MacroAction::StopMacroPreset
+                | MacroAction::EnableMacroPreset
+                | MacroAction::DisableMacroPreset
+        );
     }
     if field.starts_with("if_") || field == "extra_conditions" {
         return action == MacroAction::IfStart;
@@ -723,5 +739,38 @@ mod tests {
         assert_eq!(decoded.step.action, crate::model::MacroAction::KeyPress);
         assert_eq!(decoded.step.if_condition_type, Default::default());
         assert!(!decoded.step.vision_move_cursor_on_match);
+    }
+
+    #[test]
+    fn read_memory_preserves_variable_and_resources_preserve_code_list() {
+        let step = MacroStep {
+            action: crate::model::MacroAction::ReadMemory,
+            key: "game.exe+0x100 [0x20]".to_owned(),
+            if_variable_name: "a".to_owned(),
+            memory_target_window: Some("My Game".to_owned()),
+            memory_value_type: crate::model::MemoryValueType::I32,
+            ..MacroStep::default()
+        };
+        let code_entry = MemoryCodeEntry {
+            module: "game.exe".to_owned(),
+            offset: 0x1234,
+            instruction: "mov [rax], rcx".to_owned(),
+            ..MemoryCodeEntry::default()
+        };
+        let shared = SharedMacroStep {
+            step: step.clone(),
+            resources: MacroShareResources {
+                memory_code_list: vec![code_entry.clone()],
+                ..MacroShareResources::default()
+            },
+        };
+        let encoded = encode_shared_step(&shared).expect("encode read memory step");
+        let decoded = decode_shared_step(&encoded).expect("decode read memory step");
+        assert_eq!(decoded.step.if_variable_name, "a");
+        assert_eq!(decoded.step.key, "game.exe+0x100 [0x20]");
+        assert_eq!(decoded.step.memory_target_window.as_deref(), Some("My Game"));
+        assert_eq!(decoded.resources.memory_code_list.len(), 1);
+        assert_eq!(decoded.resources.memory_code_list[0].module, "game.exe");
+        assert_eq!(decoded.resources.memory_code_list[0].offset, 0x1234);
     }
 }

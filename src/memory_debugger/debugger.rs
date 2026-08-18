@@ -1837,6 +1837,7 @@ mod tests {
                 WatchEvent::Error(error) => panic!("watch failed: {error}"),
                 WatchEvent::Stopped => panic!("watch stopped before a write"),
                 WatchEvent::Started { .. } => {}
+                WatchEvent::CaptureLimitReached(_) => {}
             }
         };
         assert_ne!(ip, 0);

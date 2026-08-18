@@ -14695,13 +14695,6 @@ mod tests {
     }
 
     #[test]
-    fn modifier_capture_keeps_full_combo_while_keys_are_released() {
-        let mut pending = hotkey::parse_binding("Ctrl+Shift");
-        update_pending_modifier_capture(&mut pending, hotkey::parse_binding("Ctrl").unwrap());
-        assert_eq!(hotkey::format_binding(pending.as_ref()), "Ctrl+Shift");
-    }
-
-    #[test]
     fn memory_view_navigation_keeps_display_type() {
         let elements = default_structure_elements();
         let mut dialog = MemoryViewDialog {

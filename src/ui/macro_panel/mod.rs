@@ -82,10 +82,15 @@ impl CrosshairApp {
                         changed = true;
                     }
                     for window in open_windows {
+                        let clean_title = crate::window_list::strip_rule_suffix(&window.title);
+                        let is_selected = step.memory_target_window.as_deref().map_or(false, |s| {
+                            s == window.selector
+                                || s == window.title
+                                || crate::window_list::strip_rule_suffix(s) == clean_title
+                        });
                         if ui
                             .selectable_label(
-                                step.memory_target_window.as_deref()
-                                    == Some(window.selector.as_str()),
+                                is_selected,
                                 Self::truncate_window_title(
                                     &Self::simplify_window_title(&window.title),
                                     40,
@@ -94,7 +99,7 @@ impl CrosshairApp {
                             .on_hover_text(&window.selector)
                             .clicked()
                         {
-                            step.memory_target_window = Some(window.selector.clone());
+                            step.memory_target_window = Some(window.title.clone());
                             changed = true;
                         }
                     }
@@ -8001,7 +8006,10 @@ impl CrosshairApp {
                                                         step.trigger_macro_group_id = Some(group.id);
                                                         live_sync = true;
                                                     }
-                                                    let trig_group_id = step.trigger_macro_group_id.unwrap_or(group.id);
+                                                    let trig_group_id = step
+                                                        .trigger_macro_group_id
+                                                        .filter(|id| all_groups_for_trigger.iter().any(|(gid, _, _)| gid == id))
+                                                        .unwrap_or(group.id);
                                                     let trig_group_name = all_groups_for_trigger
                                                         .iter()
                                                         .find(|(gid, _, _)| *gid == trig_group_id)
@@ -10324,7 +10332,10 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         step.trigger_macro_group_id = Some(group.id);
                                                         live_sync = true;
                                                     }
-                                                    let trig_group_id = step.trigger_macro_group_id.unwrap_or(group.id);
+                                                    let trig_group_id = step
+                                                        .trigger_macro_group_id
+                                                        .filter(|id| all_groups_for_trigger.iter().any(|(gid, _, _)| gid == id))
+                                                        .unwrap_or(group.id);
                                                     let trig_group_name = all_groups_for_trigger
                                                         .iter()
                                                         .find(|(gid, _, _)| *gid == trig_group_id)
@@ -13554,7 +13565,10 @@ if supports_move_mouse || show_detection_tuning {
                                                         step.trigger_macro_group_id = Some(group.id);
                                                         live_sync = true;
                                                     }
-                                                    let trig_group_id = step.trigger_macro_group_id.unwrap_or(group.id);
+                                                    let trig_group_id = step
+                                                        .trigger_macro_group_id
+                                                        .filter(|id| all_groups_for_trigger.iter().any(|(gid, _, _)| gid == id))
+                                                        .unwrap_or(group.id);
                                                     let trig_group_name = all_groups_for_trigger
                                                         .iter()
                                                         .find(|(gid, _, _)| *gid == trig_group_id)
@@ -18642,7 +18656,10 @@ if supports_move_mouse || show_detection_tuning {
             step.trigger_macro_group_id = Some(current_group_id);
             *live_sync = true;
         }
-        let trig_group_id = step.trigger_macro_group_id.unwrap_or(current_group_id);
+        let trig_group_id = step
+            .trigger_macro_group_id
+            .filter(|id| all_groups_for_trigger.iter().any(|(gid, _, _)| gid == id))
+            .unwrap_or(current_group_id);
         let trig_group_name = all_groups_for_trigger
             .iter()
             .find(|(gid, _, _)| *gid == trig_group_id)

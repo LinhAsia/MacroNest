@@ -277,6 +277,7 @@ struct MacroShareCollectSeen {
     audio_sense_presets: HashSet<u32>,
     timer_presets: HashSet<u32>,
     esp_presets: HashSet<u32>,
+    memory_code_list: HashSet<(String, usize)>,
 }
 
 #[derive(Default)]
@@ -1753,6 +1754,17 @@ impl CrosshairApp {
                     {
                         resources.hud_presets.push(hud_preset.clone());
                     }
+                    if !preset.entity_auto_code_module.is_empty()
+                        && let Some(code_entry) = self.state.memory_code_list.iter().find(|code| {
+                            code.module.eq_ignore_ascii_case(&preset.entity_auto_code_module)
+                                && code.offset == preset.entity_auto_code_offset
+                        })
+                        && seen
+                            .memory_code_list
+                            .insert((code_entry.module.to_ascii_lowercase(), code_entry.offset))
+                    {
+                        resources.memory_code_list.push(code_entry.clone());
+                    }
                 }
             }
             _ => {}
@@ -2029,6 +2041,15 @@ impl CrosshairApp {
             maps.esp_presets.insert(old_id, preset.id);
             self.state.esp_presets.push(preset);
         }
+
+        for entry in resources.memory_code_list {
+            if !self.state.memory_code_list.iter().any(|existing| {
+                existing.module.eq_ignore_ascii_case(&entry.module) && existing.offset == entry.offset
+            }) {
+                self.state.memory_code_list.push(entry);
+            }
+        }
+        crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
 
         maps
     }
@@ -9070,11 +9091,16 @@ impl CrosshairApp {
     }
 
     fn display_title_for_selector(selector: &str, open_windows: &[WindowInfo]) -> String {
+        let clean_target = window_list::strip_rule_suffix(selector);
         open_windows
             .iter()
-            .find(|window| window.selector == selector)
+            .find(|window| {
+                window.selector == selector
+                    || window.title == selector
+                    || window_list::strip_rule_suffix(&window.title) == clean_target
+            })
             .map(|window| Self::simplify_window_title(&window.title))
-            .unwrap_or_else(|| Self::simplify_window_title(selector))
+            .unwrap_or_else(|| Self::simplify_window_title(clean_target))
     }
 
     fn process_icon_texture(ctx: &egui::Context, path: &str) -> Option<TextureHandle> {
@@ -12805,7 +12831,9 @@ impl CrosshairApp {
             MacroAction::TriggerMacroPreset
                 | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::StopMacroPreset
-        ) && step.trigger_macro_group_id == Some(old_group_id)
+                | MacroAction::EnableMacroPreset
+                | MacroAction::DisableMacroPreset
+        ) && (step.trigger_macro_group_id == Some(old_group_id) || step.trigger_macro_group_id.is_none())
         {
             step.trigger_macro_group_id = Some(new_group_id);
         }
@@ -12817,6 +12845,8 @@ impl CrosshairApp {
             MacroAction::TriggerMacroPreset
                 | MacroAction::TriggerMacroPresetIfEnabled
                 | MacroAction::StopMacroPreset
+                | MacroAction::EnableMacroPreset
+                | MacroAction::DisableMacroPreset
         ) {
             step.trigger_macro_group_id = Some(group_id);
         }
