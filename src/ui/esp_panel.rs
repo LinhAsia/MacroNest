@@ -150,7 +150,6 @@ impl CrosshairApp {
                 preset.entity_count = final_addresses.len() as u32;
                 preset.entity_hit_order_addresses = final_addresses.clone();
                 preset.entity_list_enabled = true;
-                preset.enabled = true;
             }
             let feedback_msg = if let Some(status) = status_override {
                 status.to_owned()
@@ -211,7 +210,6 @@ impl CrosshairApp {
                 preset.entity_root = format!("0x{root:X}");
                 preset.entity_count = final_count;
                 preset.entity_list_enabled = true;
-                preset.enabled = true;
             }
             let msg = if let Some(status) = status_override {
                 status.to_owned()
@@ -1213,63 +1211,69 @@ impl CrosshairApp {
 
                         // --- Angle / Orientation options ---
                         ui.label("Angle options");
-                        ui.horizontal_wrapped(|ui| {
-                            if preset.orientation_source == EspOrientationSource::Angles {
-                                angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
-                                angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
-                            } else {
-                                ui.label("Yaw = atan2(Direction B, Direction A)");
-                                angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
-                                ui.checkbox(&mut preset.swap_direction_pair, "Swap direction A/B");
-                                ui.checkbox(&mut preset.invert_direction_a, "Invert direction A");
-                                ui.checkbox(&mut preset.invert_direction_b, "Invert direction B");
-                            }
-                            ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw value")
-                                .on_hover_text("Reverse only camera rotation. Use this when lateral movement is correct but rotating the camera moves ESP the wrong way.");
-                            ui.checkbox(&mut preset.invert_camera_pitch, "Reverse pitch value")
-                                .on_hover_text("Reverse only camera pitch angle. Use this when looking down with camera moves ESP the wrong way.");
+                        ui.vertical(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                if preset.orientation_source == EspOrientationSource::Angles {
+                                    angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
+                                    angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
+                                } else {
+                                    ui.label("Yaw = atan2(Direction B, Direction A)");
+                                    angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
+                                    ui.checkbox(&mut preset.swap_direction_pair, "Swap direction A/B");
+                                    ui.checkbox(&mut preset.invert_direction_a, "Invert direction A");
+                                    ui.checkbox(&mut preset.invert_direction_b, "Invert direction B");
+                                }
+                                ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw value")
+                                    .on_hover_text("Reverse only camera rotation. Use this when lateral movement is correct but rotating the camera moves ESP the wrong way.");
+                                ui.checkbox(&mut preset.invert_camera_pitch, "Reverse pitch value")
+                                    .on_hover_text("Reverse only camera pitch angle. Use this when looking down with camera moves ESP the wrong way.");
+                            });
                         });
                         ui.end_row();
 
                         // --- Invert / Mirror ---
                         ui.label("Invert / Mirror");
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut preset.invert_vertical, "Invert elevation (height)")
-                                .on_hover_text("Invert target elevation difference. Use this when moving player up/down moves ESP the wrong way.");
-                            ui.checkbox(&mut preset.invert_yaw, "Mirror screen X")
-                                .on_hover_text("Mirror only the final left/right screen position.");
-                            ui.checkbox(&mut preset.invert_pitch, "Mirror screen Y")
-                                .on_hover_text("Mirror only the final up/down screen position.");
-                            ui.label("Horizontal FOV");
-                            ui.add(DragValue::new(&mut preset.horizontal_fov).speed(1.0).range(1.0..=179.0));
+                        ui.vertical(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.checkbox(&mut preset.invert_vertical, "Invert elevation (height)")
+                                    .on_hover_text("Invert target elevation difference. Use this when moving player up/down moves ESP the wrong way.");
+                                ui.checkbox(&mut preset.invert_yaw, "Mirror screen X")
+                                    .on_hover_text("Mirror only the final left/right screen position.");
+                                ui.checkbox(&mut preset.invert_pitch, "Mirror screen Y")
+                                    .on_hover_text("Mirror only the final up/down screen position.");
+                                ui.label("Horizontal FOV");
+                                ui.add(DragValue::new(&mut preset.horizontal_fov).speed(1.0).range(1.0..=179.0));
+                            });
                         });
                         ui.end_row();
 
                         // --- Yaw zero offset ---
                         ui.label("Yaw zero offset").on_hover_text("Use this when the marker is consistently rotated left/right. Try +90, -90, then 180.");
-                        ui.horizontal(|ui| {
-                            ui.add(
-                                DragValue::new(&mut preset.yaw_offset_degrees)
-                                    .speed(1.0)
-                                    .range(-360.0..=360.0)
-                                    .suffix(" deg"),
-                            );
-                            for value in [-180.0, -90.0, 0.0, 90.0, 180.0] {
-                                if ui.small_button(format!("{value:+.0}")).clicked() {
-                                    preset.yaw_offset_degrees = value;
+                        ui.vertical(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.add(
+                                    DragValue::new(&mut preset.yaw_offset_degrees)
+                                        .speed(1.0)
+                                        .range(-360.0..=360.0)
+                                        .suffix(" deg"),
+                                );
+                                for value in [-180.0, -90.0, 0.0, 90.0, 180.0] {
+                                    if ui.small_button(format!("{value:+.0}")).clicked() {
+                                        preset.yaw_offset_degrees = value;
+                                    }
                                 }
-                            }
-                            ui.label("Direction B/A ratio").on_hover_text(
-                                "Scales Direction B relative to A before atan2. Use this when horizontal ESP is correct near one direction but increasingly wrong while rotating.",
-                            );
-                            ui.add(
-                                DragValue::new(&mut preset.direction_multiplier)
-                                    .speed(0.001)
-                                    .range(0.0001..=100.0),
-                            );
-                            if ui.small_button("Reset scale").clicked() {
-                                preset.direction_multiplier = 1.0;
-                            }
+                                ui.label("Direction B/A ratio").on_hover_text(
+                                    "Scales Direction B relative to A before atan2. Use this when horizontal ESP is correct near one direction but increasingly wrong while rotating.",
+                                );
+                                ui.add(
+                                    DragValue::new(&mut preset.direction_multiplier)
+                                        .speed(0.001)
+                                        .range(0.0001..=100.0),
+                                );
+                                if ui.small_button("Reset scale").clicked() {
+                                    preset.direction_multiplier = 1.0;
+                                }
+                            });
                         });
                         ui.end_row();
 
