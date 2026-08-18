@@ -26,6 +26,8 @@ pub(super) struct EspEntityRootCapture {
     rx: std::sync::mpsc::Receiver<WatchEvent>,
     active: Option<AccessWatch>,
     hud_preset_id: Option<u32>,
+    started_at: std::time::Instant,
+    last_hit_at: std::time::Instant,
 }
 
 #[cfg(windows)]
@@ -166,8 +168,13 @@ impl CrosshairApp {
                     .find(|preset| preset.id == preset_id)
                 {
                     preset.entity_hit_order_addresses.clear();
+                    preset.entity_count = 0;
+                    if !preset.entity_auto_hit_order {
+                        preset.entity_root.clear();
+                    }
                 }
                 self.persist_esp_presets();
+                let now = std::time::Instant::now();
                 self.esp_entity_root_capture = Some(EspEntityRootCapture {
                     preset_id,
                     pid,
@@ -180,6 +187,8 @@ impl CrosshairApp {
                     rx,
                     active: Some(active),
                     hud_preset_id,
+                    started_at: now,
+                    last_hit_at: now,
                 });
                 self.esp_entity_capture_feedback
                     .insert(
@@ -223,6 +232,7 @@ impl CrosshairApp {
                 WatchEvent::Started { .. } => {}
                 WatchEvent::AccessHit { data_address, .. } => {
                     capture.addresses.push(data_address);
+                    capture.last_hit_at = std::time::Instant::now();
                     changed = true;
                 }
                 WatchEvent::CaptureLimitReached(limit) => {
@@ -312,8 +322,11 @@ impl CrosshairApp {
             }
         }
 
-        let is_complete = matched >= capture.required;
-        if is_complete {
+        let hit_settled = matched >= 1
+            && (capture.last_hit_at.elapsed() >= std::time::Duration::from_millis(800)
+                || capture.started_at.elapsed() >= std::time::Duration::from_secs(3));
+        let is_complete = matched >= capture.required || hit_settled;
+        if is_complete || (stopped.is_some() && matched >= 1) {
             if let Some(mut active) = capture.active.take() {
                 active.stop();
             }
@@ -369,13 +382,13 @@ impl CrosshairApp {
                 let feedback_msg = if dropped_self {
                     format!(
                         "Captured {} entities (merged/dropped -> {} active)",
-                        capture.required,
+                        matched,
                         final_addresses.len()
                     )
                 } else {
                     format!(
                         "Captured {} entities ({} active)",
-                        capture.required,
+                        matched,
                         final_addresses.len()
                     )
                 };
@@ -389,11 +402,12 @@ impl CrosshairApp {
                     .find(|preset| preset.id == capture.preset_id)
                 {
                     preset.entity_root = format!("0x{root:X}");
+                    preset.entity_count = matched.max(1) as u32;
                     preset.entity_list_enabled = true;
                 }
                 self.esp_entity_capture_feedback.insert(
                     capture.preset_id,
-                    format!("Root updated: 0x{root:X} ({}/{})", capture.required, capture.required),
+                    format!("Root updated: 0x{root:X} ({matched}/{})", capture.required),
                 );
             }
             if capture.hud_preset_id.is_some() {
