@@ -1,4 +1,5 @@
-/target
+target/
+**/target/
 /target_alt
 /target-devbuild
 /target-release-tmp
