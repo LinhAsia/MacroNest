@@ -144,6 +144,7 @@ impl CrosshairApp {
                 preset.entity_count = final_addresses.len() as u32;
                 preset.entity_hit_order_addresses = final_addresses.clone();
                 preset.entity_list_enabled = true;
+                preset.enabled = true;
             }
             let feedback_msg = if let Some(status) = status_override {
                 status.to_owned()
@@ -162,6 +163,14 @@ impl CrosshairApp {
             };
             self.esp_entity_capture_feedback
                 .insert(capture.preset_id, feedback_msg);
+            if capture.hud_preset_id.is_some() {
+                self.show_esp_entity_capture_hud(
+                    capture.hud_preset_id,
+                    format!("Entity scan {}/{} - done", final_addresses.len(), capture.required),
+                );
+                self.esp_entity_capture_hud_hide_at =
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+            }
         } else if let Some(root) = candidate {
             if let Some(preset) = self
                 .state
@@ -172,6 +181,7 @@ impl CrosshairApp {
                 preset.entity_root = format!("0x{root:X}");
                 preset.entity_count = matched.max(1) as u32;
                 preset.entity_list_enabled = true;
+                preset.enabled = true;
             }
             let msg = if let Some(status) = status_override {
                 status.to_owned()
@@ -180,17 +190,27 @@ impl CrosshairApp {
             };
             self.esp_entity_capture_feedback
                 .insert(capture.preset_id, msg);
+            if capture.hud_preset_id.is_some() {
+                self.show_esp_entity_capture_hud(
+                    capture.hud_preset_id,
+                    format!("Entity scan {matched}/{} - done", capture.required),
+                );
+                self.esp_entity_capture_hud_hide_at =
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+            }
         } else if let Some(status) = status_override {
             self.esp_entity_capture_feedback
                 .insert(capture.preset_id, status.to_owned());
+            if capture.hud_preset_id.is_some() {
+                self.show_esp_entity_capture_hud(
+                    capture.hud_preset_id,
+                    format!("Entity scan: {status}"),
+                );
+                self.esp_entity_capture_hud_hide_at =
+                    Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+            }
         }
 
-        if capture.hud_preset_id.is_some() {
-            self.esp_entity_capture_hud_hide_at = None;
-            let _ = self
-                .overlay_tx
-                .send(crate::overlay::OverlayCommand::PreviewHudPreset(Vec::new()));
-        }
         self.persist_esp_presets();
     }
 
@@ -289,7 +309,6 @@ impl CrosshairApp {
         );
         match started {
             Ok(active) => {
-                let initial_addresses = preset.entity_hit_order_addresses.clone();
                 let now = std::time::Instant::now();
                 self.esp_entity_root_capture = Some(EspEntityRootCapture {
                     preset_id,
@@ -299,7 +318,7 @@ impl CrosshairApp {
                     hit_step,
                     merge_pairs,
                     drop_nearest,
-                    addresses: initial_addresses,
+                    addresses: Vec::with_capacity(128),
                     rx,
                     active: Some(active),
                     hud_preset_id,
