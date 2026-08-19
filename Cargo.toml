@@ -106,3 +106,11 @@ anyhow = "1.0"
 image = { version = "0.25", default-features = false, features = ["bmp", "ico", "jpeg", "png", "webp"] }
 resvg = "0.45"
 tiny-skia = "0.11"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "unwind"
+
