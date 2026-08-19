@@ -13148,6 +13148,38 @@ mod windows_overlay {
                 let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
+        let should_capture_freeze = {
+            let state = SCREEN_DRAW_STATE.lock();
+            if state.capturing_region || state.text_session.is_some() {
+                return false;
+            }
+            if state.active {
+                false
+            } else {
+                match &mode {
+                    ScreenDrawCaptureMode::OcrRegionSelect { freeze, .. }
+                    | ScreenDrawCaptureMode::OcrHoldTrigger { freeze, .. } => *freeze,
+                    _ => state.freeze_screen,
+                }
+            }
+        };
+        let captured_frame = if should_capture_freeze {
+            thread::sleep(Duration::from_millis(60));
+            let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+            if screen_w > 0 && screen_h > 0 {
+                window_list::capture_virtual_screen_region(
+                    screen_x,
+                    screen_y,
+                    screen_w,
+                    screen_h,
+                )
+                .map(|frame| frame.rgba)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let started_inactive;
         let session_id;
         {
@@ -13158,25 +13190,6 @@ mod windows_overlay {
             started_inactive = !state.active;
             if started_inactive {
                 state.restore_ui_on_deactivate = true;
-                let freeze = match &mode {
-                    ScreenDrawCaptureMode::OcrRegionSelect { freeze, .. }
-                    | ScreenDrawCaptureMode::OcrHoldTrigger { freeze, .. } => *freeze,
-                    _ => state.freeze_screen,
-                };
-                let captured_frame = if freeze {
-                    std::thread::sleep(std::time::Duration::from_millis(60));
-                    let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
-                    if screen_w > 0 && screen_h > 0 {
-                        window_list::capture_virtual_screen_region(
-                            screen_x, screen_y, screen_w, screen_h,
-                        )
-                        .map(|frame| frame.rgba)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
                 activate_screen_draw(&mut state, captured_frame);
             }
             let trigger = match &mode {
