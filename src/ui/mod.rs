@@ -6626,18 +6626,6 @@ impl CrosshairApp {
                             },
                         );
 
-                        if button_response.clicked() {
-                            self.state.quick_ocr_enabled = !self.state.quick_ocr_enabled;
-                            self.sync_quick_ocr_config();
-                            self.persist();
-                            self.status = if self.state.quick_ocr_enabled {
-                                "OCR hotkey enabled."
-                            } else {
-                                "OCR hotkey disabled."
-                            }
-                            .to_owned();
-                        }
-
                         // Direct OCR trigger corner button (chọn vùng -> copy chữ)
                         let ocr_btn_rect = egui::Rect::from_min_size(
                             pos2(button_response.rect.right() - 31.0, button_response.rect.top() + 3.0),
@@ -6655,7 +6643,8 @@ impl CrosshairApp {
                             "Nhận diện chữ tức thì (chọn vùng → copy)",
                         ));
 
-                        if ocr_btn_response.clicked() {
+                        let instant_ocr_clicked = ocr_btn_response.clicked();
+                        if instant_ocr_clicked {
                             #[cfg(windows)]
                             unsafe {
                                 if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
@@ -6668,6 +6657,18 @@ impl CrosshairApp {
                                 self.state.quick_ocr_language.clone(),
                                 self.state.quick_ocr_freeze,
                             );
+                        }
+
+                        if button_response.clicked() && !instant_ocr_clicked {
+                            self.state.quick_ocr_enabled = !self.state.quick_ocr_enabled;
+                            self.sync_quick_ocr_config();
+                            self.persist();
+                            self.status = if self.state.quick_ocr_enabled {
+                                "OCR hotkey enabled."
+                            } else {
+                                "OCR hotkey disabled."
+                            }
+                            .to_owned();
                         }
 
                         // Popup settings

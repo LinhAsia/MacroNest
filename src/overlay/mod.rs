@@ -1714,6 +1714,8 @@ mod windows_overlay {
 
     static OVERLAY_COMMAND_TX: Lazy<Mutex<Option<Sender<OverlayCommand>>>> =
         Lazy::new(|| Mutex::new(None));
+    static UI_COMMAND_TX: Lazy<Mutex<Option<Sender<UiCommand>>>> =
+        Lazy::new(|| Mutex::new(None));
     static RANDOM_STATE: Lazy<std::sync::atomic::AtomicU64> = Lazy::new(|| {
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -3797,6 +3799,7 @@ mod windows_overlay {
             let _ = AppendMenuW(tray_menu, MF_STRING, MENU_SHOW, w!("Open settings"));
             let _ = AppendMenuW(tray_menu, MF_SEPARATOR, 0, PCWSTR::null());
             let _ = AppendMenuW(tray_menu, MF_STRING, MENU_EXIT, w!("Exit"));
+            *UI_COMMAND_TX.lock() = Some(ui_tx.clone());
             {
                 let mut hook_state = HOOK_STATE.lock();
                 hook_state.ui_tx = Some(ui_tx.clone());
@@ -4733,6 +4736,8 @@ mod windows_overlay {
                 hook_state.sound_presets.clear();
                 hook_state.active_hold_macros.clear();
                 hook_state.held_mouse_buttons.clear();
+                drop(hook_state);
+                *UI_COMMAND_TX.lock() = None;
                 *OVERLAY_COMMAND_TX.lock() = None;
                 SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
                 let ptr = GetWindowLongPtrW(hwnd, WINDOW_LONG_PTR_INDEX(GWLP_USERDATA.0));
@@ -4991,6 +4996,8 @@ mod windows_overlay {
                     } else {
                         true
                     };
+                    let quick_ocr_trigger_allowed =
+                        !UI_CAPTURING_INPUT.load(Ordering::Relaxed);
                     let binding = binding_from_trigger_event(&key_name);
                     if screen_draw_trigger_allowed
                         && crate::video_recorder::process_hotkey(
@@ -5013,7 +5020,7 @@ mod windows_overlay {
                             hook_state.quick_ocr_freeze,
                         )
                     };
-                    if screen_draw_trigger_allowed
+                    if quick_ocr_trigger_allowed
                         && ocr_enabled
                         && let Some(trigger) = ocr_hotkey
                         && hotkey::binding_matches(&trigger, &binding)
@@ -12509,7 +12516,6 @@ mod windows_overlay {
         state.live_stroke_rect = None;
         // Do NOT release surface here to prevent race conditions with the painting thread!
         // The surface will be safely released on the overlay thread inside sync_screen_draw_overlay_window.
-        request_ui_repaint();
         state.freeze_frame = None;
         state.text_session = None;
         state.text_interaction_start_point = None;
@@ -12533,9 +12539,7 @@ mod windows_overlay {
                     let _ = SetForegroundWindow(hwnd);
                 }
             }
-            if let Some(ui_tx) = &HOOK_STATE.lock().ui_tx {
-                let _ = ui_tx.send(UiCommand::ShowWindow);
-            }
+            send_ui_command(UiCommand::ShowWindow);
         }
         if let Some(command) = crosshair_draw_finished {
             send_ui_command(UiCommand::UpdateScreenDrawConfig {
@@ -12625,7 +12629,6 @@ mod windows_overlay {
         state.text_interaction_origin = None;
         state.current_stroke = None;
         state.pending_repaint = false;
-        request_ui_repaint();
         Some(state.capture_session_id)
     }
 
@@ -26294,7 +26297,7 @@ mod windows_overlay {
     }
 
     fn send_ui_command(command: UiCommand) {
-        if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
+        if let Some(tx) = UI_COMMAND_TX.lock().clone() {
             let _ = tx.send(command);
         }
     }
