@@ -50,6 +50,7 @@ impl CrosshairApp {
         self.sync_quick_key_display_config();
         self.sync_quick_screen_draw_config();
         self.sync_quick_video_record_config();
+        self.sync_quick_ocr_config();
         self.sync_quick_key_sound_config();
         self.sync_vietnamese_input_enabled();
         self.sync_macro_master_hotkey();
@@ -389,6 +390,26 @@ impl CrosshairApp {
             ffmpeg_exe: self.paths.ffmpeg_exe.clone(),
             ui_language: self.state.ui_language,
         });
+    }
+
+    pub(crate) fn sync_quick_ocr_config(&mut self) {
+        let config = (
+            self.state.quick_ocr_enabled,
+            self.state.quick_ocr_hotkey.clone(),
+            self.state.quick_ocr_language.clone(),
+            self.state.quick_ocr_freeze,
+        );
+        Self::sync_overlay_command_if_changed(
+            &self.overlay_tx,
+            config.clone(),
+            &mut self.last_synced_quick_ocr_config,
+            OverlayCommand::UpdateQuickOcrConfig {
+                enabled: config.0,
+                hotkey: config.1,
+                language: config.2,
+                freeze: config.3,
+            },
+        );
     }
 
     pub(crate) fn sync_quick_key_sound_config(&mut self) {

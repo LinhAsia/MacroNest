@@ -154,6 +154,7 @@ enum TitlebarQuickActionKind {
     KeyDisplay,
     ScreenDraw,
     VideoRecord,
+    Ocr,
     ClearOverlays,
     KeySound,
 }
@@ -697,6 +698,7 @@ pub struct CrosshairApp {
         QuickScreenDrawTool,
         bool,
     )>,
+    last_synced_quick_ocr_config: Option<(bool, Option<HotkeyBinding>, String, bool)>,
     last_synced_quick_key_sound_config: Option<(bool, u32, f32)>,
     last_synced_macro_master_hotkey: Option<Option<HotkeyBinding>>,
     last_synced_macros_master_enabled: Option<bool>,
@@ -1062,6 +1064,7 @@ impl CrosshairApp {
             last_synced_window_opacity_config: None,
             last_synced_quick_key_display_config: None,
             last_synced_quick_screen_draw_config: None,
+            last_synced_quick_ocr_config: None,
             last_synced_quick_key_sound_config: None,
             last_synced_macro_master_hotkey: None,
             last_synced_macros_master_enabled: None,
@@ -4477,6 +4480,32 @@ impl CrosshairApp {
                 ));
                 painter.circle_filled(body.center(), 3.5, icon_color);
             }
+            TitlebarQuickActionKind::Ocr => {
+                let center = rect.center();
+                let frame_rect = egui::Rect::from_center_size(center, vec2(26.0, 20.0));
+                let corner_len = 5.0;
+                let stroke = egui::Stroke::new(1.8, icon_color);
+                // Top-left corner
+                painter.line_segment([pos2(frame_rect.left(), frame_rect.top() + corner_len), pos2(frame_rect.left(), frame_rect.top())], stroke);
+                painter.line_segment([pos2(frame_rect.left(), frame_rect.top()), pos2(frame_rect.left() + corner_len, frame_rect.top())], stroke);
+                // Top-right corner
+                painter.line_segment([pos2(frame_rect.right() - corner_len, frame_rect.top()), pos2(frame_rect.right(), frame_rect.top())], stroke);
+                painter.line_segment([pos2(frame_rect.right(), frame_rect.top()), pos2(frame_rect.right(), frame_rect.top() + corner_len)], stroke);
+                // Bottom-left corner
+                painter.line_segment([pos2(frame_rect.left(), frame_rect.bottom() - corner_len), pos2(frame_rect.left(), frame_rect.bottom())], stroke);
+                painter.line_segment([pos2(frame_rect.left(), frame_rect.bottom()), pos2(frame_rect.left() + corner_len, frame_rect.bottom())], stroke);
+                // Bottom-right corner
+                painter.line_segment([pos2(frame_rect.right() - corner_len, frame_rect.bottom()), pos2(frame_rect.right(), frame_rect.bottom())], stroke);
+                painter.line_segment([pos2(frame_rect.right(), frame_rect.bottom()), pos2(frame_rect.right(), frame_rect.bottom() - corner_len)], stroke);
+                // Center text "OCR"
+                painter.text(
+                    center,
+                    egui::Align2::CENTER_CENTER,
+                    "OCR",
+                    egui::FontId::proportional(9.5),
+                    icon_color,
+                );
+            }
             TitlebarQuickActionKind::ClearOverlays => {
                 let center = rect.center();
 
@@ -6544,6 +6573,258 @@ impl CrosshairApp {
                                             self.state.ui_language,
                                             "Hold right mouse to erase",
                                             "Đè chuột phải để xóa",
+                                        ))
+                                        .size(10.0)
+                                        .color(ui.visuals().weak_text_color()),
+                                    );
+
+                                    if capture_active {
+                                        keep_open = true;
+                                    }
+                                    capture_active
+                                })
+                                .inner
+                            },
+                        );
+                        if keep_open {
+                            keep_menu_open = true;
+                        }
+                    },
+                );
+
+                // OCR Action
+                ui.allocate_ui_with_layout(
+                    vec2(action_width, action_height),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        let button_response = self.titlebar_quick_action_button(
+                            ui,
+                            TitlebarQuickActionKind::Ocr,
+                            self.state.quick_ocr_enabled,
+                        );
+
+                        ui.add_space(6.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(92.0, 28.0),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(Self::tr_lang(
+                                        self.state.ui_language,
+                                        "OCR",
+                                        "OCR",
+                                    ))
+                                    .size(11.0)
+                                    .color(
+                                        if button_response.hovered() {
+                                            ui.visuals().strong_text_color()
+                                        } else {
+                                            ui.visuals().text_color()
+                                        },
+                                    ),
+                                ));
+                            },
+                        );
+
+                        if button_response.clicked() {
+                            self.state.quick_ocr_enabled = !self.state.quick_ocr_enabled;
+                            self.sync_quick_ocr_config();
+                            self.persist();
+                            self.status = if self.state.quick_ocr_enabled {
+                                "OCR hotkey enabled."
+                            } else {
+                                "OCR hotkey disabled."
+                            }
+                            .to_owned();
+                        }
+
+                        // Direct OCR trigger corner button (chọn vùng -> copy chữ)
+                        let ocr_btn_rect = egui::Rect::from_min_size(
+                            pos2(button_response.rect.right() - 31.0, button_response.rect.top() + 3.0),
+                            vec2(27.0, 27.0),
+                        );
+                        let ocr_btn_response = ui.put(
+                            ocr_btn_rect,
+                            Button::new(Self::material_icon_text(0xe8b0, 14.0)) // document_scanner
+                                .corner_radius(7.0)
+                                .fill(Color32::from_rgba_premultiplied(20, 28, 44, 230))
+                                .stroke(egui::Stroke::new(1.2, Color32::from_rgb(117, 219, 166))),
+                        ).on_hover_text(Self::tr_lang(
+                            self.state.ui_language,
+                            "Instant OCR (select region → copy text)",
+                            "Nhận diện chữ tức thì (chọn vùng → copy)",
+                        ));
+
+                        if ocr_btn_response.clicked() {
+                            #[cfg(windows)]
+                            unsafe {
+                                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+                                    let _ = ShowWindow(hwnd, SW_HIDE);
+                                }
+                            }
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                            crate::overlay::screen_draw_instant_ocr(
+                                self.state.quick_ocr_language.clone(),
+                                self.state.quick_ocr_freeze,
+                            );
+                        }
+
+                        // Popup settings
+                        let mut keep_open = false;
+                        render_popup(
+                            ui,
+                            &button_response,
+                            TitlebarQuickActionKind::Ocr,
+                            &mut |ui| {
+                                ui.vertical(|ui| {
+                                    let freeze_changed = ui
+                                        .checkbox(
+                                            &mut self.state.quick_ocr_freeze,
+                                            RichText::new(Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Freeze screen",
+                                                "Đóng băng màn hình",
+                                            ))
+                                            .size(10.0),
+                                        )
+                                        .changed();
+                                    if freeze_changed {
+                                        self.sync_quick_ocr_config();
+                                        self.persist();
+                                    }
+
+                                    ui.add_space(4.0);
+                                    let capture_active =
+                                        self.capture_target.as_ref().is_some_and(|target| {
+                                            matches!(target, CaptureRequest::QuickOcrHotkey)
+                                        });
+                                    let hotkey_label = if capture_active {
+                                        Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Capturing...",
+                                            "Đang bắt phím...",
+                                        )
+                                        .to_owned()
+                                    } else {
+                                        self.state
+                                            .quick_ocr_hotkey
+                                            .as_ref()
+                                            .map(|binding| {
+                                                Self::format_binding_ui(
+                                                    self.state.ui_language,
+                                                    Some(binding),
+                                                )
+                                            })
+                                            .unwrap_or_else(|| {
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Set trigger key",
+                                                    "Đặt phím trigger",
+                                                )
+                                                .to_owned()
+                                            })
+                                    };
+                                    let capture_time = ui.ctx().input(|input| input.time) as f32;
+                                    let pulse = if capture_active {
+                                        0.5 + 0.5 * (capture_time * 6.0).sin().abs()
+                                    } else {
+                                        0.0
+                                    };
+                                    let capture_fill = if capture_active {
+                                        Color32::from_rgba_premultiplied(
+                                            (88.0 + pulse * 28.0) as u8,
+                                            (84.0 + pulse * 28.0) as u8,
+                                            (44.0 + pulse * 10.0) as u8,
+                                            255,
+                                        )
+                                    } else {
+                                        ui.visuals().widgets.inactive.bg_fill
+                                    };
+                                    let capture_stroke = if capture_active {
+                                        Color32::from_rgb(255, 232, 96)
+                                    } else {
+                                        ui.visuals().widgets.inactive.bg_stroke.color
+                                    };
+                                    let mut capture_button = Button::new(hotkey_label);
+                                    if capture_active {
+                                        capture_button = capture_button
+                                            .fill(capture_fill)
+                                            .stroke(egui::Stroke::new(1.0, capture_stroke));
+                                    }
+                                    if ui
+                                        .add_sized(
+                                            [164.0, 22.0],
+                                            capture_button,
+                                        )
+                                        .on_hover_text(if capture_active {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Cancel capture",
+                                                "Hủy bắt phím",
+                                            )
+                                        } else {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Capture OCR hotkey",
+                                                "Bắt phím OCR",
+                                            )
+                                        })
+                                        .clicked()
+                                    {
+                                        if capture_active {
+                                            self.cancel_capture();
+                                        } else if self.state.quick_ocr_hotkey.is_some() {
+                                            self.state.quick_ocr_hotkey = None;
+                                            self.sync_quick_ocr_config();
+                                            self.persist();
+                                            self.status =
+                                                "Cleared OCR trigger key.".to_owned();
+                                        } else {
+                                            self.begin_capture(
+                                                CaptureRequest::QuickOcrHotkey,
+                                                "Press the key that triggers OCR region capture."
+                                                    .to_owned(),
+                                            );
+                                        }
+                                    }
+
+                                    ui.add_space(6.0);
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Language",
+                                            "Ngôn ngữ",
+                                        ))
+                                        .size(10.0),
+                                    );
+                                    let lang_before = self.state.quick_ocr_language.clone();
+                                    let current_label = crate::ocr::display_label_for_language_code(
+                                        &self.state.quick_ocr_language,
+                                    );
+                                    egui::ComboBox::from_id_salt("quick-ocr-language")
+                                        .width(164.0)
+                                        .selected_text(current_label)
+                                        .show_ui(ui, |ui| {
+                                            for pack in crate::ocr::ocr_language_packs() {
+                                                ui.selectable_value(
+                                                    &mut self.state.quick_ocr_language,
+                                                    pack.code.to_owned(),
+                                                    pack.label,
+                                                );
+                                            }
+                                        });
+                                    if self.state.quick_ocr_language != lang_before {
+                                        self.sync_quick_ocr_config();
+                                        self.persist();
+                                    }
+
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Hold trigger to capture and copy text",
+                                            "Đè nút trigger để chụp vùng và copy chữ",
                                         ))
                                         .size(10.0)
                                         .color(ui.visuals().weak_text_color()),
@@ -13350,6 +13631,7 @@ impl CrosshairApp {
                     | CaptureRequest::VisionPresetHotkey(_)
                     | CaptureRequest::QuickScreenDrawHotkey
                     | CaptureRequest::QuickVideoRecordHotkey
+                    | CaptureRequest::QuickOcrHotkey
                     | CaptureRequest::MacrosMasterHotkey
             ),
         }
@@ -13388,7 +13670,9 @@ impl CrosshairApp {
     fn capture_request_registers_on_press(&self, target: &CaptureRequest) -> bool {
         !matches!(
             target,
-            CaptureRequest::QuickScreenDrawHotkey | CaptureRequest::QuickVideoRecordHotkey
+            CaptureRequest::QuickScreenDrawHotkey
+                | CaptureRequest::QuickVideoRecordHotkey
+                | CaptureRequest::QuickOcrHotkey
         )
     }
 
@@ -13630,6 +13914,12 @@ impl CrosshairApp {
                 self.sync_quick_video_record_config();
                 self.persist();
                 self.status = "Captured video recording toggle key.".to_owned();
+            }
+            (CaptureRequest::QuickOcrHotkey, CapturedInput::Binding(binding)) => {
+                self.state.quick_ocr_hotkey = Some(binding);
+                self.sync_quick_ocr_config();
+                self.persist();
+                self.status = "Captured OCR trigger key.".to_owned();
             }
             (CaptureRequest::PinPresetHotkey(preset_id), CapturedInput::Binding(binding)) => {
                 if let Some(preset) = self

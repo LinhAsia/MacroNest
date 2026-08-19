@@ -260,6 +260,7 @@ pub enum CaptureRequest {
     CommandPresetHotkey(u32),
     QuickScreenDrawHotkey,
     QuickVideoRecordHotkey,
+    QuickOcrHotkey,
     MacroStepInput {
         group_id: u32,
         preset_id: u32,

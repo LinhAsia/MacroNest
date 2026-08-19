@@ -1946,6 +1946,12 @@ mod windows_overlay {
             style: u32,
             volume: f32,
         },
+        UpdateQuickOcrConfig {
+            enabled: bool,
+            hotkey: Option<HotkeyBinding>,
+            language: String,
+            freeze: bool,
+        },
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2039,6 +2045,8 @@ mod windows_overlay {
         HoldTrigger(HotkeyBinding),
         VideoRegionSelect,
         VideoHoldTrigger(HotkeyBinding),
+        OcrRegionSelect { language: String, freeze: bool },
+        OcrHoldTrigger { trigger: HotkeyBinding, language: String, freeze: bool },
     }
 
     impl Default for ScreenDrawControl {
@@ -2726,6 +2734,10 @@ mod windows_overlay {
         pub(crate) quick_key_sound_style: u32,
         pub(crate) quick_key_sound_volume: f32,
         pub(crate) quick_key_mascot_active: bool,
+        pub(crate) quick_ocr_enabled: bool,
+        pub(crate) quick_ocr_hotkey: Option<HotkeyBinding>,
+        pub(crate) quick_ocr_language: String,
+        pub(crate) quick_ocr_freeze: bool,
     }
 
     impl Default for HookState {
@@ -2837,6 +2849,10 @@ mod windows_overlay {
                 quick_key_sound_style: 2,
                 quick_key_sound_volume: 1.0,
                 quick_key_mascot_active: false,
+                quick_ocr_enabled: false,
+                quick_ocr_hotkey: None,
+                quick_ocr_language: crate::ocr::OCR_DEFAULT_CODE.to_owned(),
+                quick_ocr_freeze: true,
             }
         }
     }
@@ -4988,6 +5004,28 @@ mod windows_overlay {
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
+                    let (ocr_enabled, ocr_hotkey, ocr_lang, ocr_freeze) = {
+                        let hook_state = HOOK_STATE.lock();
+                        (
+                            hook_state.quick_ocr_enabled,
+                            hook_state.quick_ocr_hotkey.clone(),
+                            hook_state.quick_ocr_language.clone(),
+                            hook_state.quick_ocr_freeze,
+                        )
+                    };
+                    if screen_draw_trigger_allowed
+                        && ocr_enabled
+                        && let Some(trigger) = ocr_hotkey
+                        && hotkey::binding_matches(&trigger, &binding)
+                    {
+                        if is_key_down && !is_repeat_key(&key_name) {
+                            screen_draw_begin_ocr_region_capture(trigger, ocr_lang, ocr_freeze);
+                            request_ui_repaint();
+                            update_held_key(info.vkCode, is_key_down, is_key_up);
+                            update_modifier_state(info.vkCode, is_key_down);
+                            return LRESULT(1);
+                        }
+                    }
                     if is_key_down {
                         if screen_draw_trigger_allowed
                             && process_screen_draw_hotkey(&binding, is_repeat_key(&key_name))
@@ -5551,6 +5589,25 @@ mod windows_overlay {
                 if crate::video_recorder::process_hotkey(&binding, is_down, false) {
                     request_ui_repaint();
                     return LRESULT(1);
+                }
+                let (ocr_enabled, ocr_hotkey, ocr_lang, ocr_freeze) = {
+                    let hook_state = HOOK_STATE.lock();
+                    (
+                        hook_state.quick_ocr_enabled,
+                        hook_state.quick_ocr_hotkey.clone(),
+                        hook_state.quick_ocr_language.clone(),
+                        hook_state.quick_ocr_freeze,
+                    )
+                };
+                if ocr_enabled
+                    && let Some(trigger) = ocr_hotkey
+                    && hotkey::binding_matches(&trigger, &binding)
+                {
+                    if is_down {
+                        screen_draw_begin_ocr_region_capture(trigger, ocr_lang, ocr_freeze);
+                        request_ui_repaint();
+                        return LRESULT(1);
+                    }
                 }
                 if let Some(swallow) = process_screen_draw_mouse_hotkey_event(message, mouse_data) {
                     if swallow {
@@ -10471,6 +10528,19 @@ mod windows_overlay {
                     hook_state.quick_key_sound_volume = volume;
                 }
 
+                OverlayCommand::UpdateQuickOcrConfig {
+                    enabled,
+                    hotkey,
+                    language,
+                    freeze,
+                } => {
+                    let mut hook_state = HOOK_STATE.lock();
+                    hook_state.quick_ocr_enabled = enabled;
+                    hook_state.quick_ocr_hotkey = hotkey;
+                    hook_state.quick_ocr_language = language;
+                    hook_state.quick_ocr_freeze = freeze;
+                }
+
                 OverlayCommand::UpdateScreenDrawConfig {
                     enabled,
                     trigger,
@@ -13085,7 +13155,11 @@ mod windows_overlay {
             started_inactive = !state.active;
             if started_inactive {
                 state.restore_ui_on_deactivate = true;
-                let freeze = state.freeze_screen;
+                let freeze = match &mode {
+                    ScreenDrawCaptureMode::OcrRegionSelect { freeze, .. }
+                    | ScreenDrawCaptureMode::OcrHoldTrigger { freeze, .. } => *freeze,
+                    _ => state.freeze_screen,
+                };
                 let captured_frame = if freeze {
                     std::thread::sleep(std::time::Duration::from_millis(60));
                     let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
@@ -13104,6 +13178,7 @@ mod windows_overlay {
             }
             let trigger = match &mode {
                 ScreenDrawCaptureMode::VideoHoldTrigger(trigger) => Some(trigger.clone()),
+                ScreenDrawCaptureMode::OcrHoldTrigger { trigger, .. } => Some(trigger.clone()),
                 _ => None,
             };
             let Some(id) = begin_screen_draw_capture_session(&mut state, trigger) else {
@@ -13128,6 +13203,14 @@ mod windows_overlay {
 
     pub fn screen_draw_instant_screenshot() -> bool {
         begin_video_region_capture(ScreenDrawCaptureMode::MouseDrag)
+    }
+
+    pub fn screen_draw_instant_ocr(language: String, freeze: bool) -> bool {
+        begin_video_region_capture(ScreenDrawCaptureMode::OcrRegionSelect { language, freeze })
+    }
+
+    pub fn screen_draw_begin_ocr_region_capture(trigger: HotkeyBinding, language: String, freeze: bool) -> bool {
+        begin_video_region_capture(ScreenDrawCaptureMode::OcrHoldTrigger { trigger, language, freeze })
     }
 
     pub fn screen_draw_toggle_from_ui() -> bool {
@@ -13234,6 +13317,24 @@ mod windows_overlay {
         capture_mode: ScreenDrawCaptureMode,
         session_id: u64,
     ) -> String {
+        if let ScreenDrawCaptureMode::OcrHoldTrigger { trigger, language, .. } = capture_mode {
+            return match select_screen_draw_capture_region_from_trigger(&trigger, session_id) {
+                Ok(Some((x, y, width, height))) => {
+                    perform_ocr_on_screen_region_and_copy(x, y, width, height, &language)
+                }
+                Ok(None) => "OCR region selection cancelled.".to_owned(),
+                Err(error) => format!("OCR region selection failed: {error}"),
+            };
+        }
+        if let ScreenDrawCaptureMode::OcrRegionSelect { language, .. } = capture_mode {
+            return match select_screen_draw_capture_region(session_id) {
+                Ok(Some((x, y, width, height))) => {
+                    perform_ocr_on_screen_region_and_copy(x, y, width, height, &language)
+                }
+                Ok(None) => "OCR region selection cancelled.".to_owned(),
+                Err(error) => format!("OCR region selection failed: {error}"),
+            };
+        }
         if let ScreenDrawCaptureMode::VideoHoldTrigger(trigger) = capture_mode {
             return match select_screen_draw_capture_region_from_trigger(&trigger, session_id) {
                 Ok(Some(region)) => {
@@ -13269,6 +13370,37 @@ mod windows_overlay {
         }
     }
 
+    fn perform_ocr_on_screen_region_and_copy(
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        language: &str,
+    ) -> String {
+        let Ok((capture_x, capture_y, capture_w, capture_h)) =
+            normalize_screen_draw_capture_region(x, y, width, height)
+        else {
+            return "Invalid capture region dimensions.".to_owned();
+        };
+        let Some(capture) = window_list::capture_virtual_screen_region(capture_x, capture_y, capture_w, capture_h) else {
+            return "Failed to capture the selected screen region.".to_owned();
+        };
+        match crate::ocr::perform_ocr(&capture.rgba, capture.width as u32, capture.height as u32, language) {
+            Ok(ocr_result) => {
+                let trimmed = ocr_result.text.trim();
+                if trimmed.is_empty() {
+                    "No text found in selected region.".to_owned()
+                } else {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(trimmed.to_owned());
+                    }
+                    format!("Copied OCR text to clipboard ({} chars).", trimmed.chars().count())
+                }
+            }
+            Err(err) => format!("OCR recognition failed: {err}"),
+        }
+    }
+
     fn capture_screen_draw_region_to_clipboard(
         capture_mode: ScreenDrawCaptureMode,
         session_id: u64,
@@ -13282,7 +13414,9 @@ mod windows_overlay {
                 select_screen_draw_capture_region_from_trigger(&trigger, session_id)?
             }
             ScreenDrawCaptureMode::VideoRegionSelect
-            | ScreenDrawCaptureMode::VideoHoldTrigger(_) => return Ok(false),
+            | ScreenDrawCaptureMode::VideoHoldTrigger(_)
+            | ScreenDrawCaptureMode::OcrRegionSelect { .. }
+            | ScreenDrawCaptureMode::OcrHoldTrigger { .. } => return Ok(false),
         };
         let Some((x, y, width, height)) = selected else {
             return Ok(false);
@@ -40349,6 +40483,12 @@ mod fallback {
             tool: crate::model::QuickScreenDrawTool,
             text_border: bool,
         },
+        UpdateQuickOcrConfig {
+            enabled: bool,
+            hotkey: Option<HotkeyBinding>,
+            language: String,
+            freeze: bool,
+        },
         SetUiVisible(bool),
         SetTrayIconVisible(bool),
         Exit,
@@ -40556,6 +40696,12 @@ mod fallback {
         false
     }
     pub fn screen_draw_instant_screenshot() -> bool {
+        false
+    }
+    pub fn screen_draw_instant_ocr(_language: String, _freeze: bool) -> bool {
+        false
+    }
+    pub fn screen_draw_begin_ocr_region_capture(_trigger: HotkeyBinding, _language: String, _freeze: bool) -> bool {
         false
     }
     pub fn screen_draw_toggle_from_ui() -> bool {

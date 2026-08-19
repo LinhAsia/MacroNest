@@ -743,6 +743,14 @@ pub struct AppState {
     pub quick_key_sound_style: u32,
     #[serde(default = "default_key_sound_volume")]
     pub quick_key_sound_volume: f32,
+    #[serde(default)]
+    pub quick_ocr_enabled: bool,
+    #[serde(default)]
+    pub quick_ocr_hotkey: Option<HotkeyBinding>,
+    #[serde(default = "default_ocr_language_code")]
+    pub quick_ocr_language: String,
+    #[serde(default = "default_screen_draw_freeze")]
+    pub quick_ocr_freeze: bool,
 }
 
 impl AppState {
@@ -1089,6 +1097,10 @@ impl Default for AppState {
             quick_key_sound_enabled: false,
             quick_key_sound_style: 2,
             quick_key_sound_volume: default_key_sound_volume(),
+            quick_ocr_enabled: false,
+            quick_ocr_hotkey: None,
+            quick_ocr_language: default_ocr_language_code(),
+            quick_ocr_freeze: default_screen_draw_freeze(),
         }
     }
 }
