@@ -13172,17 +13172,13 @@ mod windows_overlay {
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return false;
         }
-        let is_ocr = matches!(
-            &mode,
-            ScreenDrawCaptureMode::OcrRegionSelect { .. }
-                | ScreenDrawCaptureMode::OcrHoldTrigger { .. }
-        );
         let is_hold_trigger = matches!(
             &mode,
             ScreenDrawCaptureMode::VideoHoldTrigger(_)
                 | ScreenDrawCaptureMode::OcrHoldTrigger { .. }
+                | ScreenDrawCaptureMode::HoldTrigger(_)
         );
-        let should_restore_ui = !is_ocr && !is_hold_trigger;
+        let should_restore_ui = !is_hold_trigger;
 
         #[cfg(windows)]
         unsafe {
