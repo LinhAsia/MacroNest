@@ -66,6 +66,12 @@ impl CrosshairApp {
             active.stop();
         }
         let (candidate, matched, resolved_addresses) = match capture.scan_mode {
+            crate::model::EspAutoScanMode::AllHits => {
+                let addresses = capture.addresses.clone();
+                let count = addresses.len();
+                let candidate_root = addresses.first().copied();
+                (candidate_root, count, Some(addresses))
+            }
             crate::model::EspAutoScanMode::HitOrder => {
                 let (filtered, count) = crate::model::entity_hits_in_capture_order_progress(
                     &capture.addresses,
@@ -104,6 +110,7 @@ impl CrosshairApp {
 
         if capture.scan_mode == crate::model::EspAutoScanMode::HitOrder
             || capture.scan_mode == crate::model::EspAutoScanMode::MultiStride
+            || capture.scan_mode == crate::model::EspAutoScanMode::AllHits
         {
             let mut final_addresses = resolved_addresses.unwrap_or_default();
             if capture.merge_pairs {
@@ -155,10 +162,12 @@ impl CrosshairApp {
                 status.to_owned()
             } else if dropped_self {
                 format!(
-                    "Captured {} entities (dropped self -> {} active)",
+                    "Captured {} addresses (dropped self -> {} active)",
                     matched,
                     final_addresses.len()
                 )
+            } else if capture.scan_mode == crate::model::EspAutoScanMode::AllHits {
+                format!("Captured all {} entity addresses", final_addresses.len())
             } else {
                 format!(
                     "Captured {} entities ({} active)",
@@ -325,6 +334,14 @@ impl CrosshairApp {
         let multi_strides = crate::model::parse_multi_strides(&preset.entity_multi_strides);
         let merge_pairs = preset.entity_hit_order_merge_pairs;
         let drop_nearest = preset.entity_hit_order_drop_nearest;
+        let effective_timeout_ms = timeout_ms.or_else(|| {
+            let secs = preset.entity_auto_scan_duration_secs;
+            if secs > 0.0 {
+                Some((secs * 1000.0).max(100.0) as u64)
+            } else {
+                Some(1000)
+            }
+        });
         let (tx, rx) = std::sync::mpsc::channel();
         let started = AccessWatch::start_unique(
             pid,
@@ -338,7 +355,7 @@ impl CrosshairApp {
         match started {
             Ok(active) => {
                 let now = std::time::Instant::now();
-                let timeout_at = timeout_ms.and_then(|ms| {
+                let timeout_at = effective_timeout_ms.and_then(|ms| {
                     if ms > 0 {
                         Some(now + std::time::Duration::from_millis(ms))
                     } else {
@@ -362,22 +379,20 @@ impl CrosshairApp {
                     last_hit_at: now,
                     timeout_at,
                 });
-                self.esp_entity_capture_feedback
-                    .insert(
-                        preset_id,
-                        format!(
-                            "{} 0/{required}",
-                            if scan_mode == crate::model::EspAutoScanMode::HitOrder {
-                                "Captured"
-                            } else {
-                                "Matched"
-                            }
-                        ),
-                    );
+                let initial_feedback = match scan_mode {
+                    crate::model::EspAutoScanMode::AllHits => "Scanning... 0 addresses".to_owned(),
+                    crate::model::EspAutoScanMode::HitOrder => format!("Captured 0/{required}"),
+                    _ => format!("Matched 0/{required}"),
+                };
+                self.esp_entity_capture_feedback.insert(preset_id, initial_feedback);
                 self.esp_entity_capture_hud_hide_at = None;
                 self.show_esp_entity_capture_hud(
                     hud_preset_id,
-                    format!("Entity scan: 0/{required}"),
+                    if scan_mode == crate::model::EspAutoScanMode::AllHits {
+                        "Entity scan: 0 addresses".to_owned()
+                    } else {
+                        format!("Entity scan: 0/{required}")
+                    },
                 );
             }
             Err(error) => {
@@ -423,6 +438,7 @@ impl CrosshairApp {
                 WatchEvent::Error(error) => stopped = Some(format!("Debugger stopped: {error}")),
                 WatchEvent::Stopped if stopped.is_none() => {
                     stopped = Some(match capture.scan_mode {
+                        crate::model::EspAutoScanMode::AllHits => "Scan finished".to_owned(),
                         crate::model::EspAutoScanMode::HitOrder => {
                             "Debugger stopped before enough unique addresses were captured".to_owned()
                         }
@@ -440,6 +456,12 @@ impl CrosshairApp {
             }
         }
         let (candidate, matched, resolved_addresses) = match capture.scan_mode {
+            crate::model::EspAutoScanMode::AllHits => {
+                let addresses = capture.addresses.clone();
+                let count = addresses.len();
+                let candidate_root = addresses.first().copied();
+                (candidate_root, count, Some(addresses))
+            }
             crate::model::EspAutoScanMode::HitOrder => {
                 let (filtered, count) = crate::model::entity_hits_in_capture_order_progress(
                     &capture.addresses,
@@ -495,6 +517,7 @@ impl CrosshairApp {
                 }
                 if capture.scan_mode == crate::model::EspAutoScanMode::HitOrder
                     || capture.scan_mode == crate::model::EspAutoScanMode::MultiStride
+                    || capture.scan_mode == crate::model::EspAutoScanMode::AllHits
                 {
                     if let Some(resolved) = &resolved_addresses {
                         if &preset.entity_hit_order_addresses != resolved {
@@ -514,10 +537,16 @@ impl CrosshairApp {
             .timeout_at
             .is_some_and(|deadline| std::time::Instant::now() >= deadline);
         if timed_out && stopped.is_none() {
-            stopped = Some("Scan timed out".to_owned());
+            if capture.scan_mode != crate::model::EspAutoScanMode::AllHits {
+                stopped = Some("Scan timed out".to_owned());
+            }
         }
 
-        let is_complete = matched >= capture.required || timed_out;
+        let is_complete = if capture.scan_mode == crate::model::EspAutoScanMode::AllHits {
+            timed_out
+        } else {
+            matched >= capture.required || timed_out
+        };
         if is_complete || stopped.is_some() {
             self.finalize_esp_entity_capture(capture, stopped.as_deref());
             ctx.request_repaint();
@@ -525,22 +554,19 @@ impl CrosshairApp {
         }
 
         if changed {
-            self.esp_entity_capture_feedback.insert(
-                capture.preset_id,
-                format!(
-                    "{} {matched}/{}",
-                    if capture.scan_mode == crate::model::EspAutoScanMode::HitOrder {
-                        "Captured"
-                    } else {
-                        "Matched"
-                    },
-                    capture.required
-                ),
-            );
-            self.show_esp_entity_capture_hud(
-                capture.hud_preset_id,
-                format!("Entity scan: {matched}/{}", capture.required),
-            );
+            let feedback = match capture.scan_mode {
+                crate::model::EspAutoScanMode::AllHits => {
+                    format!("Scanned {} addresses", capture.addresses.len())
+                }
+                crate::model::EspAutoScanMode::HitOrder => {
+                    format!("Captured {matched}/{}", capture.required)
+                }
+                _ => {
+                    format!("Matched {matched}/{}", capture.required)
+                }
+            };
+            self.esp_entity_capture_feedback.insert(capture.preset_id, feedback.clone());
+            self.show_esp_entity_capture_hud(capture.hud_preset_id, feedback);
             ctx.request_repaint();
         }
 
@@ -843,6 +869,7 @@ impl CrosshairApp {
                                             crate::model::EspAutoScanMode::Stride => "Single Stride",
                                             crate::model::EspAutoScanMode::MultiStride => "Multi Stride",
                                             crate::model::EspAutoScanMode::HitOrder => "Hit Order",
+                                            crate::model::EspAutoScanMode::AllHits => "All Hits",
                                         };
                                         ComboBox::from_id_salt(("esp_auto_scan_mode", preset.id))
                                             .selected_text(scan_mode_text)
@@ -884,7 +911,28 @@ impl CrosshairApp {
                                                         crate::model::EspAutoScanMode::HitOrder;
                                                     preset.entity_auto_hit_order = true;
                                                 }
+                                                if ui
+                                                    .selectable_value(
+                                                        &mut scan_mode,
+                                                        crate::model::EspAutoScanMode::AllHits,
+                                                        "All Hits",
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    preset.entity_auto_scan_mode =
+                                                        crate::model::EspAutoScanMode::AllHits;
+                                                    preset.entity_auto_hit_order = false;
+                                                }
                                             });
+
+                                        ui.label("Duration");
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_auto_scan_duration_secs)
+                                                .range(0.1..=30.0)
+                                                .speed(0.1)
+                                                .suffix("s"),
+                                        )
+                                        .on_hover_text("Scan time duration in seconds (default: 1.0s).");
 
                                         if scan_mode == crate::model::EspAutoScanMode::MultiStride {
                                             ui.label("Strides");
@@ -898,22 +946,25 @@ impl CrosshairApp {
                                             );
                                         }
 
-                                        ui.label("Need");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_auto_capture_count)
-                                                .range(1..=512),
-                                        )
-                                        .on_hover_text(match scan_mode {
-                                            crate::model::EspAutoScanMode::HitOrder => {
-                                                "Stop after this many filtered entities are captured."
-                                            }
-                                            crate::model::EspAutoScanMode::MultiStride => {
-                                                "Stop after finding a chain of this many entities connected by allowed strides."
-                                            }
-                                            crate::model::EspAutoScanMode::Stride => {
-                                                "Stop only after this many addresses form one group at the configured Stride."
-                                            }
-                                        });
+                                        if scan_mode != crate::model::EspAutoScanMode::AllHits {
+                                            ui.label("Need");
+                                            ui.add(
+                                                DragValue::new(&mut preset.entity_auto_capture_count)
+                                                    .range(1..=512),
+                                            )
+                                            .on_hover_text(match scan_mode {
+                                                crate::model::EspAutoScanMode::HitOrder => {
+                                                    "Stop after this many filtered entities are captured."
+                                                }
+                                                crate::model::EspAutoScanMode::MultiStride => {
+                                                    "Stop after finding a chain of this many entities connected by allowed strides."
+                                                }
+                                                crate::model::EspAutoScanMode::Stride => {
+                                                    "Stop only after this many addresses form one group at the configured Stride."
+                                                }
+                                                crate::model::EspAutoScanMode::AllHits => "",
+                                            });
+                                        }
 
                                         if scan_mode == crate::model::EspAutoScanMode::HitOrder {
                                             ui.label("Step");
@@ -928,6 +979,7 @@ impl CrosshairApp {
 
                                         if scan_mode == crate::model::EspAutoScanMode::HitOrder
                                             || scan_mode == crate::model::EspAutoScanMode::MultiStride
+                                            || scan_mode == crate::model::EspAutoScanMode::AllHits
                                         {
                                             ui.checkbox(
                                                 &mut preset.entity_hit_order_merge_pairs,

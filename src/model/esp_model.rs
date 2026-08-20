@@ -57,10 +57,15 @@ pub enum EspAutoScanMode {
     Stride,
     MultiStride,
     HitOrder,
+    AllHits,
 }
 
 fn default_entity_auto_hit_step() -> u32 {
     1
+}
+
+fn default_entity_auto_scan_duration_secs() -> f32 {
+    1.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -89,6 +94,8 @@ pub struct EspPreset {
     pub entity_auto_hit_order: bool,
     #[serde(default)]
     pub entity_auto_scan_mode: EspAutoScanMode,
+    #[serde(default = "default_entity_auto_scan_duration_secs")]
+    pub entity_auto_scan_duration_secs: f32,
     #[serde(default)]
     pub entity_multi_strides: String,
     #[serde(default = "default_entity_auto_hit_step")]
@@ -208,6 +215,7 @@ impl EspPreset {
             entity_auto_capture_count: 5,
             entity_auto_hit_order: false,
             entity_auto_scan_mode: EspAutoScanMode::Stride,
+            entity_auto_scan_duration_secs: 1.0,
             entity_multi_strides: String::new(),
             entity_auto_hit_step: 1,
             entity_hit_order_merge_pairs: false,
@@ -1454,4 +1462,21 @@ mod tests {
         assert!((normal.normalized_x - scaled.normalized_x).abs() < 0.001);
         assert!((normal.normalized_y * 0.5 - scaled.normalized_y).abs() < 0.001);
     }
+
+    #[test]
+    fn esp_auto_scan_mode_all_hits_and_duration_defaults() {
+        let mut preset = EspPreset::default();
+        assert_eq!(preset.entity_auto_scan_mode, EspAutoScanMode::Stride);
+        assert_eq!(preset.entity_auto_scan_duration_secs, 1.0);
+        assert_eq!(preset.scan_mode(), EspAutoScanMode::Stride);
+
+        preset.entity_auto_scan_mode = EspAutoScanMode::AllHits;
+        assert_eq!(preset.scan_mode(), EspAutoScanMode::AllHits);
+
+        let json = serde_json::to_string(&preset).unwrap();
+        let loaded: EspPreset = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.entity_auto_scan_mode, EspAutoScanMode::AllHits);
+        assert_eq!(loaded.entity_auto_scan_duration_secs, 1.0);
+    }
 }
+
