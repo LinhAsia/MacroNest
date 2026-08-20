@@ -13141,11 +13141,18 @@ mod windows_overlay {
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return false;
         }
+        let is_hold_trigger = matches!(
+            &mode,
+            ScreenDrawCaptureMode::VideoHoldTrigger(_)
+                | ScreenDrawCaptureMode::OcrHoldTrigger { .. }
+        );
         #[cfg(windows)]
         unsafe {
-            if let Some(hwnd) = find_app_ui_window() {
-                use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
-                let _ = ShowWindow(hwnd, SW_HIDE);
+            if !is_hold_trigger {
+                if let Some(hwnd) = find_app_ui_window() {
+                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
             }
         }
         let should_capture_freeze = {
@@ -13189,7 +13196,7 @@ mod windows_overlay {
             }
             started_inactive = !state.active;
             if started_inactive {
-                state.restore_ui_on_deactivate = true;
+                state.restore_ui_on_deactivate = !is_hold_trigger;
                 activate_screen_draw(&mut state, captured_frame);
             }
             let trigger = match &mode {
@@ -13339,10 +13346,20 @@ mod windows_overlay {
                 }
                 _ => None,
             };
+            let rect = match selected {
+                Ok(Some((x, y, width, height))) => Some(windows::Win32::Foundation::RECT {
+                    left: x,
+                    top: y,
+                    right: x + width,
+                    bottom: y + height,
+                }),
+                _ => None,
+            };
+            let ui_language = PROTRACTOR_STATE.lock().ui_language;
             restore_screen_draw_after_region_capture(hwnd_raw, session_id);
             return match (selected, frame) {
                 (Ok(Some(_)), Some(capture)) => {
-                    perform_ocr_on_capture_and_copy(capture, &language)
+                    perform_ocr_on_capture_and_copy(capture, &language, rect, ui_language)
                 }
                 (Ok(None), _) => "OCR region selection cancelled.".to_owned(),
                 (Err(error), _) => format!("OCR region selection failed: {error}"),
@@ -13357,10 +13374,20 @@ mod windows_overlay {
                 }
                 _ => None,
             };
+            let rect = match selected {
+                Ok(Some((x, y, width, height))) => Some(windows::Win32::Foundation::RECT {
+                    left: x,
+                    top: y,
+                    right: x + width,
+                    bottom: y + height,
+                }),
+                _ => None,
+            };
+            let ui_language = PROTRACTOR_STATE.lock().ui_language;
             restore_screen_draw_after_region_capture(hwnd_raw, session_id);
             return match (selected, frame) {
                 (Ok(Some(_)), Some(capture)) => {
-                    perform_ocr_on_capture_and_copy(capture, &language)
+                    perform_ocr_on_capture_and_copy(capture, &language, rect, ui_language)
                 }
                 (Ok(None), _) => "OCR region selection cancelled.".to_owned(),
                 (Err(error), _) => format!("OCR region selection failed: {error}"),
@@ -13411,28 +13438,296 @@ mod windows_overlay {
     fn perform_ocr_on_capture_and_copy(
         capture: window_list::ScreenCaptureFrame,
         language: &str,
+        rect: Option<windows::Win32::Foundation::RECT>,
+        ui_language: crate::model::UiLanguage,
     ) -> String {
-        match crate::ocr::perform_ocr(
-            &capture.rgba,
-            capture.width as u32,
-            capture.height as u32,
-            language,
-        ) {
-            Ok(ocr_result) => {
+        let ocr_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::ocr::perform_ocr(
+                &capture.rgba,
+                capture.width as u32,
+                capture.height as u32,
+                language,
+            )
+        }));
+
+        match ocr_result {
+            Ok(Ok(ocr_result)) => {
                 let trimmed = ocr_result.text.trim();
                 if trimmed.is_empty() {
+                    let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                        "⚠ Không tìm thấy chữ trong vùng chọn".to_owned()
+                    } else {
+                        "⚠ No text found in selected region".to_owned()
+                    };
+                    show_ocr_copy_toast_async(rect, toast_msg, true);
                     "No text found in selected region.".to_owned()
                 } else {
-                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                        let _ = clipboard.set_text(trimmed.to_owned());
-                    }
-                    format!(
-                        "Copied OCR text to clipboard ({} chars).",
-                        trimmed.chars().count()
-                    )
+                    let char_count = trimmed.chars().count();
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                            let _ = clipboard.set_text(trimmed.to_owned());
+                        }
+                    }));
+                    let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                        format!("✓ Đã sao chép {char_count} ký tự vào bộ nhớ tạm")
+                    } else {
+                        format!("✓ Copied {char_count} chars to Clipboard")
+                    };
+                    show_ocr_copy_toast_async(rect, toast_msg, false);
+                    format!("Copied OCR text to clipboard ({char_count} chars).")
                 }
             }
-            Err(err) => format!("OCR recognition failed: {err}"),
+            Ok(Err(err)) => {
+                let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                    "⚠ Nhận diện chữ thất bại".to_owned()
+                } else {
+                    "⚠ OCR recognition failed".to_owned()
+                };
+                show_ocr_copy_toast_async(rect, toast_msg, true);
+                format!("OCR recognition failed: {err}")
+            }
+            Err(_) => {
+                let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                    "⚠ Lỗi nhận diện OCR".to_owned()
+                } else {
+                    "⚠ OCR process error".to_owned()
+                };
+                show_ocr_copy_toast_async(rect, toast_msg, true);
+                "OCR recognition encountered an error.".to_owned()
+            }
+        }
+    }
+
+    fn show_ocr_copy_toast_async(
+        rect: Option<windows::Win32::Foundation::RECT>,
+        message: String,
+        is_error: bool,
+    ) {
+        thread::spawn(move || run_ocr_copy_toast(rect, message, is_error));
+    }
+
+    fn run_ocr_copy_toast(
+        rect: Option<windows::Win32::Foundation::RECT>,
+        message: String,
+        is_error: bool,
+    ) {
+        use windows::{
+            Win32::{
+                Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM},
+                Graphics::Gdi::{
+                    CreateFontW, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
+                    DeleteObject, DrawTextW, FONT_CHARSET, FONT_CLIP_PRECISION,
+                    FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_BOLD, FillRect, GetDC, HGDIOBJ,
+                    ReleaseDC, SetBkMode, SetTextColor, TRANSPARENT,
+                },
+                System::LibraryLoader::GetModuleHandleW,
+                UI::WindowsAndMessaging::{
+                    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+                    GetSystemMetrics, LWA_ALPHA, MSG, PM_REMOVE, PeekMessageW, RegisterClassW,
+                    SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNOACTIVATE, SetLayeredWindowAttributes,
+                    ShowWindow, TranslateMessage, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+                    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+                },
+            },
+            core::{PCWSTR, w},
+        };
+
+        let text_len = message.chars().count();
+        let toast_w = ((text_len as i32 * 9 + 44).max(240).min(440)) as i32;
+        let toast_h = 44;
+
+        let (center_x, center_y) = if let Some(r) = rect {
+            ((r.left + r.right) / 2, (r.top + r.bottom) / 2)
+        } else {
+            let sw = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+            let sh = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+            (sw / 2, sh / 2)
+        };
+
+        let toast_x = center_x - toast_w / 2;
+        let toast_y = center_y - toast_h / 2;
+
+        unsafe extern "system" fn toast_wnd_proc(
+            hwnd: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            if message == windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST {
+                return LRESULT(windows::Win32::UI::WindowsAndMessaging::HTTRANSPARENT as isize);
+            }
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
+
+        unsafe {
+            let Ok(module) = GetModuleHandleW(None) else {
+                return;
+            };
+            let class_name = w!("MacroNestOcrCopyToast");
+            static CLASS_REGISTERED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if !*CLASS_REGISTERED.get_or_init(|| {
+                let class = WNDCLASSW {
+                    lpfnWndProc: Some(toast_wnd_proc),
+                    hInstance: HINSTANCE(module.0),
+                    lpszClassName: class_name,
+                    hbrBackground: CreateSolidBrush(COLORREF(0x0022_2222)),
+                    ..Default::default()
+                };
+                RegisterClassW(&class) != 0
+            }) {
+                return;
+            }
+
+            let Ok(hwnd) = CreateWindowExW(
+                WS_EX_TOPMOST
+                    | WS_EX_TOOLWINDOW
+                    | WS_EX_NOACTIVATE
+                    | WS_EX_TRANSPARENT
+                    | WS_EX_LAYERED,
+                class_name,
+                PCWSTR::null(),
+                WS_POPUP,
+                toast_x,
+                toast_y,
+                toast_w,
+                toast_h,
+                None,
+                None,
+                Some(HINSTANCE(module.0)),
+                None,
+            ) else {
+                return;
+            };
+
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 0, LWA_ALPHA);
+            let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+
+            let font = CreateFontW(
+                14,
+                0,
+                0,
+                0,
+                FW_BOLD.0 as i32,
+                0,
+                0,
+                0,
+                FONT_CHARSET(0),
+                FONT_OUTPUT_PRECISION(0),
+                FONT_CLIP_PRECISION(0),
+                FONT_QUALITY(0),
+                0,
+                w!("Segoe UI"),
+            );
+
+            let bg_brush = CreateSolidBrush(COLORREF(0x002A_2620));
+            let border_brush = if is_error {
+                CreateSolidBrush(COLORREF(0x0033_88FF))
+            } else {
+                CreateSolidBrush(COLORREF(0x00A6_DB75))
+            };
+
+            let hdc = GetDC(Some(hwnd));
+            if !hdc.0.is_null() {
+                let full_rect = RECT {
+                    left: 0,
+                    top: 0,
+                    right: toast_w,
+                    bottom: toast_h,
+                };
+                FillRect(hdc, &full_rect, bg_brush);
+
+                let top_b = RECT {
+                    left: 0,
+                    top: 0,
+                    right: toast_w,
+                    bottom: 2,
+                };
+                let bot_b = RECT {
+                    left: 0,
+                    top: toast_h - 2,
+                    right: toast_w,
+                    bottom: toast_h,
+                };
+                let left_b = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 2,
+                    bottom: toast_h,
+                };
+                let right_b = RECT {
+                    left: toast_w - 2,
+                    top: 0,
+                    right: toast_w,
+                    bottom: toast_h,
+                };
+                FillRect(hdc, &top_b, border_brush);
+                FillRect(hdc, &bot_b, border_brush);
+                FillRect(hdc, &left_b, border_brush);
+                FillRect(hdc, &right_b, border_brush);
+
+                let mut text_utf16: Vec<u16> =
+                    message.encode_utf16().chain(std::iter::once(0)).collect();
+                let mut text_rect = RECT {
+                    left: 6,
+                    top: 2,
+                    right: toast_w - 6,
+                    bottom: toast_h - 2,
+                };
+                let old_font = windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, COLORREF(0x00FF_FF_FF));
+                DrawTextW(
+                    hdc,
+                    &mut text_utf16,
+                    &mut text_rect,
+                    DT_SINGLELINE | DT_VCENTER | DT_CENTER,
+                );
+                windows::Win32::Graphics::Gdi::SelectObject(hdc, old_font);
+                let _ = ReleaseDC(Some(hwnd), hdc);
+            }
+
+            let _ = DeleteObject(HGDIOBJ(font.0));
+            let _ = DeleteObject(HGDIOBJ(bg_brush.0));
+            let _ = DeleteObject(HGDIOBJ(border_brush.0));
+
+            let mut msg = MSG::default();
+
+            let start_fade_in = Instant::now();
+            while start_fade_in.elapsed() < Duration::from_millis(150) {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                let progress = (start_fade_in.elapsed().as_secs_f32() / 0.15).clamp(0.0, 1.0);
+                let alpha = (progress * 240.0) as u8;
+                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
+                thread::sleep(Duration::from_millis(16));
+            }
+            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 240, LWA_ALPHA);
+
+            let start_hold = Instant::now();
+            while start_hold.elapsed() < Duration::from_millis(1200) {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                thread::sleep(Duration::from_millis(30));
+            }
+
+            let start_fade_out = Instant::now();
+            while start_fade_out.elapsed() < Duration::from_millis(200) {
+                while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+                let progress =
+                    (1.0 - start_fade_out.elapsed().as_secs_f32() / 0.20).clamp(0.0, 1.0);
+                let alpha = (progress * 240.0) as u8;
+                let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), alpha, LWA_ALPHA);
+                thread::sleep(Duration::from_millis(16));
+            }
+
+            let _ = DestroyWindow(hwnd);
         }
     }
 

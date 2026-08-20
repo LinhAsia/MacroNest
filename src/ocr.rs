@@ -567,7 +567,7 @@ fn build_engine(pack: &OcrLanguagePack) -> Result<ocr_rs::OcrEngine> {
         .unwrap_or(4)
         .min(4) as i32;
 
-    let det_options = ocr_rs::DetOptions::fast()
+    let det_options = ocr_rs::DetOptions::default()
         .with_max_side_len(1280)
         .with_box_threshold(0.42)
         .with_score_threshold(0.22)
@@ -578,8 +578,9 @@ fn build_engine(pack: &OcrLanguagePack) -> Result<ocr_rs::OcrEngine> {
         .with_min_score(0.18)
         .with_punct_min_score(0.08)
         .with_batch(false);
-    let config = ocr_rs::OcrEngineConfig::fast()
+    let config = ocr_rs::OcrEngineConfig::new()
         .with_threads(threads)
+        .with_precision(ocr_rs::PrecisionMode::Normal)
         .with_parallel(false)
         .with_min_result_confidence(0.18)
         .with_det_options(det_options)
