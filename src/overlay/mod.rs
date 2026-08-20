@@ -13851,34 +13851,11 @@ mod windows_overlay {
             if is_down(0x1B) || is_down(0x02) {
                 return Ok(None);
             }
-            thread::sleep(Duration::from_millis(2));
+            thread::sleep(Duration::from_millis(10));
         }
 
-        set_screen_draw_region_capture_mouse_blocked(true, false);
+        set_screen_draw_region_capture_mouse_blocked(true, true);
 
-        // Step 1: Wait for user to press Left Mouse Button (or cancel)
-        let origin = loop {
-            if !screen_draw_capture_session_is_current(session_id) || is_down(0x1B) || is_down(0x02) {
-                set_screen_draw_region_capture_mouse_blocked(false, false);
-                return Ok(None);
-            }
-            if cancel_screen_draw_mouse_capture_from_trigger_press() {
-                set_screen_draw_region_capture_mouse_blocked(false, false);
-                return Ok(None);
-            }
-            if is_down(0x01) {
-                let mut pt = POINT::default();
-                if unsafe { GetCursorPos(&mut pt).is_ok() } {
-                    break pt;
-                }
-            }
-            thread::sleep(Duration::from_millis(2));
-        };
-
-        update_screen_draw_region_capture_preview(origin, origin);
-        let mut last_preview_at = Instant::now();
-
-        // Step 2: Dragging while Left Mouse Button is held down
         let result = loop {
             if !screen_draw_capture_session_is_current(session_id) || is_down(0x1B) || is_down(0x02) {
                 break Ok(None);
@@ -13887,27 +13864,15 @@ mod windows_overlay {
                 break Ok(None);
             }
 
-            let mut point = POINT::default();
-            if unsafe { GetCursorPos(&mut point).is_ok() } {
-                if last_preview_at.elapsed() >= Duration::from_millis(16) {
-                    update_screen_draw_region_capture_preview(origin, point);
-                    last_preview_at = Instant::now();
-                }
-
-                // When user releases Left Mouse Button, finish the selection!
-                if !is_down(0x01) {
-                    let x = origin.x.min(point.x);
-                    let y = origin.y.min(point.y);
-                    let width = (origin.x - point.x).abs();
-                    let height = (origin.y - point.y).abs();
-                    if width >= 2 && height >= 2 {
-                        break Ok(Some((x, y, width, height)));
-                    }
-                    break Ok(None);
-                }
+            let completed = {
+                let mut hook_state = HOOK_STATE.lock();
+                hook_state.vision_capture_completed_region.take()
+            };
+            if let Some(region) = completed {
+                break Ok(Some(region));
             }
 
-            thread::sleep(Duration::from_millis(2));
+            thread::sleep(Duration::from_millis(5));
         };
 
         set_screen_draw_region_capture_mouse_blocked(false, false);
