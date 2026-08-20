@@ -12846,11 +12846,11 @@ impl CrosshairApp {
     fn reset_memory_scan(&mut self, status: &str) {
         self.memory_panel.job_rx = None;
         self.memory_panel.scanning = false;
-        self.memory_panel.candidates.clear();
-        self.memory_panel.live_candidate_values.clear();
-        self.memory_panel.text_candidates.clear();
-        self.memory_panel.selected_results.clear();
-        self.memory_panel.marked_result_addresses.clear();
+        self.memory_panel.candidates = Vec::new();
+        self.memory_panel.live_candidate_values = HashMap::new();
+        self.memory_panel.text_candidates = Vec::new();
+        self.memory_panel.selected_results = HashSet::new();
+        self.memory_panel.marked_result_addresses = HashSet::new();
         self.memory_panel.selection_anchor = None;
         self.memory_panel.visible_scan_ranges = [None, None];
         self.memory_panel.pending_write_checks.clear();
