@@ -5496,7 +5496,7 @@ mod windows_overlay {
                         }
 
                         wake_command_queue();
-                        return LRESULT(1);
+                        return CallNextHookEx(None, code, wparam, lparam);
                     }
 
                     WM_LBUTTONUP => {
@@ -5530,7 +5530,7 @@ mod windows_overlay {
                         }
 
                         wake_command_queue();
-                        return LRESULT(1);
+                        return CallNextHookEx(None, code, wparam, lparam);
                     }
 
                     WM_MOUSEWHEEL
@@ -13855,12 +13855,19 @@ mod windows_overlay {
             thread::sleep(Duration::from_millis(5));
         }
 
-        // 2. Wait for user to press Left Mouse Button to start selecting (or Esc/Right Click to cancel)
+        // 2. Activate dim screen overlay immediately!
+        set_screen_draw_region_capture_mouse_blocked(true, true);
+
+        // 3. Wait for user to press Left Mouse Button to start selecting (or Esc/Right Click to cancel)
         let origin = loop {
             if !screen_draw_capture_session_is_current(session_id) || is_down(0x1B) || is_down(0x02) {
+                set_screen_draw_region_capture_mouse_blocked(false, false);
+                reset_screen_draw_capture_overlay_state();
                 return Ok(None);
             }
             if cancel_screen_draw_mouse_capture_from_trigger_press() {
+                set_screen_draw_region_capture_mouse_blocked(false, false);
+                reset_screen_draw_capture_overlay_state();
                 return Ok(None);
             }
             if is_down(0x01) {
@@ -13875,7 +13882,7 @@ mod windows_overlay {
         update_screen_draw_region_capture_preview(origin, origin);
         let mut last_preview_at = Instant::now();
 
-        // 3. Dragging while Left Mouse Button is held down
+        // 4. Dragging while Left Mouse Button is held down
         let result = loop {
             if !screen_draw_capture_session_is_current(session_id) || is_down(0x1B) || is_down(0x02) {
                 break Ok(None);
@@ -13907,6 +13914,7 @@ mod windows_overlay {
             thread::sleep(Duration::from_millis(2));
         };
 
+        set_screen_draw_region_capture_mouse_blocked(false, false);
         reset_screen_draw_capture_overlay_state();
         result
     }
@@ -13969,7 +13977,7 @@ mod windows_overlay {
             bail!("Failed to read the cursor position");
         }
 
-        set_screen_draw_region_capture_mouse_blocked(true, false);
+        set_screen_draw_region_capture_mouse_blocked(true, true);
         update_screen_draw_region_capture_preview(origin, origin);
         let mut last_preview_at = Instant::now();
 
@@ -14018,6 +14026,7 @@ mod windows_overlay {
         };
 
         set_screen_draw_region_capture_mouse_blocked(false, false);
+        reset_screen_draw_capture_overlay_state();
         result
     }
 
