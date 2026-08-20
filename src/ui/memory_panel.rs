@@ -607,9 +607,26 @@ struct ScanJobResult {
 }
 
 #[cfg(windows)]
+struct CodeRelocateCandidate {
+    offset: usize,
+    address: usize,
+    instruction: String,
+}
+
+#[cfg(windows)]
+struct CodeRelocateChoiceDialog {
+    code_index: usize,
+    name: String,
+    module: String,
+    old_offset: usize,
+    candidates: Vec<CodeRelocateCandidate>,
+}
+
+#[cfg(windows)]
 struct CodeRelocateResult {
     pid: u32,
     module: String,
+    module_base: usize,
     old_offset: usize,
     aob_signature: String,
     result: Result<Vec<usize>, String>,
@@ -737,6 +754,8 @@ pub(crate) struct MemoryPanelState {
     code_relocate_rx: Option<Receiver<CodeRelocateResult>>,
     #[cfg(windows)]
     code_relocate_status: String,
+    #[cfg(windows)]
+    code_relocate_choice_dialog: Option<CodeRelocateChoiceDialog>,
     scanning: bool,
     scan_progress: Arc<AtomicUsize>,
     scan_input_count: usize,
@@ -841,6 +860,8 @@ impl Default for MemoryPanelState {
             code_relocate_rx: None,
             #[cfg(windows)]
             code_relocate_status: String::new(),
+            #[cfg(windows)]
+            code_relocate_choice_dialog: None,
             scanning: false,
             scan_progress: Arc::new(AtomicUsize::new(0)),
             scan_input_count: 0,
@@ -1176,6 +1197,8 @@ impl CrosshairApp {
         self.render_disassembler_dialog(ui.ctx());
         #[cfg(windows)]
         self.render_code_access_dialog(ui.ctx());
+        #[cfg(windows)]
+        self.render_code_relocate_choice_dialog(ui.ctx());
         self.render_code_compare_dialog(ui.ctx());
         self.render_dll_studio_window(ui.ctx());
         self.sync_memory_freeze_targets();
@@ -1335,6 +1358,8 @@ impl CrosshairApp {
         self.render_disassembler_dialog(ctx);
         #[cfg(windows)]
         self.render_code_access_dialog(ctx);
+        #[cfg(windows)]
+        self.render_code_relocate_choice_dialog(ctx);
         self.render_code_compare_dialog(ctx);
         self.render_dll_studio_window(ctx);
         self.sync_memory_freeze_targets();
@@ -4928,6 +4953,7 @@ impl CrosshairApp {
         let aob_signature = entry.aob_signature.clone();
         let worker_module = module.clone();
         let worker_aob = aob_signature.clone();
+        let worker_module_base = module_base;
         thread::spawn(move || {
             let options = MemoryScanOptions {
                 writable: false,
@@ -4944,7 +4970,7 @@ impl CrosshairApp {
                 &worker_aob,
                 module_base,
                 module_size,
-                2,
+                32,
                 options,
                 Arc::new(AtomicUsize::new(0)),
             )
@@ -4958,6 +4984,7 @@ impl CrosshairApp {
             let _ = tx.send(CodeRelocateResult {
                 pid,
                 module: worker_module,
+                module_base: worker_module_base,
                 old_offset,
                 aob_signature: worker_aob,
                 result,
@@ -4966,6 +4993,42 @@ impl CrosshairApp {
         self.memory_panel.code_relocate_rx = Some(rx);
         self.memory_panel.code_relocate_status =
             format!("Searching {} for saved AOB...", module);
+    }
+
+    #[cfg(windows)]
+    fn apply_code_entry_relocate(
+        &mut self,
+        code_index: usize,
+        module: &str,
+        old_offset: usize,
+        new_offset: usize,
+    ) {
+        if let Some(entry) = self.state.memory_code_list.get_mut(code_index) {
+            entry.offset = new_offset;
+            for preset in &mut self.state.esp_presets {
+                if preset
+                    .entity_auto_code_module
+                    .eq_ignore_ascii_case(module)
+                    && preset.entity_auto_code_offset == old_offset
+                {
+                    preset.entity_auto_code_offset = new_offset;
+                }
+            }
+            for pointer in &mut self.state.memory_pointer_list {
+                if pointer.code_module.eq_ignore_ascii_case(module)
+                    && pointer.code_offset == old_offset
+                {
+                    pointer.code_offset = new_offset;
+                }
+            }
+            self.memory_panel.code_relocate_status = format!(
+                "Relocated '{}' from {}+{:X} to {}+{:X}",
+                entry.name, module, old_offset, module, new_offset
+            );
+            crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
+            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+            self.persist();
+        }
     }
 
     #[cfg(windows)]
@@ -4999,45 +5062,141 @@ impl CrosshairApp {
         };
         match outcome.result {
             Ok(matches) if matches.len() == 1 => {
-                let new_offset = matches[0];
-                let entry = &mut self.state.memory_code_list[index];
-                entry.offset = new_offset;
-                for preset in &mut self.state.esp_presets {
-                    if preset
-                        .entity_auto_code_module
-                        .eq_ignore_ascii_case(&outcome.module)
-                        && preset.entity_auto_code_offset == outcome.old_offset
-                    {
-                        preset.entity_auto_code_offset = new_offset;
-                    }
-                }
-                for pointer in &mut self.state.memory_pointer_list {
-                    if pointer.code_module.eq_ignore_ascii_case(&outcome.module)
-                        && pointer.code_offset == outcome.old_offset
-                    {
-                        pointer.code_offset = new_offset;
-                    }
-                }
-                self.memory_panel.code_relocate_status = format!(
-                    "Relocated '{}' from {}+{:X} to {}+{:X}",
-                    entry.name, outcome.module, outcome.old_offset, outcome.module, new_offset
-                );
-                crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
-                crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
-                self.persist();
+                self.apply_code_entry_relocate(index, &outcome.module, outcome.old_offset, matches[0]);
             }
             Ok(matches) if matches.is_empty() => {
                 self.memory_panel.code_relocate_status =
                     "Saved AOB was not found in the module; code probably changed".to_owned();
             }
-            Ok(_) => {
-                self.memory_panel.code_relocate_status =
-                    "Saved AOB is not unique; offset was not changed".to_owned();
+            Ok(matches) => {
+                let candidates = matches
+                    .into_iter()
+                    .map(|offset| {
+                        let address = outcome.module_base.saturating_add(offset);
+                        let instruction = match disassemble_from(
+                            outcome.pid,
+                            address,
+                            self.state.memory_debugger_architecture,
+                            1,
+                        ) {
+                            Ok(lines) if !lines.is_empty() => lines[0].2.clone(),
+                            _ => String::new(),
+                        };
+                        CodeRelocateCandidate {
+                            offset,
+                            address,
+                            instruction,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                let entry_name = self
+                    .state
+                    .memory_code_list
+                    .get(index)
+                    .map(|e| e.name.clone())
+                    .unwrap_or_default();
+                self.memory_panel.code_relocate_status = format!(
+                    "Found {} matching addresses; select the correct one",
+                    candidates.len()
+                );
+                self.memory_panel.code_relocate_choice_dialog = Some(CodeRelocateChoiceDialog {
+                    code_index: index,
+                    name: entry_name,
+                    module: outcome.module,
+                    old_offset: outcome.old_offset,
+                    candidates,
+                });
             }
             Err(error) => {
                 self.memory_panel.code_relocate_status =
                     format!("AOB relocation failed: {error}");
             }
+        }
+    }
+
+    #[cfg(windows)]
+    fn render_code_relocate_choice_dialog(&mut self, ctx: &egui::Context) {
+        let mut close_dialog = false;
+        let mut selected_choice: Option<(usize, String, usize, usize)> = None;
+        let mut open_disasm: Option<usize> = None;
+
+        if let Some(dialog) = self.memory_panel.code_relocate_choice_dialog.as_ref() {
+            egui::Window::new(format!("Relocate Code - {}", dialog.name))
+                .collapsible(false)
+                .resizable(true)
+                .default_width(540.0)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "Found {} addresses matching the saved AOB in {}. Select the target address to relocate:",
+                        dialog.candidates.len(),
+                        dialog.module
+                    ));
+                    ui.label(
+                        egui::RichText::new(format!("Previous offset: {}+{:X}", dialog.module, dialog.old_offset))
+                            .weak(),
+                    );
+                    ui.add_space(6.0);
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("code_relocate_choice_scroll")
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            egui::Grid::new("code_relocate_candidates_grid")
+                                .striped(true)
+                                .num_columns(4)
+                                .spacing([12.0, 6.0])
+                                .show(ui, |ui| {
+                                    ui.strong("Module Offset");
+                                    ui.strong("Address");
+                                    ui.strong("Instruction");
+                                    ui.strong("Action");
+                                    ui.end_row();
+
+                                    for candidate in &dialog.candidates {
+                                        ui.monospace(format!("{}+{:X}", dialog.module, candidate.offset));
+                                        ui.monospace(format!("0x{:X}", candidate.address));
+                                        if candidate.instruction.is_empty() {
+                                            ui.weak("<unavailable>");
+                                        } else {
+                                            ui.monospace(&candidate.instruction);
+                                        }
+                                        ui.horizontal(|ui| {
+                                            if ui.button("Select").clicked() {
+                                                selected_choice = Some((
+                                                    dialog.code_index,
+                                                    dialog.module.clone(),
+                                                    dialog.old_offset,
+                                                    candidate.offset,
+                                                ));
+                                            }
+                                            if ui.button("Disasm").clicked() {
+                                                open_disasm = Some(candidate.address);
+                                            }
+                                        });
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            close_dialog = true;
+                        }
+                    });
+                });
+        }
+
+        if let Some((code_index, module, old_offset, new_offset)) = selected_choice {
+            self.apply_code_entry_relocate(code_index, &module, old_offset, new_offset);
+            self.memory_panel.code_relocate_choice_dialog = None;
+        } else if close_dialog {
+            self.memory_panel.code_relocate_choice_dialog = None;
+        }
+
+        if let Some(addr) = open_disasm {
+            self.open_disassembler_at_address(addr);
         }
     }
 
