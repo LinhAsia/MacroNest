@@ -13321,38 +13321,54 @@ mod windows_overlay {
     fn begin_screen_draw_region_capture(capture_mode: ScreenDrawCaptureMode, session_id: u64) {
         let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
         thread::spawn(move || {
-            let status = run_screen_draw_region_capture_flow(capture_mode, session_id);
-            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
-            if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
-                let _ = tx.send(UiCommand::ScreenDrawCaptureStatus(status));
-            }
+            let status = run_screen_draw_region_capture_flow(capture_mode, session_id, hwnd_raw);
+            send_ui_command(UiCommand::ScreenDrawCaptureStatus(status));
         });
     }
 
     fn run_screen_draw_region_capture_flow(
         capture_mode: ScreenDrawCaptureMode,
         session_id: u64,
+        hwnd_raw: isize,
     ) -> String {
         if let ScreenDrawCaptureMode::OcrHoldTrigger { trigger, language, .. } = capture_mode {
-            return match select_screen_draw_capture_region_from_trigger(&trigger, session_id) {
+            let selected = select_screen_draw_capture_region_from_trigger(&trigger, session_id);
+            let frame = match selected {
                 Ok(Some((x, y, width, height))) => {
-                    perform_ocr_on_screen_region_and_copy(x, y, width, height, &language)
+                    build_screen_draw_capture_region(x, y, width, height).ok()
                 }
-                Ok(None) => "OCR region selection cancelled.".to_owned(),
-                Err(error) => format!("OCR region selection failed: {error}"),
+                _ => None,
+            };
+            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
+            return match (selected, frame) {
+                (Ok(Some(_)), Some(capture)) => {
+                    perform_ocr_on_capture_and_copy(capture, &language)
+                }
+                (Ok(None), _) => "OCR region selection cancelled.".to_owned(),
+                (Err(error), _) => format!("OCR region selection failed: {error}"),
+                (Ok(Some(_)), None) => "Failed to capture the selected screen region.".to_owned(),
             };
         }
         if let ScreenDrawCaptureMode::OcrRegionSelect { language, .. } = capture_mode {
-            return match select_screen_draw_capture_region(session_id) {
+            let selected = select_screen_draw_capture_region(session_id);
+            let frame = match selected {
                 Ok(Some((x, y, width, height))) => {
-                    perform_ocr_on_screen_region_and_copy(x, y, width, height, &language)
+                    build_screen_draw_capture_region(x, y, width, height).ok()
                 }
-                Ok(None) => "OCR region selection cancelled.".to_owned(),
-                Err(error) => format!("OCR region selection failed: {error}"),
+                _ => None,
+            };
+            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
+            return match (selected, frame) {
+                (Ok(Some(_)), Some(capture)) => {
+                    perform_ocr_on_capture_and_copy(capture, &language)
+                }
+                (Ok(None), _) => "OCR region selection cancelled.".to_owned(),
+                (Err(error), _) => format!("OCR region selection failed: {error}"),
+                (Ok(Some(_)), None) => "Failed to capture the selected screen region.".to_owned(),
             };
         }
         if let ScreenDrawCaptureMode::VideoHoldTrigger(trigger) = capture_mode {
-            return match select_screen_draw_capture_region_from_trigger(&trigger, session_id) {
+            let result = match select_screen_draw_capture_region_from_trigger(&trigger, session_id) {
                 Ok(Some(region)) => {
                     thread::spawn(move || {
                         thread::sleep(Duration::from_millis(35));
@@ -13363,9 +13379,11 @@ mod windows_overlay {
                 Ok(None) => "Video region selection cancelled.".to_owned(),
                 Err(error) => format!("Video region selection failed: {error}"),
             };
+            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
+            return result;
         }
         if matches!(capture_mode, ScreenDrawCaptureMode::VideoRegionSelect) {
-            return match select_screen_draw_capture_region(session_id) {
+            let result = match select_screen_draw_capture_region(session_id) {
                 Ok(Some((x, y, width, height))) => {
                     send_ui_command(UiCommand::VideoRecordRegionSelected {
                         x,
@@ -13378,30 +13396,28 @@ mod windows_overlay {
                 Ok(None) => "Video region selection cancelled.".to_owned(),
                 Err(error) => format!("Video region selection failed: {error}"),
             };
+            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
+            return result;
         }
-        match capture_screen_draw_region_to_clipboard(capture_mode, session_id) {
+        let result = match capture_screen_draw_region_to_clipboard(capture_mode, session_id) {
             Ok(copied) if copied => "Copied annotated screen region to clipboard.".to_owned(),
             Ok(_) => "Screen draw capture cancelled.".to_owned(),
             Err(error) => format!("Screen draw capture failed: {error}"),
-        }
+        };
+        restore_screen_draw_after_region_capture(hwnd_raw, session_id);
+        result
     }
 
-    fn perform_ocr_on_screen_region_and_copy(
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
+    fn perform_ocr_on_capture_and_copy(
+        capture: window_list::ScreenCaptureFrame,
         language: &str,
     ) -> String {
-        let Ok((capture_x, capture_y, capture_w, capture_h)) =
-            normalize_screen_draw_capture_region(x, y, width, height)
-        else {
-            return "Invalid capture region dimensions.".to_owned();
-        };
-        let Some(capture) = window_list::capture_virtual_screen_region(capture_x, capture_y, capture_w, capture_h) else {
-            return "Failed to capture the selected screen region.".to_owned();
-        };
-        match crate::ocr::perform_ocr(&capture.rgba, capture.width as u32, capture.height as u32, language) {
+        match crate::ocr::perform_ocr(
+            &capture.rgba,
+            capture.width as u32,
+            capture.height as u32,
+            language,
+        ) {
             Ok(ocr_result) => {
                 let trimmed = ocr_result.text.trim();
                 if trimmed.is_empty() {
@@ -13410,7 +13426,10 @@ mod windows_overlay {
                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
                         let _ = clipboard.set_text(trimmed.to_owned());
                     }
-                    format!("Copied OCR text to clipboard ({} chars).", trimmed.chars().count())
+                    format!(
+                        "Copied OCR text to clipboard ({} chars).",
+                        trimmed.chars().count()
+                    )
                 }
             }
             Err(err) => format!("OCR recognition failed: {err}"),
