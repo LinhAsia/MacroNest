@@ -13197,6 +13197,7 @@ mod windows_overlay {
             started_inactive = !state.active;
             if started_inactive {
                 state.restore_ui_on_deactivate = !is_hold_trigger;
+                state.freeze_screen = should_capture_freeze;
                 activate_screen_draw(&mut state, captured_frame);
             }
             let trigger = match &mode {
@@ -16432,10 +16433,8 @@ mod windows_overlay {
                 background,
             );
             state.committed_dirty = false;
-        } else if state.freeze_screen && state.freeze_frame.is_some() {
-            if let Some(ref bg) = state.freeze_frame {
-                state.committed_rgba.extend_from_slice(bg);
-            }
+        } else if let Some(ref bg) = state.freeze_frame {
+            state.committed_rgba.extend_from_slice(bg);
             state.committed_dirty = true;
         } else {
             state.committed_rgba.resize(byte_len, 0);
@@ -17019,10 +17018,8 @@ mod windows_overlay {
                 state.canvas_height,
                 background,
             );
-        } else if state.freeze_screen && state.freeze_frame.is_some() {
-            if let Some(ref bg) = state.freeze_frame {
-                state.committed_rgba.copy_from_slice(bg);
-            }
+        } else if let Some(ref bg) = state.freeze_frame {
+            state.committed_rgba.copy_from_slice(bg);
         } else {
             state.committed_rgba.fill(0);
         }
