@@ -13177,6 +13177,14 @@ mod windows_overlay {
             ScreenDrawCaptureMode::VideoHoldTrigger(_)
                 | ScreenDrawCaptureMode::OcrHoldTrigger { .. }
         );
+        let was_ui_visible = unsafe {
+            find_app_ui_window().is_some_and(|hwnd| {
+                use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
+                IsWindowVisible(hwnd).as_bool()
+            })
+        };
+        let should_restore_ui = !is_hold_trigger || was_ui_visible;
+
         #[cfg(windows)]
         unsafe {
             if let Some(hwnd) = find_app_ui_window() {
@@ -13225,9 +13233,11 @@ mod windows_overlay {
             }
             started_inactive = !state.active;
             if started_inactive {
-                state.restore_ui_on_deactivate = !is_hold_trigger;
+                state.restore_ui_on_deactivate = should_restore_ui;
                 state.freeze_screen = should_capture_freeze;
                 activate_screen_draw(&mut state, captured_frame);
+            } else if should_restore_ui {
+                state.restore_ui_on_deactivate = true;
             }
             let trigger = match &mode {
                 ScreenDrawCaptureMode::VideoHoldTrigger(trigger) => Some(trigger.clone()),
