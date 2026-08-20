@@ -4638,8 +4638,8 @@ impl CrosshairApp {
                 });
                 ui.horizontal(|ui| {
                     Self::memory_view_cell(ui, 190.0, "Address / Module");
-                    Self::memory_view_cell(ui, 310.0, "Name / Instruction");
-                    Self::memory_view_cell(ui, 320.0, "Action / Status");
+                    Self::memory_view_cell(ui, 300.0, "Name / Instruction");
+                    Self::memory_view_cell(ui, 350.0, "Action / Status");
                 });
                 #[cfg(windows)]
                 if !self.memory_panel.code_relocate_status.is_empty() {
@@ -4666,7 +4666,7 @@ impl CrosshairApp {
                                 let address_response =
                                     Self::memory_view_cell(ui, 190.0, &address_str);
                                 let instruction_response =
-                                    Self::memory_view_cell(ui, 310.0, &instruction_text);
+                                    Self::memory_view_cell(ui, 300.0, &instruction_text);
                                 let action_label = if entry.replaced {
                                     "NOP Active"
                                 } else if entry.writes {
@@ -4674,37 +4674,48 @@ impl CrosshairApp {
                                 } else {
                                     "Find accessed"
                                 };
-                                let action_response = ui.button(action_label);
+                                let action_response = ui.add_sized(
+                                    [92.0, 19.0],
+                                    egui::Button::new(action_label).small(),
+                                );
                                 if action_response.clicked() {
                                     pending_action = Some(CodeAction::StartAccessWatch(index));
                                 }
+                                let copy_aob_enabled = !entry.aob_signature.is_empty();
                                 let copy_aob_response = ui.add_enabled(
-                                    !entry.aob_signature.is_empty(),
-                                    egui::Button::new("Copy AOB").small(),
+                                    copy_aob_enabled,
+                                    egui::Button::new("Copy AOB").small().min_size(egui::vec2(68.0, 19.0)),
                                 )
                                 .on_hover_text("Copy the saved six-instruction AOB signature");
-                                if copy_aob_response.clicked() {
+                                if copy_aob_response.clicked() && copy_aob_enabled {
                                     ui.ctx().copy_text(entry.aob_signature.clone());
                                     self.memory_panel.code_relocate_status =
                                         format!("Copied AOB for '{}'", entry.name);
                                 }
+                                let relocate_enabled = !entry.aob_signature.is_empty()
+                                    && !entry.replaced
+                                    && self.memory_panel.code_relocate_rx.is_none();
                                 let relocate_response = ui.add_enabled(
-                                    !entry.aob_signature.is_empty()
-                                        && !entry.replaced
-                                        && self.memory_panel.code_relocate_rx.is_none(),
-                                    egui::Button::new("Relocate").small(),
+                                    relocate_enabled,
+                                    egui::Button::new("Relocate").small().min_size(egui::vec2(62.0, 19.0)),
                                 )
                                 .on_hover_text(
                                     "Find the saved AOB in this module and update a unique new offset",
                                 );
-                                if relocate_response.clicked() {
+                                if relocate_response.clicked() && relocate_enabled {
                                     pending_action = Some(CodeAction::Relocate(index));
                                 }
-                                let rename_response = ui.small_button("Rename");
+                                let rename_response = ui.add_sized(
+                                    [58.0, 19.0],
+                                    egui::Button::new("Rename").small(),
+                                );
                                 if rename_response.clicked() {
                                     pending_action = Some(CodeAction::Rename(index));
                                 }
-                                let delete_response = ui.small_button("Del");
+                                let delete_response = ui.add_sized(
+                                    [36.0, 19.0],
+                                    egui::Button::new("Del").small(),
+                                );
                                 if delete_response.clicked() {
                                     pending_action = Some(CodeAction::Delete(index));
                                 }
@@ -4916,6 +4927,8 @@ impl CrosshairApp {
         if self.memory_panel.code_relocate_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
+        #[cfg(windows)]
+        self.render_code_relocate_choice_dialog(ctx);
     }
 
     #[cfg(windows)]
@@ -5125,7 +5138,9 @@ impl CrosshairApp {
             egui::Window::new(format!("Relocate Code - {}", dialog.name))
                 .collapsible(false)
                 .resizable(true)
-                .default_width(540.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .order(egui::Order::Foreground)
+                .default_width(560.0)
                 .show(ctx, |ui| {
                     ui.label(format!(
                         "Found {} addresses matching the saved AOB in {}. Select the target address to relocate:",
