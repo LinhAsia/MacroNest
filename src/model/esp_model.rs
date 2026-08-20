@@ -832,6 +832,7 @@ pub struct EspPermutationConfig {
     pub invert_camera_pitch: bool,
     pub invert_vertical: bool,
     pub pitch_input: EspPitchInput,
+    pub pitch_unit: EspAngleUnit,
     pub color: [u8; 4],
 }
 
@@ -844,7 +845,12 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
     let yaw_offsets = [0.0, 90.0, 180.0, -90.0];
     let rev_pitches = [false, true];
     let inv_elevations = [false, true];
-    let pitch_inputs = [EspPitchInput::Angle, EspPitchInput::SineComponent];
+    let pitch_modes = [
+        (EspPitchInput::Angle, EspAngleUnit::Radians, "Rad"),
+        (EspPitchInput::Angle, EspAngleUnit::Degrees, "Deg"),
+        (EspPitchInput::SineComponent, EspAngleUnit::Radians, "Asin"),
+        (EspPitchInput::TangentComponent, EspAngleUnit::Radians, "Atan"),
+    ];
 
     let colors: [[u8; 4]; 8] = [
         [0, 255, 255, 255],   // Cyan
@@ -857,7 +863,7 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
         [200, 255, 200, 255], // Mint Green
     ];
 
-    let mut configs = Vec::with_capacity(1024);
+    let mut configs = Vec::with_capacity(2048);
     let mut idx = 1;
     for &plane in &planes {
         for &swap in &swaps {
@@ -867,7 +873,7 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
                         for &yaw_off in &yaw_offsets {
                             for &rev_pitch in &rev_pitches {
                                 for &inv_elev in &inv_elevations {
-                                    for &p_in in &pitch_inputs {
+                                    for &(p_in, p_unit, p_tag) in &pitch_modes {
                                         let plane_str = match plane {
                                             EspHorizontalPlane::Xz => "XZ",
                                             EspHorizontalPlane::Xy => "XY",
@@ -883,14 +889,9 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
                                         let yaw_str = format!("{yaw_off:+.0}°");
                                         let rev_p_str = if rev_pitch { "RevP" } else { "NormP" };
                                         let elev_str = if inv_elev { "InvElev" } else { "NormElev" };
-                                        let pin_str = match p_in {
-                                            EspPitchInput::Angle => "Angle",
-                                            EspPitchInput::SineComponent => "Asin",
-                                            EspPitchInput::TangentComponent => "Atan",
-                                        };
 
-                                        let short_desc = format!("[{plane_str}] {swap_str} {inv_str} {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {pin_str}");
-                                        let label = format!("#{idx}: [{plane_str}] {swap_str} {inv_str} {rev_y_str} {yaw_str} {rev_p_str} {elev_str} {pin_str}");
+                                        let short_desc = format!("[{plane_str}] {swap_str} {inv_str} {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {p_tag}");
+                                        let label = format!("#{idx}: [{plane_str}] {swap_str} {inv_str} {rev_y_str} {yaw_str} {rev_p_str} {elev_str} {p_tag}");
 
                                         configs.push(EspPermutationConfig {
                                             index: idx,
@@ -905,6 +906,7 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
                                             invert_camera_pitch: rev_pitch,
                                             invert_vertical: inv_elev,
                                             pitch_input: p_in,
+                                            pitch_unit: p_unit,
                                             color: colors[(idx - 1) % colors.len()],
                                         });
                                         idx += 1;
