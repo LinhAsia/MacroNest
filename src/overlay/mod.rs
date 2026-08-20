@@ -13172,24 +13172,25 @@ mod windows_overlay {
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return false;
         }
+        let is_ocr = matches!(
+            &mode,
+            ScreenDrawCaptureMode::OcrRegionSelect { .. }
+                | ScreenDrawCaptureMode::OcrHoldTrigger { .. }
+        );
         let is_hold_trigger = matches!(
             &mode,
             ScreenDrawCaptureMode::VideoHoldTrigger(_)
                 | ScreenDrawCaptureMode::OcrHoldTrigger { .. }
         );
-        let was_ui_visible = unsafe {
-            find_app_ui_window().is_some_and(|hwnd| {
-                use windows::Win32::UI::WindowsAndMessaging::IsWindowVisible;
-                IsWindowVisible(hwnd).as_bool()
-            })
-        };
-        let should_restore_ui = !is_hold_trigger || was_ui_visible;
+        let should_restore_ui = !is_ocr && !is_hold_trigger;
 
         #[cfg(windows)]
         unsafe {
-            if let Some(hwnd) = find_app_ui_window() {
-                use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
-                let _ = ShowWindow(hwnd, SW_HIDE);
+            if !is_hold_trigger {
+                if let Some(hwnd) = find_app_ui_window() {
+                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+                    let _ = ShowWindow(hwnd, SW_HIDE);
+                }
             }
         }
         let should_capture_freeze = {
