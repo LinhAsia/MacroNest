@@ -13163,11 +13163,9 @@ mod windows_overlay {
         );
         #[cfg(windows)]
         unsafe {
-            if !is_hold_trigger {
-                if let Some(hwnd) = find_app_ui_window() {
-                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
-                    let _ = ShowWindow(hwnd, SW_HIDE);
-                }
+            if let Some(hwnd) = find_app_ui_window() {
+                use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+                let _ = ShowWindow(hwnd, SW_HIDE);
             }
         }
         let should_capture_freeze = {
@@ -13233,7 +13231,10 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_begin_video_region_capture(trigger: HotkeyBinding) -> bool {
-        begin_video_region_capture(ScreenDrawCaptureMode::VideoHoldTrigger(trigger))
+        thread::spawn(move || {
+            begin_video_region_capture(ScreenDrawCaptureMode::VideoHoldTrigger(trigger));
+        });
+        true
     }
 
     pub fn screen_draw_select_video_region() -> bool {
@@ -13241,15 +13242,24 @@ mod windows_overlay {
     }
 
     pub fn screen_draw_instant_screenshot() -> bool {
-        begin_video_region_capture(ScreenDrawCaptureMode::MouseDrag)
+        thread::spawn(move || {
+            begin_video_region_capture(ScreenDrawCaptureMode::MouseDrag);
+        });
+        true
     }
 
     pub fn screen_draw_instant_ocr(language: String, freeze: bool) -> bool {
-        begin_video_region_capture(ScreenDrawCaptureMode::OcrRegionSelect { language, freeze })
+        thread::spawn(move || {
+            begin_video_region_capture(ScreenDrawCaptureMode::OcrRegionSelect { language, freeze });
+        });
+        true
     }
 
     pub fn screen_draw_begin_ocr_region_capture(trigger: HotkeyBinding, language: String, freeze: bool) -> bool {
-        begin_video_region_capture(ScreenDrawCaptureMode::OcrHoldTrigger { trigger, language, freeze })
+        thread::spawn(move || {
+            begin_video_region_capture(ScreenDrawCaptureMode::OcrHoldTrigger { trigger, language, freeze });
+        });
+        true
     }
 
     pub fn screen_draw_toggle_from_ui() -> bool {
@@ -13344,7 +13354,10 @@ mod windows_overlay {
     fn begin_screen_draw_region_capture(capture_mode: ScreenDrawCaptureMode, session_id: u64) {
         let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
         thread::spawn(move || {
-            let status = run_screen_draw_region_capture_flow(capture_mode, session_id, hwnd_raw);
+            let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_screen_draw_region_capture_flow(capture_mode, session_id, hwnd_raw)
+            }))
+            .unwrap_or_else(|_| "OCR/Region capture encountered an unexpected error.".to_owned());
             send_ui_command(UiCommand::ScreenDrawCaptureStatus(status));
         });
     }
@@ -13956,20 +13969,10 @@ mod windows_overlay {
     }
 
     fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
-        let state_trigger_down = {
-            let state = SCREEN_DRAW_STATE.try_lock();
-            state.as_ref().is_some_and(|state| {
-                state
-                    .trigger
-                    .as_ref()
-                    .is_some_and(|configured| hotkey::binding_matches(configured, trigger))
-                    && state.trigger_is_down
-            })
-        };
         let hook_state = HOOK_STATE.lock();
         hotkey::binding_key_names(trigger)
             .into_iter()
-            .all(|key| state_trigger_down || screen_draw_trigger_key_is_down(&key, &hook_state))
+            .all(|key| screen_draw_trigger_key_is_down(&key, &hook_state))
     }
 
     fn sync_trigger_binding_input_state(binding: &HotkeyBinding) {
