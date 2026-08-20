@@ -911,6 +911,7 @@ pub struct CrosshairApp {
     geometry_preset_preview_target: Option<u32>,
     geometry_preview_sent: Option<GeometrySpec>,
     esp_calibration_feedback: HashMap<u32, String>,
+    esp_selected_permutation: HashMap<u32, usize>,
     esp_entity_capture_feedback: HashMap<u32, String>,
     #[cfg(windows)]
     esp_entity_root_capture: Option<esp_panel::EspEntityRootCapture>,
@@ -1274,6 +1275,7 @@ impl CrosshairApp {
             geometry_preset_preview_target: None,
             geometry_preview_sent: None,
             esp_calibration_feedback: HashMap::new(),
+            esp_selected_permutation: HashMap::new(),
             esp_entity_capture_feedback: HashMap::new(),
             #[cfg(windows)]
             esp_entity_root_capture: None,

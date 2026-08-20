@@ -171,6 +171,8 @@ pub struct EspPreset {
     pub show_tracer: bool,
     pub show_distance: bool,
     pub debug_mode: bool,
+    #[serde(default)]
+    pub permutation_debug_mode: bool,
     pub target_audio_enabled: bool,
     pub target_audio_path: String,
     pub target_audio_loop: bool,
@@ -281,6 +283,7 @@ impl EspPreset {
             show_tracer: false,
             show_distance: false,
             debug_mode: false,
+            permutation_debug_mode: false,
             target_audio_enabled: false,
             target_audio_path: String::new(),
             target_audio_loop: true,
@@ -813,6 +816,89 @@ pub(crate) fn esp_orientation_from_direction_pair(
         esp_angle_from_radians(direction[1].atan2(direction[0]), preset.yaw_unit),
         pitch,
     ))
+}
+
+#[derive(Debug, Clone)]
+pub struct EspPermutationConfig {
+    pub index: usize,
+    pub short_desc: String,
+    pub label: String,
+    pub horizontal_plane: EspHorizontalPlane,
+    pub swap_direction_pair: bool,
+    pub invert_direction_a: bool,
+    pub invert_direction_b: bool,
+    pub invert_camera_yaw: bool,
+    pub yaw_offset_degrees: f32,
+    pub color: [u8; 4],
+}
+
+pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
+    let planes = [EspHorizontalPlane::Xz, EspHorizontalPlane::Xy];
+    let swaps = [false, true];
+    let inv_as = [false, true];
+    let inv_bs = [false, true];
+    let rev_yaws = [false, true];
+    let yaw_offsets = [0.0, 90.0, 180.0, -90.0];
+
+    let colors: [[u8; 4]; 8] = [
+        [0, 255, 255, 255],   // Cyan
+        [255, 0, 255, 255],   // Magenta
+        [255, 255, 0, 255],   // Yellow
+        [0, 255, 128, 255],   // Spring Green
+        [255, 128, 0, 255],   // Orange
+        [160, 160, 255, 255], // Light Indigo
+        [255, 90, 90, 255],   // Coral Red
+        [200, 255, 200, 255], // Mint Green
+    ];
+
+    let mut configs = Vec::with_capacity(128);
+    let mut idx = 1;
+    for &plane in &planes {
+        for &swap in &swaps {
+            for &inv_a in &inv_as {
+                for &inv_b in &inv_bs {
+                    for &rev_yaw in &rev_yaws {
+                        for &yaw_off in &yaw_offsets {
+                            let plane_str = match plane {
+                                EspHorizontalPlane::Xz => "XZ (Y-Height)",
+                                EspHorizontalPlane::Xy => "XY (Z-Height)",
+                            };
+                            let swap_str = if swap { "Swap" } else { "NoSwap" };
+                            let inv_str = match (inv_a, inv_b) {
+                                (false, false) => "+A +B",
+                                (true, false) => "-A +B",
+                                (false, true) => "+A -B",
+                                (true, true) => "-A -B",
+                            };
+                            let rev_str = if rev_yaw { "RevYaw" } else { "NormYaw" };
+                            let yaw_str = format!("{yaw_off:+.0}°");
+
+                            let short_desc = format!("{plane_str} | {swap_str} | {inv_str} | {rev_str} | {yaw_str}");
+                            let label = format!("#{idx:02}: [{}] {} {} {} {}", match plane {
+                                EspHorizontalPlane::Xz => "XZ",
+                                EspHorizontalPlane::Xy => "XY",
+                            }, if swap { "Swap" } else { "Norm" }, inv_str, if rev_yaw { "Rev" } else { "Dir" }, yaw_str);
+
+                            configs.push(EspPermutationConfig {
+                                index: idx,
+                                short_desc,
+                                label,
+                                horizontal_plane: plane,
+                                swap_direction_pair: swap,
+                                invert_direction_a: inv_a,
+                                invert_direction_b: inv_b,
+                                invert_camera_yaw: rev_yaw,
+                                yaw_offset_degrees: yaw_off,
+                                color: colors[(idx - 1) % colors.len()],
+                            });
+                            idx += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    configs
 }
 
 fn wrap_angle(value: f32) -> f32 {

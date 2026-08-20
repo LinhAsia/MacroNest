@@ -1425,6 +1425,55 @@ impl CrosshairApp {
                         });
                         ui.end_row();
 
+                        // --- Combination Matrix ---
+                        ui.label("Combination Matrix");
+                        ui.vertical(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.checkbox(
+                                    &mut preset.permutation_debug_mode,
+                                    "Render all combinations (Single target)",
+                                )
+                                .on_hover_text(
+                                    "Simultaneously renders all 128 combinations of Plane (XZ/XY), Swap A/B, Invert A/B, Reverse Yaw, and Yaw Offsets with numbered labels. Look at your target in-game to see which # number lands directly on it, then apply below!",
+                                );
+
+                                if preset.permutation_debug_mode {
+                                    let perms = crate::model::esp_debug_permutations();
+                                    let selected_perm = self.esp_selected_permutation.entry(preset.id).or_insert(1);
+                                    ui.label("Pick #:");
+                                    ui.add(
+                                        DragValue::new(selected_perm)
+                                            .range(1..=perms.len())
+                                            .speed(1.0),
+                                    );
+                                    if let Some(target_cfg) = perms.iter().find(|c| c.index == *selected_perm) {
+                                        ui.label(
+                                            RichText::new(&target_cfg.short_desc)
+                                                .color(Color32::from_rgb(
+                                                    target_cfg.color[0],
+                                                    target_cfg.color[1],
+                                                    target_cfg.color[2],
+                                                ))
+                                                .strong(),
+                                        );
+                                        if ui
+                                            .button(format!("Apply #{} to Preset", target_cfg.index))
+                                            .clicked()
+                                        {
+                                            preset.horizontal_plane = target_cfg.horizontal_plane;
+                                            preset.swap_direction_pair = target_cfg.swap_direction_pair;
+                                            preset.invert_direction_a = target_cfg.invert_direction_a;
+                                            preset.invert_direction_b = target_cfg.invert_direction_b;
+                                            preset.invert_camera_yaw = target_cfg.invert_camera_yaw;
+                                            preset.yaw_offset_degrees = target_cfg.yaw_offset_degrees;
+                                            preset.permutation_debug_mode = false;
+                                        }
+                                    }
+                                }
+                            });
+                        });
+                        ui.end_row();
+
                         // --- Marker ---
                         ui.label("Marker");
                         ui.horizontal_wrapped(|ui| {

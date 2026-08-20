@@ -27428,7 +27428,7 @@ mod windows_overlay {
     fn read_esp_view_inputs(
         preset: &crate::model::EspPreset,
         frame: &mut EspReadFrame,
-    ) -> Result<(u32, [f32; 3], f32, f32), String> {
+    ) -> Result<(u32, [f32; 3], f32, f32, Option<[f32; 2]>), String> {
         if preset.target_window.trim().is_empty() {
             return Err("select a running target window first".to_owned());
         }
@@ -27447,10 +27447,11 @@ mod windows_overlay {
             read("Camera Y", &preset.camera_y)?,
             read("Camera Z", &preset.camera_z)?,
         ];
-        let (yaw, pitch) = match preset.orientation_source {
+        let (yaw, pitch, raw_direction) = match preset.orientation_source {
             crate::model::EspOrientationSource::Angles => (
                 read("Camera yaw", &preset.camera_yaw)?,
                 read("Camera pitch", &preset.camera_pitch)?,
+                None,
             ),
             crate::model::EspOrientationSource::DirectionPairPitch => {
                 let direction = [
@@ -27458,11 +27459,12 @@ mod windows_overlay {
                     read("Camera direction B", &preset.camera_direction_b)?,
                 ];
                 let pitch = read("Camera pitch", &preset.camera_pitch)?;
-                crate::model::esp_orientation_from_direction_pair(preset, direction, pitch)
-                    .ok_or_else(|| "Camera direction pair is zero or invalid".to_owned())?
+                let (yaw, pitch) = crate::model::esp_orientation_from_direction_pair(preset, direction, pitch)
+                    .ok_or_else(|| "Camera direction pair is zero or invalid".to_owned())?;
+                (yaw, pitch, Some(direction))
             }
         };
-        Ok((pid, camera, yaw, pitch))
+        Ok((pid, camera, yaw, pitch, raw_direction))
     }
 
     fn read_esp_targets(
@@ -27578,7 +27580,7 @@ mod windows_overlay {
         preset: &crate::model::EspPreset,
         frame: &mut EspReadFrame,
     ) -> Result<([f32; 3], [f32; 3], f32, f32), String> {
-        let (pid, camera, yaw, pitch) = read_esp_view_inputs(preset, frame)?;
+        let (pid, camera, yaw, pitch, _) = read_esp_view_inputs(preset, frame)?;
         let (target, _, _) = read_esp_targets(preset, frame, pid)?
             .into_iter()
             .next()
@@ -27666,7 +27668,7 @@ mod windows_overlay {
         if width <= 0 || height <= 0 {
             return (Vec::new(), None);
         }
-        let Ok((pid, camera, yaw, pitch)) = read_esp_view_inputs(preset, frame) else {
+        let Ok((pid, camera, yaw, pitch, raw_direction)) = read_esp_view_inputs(preset, frame) else {
             return (Vec::new(), None);
         };
         let Ok(targets) = read_esp_targets(preset, frame, pid) else {
@@ -27696,6 +27698,23 @@ mod windows_overlay {
                 volume: crate::model::esp_spatial_audio_gain(preset, distance),
                 pan: crate::model::esp_spatial_audio_pan(preset, target, camera, yaw),
             });
+        }
+        if preset.permutation_debug_mode {
+            if let Some((target, _, _)) = targets.first() {
+                let perm_shapes = esp_shapes_for_permutations(
+                    preset,
+                    *target,
+                    camera,
+                    yaw,
+                    pitch,
+                    raw_direction,
+                    left,
+                    top,
+                    width,
+                    height,
+                );
+                return (perm_shapes, None);
+            }
         }
         let mut shapes = Vec::new();
         let mut best_snapshot = None;
@@ -27732,6 +27751,108 @@ mod windows_overlay {
             }
         }
         (shapes, best_snapshot)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn esp_shapes_for_permutations(
+        preset: &crate::model::EspPreset,
+        target: [f32; 3],
+        camera: [f32; 3],
+        raw_yaw: f32,
+        pitch: f32,
+        raw_direction: Option<[f32; 2]>,
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+    ) -> Vec<GeometryRenderShape> {
+        let mut shapes = Vec::new();
+        let aspect = width as f32 / height as f32;
+        let perms = crate::model::esp_debug_permutations();
+
+        for perm in perms {
+            let mut test_preset = preset.clone();
+            test_preset.horizontal_plane = perm.horizontal_plane;
+            test_preset.swap_direction_pair = perm.swap_direction_pair;
+            test_preset.invert_direction_a = perm.invert_direction_a;
+            test_preset.invert_direction_b = perm.invert_direction_b;
+            test_preset.invert_camera_yaw = perm.invert_camera_yaw;
+            test_preset.yaw_offset_degrees = perm.yaw_offset_degrees;
+
+            let perm_orientation = match test_preset.orientation_source {
+                crate::model::EspOrientationSource::Angles => Some((raw_yaw, pitch)),
+                crate::model::EspOrientationSource::DirectionPairPitch => {
+                    if let Some(dir) = raw_direction {
+                        crate::model::esp_orientation_from_direction_pair(&test_preset, dir, pitch)
+                    } else {
+                        Some((raw_yaw, pitch))
+                    }
+                }
+            };
+
+            let Some((p_yaw, p_pitch)) = perm_orientation else {
+                continue;
+            };
+
+            let Some(projection) = crate::model::project_esp(
+                &test_preset,
+                target,
+                camera,
+                p_yaw,
+                p_pitch,
+                aspect,
+            ) else {
+                continue;
+            };
+
+            if !projection.on_screen {
+                continue;
+            }
+
+            let px = left
+                + ((projection.normalized_x + 1.0) * 0.5 * width as f32
+                    + preset.screen_offset_x
+                    + preset.marker_offset_x)
+                    .round() as i32;
+            let py = top
+                + ((1.0 - projection.normalized_y) * 0.5 * height as f32
+                    + preset.screen_offset_y
+                    + preset.marker_offset_y)
+                    .round() as i32;
+
+            let color = perm.color;
+            let half_w = 10;
+            let half_h = 10;
+            let points = vec![
+                (px - half_w, py - half_h),
+                (px + half_w, py - half_h),
+                (px + half_w, py + half_h),
+                (px - half_w, py + half_h),
+            ];
+            shapes.push(GeometryRenderShape {
+                bounds: (px - half_w - 2, py - half_h - 2, px + half_w + 2, py + half_h + 2),
+                draw: GeometryRenderDraw::Polygon {
+                    points,
+                    stroke: color,
+                    fill: None,
+                    thickness: 2,
+                },
+            });
+
+            let text_y = py - 18;
+            shapes.push(GeometryRenderShape {
+                bounds: geometry_label_bounds(px, text_y, 11, &perm.label, 0.0),
+                draw: GeometryRenderDraw::Label(GeometryRenderText {
+                    x: px,
+                    y: text_y,
+                    font_size: 11,
+                    color,
+                    rotation_deg: 0.0,
+                    text: perm.label,
+                }),
+            });
+        }
+        shapes
     }
 
     #[allow(clippy::too_many_arguments)]
