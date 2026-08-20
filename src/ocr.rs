@@ -624,7 +624,11 @@ fn upscale_for_small_text(
     width: u32,
     height: u32,
 ) -> Result<(DynamicImage, f32)> {
-    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba_bytes.to_vec())
+    let expected_len = (width as usize).saturating_mul(height as usize).saturating_mul(4);
+    if rgba_bytes.len() < expected_len {
+        bail!("Image buffer too short: expected {} bytes, got {}", expected_len, rgba_bytes.len());
+    }
+    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba_bytes[..expected_len].to_vec())
         .ok_or_else(|| anyhow!("Failed to create OCR image buffer from raw pixels"))?;
     let mut scale = 1.0_f32;
     let min_side = width.min(height);

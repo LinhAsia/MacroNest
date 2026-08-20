@@ -13526,8 +13526,13 @@ mod windows_overlay {
                 } else {
                     let char_count = trimmed.chars().count();
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                            let _ = clipboard.set_text(trimmed.to_owned());
+                        for _ in 0..5 {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                if clipboard.set_text(trimmed.to_owned()).is_ok() {
+                                    break;
+                                }
+                            }
+                            thread::sleep(Duration::from_millis(20));
                         }
                     }));
                     let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
@@ -13591,7 +13596,7 @@ mod windows_overlay {
                     CreateFontW, CreateSolidBrush, DT_CENTER, DT_SINGLELINE, DT_VCENTER,
                     DeleteObject, DrawTextW, FONT_CHARSET, FONT_CLIP_PRECISION,
                     FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_BOLD, FillRect, GetDC, HGDIOBJ,
-                    ReleaseDC, SetBkMode, SetTextColor, TRANSPARENT,
+                    ReleaseDC, SetBkMode, SetTextColor, TRANSPARENT, BeginPaint, EndPaint, PAINTSTRUCT,
                 },
                 System::LibraryLoader::GetModuleHandleW,
                 UI::WindowsAndMessaging::{
@@ -13600,6 +13605,7 @@ mod windows_overlay {
                     SM_CXSCREEN, SM_CYSCREEN, SW_SHOWNOACTIVATE, SetLayeredWindowAttributes,
                     ShowWindow, TranslateMessage, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
                     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+                    WM_ERASEBKGND, WM_PAINT, WM_NCHITTEST, HTTRANSPARENT,
                 },
             },
             core::{PCWSTR, w},
@@ -13626,10 +13632,19 @@ mod windows_overlay {
             wparam: WPARAM,
             lparam: LPARAM,
         ) -> LRESULT {
-            if message == windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST {
-                return LRESULT(windows::Win32::UI::WindowsAndMessaging::HTTRANSPARENT as isize);
+            match message {
+                windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST => {
+                    LRESULT(windows::Win32::UI::WindowsAndMessaging::HTTRANSPARENT as isize)
+                }
+                windows::Win32::UI::WindowsAndMessaging::WM_ERASEBKGND => LRESULT(1),
+                windows::Win32::UI::WindowsAndMessaging::WM_PAINT => {
+                    let mut ps = windows::Win32::Graphics::Gdi::PAINTSTRUCT::default();
+                    let _ = windows::Win32::Graphics::Gdi::BeginPaint(hwnd, &mut ps);
+                    let _ = windows::Win32::Graphics::Gdi::EndPaint(hwnd, &ps);
+                    LRESULT(0)
+                }
+                _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
             }
-            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
 
         unsafe {
@@ -14214,7 +14229,7 @@ mod windows_overlay {
             for col in 0..copy_w {
                 let src_offset = src_index + col * 4;
                 let dst_offset = dst_row_index + col * 4;
-                if dst_offset + 4 > dst.len() {
+                if dst_offset + 4 > dst.len() || src_offset + 4 > state.committed_rgba.len() {
                     break;
                 }
                 let src_a = state.committed_rgba[src_offset + 3];
