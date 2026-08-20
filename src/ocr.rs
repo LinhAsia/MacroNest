@@ -654,8 +654,11 @@ fn upscale_for_small_text(
 
 #[cfg(windows)]
 pub fn perform_ocr(rgba_bytes: &[u8], width: u32, height: u32, lang: &str) -> Result<OcrResult> {
-    if rgba_bytes.is_empty() || width == 0 || height == 0 {
-        bail!("Empty image or invalid dimensions");
+    if rgba_bytes.is_empty() || width < 10 || height < 10 {
+        return Ok(OcrResult {
+            text: String::new(),
+            words: Vec::new(),
+        });
     }
 
     let (image, scale) = upscale_for_small_text(rgba_bytes, width, height)?;
@@ -698,4 +701,16 @@ pub fn perform_ocr(
     _lang: &str,
 ) -> Result<OcrResult> {
     bail!("OCR is only supported on Windows.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ocr_run() {
+        let img = vec![255u8; 100 * 100 * 4];
+        let res = perform_ocr(&img, 100, 100, "multilingual");
+        println!("OCR result: {:?}", res);
+    }
 }

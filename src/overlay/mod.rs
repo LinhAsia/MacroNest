@@ -12579,19 +12579,25 @@ mod windows_overlay {
         state.current_stroke_release_seen_at = None;
         state.strokes.clear();
         state.redo_strokes.clear();
-        reset_screen_draw_buffers(state);
         state.tool = ScreenDrawTool::Brush;
         state.eraser = false;
         state.effect = ScreenDrawEffect::None;
         state.active_control = ScreenDrawControl::None;
         state.toolbar_w = SCREEN_DRAW_TOOLBAR_WIDTH;
         state.toolbar_h = SCREEN_DRAW_TOOLBAR_HEIGHT;
-        let (_, _, virt_w, _) = window_list::virtual_screen_bounds();
+        let (_, _, virt_w, virt_h) = window_list::virtual_screen_bounds();
         let screen_w = if virt_w > 0 {
             virt_w
         } else {
             state.canvas_width.max(1) as i32
         };
+        let screen_h = if virt_h > 0 {
+            virt_h
+        } else {
+            state.canvas_height.max(1) as i32
+        };
+        state.canvas_width = screen_w as usize;
+        state.canvas_height = screen_h as usize;
         state.toolbar_x = ((screen_w - SCREEN_DRAW_TOOLBAR_WIDTH) / 2).max(10);
         state.toolbar_y = 40;
         state.color_palette_open = false;
@@ -12600,6 +12606,15 @@ mod windows_overlay {
         state.text_interaction_start_point = None;
         state.text_interaction_origin = None;
         state.canvas_background = None;
+
+        if let Some(ref bg) = state.freeze_frame {
+            state.committed_rgba.clear();
+            state.committed_rgba.extend_from_slice(bg);
+            state.committed_dirty = true;
+        } else {
+            reset_screen_draw_buffers(state);
+        }
+
         state.pending_repaint = true;
         state.dirty_rect = Some(ScreenDrawDirtyRect::full(
             state.canvas_width.max(1),
@@ -13442,6 +13457,16 @@ mod windows_overlay {
         rect: Option<windows::Win32::Foundation::RECT>,
         ui_language: crate::model::UiLanguage,
     ) -> String {
+        if capture.width < 10 || capture.height < 10 {
+            let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                "⚠ Vùng chọn quá nhỏ".to_owned()
+            } else {
+                "⚠ Selected region too small".to_owned()
+            };
+            show_ocr_copy_toast_async(rect, toast_msg, true);
+            return "Selected region too small.".to_owned();
+        }
+
         let ocr_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             crate::ocr::perform_ocr(
                 &capture.rgba,
@@ -13479,7 +13504,14 @@ mod windows_overlay {
                 }
             }
             Ok(Err(err)) => {
-                let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                let err_str = err.to_string();
+                let toast_msg = if err_str.contains("not installed") {
+                    if ui_language == crate::model::UiLanguage::Vietnamese {
+                        "⚠ Chưa cài đặt gói OCR (Cài đặt > Công cụ)".to_owned()
+                    } else {
+                        "⚠ OCR pack not installed (Settings > Tools)".to_owned()
+                    }
+                } else if ui_language == crate::model::UiLanguage::Vietnamese {
                     "⚠ Nhận diện chữ thất bại".to_owned()
                 } else {
                     "⚠ OCR recognition failed".to_owned()
@@ -13504,7 +13536,11 @@ mod windows_overlay {
         message: String,
         is_error: bool,
     ) {
-        thread::spawn(move || run_ocr_copy_toast(rect, message, is_error));
+        thread::spawn(move || {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_ocr_copy_toast(rect, message, is_error);
+            }));
+        });
     }
 
     fn run_ocr_copy_toast(
@@ -16413,6 +16449,9 @@ mod windows_overlay {
             && state.canvas_height == height
             && state.committed_rgba.len() == width * height * 4
         {
+            if state.committed_dirty {
+                rebuild_screen_draw_canvas(state);
+            }
             return true;
         }
 
@@ -17019,7 +17058,12 @@ mod windows_overlay {
                 background,
             );
         } else if let Some(ref bg) = state.freeze_frame {
-            state.committed_rgba.copy_from_slice(bg);
+            if state.committed_rgba.len() == bg.len() {
+                state.committed_rgba.copy_from_slice(bg);
+            } else {
+                state.committed_rgba.clear();
+                state.committed_rgba.extend_from_slice(bg);
+            }
         } else {
             state.committed_rgba.fill(0);
         }
