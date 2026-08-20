@@ -4825,22 +4825,26 @@ mod windows_overlay {
             }
             WM_TIMER => {
                 if _wparam.0 == SCREEN_DRAW_TIMER_ID {
-                    screen_draw_maybe_begin_trigger_capture();
-                    finish_released_screen_draw_stroke_if_stale();
-                    let should_paint = {
-                        let state = SCREEN_DRAW_STATE.lock();
-                        state.active && (state.pending_repaint || state.text_session.is_some())
-                    } && !screen_draw_cursor_over_toolbar();
-                    if should_paint {
-                        let _ = paint_screen_draw_overlay(hwnd);
-                    }
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        screen_draw_maybe_begin_trigger_capture();
+                        finish_released_screen_draw_stroke_if_stale();
+                        let should_paint = {
+                            let state = SCREEN_DRAW_STATE.lock();
+                            state.active && (state.pending_repaint || state.text_session.is_some())
+                        } && !screen_draw_cursor_over_toolbar();
+                        if should_paint {
+                            let _ = paint_screen_draw_overlay(hwnd);
+                        }
+                    }));
                     return LRESULT(0);
                 }
                 DefWindowProcW(hwnd, msg, _wparam, _lparam)
             }
             WMAPP_SCREEN_DRAW_SYNC => {
                 SCREEN_DRAW_OVERLAY_SYNC_PENDING.store(false, Ordering::Release);
-                let _ = sync_screen_draw_overlay_window(hwnd);
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = sync_screen_draw_overlay_window(hwnd);
+                }));
                 LRESULT(0)
             }
             windows::Win32::UI::WindowsAndMessaging::WM_PAINT => {
@@ -12598,6 +12602,8 @@ mod windows_overlay {
         };
         state.canvas_width = screen_w as usize;
         state.canvas_height = screen_h as usize;
+        let byte_len = state.canvas_width.saturating_mul(state.canvas_height).saturating_mul(4);
+
         state.toolbar_x = ((screen_w - SCREEN_DRAW_TOOLBAR_WIDTH) / 2).max(10);
         state.toolbar_y = 40;
         state.color_palette_open = false;
@@ -12607,12 +12613,22 @@ mod windows_overlay {
         state.text_interaction_origin = None;
         state.canvas_background = None;
 
+        state.committed_rgba.clear();
+        state.frame_rgba.clear();
+        state.frame_rgba.resize(byte_len, 0);
+
         if let Some(ref bg) = state.freeze_frame {
-            state.committed_rgba.clear();
-            state.committed_rgba.extend_from_slice(bg);
+            if bg.len() == byte_len {
+                state.committed_rgba.extend_from_slice(bg);
+            } else {
+                state.committed_rgba.resize(byte_len, 0);
+                let copy_len = bg.len().min(byte_len);
+                state.committed_rgba[..copy_len].copy_from_slice(&bg[..copy_len]);
+            }
             state.committed_dirty = true;
         } else {
-            reset_screen_draw_buffers(state);
+            state.committed_rgba.resize(byte_len, 0);
+            state.committed_dirty = false;
         }
 
         state.pending_repaint = true;
@@ -16448,9 +16464,11 @@ mod windows_overlay {
     }
 
     fn ensure_screen_draw_canvas(state: &mut ScreenDrawState, width: usize, height: usize) -> bool {
+        let byte_len = width.saturating_mul(height).saturating_mul(4);
         if state.canvas_width == width
             && state.canvas_height == height
-            && state.committed_rgba.len() == width * height * 4
+            && state.committed_rgba.len() == byte_len
+            && state.frame_rgba.len() == byte_len
         {
             if state.committed_dirty {
                 rebuild_screen_draw_canvas(state);
@@ -16458,7 +16476,6 @@ mod windows_overlay {
             return true;
         }
 
-        let byte_len = width.saturating_mul(height).saturating_mul(4);
         state.canvas_width = width;
         state.canvas_height = height;
         if state.toolbar_x <= 0 {
@@ -16476,7 +16493,13 @@ mod windows_overlay {
             );
             state.committed_dirty = false;
         } else if let Some(ref bg) = state.freeze_frame {
-            state.committed_rgba.extend_from_slice(bg);
+            if bg.len() == byte_len {
+                state.committed_rgba.extend_from_slice(bg);
+            } else {
+                state.committed_rgba.resize(byte_len, 0);
+                let copy_len = bg.len().min(byte_len);
+                state.committed_rgba[..copy_len].copy_from_slice(&bg[..copy_len]);
+            }
             state.committed_dirty = true;
         } else {
             state.committed_rgba.resize(byte_len, 0);
@@ -17148,7 +17171,9 @@ mod windows_overlay {
         for y in rect.top..rect.bottom {
             let row_start = (y * width + rect.left) * 4;
             let row_end = (y * width + rect.right) * 4;
-            dst[row_start..row_end].copy_from_slice(&src[row_start..row_end]);
+            if row_end <= src.len() && row_end <= dst.len() && row_start <= row_end {
+                dst[row_start..row_end].copy_from_slice(&src[row_start..row_end]);
+            }
         }
     }
 
@@ -17158,24 +17183,21 @@ mod windows_overlay {
         width: usize,
         rect: ScreenDrawDirtyRect,
     ) {
-        // Fast R/B swap: treat every 4 bytes as a u32, mask-and-shift to swap channels.
-        // RGBA bytes in little-endian u32: bits [31:24]=A, [23:16]=B, [15:8]=G, [7:0]=R
-        // BGRA bytes in little-endian u32: bits [31:24]=A, [23:16]=R, [15:8]=G, [7:0]=B
-        // Swap: keep A and G in place, swap R (bits [7:0]) and B (bits [23:16]).
         for y in rect.top..rect.bottom {
             let row_start = (y * width + rect.left) * 4;
             let row_end = (y * width + rect.right) * 4;
+            if row_end > src.len() || row_end > dst.len() || row_start > row_end {
+                continue;
+            }
             let src_row = &src[row_start..row_end];
             let dst_row = &mut dst[row_start..row_end];
             for (src_chunk, dst_chunk) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
                 let pixel =
                     u32::from_ne_bytes([src_chunk[0], src_chunk[1], src_chunk[2], src_chunk[3]]);
-                // Extract channels
                 let r = (pixel) & 0xFF;
                 let g = (pixel >> 8) & 0xFF;
                 let b = (pixel >> 16) & 0xFF;
                 let a = (pixel >> 24) & 0xFF;
-                // Write as BGRA
                 let bgra = b | (g << 8) | (r << 16) | (a << 24);
                 let out = bgra.to_ne_bytes();
                 dst_chunk[0] = out[0];
@@ -17199,7 +17221,9 @@ mod windows_overlay {
             let src_end = src_start + row_bytes;
             let dst_start = row_index * row_bytes;
             let dst_end = dst_start + row_bytes;
-            out[dst_start..dst_end].copy_from_slice(&src[src_start..src_end]);
+            if src_end <= src.len() && dst_end <= out.len() && src_start <= src_end {
+                out[dst_start..dst_end].copy_from_slice(&src[src_start..src_end]);
+            }
         }
         out
     }
@@ -17222,7 +17246,9 @@ mod windows_overlay {
             let dst_end = dst_start + row_bytes;
             let src_start = row_index * row_bytes;
             let src_end = src_start + row_bytes;
-            dst[dst_start..dst_end].copy_from_slice(&src[src_start..src_end]);
+            if src_end <= src.len() && dst_end <= dst.len() && src_start <= src_end {
+                dst[dst_start..dst_end].copy_from_slice(&src[src_start..src_end]);
+            }
         }
     }
 
