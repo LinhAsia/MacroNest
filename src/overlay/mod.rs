@@ -27778,6 +27778,9 @@ mod windows_overlay {
             test_preset.invert_direction_b = perm.invert_direction_b;
             test_preset.invert_camera_yaw = perm.invert_camera_yaw;
             test_preset.yaw_offset_degrees = perm.yaw_offset_degrees;
+            test_preset.invert_camera_pitch = perm.invert_camera_pitch;
+            test_preset.invert_vertical = perm.invert_vertical;
+            test_preset.pitch_input = perm.pitch_input;
 
             let perm_orientation = match test_preset.orientation_source {
                 crate::model::EspOrientationSource::Angles => Some((raw_yaw, pitch)),

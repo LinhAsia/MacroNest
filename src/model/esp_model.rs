@@ -829,6 +829,9 @@ pub struct EspPermutationConfig {
     pub invert_direction_b: bool,
     pub invert_camera_yaw: bool,
     pub yaw_offset_degrees: f32,
+    pub invert_camera_pitch: bool,
+    pub invert_vertical: bool,
+    pub pitch_input: EspPitchInput,
     pub color: [u8; 4],
 }
 
@@ -839,6 +842,9 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
     let inv_bs = [false, true];
     let rev_yaws = [false, true];
     let yaw_offsets = [0.0, 90.0, 180.0, -90.0];
+    let rev_pitches = [false, true];
+    let inv_elevations = [false, true];
+    let pitch_inputs = [EspPitchInput::Angle, EspPitchInput::SineComponent];
 
     let colors: [[u8; 4]; 8] = [
         [0, 255, 255, 255],   // Cyan
@@ -851,7 +857,7 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
         [200, 255, 200, 255], // Mint Green
     ];
 
-    let mut configs = Vec::with_capacity(128);
+    let mut configs = Vec::with_capacity(1024);
     let mut idx = 1;
     for &plane in &planes {
         for &swap in &swaps {
@@ -859,39 +865,52 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
                 for &inv_b in &inv_bs {
                     for &rev_yaw in &rev_yaws {
                         for &yaw_off in &yaw_offsets {
-                            let plane_str = match plane {
-                                EspHorizontalPlane::Xz => "XZ (Y-Height)",
-                                EspHorizontalPlane::Xy => "XY (Z-Height)",
-                            };
-                            let swap_str = if swap { "Swap" } else { "NoSwap" };
-                            let inv_str = match (inv_a, inv_b) {
-                                (false, false) => "+A +B",
-                                (true, false) => "-A +B",
-                                (false, true) => "+A -B",
-                                (true, true) => "-A -B",
-                            };
-                            let rev_str = if rev_yaw { "RevYaw" } else { "NormYaw" };
-                            let yaw_str = format!("{yaw_off:+.0}°");
+                            for &rev_pitch in &rev_pitches {
+                                for &inv_elev in &inv_elevations {
+                                    for &p_in in &pitch_inputs {
+                                        let plane_str = match plane {
+                                            EspHorizontalPlane::Xz => "XZ",
+                                            EspHorizontalPlane::Xy => "XY",
+                                        };
+                                        let swap_str = if swap { "Swap" } else { "Norm" };
+                                        let inv_str = match (inv_a, inv_b) {
+                                            (false, false) => "+A+B",
+                                            (true, false) => "-A+B",
+                                            (false, true) => "+A-B",
+                                            (true, true) => "-A-B",
+                                        };
+                                        let rev_y_str = if rev_yaw { "RevY" } else { "NormY" };
+                                        let yaw_str = format!("{yaw_off:+.0}°");
+                                        let rev_p_str = if rev_pitch { "RevP" } else { "NormP" };
+                                        let elev_str = if inv_elev { "InvElev" } else { "NormElev" };
+                                        let pin_str = match p_in {
+                                            EspPitchInput::Angle => "Angle",
+                                            EspPitchInput::SineComponent => "Asin",
+                                            EspPitchInput::TangentComponent => "Atan",
+                                        };
 
-                            let short_desc = format!("{plane_str} | {swap_str} | {inv_str} | {rev_str} | {yaw_str}");
-                            let label = format!("#{idx:02}: [{}] {} {} {} {}", match plane {
-                                EspHorizontalPlane::Xz => "XZ",
-                                EspHorizontalPlane::Xy => "XY",
-                            }, if swap { "Swap" } else { "Norm" }, inv_str, if rev_yaw { "Rev" } else { "Dir" }, yaw_str);
+                                        let short_desc = format!("[{plane_str}] {swap_str} {inv_str} {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {pin_str}");
+                                        let label = format!("#{idx}: [{plane_str}] {swap_str} {inv_str} {rev_y_str} {yaw_str} {rev_p_str} {elev_str} {pin_str}");
 
-                            configs.push(EspPermutationConfig {
-                                index: idx,
-                                short_desc,
-                                label,
-                                horizontal_plane: plane,
-                                swap_direction_pair: swap,
-                                invert_direction_a: inv_a,
-                                invert_direction_b: inv_b,
-                                invert_camera_yaw: rev_yaw,
-                                yaw_offset_degrees: yaw_off,
-                                color: colors[(idx - 1) % colors.len()],
-                            });
-                            idx += 1;
+                                        configs.push(EspPermutationConfig {
+                                            index: idx,
+                                            short_desc,
+                                            label,
+                                            horizontal_plane: plane,
+                                            swap_direction_pair: swap,
+                                            invert_direction_a: inv_a,
+                                            invert_direction_b: inv_b,
+                                            invert_camera_yaw: rev_yaw,
+                                            yaw_offset_degrees: yaw_off,
+                                            invert_camera_pitch: rev_pitch,
+                                            invert_vertical: inv_elev,
+                                            pitch_input: p_in,
+                                            color: colors[(idx - 1) % colors.len()],
+                                        });
+                                        idx += 1;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
