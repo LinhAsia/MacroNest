@@ -14025,9 +14025,12 @@ mod windows_overlay {
     }
 
     fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
+        let keys = hotkey::binding_key_names(trigger);
+        if keys.is_empty() {
+            return false;
+        }
         let hook_state = HOOK_STATE.lock();
-        hotkey::binding_key_names(trigger)
-            .into_iter()
+        keys.into_iter()
             .all(|key| screen_draw_trigger_key_is_down(&key, &hook_state))
     }
 
