@@ -1094,7 +1094,7 @@ unsafe fn arm_thread(
 ) -> io::Result<()> {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
-            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
+            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS,
             ..WOW64_CONTEXT::default()
         };
         if unsafe { Wow64GetThreadContext(thread, &mut context) } == 0 {
@@ -1115,7 +1115,7 @@ unsafe fn arm_thread(
     }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
-    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
+    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
     if unsafe { GetThreadContext(thread, context) } == 0 {
         return Err(io::Error::last_os_error());
     }
@@ -1611,7 +1611,7 @@ fn register_value(register: Register, context: &CONTEXT) -> Option<u64> {
 unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
-            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
+            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS,
             ..WOW64_CONTEXT::default()
         };
         if unsafe { Wow64GetThreadContext(thread, &mut context) } != 0 {
@@ -1621,14 +1621,13 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
             context.Dr3 = 0;
             context.Dr6 = 0;
             context.Dr7 = 0;
-            context.EFlags |= RESUME_FLAG;
             unsafe { Wow64SetThreadContext(thread, &context) };
         }
         return;
     }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
-    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
+    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
     if unsafe { GetThreadContext(thread, context) } != 0 {
         context.Dr0 = 0;
         context.Dr1 = 0;
@@ -1636,7 +1635,6 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
         context.Dr3 = 0;
         context.Dr6 = 0;
         context.Dr7 = 0;
-        context.EFlags |= RESUME_FLAG;
         unsafe { SetThreadContext(thread, context) };
     }
 }
