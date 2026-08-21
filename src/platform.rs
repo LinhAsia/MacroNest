@@ -120,10 +120,66 @@ mod windows_platform {
         Ok(Some(SingleInstanceGuard { handle }))
     }
 
+    pub fn disable_power_throttling() {
+        unsafe {
+            #[repr(C)]
+            struct ProcessPowerThrottlingState {
+                version: u32,
+                control_mask: u32,
+                state_mask: u32,
+            }
+            const PROCESS_POWER_THROTTLING_CURRENT_VERSION: u32 = 1;
+            const PROCESS_POWER_THROTTLING_EXECUTION_SPEED: u32 = 0x1;
+            const PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION: u32 = 0x4;
+            const PROCESS_POWER_THROTTLING: i32 = 4;
+
+            let state = ProcessPowerThrottlingState {
+                version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                control_mask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED
+                    | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
+                state_mask: 0,
+            };
+
+            if let Ok(kernel32) =
+                windows::Win32::System::LibraryLoader::GetModuleHandleW(w!("kernel32.dll"))
+            {
+                type SetProcessInformationFn = unsafe extern "system" fn(
+                    windows::Win32::Foundation::HANDLE,
+                    i32,
+                    *const std::ffi::c_void,
+                    u32,
+                ) -> i32;
+
+                if let Some(func) = windows::Win32::System::LibraryLoader::GetProcAddress(
+                    kernel32,
+                    windows::core::s!("SetProcessInformation"),
+                ) {
+                    let set_proc_info: SetProcessInformationFn = std::mem::transmute(func);
+                    let _ = set_proc_info(
+                        GetCurrentProcess(),
+                        PROCESS_POWER_THROTTLING,
+                        &state as *const _ as *const std::ffi::c_void,
+                        std::mem::size_of::<ProcessPowerThrottlingState>() as u32,
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn set_current_thread_high_priority() {
+        unsafe {
+            use windows::Win32::System::Threading::{
+                GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
+            };
+            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+        }
+    }
+
     pub fn set_high_priority() {
         unsafe {
             let _ = SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
         }
+        disable_power_throttling();
     }
 
     pub fn relaunch_as_admin_if_needed() -> Result<bool> {
@@ -775,13 +831,8 @@ mod windows_platform {
     }
 
     pub fn trim_working_set() {
-        unsafe {
-            let _ = windows::Win32::System::Threading::SetProcessWorkingSetSize(
-                GetCurrentProcess(),
-                usize::MAX,
-                usize::MAX,
-            );
-        }
+        // No-op: Evicting the process working set causes Windows to page MacroNest out to disk/standby,
+        // which causes subsequent memory scans and UI actions to incur severe page-fault latency.
     }
 }
 
@@ -810,6 +861,10 @@ mod fallback {
     pub fn release_single_instance() {}
 
     pub fn set_high_priority() {}
+
+    pub fn set_current_thread_high_priority() {}
+
+    pub fn disable_power_throttling() {}
 
     pub fn set_native_window_shadow(_frame: &Frame, _enabled: bool) -> bool {
         true

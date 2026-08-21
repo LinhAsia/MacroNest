@@ -532,6 +532,7 @@ fn capture_pointer_map_with_budget_cancel(
             "pointer width must be 4 or 8 bytes",
         ));
     }
+    crate::platform::set_current_thread_high_priority();
     let process = ScanProcess::open(pid, false)?;
     let mut regions = pointer_scan_regions_for(&process);
     // Module-backed regions are the most likely roots; scan them first when a
@@ -1652,6 +1653,7 @@ pub fn scan_memory_range_with_progress(
             let progress = Arc::clone(&total);
             let claimed_results = Arc::clone(&claimed_results);
             thread::spawn(move || {
+                crate::platform::set_current_thread_high_priority();
                 scan_region_bucket(
                     pid,
                     regions,
@@ -1713,6 +1715,7 @@ pub fn scan_text_memory_with_progress(
             "text cannot be empty",
         ));
     }
+    crate::platform::set_current_thread_high_priority();
     let process = ScanProcess::open(pid, false)?;
     let mut found = Vec::new();
     let mut buffer = Vec::new();
@@ -1910,6 +1913,7 @@ fn scan_aob_regions(
     regions: Vec<ScanRegion>,
     total: Arc<AtomicUsize>,
 ) -> io::Result<Vec<TextScanCandidate>> {
+    crate::platform::set_current_thread_high_priority();
     let mut found = Vec::new();
     let mut buffer = Vec::new();
     let overlap = pattern.len().saturating_sub(1);
@@ -2118,6 +2122,7 @@ fn filter_candidate_slice(
     range: Option<(ScanValue, ScanValue)>,
     progress: Option<&AtomicUsize>,
 ) -> io::Result<usize> {
+    crate::platform::set_current_thread_high_priority();
     const BATCH_BYTES: usize = 64 * 1024;
     let process = ScanProcess::open(pid, false)?;
     let mut buffer = [0u8; BATCH_BYTES];
@@ -2271,6 +2276,17 @@ fn is_valid_unknown_scan_value(value: ScanValue) -> bool {
 fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<ScanRegion> {
     let mut regions = Vec::new();
     let mut address = 0usize;
+    let mut information_buffer = if options.active_memory_only {
+        Some(vec![
+            WorkingSetExInformation {
+                virtual_address: std::ptr::null_mut(),
+                virtual_attributes: 0,
+            };
+            4096
+        ])
+    } else {
+        None
+    };
     loop {
         let mut information = MaybeUninit::<MemoryBasicInformation>::zeroed();
         let queried = unsafe {
@@ -2323,8 +2339,8 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
                 base,
                 size: information.region_size,
             };
-            if options.active_memory_only {
-                regions.extend(active_scan_regions(process, region));
+            if let Some(buf) = information_buffer.as_mut() {
+                regions.extend(active_scan_regions(process, region, buf));
             } else {
                 regions.push(region);
             }
@@ -2337,23 +2353,20 @@ fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<Sc
     regions
 }
 
-fn active_scan_regions(process: &ScanProcess, region: ScanRegion) -> Vec<ScanRegion> {
-    const QUERY_PAGES: usize = 4096;
+fn active_scan_regions(
+    process: &ScanProcess,
+    region: ScanRegion,
+    information: &mut [WorkingSetExInformation],
+) -> Vec<ScanRegion> {
     const MAX_COALESCE_GAP: usize = 64 * 1024;
+    let query_pages = information.len().max(1);
     let end = region.base.saturating_add(region.size);
     let mut page = region.base;
     let mut active_start = None;
     let mut last_active_end = 0;
     let mut active: Vec<ScanRegion> = Vec::new();
-    let mut information = vec![
-        WorkingSetExInformation {
-            virtual_address: std::ptr::null_mut(),
-            virtual_attributes: 0,
-        };
-        QUERY_PAGES
-    ];
     while page < end {
-        let count = (end - page).div_ceil(PAGE_BYTES).min(QUERY_PAGES);
+        let count = (end - page).div_ceil(PAGE_BYTES).min(query_pages);
         for (index, item) in information[..count].iter_mut().enumerate() {
             item.virtual_address = page.saturating_add(index * PAGE_BYTES) as *mut c_void;
             item.virtual_attributes = 0;
