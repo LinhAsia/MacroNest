@@ -317,9 +317,7 @@ impl WatchSession {
     pub fn stop(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
-            std::thread::spawn(move || {
-                let _ = worker.join();
-            });
+            let _ = worker.join();
         }
     }
 }
@@ -835,23 +833,9 @@ fn watch_loop<F>(
             EXCEPTION_DEBUG_EVENT => unsafe {
                 let exception = event.u.Exception.ExceptionRecord.ExceptionCode;
                 if exception == EXCEPTION_SINGLE_STEP || exception == STATUS_WX86_SINGLE_STEP {
-                    let thread = match threads.entry(event.dwThreadId) {
-                        std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
-                        std::collections::hash_map::Entry::Vacant(entry) => {
-                            let handle = OpenThread(
-                                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
-                                0,
-                                event.dwThreadId,
-                            );
-                            if !handle.is_null() {
-                                *entry.insert(handle)
-                            } else {
-                                HANDLE::default()
-                            }
-                        }
-                    };
-                    if !thread.is_null()
-                        && let Some((context, hit_mask)) = read_hit(thread, architecture)
+                    if let Some((context, hit_mask)) = threads
+                        .get(&event.dwThreadId)
+                        .and_then(|&thread| read_hit(thread, architecture))
                     {
                         let context = context.as_amd64();
                         match &kind {
@@ -945,9 +929,7 @@ fn watch_loop<F>(
                                         access_hits += 1;
                                         let should_stop = access_hits >= *capture_limit;
                                         if should_stop {
-                                            for &t in threads.values() {
-                                                disarm_thread(t, architecture);
-                                            }
+                                            disarm_paused_threads(&threads, architecture);
                                             capture_limit_reached = true;
                                             stop.store(true, Ordering::Release);
                                         }
@@ -959,9 +941,7 @@ fn watch_loop<F>(
                                             notify(WatchEvent::CaptureLimitReached(access_hits));
                                         }
                                     } else if execute_candidates_seen >= *capture_limit {
-                                        for &t in threads.values() {
-                                            disarm_thread(t, architecture);
-                                        }
+                                        disarm_paused_threads(&threads, architecture);
                                         capture_limit_reached = true;
                                         stop.store(true, Ordering::Release);
                                         notify(WatchEvent::CaptureLimitReached(
@@ -1026,14 +1006,48 @@ fn watch_loop<F>(
         }
         unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
     }
-    for &t in threads.values() {
-        unsafe { disarm_thread(t, architecture) };
+    unsafe { disarm_paused_threads(&threads, architecture) };
+    let flush_start = std::time::Instant::now();
+    while flush_start.elapsed() < std::time::Duration::from_millis(150) {
+        let mut event = DEBUG_EVENT::default();
+        if unsafe { WaitForDebugEvent(&mut event, 10) } != 0 {
+            let mut status = DBG_CONTINUE;
+            if event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT {
+                let exception = unsafe { event.u.Exception.ExceptionRecord.ExceptionCode };
+                if exception == EXCEPTION_SINGLE_STEP || exception == STATUS_WX86_SINGLE_STEP {
+                    status = DBG_CONTINUE;
+                } else if exception == EXCEPTION_BREAKPOINT || exception == STATUS_WX86_BREAKPOINT {
+                    status = DBG_CONTINUE;
+                } else {
+                    status = DBG_EXCEPTION_NOT_HANDLED;
+                }
+            } else if event.dwDebugEventCode == EXIT_THREAD_DEBUG_EVENT {
+                if let Some(thread) = threads.remove(&event.dwThreadId) {
+                    unsafe { close_if_valid(thread) };
+                }
+            }
+            unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
+        } else {
+            break;
+        }
     }
-    for (_, thread) in threads.drain() {
-        unsafe { close_if_valid(thread) };
+    for (_, thread) in threads {
+        unsafe {
+            if SuspendThread(thread) != u32::MAX {
+                disarm_thread(thread, architecture);
+                ResumeThread(thread);
+            }
+            close_if_valid(thread);
+        }
     }
     unsafe { DebugActiveProcessStop(pid) };
     notify(WatchEvent::Stopped);
+}
+
+unsafe fn disarm_paused_threads(threads: &HashMap<u32, HANDLE>, architecture: TargetArchitecture) {
+    for &thread in threads.values() {
+        unsafe { disarm_thread(thread, architecture) };
+    }
 }
 
 unsafe fn close_if_valid(handle: HANDLE) {
@@ -1092,45 +1106,50 @@ unsafe fn arm_thread(
     architecture: TargetArchitecture,
     active_slot_start: usize,
 ) -> io::Result<()> {
-    if architecture == TargetArchitecture::X86 {
-        let mut context = WOW64_CONTEXT {
-            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS,
-            ..WOW64_CONTEXT::default()
-        };
-        if unsafe { Wow64GetThreadContext(thread, &mut context) } == 0 {
+    let _ = unsafe { SuspendThread(thread) };
+    let result = (|| {
+        if architecture == TargetArchitecture::X86 {
+            let mut context = WOW64_CONTEXT {
+                ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
+                ..WOW64_CONTEXT::default()
+            };
+            if unsafe { Wow64GetThreadContext(thread, &mut context) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let addresses = kind.active_addresses(active_slot_start);
+            context.Dr0 = addresses.first().copied().unwrap_or_default() as u32;
+            context.Dr1 = addresses.get(1).copied().unwrap_or_default() as u32;
+            context.Dr2 = addresses.get(2).copied().unwrap_or_default() as u32;
+            context.Dr3 = addresses.get(3).copied().unwrap_or_default() as u32;
+            context.Dr6 = 0;
+            context.Dr7 = kind.dr7(active_slot_start) as u32;
+            return if unsafe { Wow64SetThreadContext(thread, &context) } == 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
+            };
+        }
+        let mut aligned = AlignedContext::default();
+        let context = &mut aligned.0;
+        context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
+        if unsafe { GetThreadContext(thread, context) } == 0 {
             return Err(io::Error::last_os_error());
         }
         let addresses = kind.active_addresses(active_slot_start);
-        context.Dr0 = addresses.first().copied().unwrap_or_default() as u32;
-        context.Dr1 = addresses.get(1).copied().unwrap_or_default() as u32;
-        context.Dr2 = addresses.get(2).copied().unwrap_or_default() as u32;
-        context.Dr3 = addresses.get(3).copied().unwrap_or_default() as u32;
+        context.Dr0 = addresses.first().copied().unwrap_or_default() as u64;
+        context.Dr1 = addresses.get(1).copied().unwrap_or_default() as u64;
+        context.Dr2 = addresses.get(2).copied().unwrap_or_default() as u64;
+        context.Dr3 = addresses.get(3).copied().unwrap_or_default() as u64;
         context.Dr6 = 0;
-        context.Dr7 = kind.dr7(active_slot_start) as u32;
-        return if unsafe { Wow64SetThreadContext(thread, &context) } == 0 {
+        context.Dr7 = kind.dr7(active_slot_start);
+        if unsafe { SetThreadContext(thread, context) } == 0 {
             Err(io::Error::last_os_error())
         } else {
             Ok(())
-        };
-    }
-    let mut aligned = AlignedContext::default();
-    let context = &mut aligned.0;
-    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
-    if unsafe { GetThreadContext(thread, context) } == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let addresses = kind.active_addresses(active_slot_start);
-    context.Dr0 = addresses.first().copied().unwrap_or_default() as u64;
-    context.Dr1 = addresses.get(1).copied().unwrap_or_default() as u64;
-    context.Dr2 = addresses.get(2).copied().unwrap_or_default() as u64;
-    context.Dr3 = addresses.get(3).copied().unwrap_or_default() as u64;
-    context.Dr6 = 0;
-    context.Dr7 = kind.dr7(active_slot_start);
-    if unsafe { SetThreadContext(thread, context) } == 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+        }
+    })();
+    let _ = unsafe { ResumeThread(thread) };
+    result
 }
 
 fn rearm_existing_threads(
