@@ -63,7 +63,9 @@ impl CrosshairApp {
         status_override: Option<&str>,
     ) {
         if let Some(mut active) = capture.active.take() {
-            active.stop();
+            std::thread::spawn(move || {
+                active.stop();
+            });
         }
         let (candidate, matched, resolved_addresses) = match capture.scan_mode {
             crate::model::EspAutoScanMode::AllHits => {
@@ -334,14 +336,18 @@ impl CrosshairApp {
         let multi_strides = crate::model::parse_multi_strides(&preset.entity_multi_strides);
         let merge_pairs = preset.entity_hit_order_merge_pairs;
         let drop_nearest = preset.entity_hit_order_drop_nearest;
-        let effective_timeout_ms = timeout_ms.or_else(|| {
-            let secs = preset.entity_auto_scan_duration_secs;
-            if secs > 0.0 {
-                Some((secs * 1000.0).max(100.0) as u64)
-            } else {
-                Some(1000)
-            }
-        });
+        let effective_timeout_ms = if scan_mode == crate::model::EspAutoScanMode::AllHits {
+            timeout_ms.or_else(|| {
+                let secs = preset.entity_auto_scan_duration_secs;
+                if secs > 0.0 {
+                    Some((secs * 1000.0).max(100.0) as u64)
+                } else {
+                    Some(1000)
+                }
+            })
+        } else {
+            timeout_ms
+        };
         let (tx, rx) = std::sync::mpsc::channel();
         let started = AccessWatch::start_unique(
             pid,
@@ -528,7 +534,7 @@ impl CrosshairApp {
                     }
                 }
                 if needs_sync {
-                    self.persist_esp_presets();
+                    self.sync_esp_presets();
                 }
             }
         }
@@ -925,14 +931,16 @@ impl CrosshairApp {
                                                 }
                                             });
 
-                                        ui.label("Duration");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_auto_scan_duration_secs)
-                                                .range(0.1..=30.0)
-                                                .speed(0.1)
-                                                .suffix("s"),
-                                        )
-                                        .on_hover_text("Scan time duration in seconds (default: 1.0s).");
+                                        if scan_mode == crate::model::EspAutoScanMode::AllHits {
+                                            ui.label("Duration");
+                                            ui.add(
+                                                DragValue::new(&mut preset.entity_auto_scan_duration_secs)
+                                                    .range(0.1..=30.0)
+                                                    .speed(0.1)
+                                                    .suffix("s"),
+                                            )
+                                            .on_hover_text("Scan time duration in seconds (default: 1.0s).");
+                                        }
 
                                         if scan_mode == crate::model::EspAutoScanMode::MultiStride {
                                             ui.label("Strides");
