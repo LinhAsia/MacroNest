@@ -176,6 +176,8 @@ pub struct EspPreset {
     pub filled: bool,
     pub color: RgbaColor,
     pub show_tracer: bool,
+    #[serde(default)]
+    pub tracer_from_top: bool,
     pub show_distance: bool,
     pub debug_mode: bool,
     #[serde(default)]
@@ -289,6 +291,7 @@ impl EspPreset {
                 a: 255,
             },
             show_tracer: false,
+            tracer_from_top: false,
             show_distance: false,
             debug_mode: false,
             permutation_debug_mode: false,

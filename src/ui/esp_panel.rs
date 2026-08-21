@@ -1712,6 +1712,10 @@ impl CrosshairApp {
                                 preset.color = RgbaColor { r: color.r(), g: color.g(), b: color.b(), a: color.a() };
                             }
                             ui.checkbox(&mut preset.show_tracer, "Tracer");
+                            if preset.show_tracer {
+                                ui.checkbox(&mut preset.tracer_from_top, "From Top")
+                                    .on_hover_text("Vẽ đường tracer từ đỉnh màn hình xuống mục tiêu (thay vì từ đáy màn hình lên).");
+                            }
                             ui.checkbox(&mut preset.show_distance, "Distance");
                             ui.checkbox(&mut preset.debug_mode, "Debug Mode")
                                 .on_hover_text("Clicking any Box marker displays its memory address & X Y Z coordinates and copies the address to clipboard.");

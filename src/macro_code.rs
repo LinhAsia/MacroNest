@@ -773,4 +773,70 @@ mod tests {
         assert_eq!(decoded.resources.memory_code_list[0].module, "game.exe");
         assert_eq!(decoded.resources.memory_code_list[0].offset, 0x1234);
     }
+
+    #[test]
+    fn esp_preset_preserves_all_settings_in_shared_code() {
+        let mut esp_preset = EspPreset::new(42);
+        esp_preset.name = "Custom ESP 3D".to_owned();
+        esp_preset.show_tracer = true;
+        esp_preset.tracer_from_top = true;
+        esp_preset.show_distance = true;
+        esp_preset.marker = crate::model::EspMarkerKind::Box;
+        esp_preset.box_width = 50.0;
+        esp_preset.box_height = 100.0;
+        esp_preset.target_audio_enabled = true;
+        esp_preset.target_audio_path = "C:/sounds/beep.wav".to_owned();
+        esp_preset.custom_entity_colors.insert(
+            1,
+            crate::model::RgbaColor {
+                r: 255,
+                g: 0,
+                b: 128,
+                a: 255,
+            },
+        );
+
+        let step = MacroStep {
+            action: crate::model::MacroAction::EnableEspPreset,
+            esp_preset_id: Some(42),
+            ..MacroStep::default()
+        };
+
+        let shared = SharedMacroPreset {
+            preset: crate::model::MacroPreset {
+                id: 10,
+                steps: vec![step],
+                ..crate::model::MacroPreset::default()
+            },
+            resources: MacroShareResources {
+                esp_presets: vec![esp_preset.clone()],
+                ..MacroShareResources::default()
+            },
+        };
+
+        let encoded = encode_shared_preset(&shared).expect("encode shared preset with esp");
+        let decoded = decode_shared_preset(&encoded).expect("decode shared preset with esp");
+
+        assert_eq!(decoded.resources.esp_presets.len(), 1);
+        let restored = &decoded.resources.esp_presets[0];
+        assert_eq!(restored.id, 42);
+        assert_eq!(restored.name, "Custom ESP 3D");
+        assert!(restored.show_tracer);
+        assert!(restored.tracer_from_top);
+        assert!(restored.show_distance);
+        assert_eq!(restored.marker, crate::model::EspMarkerKind::Box);
+        assert_eq!(restored.box_width, 50.0);
+        assert_eq!(restored.box_height, 100.0);
+        assert!(restored.target_audio_enabled);
+        assert_eq!(restored.target_audio_path, "C:/sounds/beep.wav");
+        assert_eq!(
+            restored.custom_entity_colors.get(&1),
+            Some(&crate::model::RgbaColor {
+                r: 255,
+                g: 0,
+                b: 128,
+                a: 255
+            })
+        );
+    }
 }

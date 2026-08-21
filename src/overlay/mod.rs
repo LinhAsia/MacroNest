@@ -28085,7 +28085,11 @@ mod windows_overlay {
         }
         if preset.show_tracer {
             let origin_x = left + width / 2;
-            let origin_y = top + height;
+            let origin_y = if preset.tracer_from_top {
+                top
+            } else {
+                top + height
+            };
             let (target_x, target_y) = match preset.marker_source {
                 crate::model::EspMarkerSource::Geometry => match preset.marker {
                     crate::model::EspMarkerKind::Dot => {
