@@ -1,5 +1,5 @@
 {
-  "version": "1.2.5",
-  "notes": "Added instant macro trigger key setup, instant data folder switching and reset feedback, Quick Video Recorder optimizations, macro sharing improvements, and bug fixes.",
-  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.5/MacroNest.exe"
+  "version": "1.2.6",
+  "notes": "Added memory scanning optimizations (disabled EcoQoS power throttling, raised worker priorities, and eliminated working set eviction), auto-update download resilience, and bug fixes.",
+  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.6/MacroNest.exe"
 }

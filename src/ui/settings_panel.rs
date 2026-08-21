@@ -2204,6 +2204,74 @@ impl CrosshairApp {
         }
     }
 
+    fn resolve_download_response(
+        client: &reqwest::blocking::Client,
+        download_url: &str,
+        version: &str,
+    ) -> Result<reqwest::blocking::Response, String> {
+        // 1. Try provided download_url
+        if let Ok(resp) = client.get(download_url).send() {
+            if resp.status().is_success() {
+                return Ok(resp);
+            }
+        }
+
+        // 2. Try common tag variants (v1.2.6, v.1.2.6, 1.2.6)
+        let tag_clean = version.trim().trim_start_matches('v').trim_start_matches('.');
+        let fallback_urls = [
+            format!("https://github.com/LinhAsia/MacroNest/releases/download/v{tag_clean}/MacroNest.exe"),
+            format!("https://github.com/LinhAsia/MacroNest/releases/download/v.{tag_clean}/MacroNest.exe"),
+            format!("https://github.com/LinhAsia/MacroNest/releases/download/{tag_clean}/MacroNest.exe"),
+        ];
+
+        for url in &fallback_urls {
+            if url != download_url {
+                if let Ok(resp) = client.get(url).send() {
+                    if resp.status().is_success() {
+                        return Ok(resp);
+                    }
+                }
+            }
+        }
+
+        // 3. Query GitHub API latest release
+        #[derive(Deserialize)]
+        struct GhAsset {
+            name: String,
+            browser_download_url: String,
+        }
+        #[derive(Deserialize)]
+        struct GhRelease {
+            assets: Vec<GhAsset>,
+        }
+
+        if let Ok(api_resp) = client
+            .get("https://api.github.com/repos/LinhAsia/MacroNest/releases/latest")
+            .send()
+        {
+            if let Ok(release) = api_resp.json::<GhRelease>() {
+                if let Some(asset) = release
+                    .assets
+                    .into_iter()
+                    .find(|a| a.name.eq_ignore_ascii_case("MacroNest.exe"))
+                {
+                    if let Ok(resp) = client.get(&asset.browser_download_url).send() {
+                        if resp.status().is_success() {
+                            return Ok(resp);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If all fallbacks failed, do a request to download_url with error_for_status to return the descriptive error
+        client
+            .get(download_url)
+            .send()
+            .and_then(|resp| resp.error_for_status())
+            .map_err(|e| e.to_string())
+    }
+
     pub(crate) fn start_download_update(
         &mut self,
         ctx: &egui::Context,
@@ -2222,11 +2290,7 @@ impl CrosshairApp {
             let result = client.map_err(|e| e.to_string()).and_then(|c| {
                 use std::io::{Read, Write};
 
-                let mut resp = c
-                    .get(&download_url)
-                    .send()
-                    .and_then(|resp| resp.error_for_status())
-                    .map_err(|e| e.to_string())?;
+                let mut resp = Self::resolve_download_response(&c, &download_url, &version)?;
                 let total_size = resp.content_length().unwrap_or(0);
                 let temp_part_path = Self::update_download_partial_path(&version);
                 let temp_path = Self::update_download_final_path(&version);
