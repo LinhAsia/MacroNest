@@ -13230,10 +13230,10 @@ mod windows_overlay {
             }
             started_inactive = !state.active;
             if started_inactive {
-                state.restore_ui_on_deactivate = should_restore_ui;
                 state.freeze_screen = should_capture_freeze;
                 activate_screen_draw(&mut state, captured_frame);
-            } else if should_restore_ui {
+            }
+            if should_restore_ui {
                 state.restore_ui_on_deactivate = true;
             }
             let trigger = match &mode {
@@ -13847,76 +13847,64 @@ mod windows_overlay {
     fn select_screen_draw_capture_region(session_id: u64) -> Result<Option<(i32, i32, i32, i32)>> {
         let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
 
-        // 1. Wait until user releases left mouse button after clicking the UI button
+        // 1. Wait until user releases left mouse button from clicking the UI button
         while is_down(0x01) {
             if is_down(0x1B) || is_down(0x02) {
+                reset_screen_draw_capture_overlay_state();
                 return Ok(None);
             }
             thread::sleep(Duration::from_millis(5));
         }
 
-        // 2. Activate dim screen overlay immediately!
-        set_screen_draw_region_capture_mouse_blocked(true, true);
+        // Wait a small delay so mouse click from UI is settled
+        thread::sleep(Duration::from_millis(40));
 
-        // 3. Wait for user to press Left Mouse Button to start selecting (or Esc/Right Click to cancel)
-        let origin = loop {
-            if !screen_draw_capture_session_is_current(session_id) || is_down(0x1B) || is_down(0x02) {
-                set_screen_draw_region_capture_mouse_blocked(false, false);
-                reset_screen_draw_capture_overlay_state();
-                return Ok(None);
-            }
-            if cancel_screen_draw_mouse_capture_from_trigger_press() {
-                set_screen_draw_region_capture_mouse_blocked(false, false);
-                reset_screen_draw_capture_overlay_state();
-                return Ok(None);
-            }
-            if is_down(0x01) {
-                let mut pt = POINT::default();
-                if unsafe { GetCursorPos(&mut pt).is_ok() } {
-                    break pt;
-                }
-            }
-            thread::sleep(Duration::from_millis(2));
-        };
-
-        update_screen_draw_region_capture_preview(origin, origin);
+        // 2. Loop waiting for user to click and drag
+        let mut origin = POINT::default();
+        let mut dragging = false;
         let mut last_preview_at = Instant::now();
 
-        // 4. Dragging while Left Mouse Button is held down
-        let result = loop {
+        loop {
             if !screen_draw_capture_session_is_current(session_id) || is_down(0x1B) || is_down(0x02) {
-                break Ok(None);
+                reset_screen_draw_capture_overlay_state();
+                return Ok(None);
             }
             if cancel_screen_draw_mouse_capture_from_trigger_press() {
-                break Ok(None);
+                reset_screen_draw_capture_overlay_state();
+                return Ok(None);
             }
 
-            let mut point = POINT::default();
-            if unsafe { GetCursorPos(&mut point).is_ok() } {
-                if last_preview_at.elapsed() >= Duration::from_millis(16) {
-                    update_screen_draw_region_capture_preview(origin, point);
+            let mut pt = POINT::default();
+            let has_pos = unsafe { GetCursorPos(&mut pt).is_ok() };
+
+            if is_down(0x01) {
+                if !dragging {
+                    if has_pos {
+                        origin = pt;
+                        dragging = true;
+                        update_screen_draw_region_capture_preview(origin, origin);
+                        last_preview_at = Instant::now();
+                    }
+                } else if has_pos && last_preview_at.elapsed() >= Duration::from_millis(16) {
+                    update_screen_draw_region_capture_preview(origin, pt);
                     last_preview_at = Instant::now();
                 }
-
-                // When user releases Left Mouse Button, finish!
-                if !is_down(0x01) {
-                    let x = origin.x.min(point.x);
-                    let y = origin.y.min(point.y);
-                    let width = (origin.x - point.x).abs();
-                    let height = (origin.y - point.y).abs();
-                    if width >= 2 && height >= 2 {
-                        break Ok(Some((x, y, width, height)));
-                    }
-                    break Ok(None);
+            } else if dragging {
+                let cur = if has_pos { pt } else { origin };
+                let x = origin.x.min(cur.x);
+                let y = origin.y.min(cur.y);
+                let width = (origin.x - cur.x).abs();
+                let height = (origin.y - cur.y).abs();
+                reset_screen_draw_capture_overlay_state();
+                if width >= 4 && height >= 4 {
+                    return Ok(Some((x, y, width, height)));
+                } else {
+                    dragging = false;
                 }
             }
 
             thread::sleep(Duration::from_millis(2));
-        };
-
-        set_screen_draw_region_capture_mouse_blocked(false, false);
-        reset_screen_draw_capture_overlay_state();
-        result
+        }
     }
 
     fn should_cancel_screen_draw_mouse_capture_from_trigger_press(
@@ -13977,7 +13965,6 @@ mod windows_overlay {
             bail!("Failed to read the cursor position");
         }
 
-        set_screen_draw_region_capture_mouse_blocked(true, true);
         update_screen_draw_region_capture_preview(origin, origin);
         let mut last_preview_at = Instant::now();
 
@@ -14025,7 +14012,6 @@ mod windows_overlay {
             thread::sleep(Duration::from_millis(1));
         };
 
-        set_screen_draw_region_capture_mouse_blocked(false, false);
         reset_screen_draw_capture_overlay_state();
         result
     }
