@@ -1848,6 +1848,16 @@ impl CrosshairApp {
         for profile in resources.crosshair_profiles {
             let mut imported = profile.clone();
             let old_name = imported.name.clone();
+            if let Some(existing) = self.state.profiles.iter().find(|existing| {
+                let mut test = imported.clone();
+                test.name = existing.name.clone();
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.crosshair_profiles
+                    .insert(old_name, existing.name.clone());
+                continue;
+            }
             if self
                 .state
                 .profiles
@@ -1864,6 +1874,15 @@ impl CrosshairApp {
 
         for mut preset in resources.window_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.window_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.window_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.window_presets,
                 &mut self.state.next_preset_id,
@@ -1876,6 +1895,15 @@ impl CrosshairApp {
 
         for mut layout in resources.window_layouts {
             let old_id = layout.id;
+            if let Some(existing) = self.state.window_layouts.iter().find(|existing| {
+                let mut test = layout.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.window_layouts.insert(old_id, existing.id);
+                continue;
+            }
             layout.id = Self::allocate_next_id(
                 &self.state.window_layouts,
                 &mut self.state.next_window_layout_id,
@@ -1888,6 +1916,15 @@ impl CrosshairApp {
 
         for mut preset in resources.window_focus_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.window_focus_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.window_focus_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.window_focus_presets,
                 &mut self.state.next_window_focus_preset_id,
@@ -1900,6 +1937,15 @@ impl CrosshairApp {
 
         for mut preset in resources.pin_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.pin_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.pin_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.pin_presets,
                 &mut self.state.next_pin_preset_id,
@@ -1912,6 +1958,15 @@ impl CrosshairApp {
 
         for mut preset in resources.mouse_path_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.mouse_path_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.mouse_path_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.mouse_path_presets,
                 &mut self.state.next_mouse_path_preset_id,
@@ -1924,6 +1979,15 @@ impl CrosshairApp {
 
         for mut preset in resources.mouse_sensitivity_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.mouse_sensitivity_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.mouse_sensitivity_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.mouse_sensitivity_presets,
                 &mut self.state.next_mouse_sensitivity_preset_id,
@@ -1936,6 +2000,15 @@ impl CrosshairApp {
 
         for mut preset in resources.zoom_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.zoom_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.zoom_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.zoom_presets,
                 &mut self.state.next_zoom_preset_id,
@@ -1948,6 +2021,15 @@ impl CrosshairApp {
 
         for mut preset in resources.hud_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.hud_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.hud_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.hud_presets,
                 &mut self.state.next_hud_preset_id,
@@ -1960,6 +2042,15 @@ impl CrosshairApp {
 
         for mut preset in resources.command_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.command_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.command_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.command_presets,
                 &mut self.state.next_command_preset_id,
@@ -1972,6 +2063,15 @@ impl CrosshairApp {
 
         for mut preset in resources.geometry_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.geometry_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.geometry_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.geometry_presets,
                 &mut self.state.next_geometry_preset_id,
@@ -1985,6 +2085,20 @@ impl CrosshairApp {
         for shared in resources.vision_presets {
             let old_id = shared.preset.id;
             let mut preset = shared.preset;
+            if let Some(existing) = self.state.vision_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                if test != **existing {
+                    return false;
+                }
+                let existing_template =
+                    fs::read(self.vision_template_file_for_preset(existing.id)).ok();
+                shared.template_png == existing_template
+            }) {
+                maps.vision_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.vision_presets,
                 &mut self.state.next_vision_preset_id,
@@ -2000,6 +2114,15 @@ impl CrosshairApp {
 
         for mut preset in resources.ocr_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.ocr_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.ocr_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.ocr_presets,
                 &mut self.state.next_ocr_preset_id,
@@ -2012,6 +2135,15 @@ impl CrosshairApp {
 
         for mut preset in resources.audio_sense_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.audio_sense_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.audio_sense_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.audio_sense_presets,
                 &mut self.state.next_audio_sense_preset_id,
@@ -2024,6 +2156,15 @@ impl CrosshairApp {
 
         for mut preset in resources.timer_presets {
             let old_id = preset.id;
+            if let Some(existing) = self.state.timer_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.timer_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.timer_presets,
                 &mut self.state.next_timer_preset_id,
@@ -2036,17 +2177,26 @@ impl CrosshairApp {
 
         for mut preset in resources.esp_presets {
             let old_id = preset.id;
+            if let Some(old_hud_id) = preset.entity_auto_hud_preset_id {
+                if let Some(new_hud_id) = maps.hud_presets.get(&old_hud_id) {
+                    preset.entity_auto_hud_preset_id = Some(*new_hud_id);
+                }
+            }
+            if let Some(existing) = self.state.esp_presets.iter().find(|existing| {
+                let mut test = preset.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.esp_presets.insert(old_id, existing.id);
+                continue;
+            }
             preset.id = Self::allocate_next_id(
                 &self.state.esp_presets,
                 &mut self.state.next_esp_preset_id,
                 |item| item.id,
             );
             preset.collapsed = true;
-            if let Some(old_hud_id) = preset.entity_auto_hud_preset_id {
-                if let Some(new_hud_id) = maps.hud_presets.get(&old_hud_id) {
-                    preset.entity_auto_hud_preset_id = Some(*new_hud_id);
-                }
-            }
             maps.esp_presets.insert(old_id, preset.id);
             self.state.esp_presets.push(preset);
         }

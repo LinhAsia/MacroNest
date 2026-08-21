@@ -1033,7 +1033,9 @@ mod tests {
 
     #[test]
     fn duration_toggle_restores_previous_value_instead_of_resetting_default() {
+        use super::MacroAction;
         let mut step = MacroStep::default();
+        step.action = MacroAction::EnableCrosshairProfile;
         step.set_duration_permanent(false);
         step.duration_expr = "4321".to_string();
         step.remember_duration_input();

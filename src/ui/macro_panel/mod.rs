@@ -5654,14 +5654,18 @@ impl CrosshairApp {
                         }
                     }
                 }
-                if render_items.is_empty() && search_query.is_empty() {
+                if render_items.is_empty()
+                    && search_query.is_empty()
+                    && self.macro_groups_favorite_filter == MacroGroupFavoriteFilter::All
+                    && self.state.macro_groups.iter().filter(|g| g.folder_id == Some(active_folder_id)).count() == 0
+                {
                     render_items.push(RenderItem::AddMacroGroup(Some(active_folder_id)));
                 }
             } else if Self::should_show_global_empty_macro_group_cta(
                 total_group_count,
                 &search_query,
                 active_folder_view,
-            ) {
+            ) && self.macro_groups_favorite_filter == MacroGroupFavoriteFilter::All {
                 render_items.push(RenderItem::AddMacroGroup(None));
             } else {
                 if self.state.macro_folders.is_empty() && search_query.is_empty() {
@@ -5685,7 +5689,11 @@ impl CrosshairApp {
                     }
                 }
             }
-            if render_items.is_empty() && search_query.is_empty() {
+            if render_items.is_empty()
+                && search_query.is_empty()
+                && self.macro_groups_favorite_filter == MacroGroupFavoriteFilter::All
+                && total_group_count == 0
+            {
                 render_items.push(RenderItem::AddMacroGroup(None));
             }
         }
@@ -5711,6 +5719,12 @@ impl CrosshairApp {
                     language,
                     "No macro groups match this search.",
                     "No macro groups match this search.",
+                ));
+            } else if self.macro_groups_favorite_filter == MacroGroupFavoriteFilter::Star {
+                ui.label(Self::tr_lang(
+                    language,
+                    "No favorite macro groups.",
+                    "No favorite macro groups.",
                 ));
             } else if !self.macro_folders_panel_open {
                 if total_group_count == 0 {
@@ -22334,3 +22348,4 @@ mod tests {
         ));
     }
 }
+

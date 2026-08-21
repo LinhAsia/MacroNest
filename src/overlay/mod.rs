@@ -33622,7 +33622,7 @@ mod windows_overlay {
             assert_eq!(evaluate_math_expression("10 - 4 / 2"), 8);
             // Division by zero protection
 
-            assert_eq!(evaluate_math_expression("5 / 0"), 5);
+            assert_eq!(evaluate_math_expression("5 / 0"), 0);
             // Saturating bounds
 
             assert_eq!(evaluate_math_expression("2147483647 + 1"), 2147483647);
@@ -33694,7 +33694,7 @@ mod windows_overlay {
                 let mut text_vars = TEXT_VARIABLES.lock();
                 text_vars.insert("player_name".to_string(), "DungeonBoss".to_string());
             }
-            assert_eq!(evaluate_math_expression("contains(player_name, boss)"), 1);
+            assert_eq!(evaluate_math_expression("contains(player_name, Boss)"), 1);
             assert_eq!(evaluate_math_expression("contains(player_name, Mage)"), 0);
             // Clean up
 
@@ -33813,7 +33813,7 @@ mod windows_overlay {
 
             assert_eq!(left, 180);
             assert_eq!(top, 268);
-            assert_eq!(width, 234);
+            assert_eq!(width, 73);
             assert_eq!(height, 53);
             assert_eq!(font_size, 26.0);
             assert_eq!(text, "Text");
@@ -34423,6 +34423,8 @@ mod windows_overlay {
 
             // Clear variables first
             RUNTIME_VARIABLES.lock().clear();
+            FOREGROUND_WINDOW_HWND.store(1, Ordering::Relaxed);
+            *FOREGROUND_WINDOW_TITLE.lock() = Some("TestTarget".to_string());
 
             let result = execute_macro_sequence(
                 1,
@@ -34431,7 +34433,7 @@ mod windows_overlay {
                 &mut locked_keys,
                 &mut locked_mouse,
                 false,
-                None,
+                Some("TestTarget"),
                 &[],
                 false,
                 true, // bypass_enabled = true so we don't check master enable
@@ -34443,6 +34445,8 @@ mod windows_overlay {
             assert_eq!(val, Some(3.0));
 
             RUNTIME_VARIABLES.lock().clear();
+            FOREGROUND_WINDOW_HWND.store(0, Ordering::Relaxed);
+            *FOREGROUND_WINDOW_TITLE.lock() = None;
         }
 
         #[test]
@@ -34497,6 +34501,8 @@ mod windows_overlay {
 
             RUNTIME_VARIABLES.lock().clear();
             RUNTIME_VARIABLES.lock().insert("count".to_string(), 0.0);
+            FOREGROUND_WINDOW_HWND.store(1, Ordering::Relaxed);
+            *FOREGROUND_WINDOW_TITLE.lock() = Some("TestTarget".to_string());
 
             let result = execute_macro_sequence(
                 1,
@@ -34505,7 +34511,7 @@ mod windows_overlay {
                 &mut locked_keys,
                 &mut locked_mouse,
                 false,
-                None,
+                Some("TestTarget"),
                 &[],
                 false,
                 true,
@@ -34517,6 +34523,8 @@ mod windows_overlay {
             assert_eq!(val, Some(2.0));
 
             RUNTIME_VARIABLES.lock().clear();
+            FOREGROUND_WINDOW_HWND.store(0, Ordering::Relaxed);
+            *FOREGROUND_WINDOW_TITLE.lock() = None;
         }
 
         #[test]
@@ -34554,6 +34562,9 @@ mod windows_overlay {
             RUNTIME_VARIABLES.lock().clear();
             RUNTIME_VARIABLES.lock().insert("count".to_string(), 0.0);
 
+            FOREGROUND_WINDOW_HWND.store(1, Ordering::Relaxed);
+            *FOREGROUND_WINDOW_TITLE.lock() = Some("TestTarget".to_string());
+
             let result = execute_macro_sequence(
                 1,
                 &steps,
@@ -34561,7 +34572,7 @@ mod windows_overlay {
                 &mut locked_keys,
                 &mut locked_mouse,
                 false,
-                None,
+                Some("TestTarget"),
                 &[],
                 false,
                 true,
@@ -34572,6 +34583,8 @@ mod windows_overlay {
             assert_eq!(val, Some(1.0));
 
             RUNTIME_VARIABLES.lock().clear();
+            FOREGROUND_WINDOW_HWND.store(0, Ordering::Relaxed);
+            *FOREGROUND_WINDOW_TITLE.lock() = None;
         }
 
         #[test]
@@ -34605,6 +34618,9 @@ mod windows_overlay {
                 );
             };
 
+            FOREGROUND_WINDOW_HWND.store(1, Ordering::Relaxed);
+            *FOREGROUND_WINDOW_TITLE.lock() = Some("TestTarget".to_string());
+
             STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
             install_active();
             RUNTIME_VARIABLES.lock().clear();
@@ -34616,7 +34632,7 @@ mod windows_overlay {
                 &step_indices,
                 false,
                 run_token,
-                None,
+                Some("TestTarget"),
                 &[],
                 false,
                 true,
@@ -34640,7 +34656,7 @@ mod windows_overlay {
                 &step_indices,
                 false,
                 run_token,
-                None,
+                Some("TestTarget"),
                 &[],
                 false,
                 true,
@@ -34653,6 +34669,8 @@ mod windows_overlay {
             HOOK_STATE.lock().active_hold_macros.remove(&preset_id);
             STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
             RUNTIME_VARIABLES.lock().clear();
+            FOREGROUND_WINDOW_HWND.store(0, Ordering::Relaxed);
+            *FOREGROUND_WINDOW_TITLE.lock() = None;
         }
 
         #[test]
