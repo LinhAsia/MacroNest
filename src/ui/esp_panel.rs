@@ -63,7 +63,9 @@ impl CrosshairApp {
         status_override: Option<&str>,
     ) {
         if let Some(mut active) = capture.active.take() {
-            active.stop();
+            std::thread::spawn(move || {
+                active.stop();
+            });
         }
         let (candidate, matched, resolved_addresses) = match capture.scan_mode {
             crate::model::EspAutoScanMode::AllHits => {

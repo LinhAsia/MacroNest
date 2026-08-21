@@ -1006,39 +1006,27 @@ fn watch_loop<F>(
         }
         unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
     }
-    unsafe { disarm_paused_threads(&threads, architecture) };
-    let flush_start = std::time::Instant::now();
-    while flush_start.elapsed() < std::time::Duration::from_millis(150) {
-        let mut event = DEBUG_EVENT::default();
-        if unsafe { WaitForDebugEvent(&mut event, 10) } != 0 {
-            let mut status = DBG_CONTINUE;
-            if event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT {
-                let exception = unsafe { event.u.Exception.ExceptionRecord.ExceptionCode };
-                if exception == EXCEPTION_SINGLE_STEP || exception == STATUS_WX86_SINGLE_STEP {
-                    status = DBG_CONTINUE;
-                } else if exception == EXCEPTION_BREAKPOINT || exception == STATUS_WX86_BREAKPOINT {
-                    status = DBG_CONTINUE;
-                } else {
-                    status = DBG_EXCEPTION_NOT_HANDLED;
-                }
-            } else if event.dwDebugEventCode == EXIT_THREAD_DEBUG_EVENT {
-                if let Some(thread) = threads.remove(&event.dwThreadId) {
-                    unsafe { close_if_valid(thread) };
-                }
+    unsafe { disarm_all_process_threads(pid, architecture) };
+    let mut drain_event = DEBUG_EVENT::default();
+    while unsafe { WaitForDebugEvent(&mut drain_event, 0) } != 0 {
+        let status = if drain_event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT {
+            let exception = unsafe { drain_event.u.Exception.ExceptionRecord.ExceptionCode };
+            if exception == EXCEPTION_SINGLE_STEP
+                || exception == STATUS_WX86_SINGLE_STEP
+                || exception == EXCEPTION_BREAKPOINT
+                || exception == STATUS_WX86_BREAKPOINT
+            {
+                DBG_CONTINUE
+            } else {
+                DBG_EXCEPTION_NOT_HANDLED
             }
-            unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
         } else {
-            break;
-        }
+            DBG_CONTINUE
+        };
+        unsafe { ContinueDebugEvent(drain_event.dwProcessId, drain_event.dwThreadId, status) };
     }
-    for (_, thread) in threads {
-        unsafe {
-            if SuspendThread(thread) != u32::MAX {
-                disarm_thread(thread, architecture);
-                ResumeThread(thread);
-            }
-            close_if_valid(thread);
-        }
+    for (_, thread) in threads.drain() {
+        unsafe { close_if_valid(thread) };
     }
     unsafe { DebugActiveProcessStop(pid) };
     notify(WatchEvent::Stopped);
@@ -1630,7 +1618,7 @@ fn register_value(register: Register, context: &CONTEXT) -> Option<u64> {
 unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
-            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS,
+            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
             ..WOW64_CONTEXT::default()
         };
         if unsafe { Wow64GetThreadContext(thread, &mut context) } != 0 {
@@ -1640,13 +1628,14 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
             context.Dr3 = 0;
             context.Dr6 = 0;
             context.Dr7 = 0;
+            context.EFlags |= RESUME_FLAG;
             unsafe { Wow64SetThreadContext(thread, &context) };
         }
         return;
     }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
-    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
+    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
     if unsafe { GetThreadContext(thread, context) } != 0 {
         context.Dr0 = 0;
         context.Dr1 = 0;
@@ -1654,7 +1643,40 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
         context.Dr3 = 0;
         context.Dr6 = 0;
         context.Dr7 = 0;
+        context.EFlags |= RESUME_FLAG;
         unsafe { SetThreadContext(thread, context) };
+    }
+}
+
+unsafe fn disarm_all_process_threads(pid: u32, architecture: TargetArchitecture) {
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot != INVALID_HANDLE_VALUE {
+        let mut entry = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..THREADENTRY32::default()
+        };
+        let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid {
+                let thread = unsafe {
+                    OpenThread(
+                        THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                        0,
+                        entry.th32ThreadID,
+                    )
+                };
+                if !thread.is_null() {
+                    let suspended = unsafe { SuspendThread(thread) };
+                    if suspended != u32::MAX {
+                        unsafe { disarm_thread(thread, architecture) };
+                        let _ = unsafe { ResumeThread(thread) };
+                    }
+                    unsafe { CloseHandle(thread) };
+                }
+            }
+            more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+        }
+        unsafe { CloseHandle(snapshot) };
     }
 }
 
