@@ -26864,37 +26864,35 @@ mod windows_overlay {
                     continue;
                 }
                 let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
+                if hwnd_value == 0 {
+                    continue;
+                }
+                let hwnd = HWND(hwnd_value as _);
                 if shapes.is_empty() {
-                    if visible && hwnd_value != 0 {
+                    if visible {
                         unsafe {
-                            let _ = ShowWindow(HWND(hwnd_value as _), SW_HIDE);
+                            let _ = ShowWindow(hwnd, SW_HIDE);
                         }
                         visible = false;
                     }
                     continue;
                 }
                 if renderer.is_none() {
-                    renderer = esp_gpu::EspGpuRenderer::new().ok();
+                    renderer = esp_gpu::EspGpuRenderer::new(hwnd).ok();
                 }
                 if let Some(gpu) = renderer.as_mut() {
                     if gpu.paint(&shapes).is_ok() {
                         if !visible {
-                            let current_hwnd = ESP_OVERLAY_HWND.load(Ordering::Acquire);
-                            if current_hwnd != 0 {
-                                unsafe {
-                                    let _ = ShowWindow(HWND(current_hwnd as _), SW_SHOWNA);
-                                }
-                                visible = true;
+                            unsafe {
+                                let _ = ShowWindow(hwnd, SW_SHOWNA);
                             }
+                            visible = true;
                         }
                     } else {
                         renderer = None;
                         if visible {
-                            let current_hwnd = ESP_OVERLAY_HWND.load(Ordering::Acquire);
-                            if current_hwnd != 0 {
-                                unsafe {
-                                    let _ = ShowWindow(HWND(current_hwnd as _), SW_HIDE);
-                                }
+                            unsafe {
+                                let _ = ShowWindow(hwnd, SW_HIDE);
                             }
                             visible = false;
                         }
