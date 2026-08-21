@@ -534,7 +534,7 @@ impl CrosshairApp {
                     }
                 }
                 if needs_sync {
-                    self.sync_esp_presets();
+                    self.persist_esp_presets();
                 }
             }
         }
