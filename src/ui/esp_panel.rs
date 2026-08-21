@@ -349,7 +349,7 @@ impl CrosshairApp {
             pid,
             instruction_address,
             self.state.memory_debugger_architecture,
-            ESP_ENTITY_ROOT_CAPTURE_LIMIT,
+            required,
             move |event| {
                 let _ = tx.send(event);
             },

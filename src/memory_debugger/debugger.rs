@@ -833,9 +833,23 @@ fn watch_loop<F>(
             EXCEPTION_DEBUG_EVENT => unsafe {
                 let exception = event.u.Exception.ExceptionRecord.ExceptionCode;
                 if exception == EXCEPTION_SINGLE_STEP || exception == STATUS_WX86_SINGLE_STEP {
-                    if let Some((context, hit_mask)) = threads
-                        .get(&event.dwThreadId)
-                        .and_then(|&thread| read_hit(thread, architecture))
+                    let thread = match threads.entry(event.dwThreadId) {
+                        std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            let handle = OpenThread(
+                                THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                                0,
+                                event.dwThreadId,
+                            );
+                            if !handle.is_null() {
+                                *entry.insert(handle)
+                            } else {
+                                HANDLE::default()
+                            }
+                        }
+                    };
+                    if !thread.is_null()
+                        && let Some((context, hit_mask)) = read_hit(thread, architecture)
                     {
                         let context = context.as_amd64();
                         match &kind {
@@ -929,7 +943,7 @@ fn watch_loop<F>(
                                         access_hits += 1;
                                         let should_stop = access_hits >= *capture_limit;
                                         if should_stop {
-                                            disarm_paused_threads(&threads, architecture);
+                                            disarm_all_process_threads(pid, architecture);
                                             capture_limit_reached = true;
                                             stop.store(true, Ordering::Release);
                                         }
@@ -941,7 +955,7 @@ fn watch_loop<F>(
                                             notify(WatchEvent::CaptureLimitReached(access_hits));
                                         }
                                     } else if execute_candidates_seen >= *capture_limit {
-                                        disarm_paused_threads(&threads, architecture);
+                                        disarm_all_process_threads(pid, architecture);
                                         capture_limit_reached = true;
                                         stop.store(true, Ordering::Release);
                                         notify(WatchEvent::CaptureLimitReached(
