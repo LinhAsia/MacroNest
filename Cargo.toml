@@ -109,8 +109,8 @@ tiny-skia = "0.11"
 
 [profile.release]
 opt-level = 3
-lto = "off"
-codegen-units = 256
+lto = "thin"
+codegen-units = 16
 debug = 0
 strip = "symbols"
 panic = "unwind"

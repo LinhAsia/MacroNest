@@ -12314,21 +12314,120 @@ mod windows_overlay {
         request_ui_repaint();
     }
 
-    pub fn screen_draw_trigger_capture_region_mouse() {
-        let mut capture_session_id = None;
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            capture_session_id = begin_screen_draw_capture_session(&mut state, None);
+    fn start_native_screen_draw_region_capture() {
+        let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+        if screen_w <= 0 || screen_h <= 0 {
+            return;
         }
-        if let Some(capture_session_id) = capture_session_id {
-            reset_screen_draw_capture_overlay_state();
+
+        let mut capture = match window_list::capture_virtual_screen_region(
+            screen_x, screen_y, screen_w, screen_h,
+        ) {
+            Some(c) => c,
+            None => return,
+        };
+
+        let _ = blend_screen_draw_capture_region_onto_capture(
+            &mut capture.rgba,
+            screen_x,
+            screen_y,
+            screen_w,
+            screen_h,
+        );
+
+        let screen_draw_hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+        #[cfg(windows)]
+        unsafe {
+            if screen_draw_hwnd_raw != 0 {
+                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                let _ = ShowWindow(HWND(screen_draw_hwnd_raw as *mut std::ffi::c_void), SW_HIDE);
+            }
+        }
+
+        thread::spawn(move || {
+            let mode = native_capture::NativeCaptureMode::RegionSelect {
+                is_template: false,
+                vietnamese: true,
+            };
+            let result = native_capture::run_capture_overlay(
+                capture.clone(),
+                screen_x,
+                screen_y,
+                screen_w,
+                screen_h,
+                mode,
+            );
+
+            if let native_capture::NativeCaptureResult::SelectedRegion {
+                x,
+                y,
+                width: w,
+                height: h,
+            } = result
+            {
+                if w >= 4 && h >= 4 {
+                    let rel_x = (x - screen_x).clamp(0, screen_w.saturating_sub(1)) as usize;
+                    let rel_y = (y - screen_y).clamp(0, screen_h.saturating_sub(1)) as usize;
+                    let crop_w = (w.max(1) as usize).min((screen_w as usize).saturating_sub(rel_x));
+                    let crop_h = (h.max(1) as usize).min((screen_h as usize).saturating_sub(rel_y));
+                    if crop_w > 0 && crop_h > 0 {
+                        let mut cropped_rgba = vec![0u8; crop_w * crop_h * 4];
+                        for row in 0..crop_h {
+                            let src_offset = ((rel_y + row) * (screen_w as usize) + rel_x) * 4;
+                            let dst_offset = row * crop_w * 4;
+                            let row_bytes = crop_w * 4;
+                            if src_offset + row_bytes <= capture.rgba.len()
+                                && dst_offset + row_bytes <= cropped_rgba.len()
+                            {
+                                cropped_rgba[dst_offset..dst_offset + row_bytes]
+                                    .copy_from_slice(&capture.rgba[src_offset..src_offset + row_bytes]);
+                            }
+                        }
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_image(arboard::ImageData {
+                                    width: crop_w,
+                                    height: crop_h,
+                                    bytes: std::borrow::Cow::Owned(cropped_rgba),
+                                });
+                            }
+                        }));
+                        let rect = Some(windows::Win32::Foundation::RECT {
+                            left: x,
+                            top: y,
+                            right: x + w,
+                            bottom: y + h,
+                        });
+                        show_ocr_copy_toast_async(
+                            rect,
+                            "✓ Đã sao chép ảnh vào bộ nhớ tạm".to_owned(),
+                            false,
+                        );
+                    }
+                }
+            }
+
+            #[cfg(windows)]
+            unsafe {
+                if screen_draw_hwnd_raw != 0 {
+                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNOACTIVATE};
+                    let _ = ShowWindow(
+                        HWND(screen_draw_hwnd_raw as *mut std::ffi::c_void),
+                        SW_SHOWNOACTIVATE,
+                    );
+                }
+            }
             request_screen_draw_overlay_sync();
-            begin_screen_draw_region_capture(ScreenDrawCaptureMode::MouseDrag, capture_session_id);
-        }
+            request_ui_repaint();
+        });
+    }
+
+    pub fn screen_draw_trigger_capture_region_mouse() {
+        start_native_screen_draw_region_capture();
     }
 
     pub fn screen_draw_trigger_capture_region_from_toolbar() {
-        screen_draw_trigger_capture_region_mouse();
+        start_native_screen_draw_region_capture();
     }
 
     fn screen_draw_local_point_from_screen(point: POINT) -> POINT {
@@ -12752,6 +12851,7 @@ mod windows_overlay {
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
         let mut capture_mode = None;
         let mut capture_session_id = 0u64;
+        let mut should_trigger_native_capture = false;
         let mut should_sync_config = false;
         let mut should_deactivate = false;
         let mut trigger_to_sync = None;
@@ -13046,11 +13146,8 @@ mod windows_overlay {
                 should_sync_config = true;
             }
             ScreenDrawHit::CaptureRegion => {
-                if let Some(session_id) = begin_screen_draw_capture_session(&mut state, None) {
-                    capture_session_id = session_id;
-                    state.active_control = ScreenDrawControl::None;
-                    capture_mode = Some(ScreenDrawCaptureMode::MouseDrag);
-                }
+                should_trigger_native_capture = true;
+                state.active_control = ScreenDrawControl::None;
             }
             ScreenDrawHit::TextSessionConfirm => {
                 let committed = commit_screen_draw_text_session(&mut state);
@@ -13151,6 +13248,9 @@ mod windows_overlay {
         if let Some(capture_mode) = capture_mode {
             request_screen_draw_overlay_sync();
             begin_screen_draw_region_capture(capture_mode, capture_session_id);
+        }
+        if should_trigger_native_capture {
+            start_native_screen_draw_region_capture();
         }
         true
     }

@@ -7221,7 +7221,7 @@ impl CrosshairApp {
                                                 )
                                                 .clicked()
                                             {
-                                                crate::overlay::screen_draw_select_video_region();
+                                                self.begin_video_record_region_select(ui.ctx(), false);
                                             }
                                         }
                                         _ => {}
@@ -15408,6 +15408,92 @@ impl CrosshairApp {
                             }
                         }
                     }
+                }
+            }
+
+            #[cfg(windows)]
+            unsafe {
+                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                    if was_minimized {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWMINNOACTIVE, ShowWindow,
+                        };
+                        let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+                    } else {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+                        };
+                        let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        let _ = SetForegroundWindow(hwnd);
+                    }
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let _ = ui_tx.send(UiCommand::NativeInstantCaptureFinished { was_minimized });
+            egui_ctx.request_repaint();
+        });
+    }
+
+    fn begin_video_record_region_select(&mut self, ctx: &egui::Context, was_minimized: bool) {
+        if self.native_capture_in_progress {
+            return;
+        }
+        self.native_capture_in_progress = true;
+
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
+                let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+            }
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
+        crate::overlay::wake_command_queue();
+
+        let ui_tx = self.ui_tx.clone();
+        let egui_ctx = ctx.clone();
+        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            let result = if let Some(capture) =
+                crate::window_list::capture_virtual_screen_region(left, top, width, height)
+            {
+                let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
+                    is_template: false,
+                    vietnamese,
+                };
+                crate::overlay::native_capture::run_capture_overlay(
+                    capture,
+                    left,
+                    top,
+                    width,
+                    height,
+                    mode,
+                )
+            } else {
+                crate::overlay::native_capture::NativeCaptureResult::Cancelled
+            };
+
+            if let crate::overlay::native_capture::NativeCaptureResult::SelectedRegion {
+                x,
+                y,
+                width: w,
+                height: h,
+            } = result
+            {
+                if w >= 4 && h >= 4 {
+                    let _ = ui_tx.send(UiCommand::VideoRecordRegionSelected {
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                    });
                 }
             }
 
