@@ -14167,8 +14167,10 @@ mod windows_overlay {
         hook_state.vision_capture_is_region_mode = blocked && is_region_mode;
         hook_state.vision_capture_anchor = None;
         hook_state.vision_capture_completed_region = None;
-        hook_state.vision_capture_preview_regions = Vec::new();
+        hook_state.vision_capture_preview_regions.clear();
         hook_state.vision_preview_source = None;
+        hook_state.held_mouse_buttons.remove("MouseLeft");
+        hook_state.held_mouse_buttons.remove("MouseRight");
         drop(hook_state);
         force_refresh_search_area_overlay();
         request_ui_repaint();
@@ -14291,6 +14293,8 @@ mod windows_overlay {
     }
 
     fn restore_screen_draw_after_region_capture(hwnd_raw: isize, session_id: u64) {
+        set_screen_draw_region_capture_mouse_blocked(false, false);
+        reset_screen_draw_capture_overlay_state();
         let trigger_to_sync = {
             let mut state = SCREEN_DRAW_STATE.lock();
             if state.capture_session_id != session_id {

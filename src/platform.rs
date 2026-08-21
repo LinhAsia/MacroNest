@@ -831,8 +831,10 @@ mod windows_platform {
     }
 
     pub fn trim_working_set() {
-        // No-op: Evicting the process working set causes Windows to page MacroNest out to disk/standby,
-        // which causes subsequent memory scans and UI actions to incur severe page-fault latency.
+        unsafe {
+            use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+            let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+        }
     }
 }
 
