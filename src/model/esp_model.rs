@@ -1245,7 +1245,8 @@ mod tests {
 
     #[test]
     fn spatial_audio_pan_tracks_target_side_outside_the_visible_fov() {
-        let preset = EspPreset::default();
+        let mut preset = EspPreset::default();
+        preset.horizontal_plane = EspHorizontalPlane::Xy;
         assert!(esp_spatial_audio_pan(&preset, [0.0, 1.0, 0.0], [0.0; 3], 0.0) > 0.9);
         assert!(esp_spatial_audio_pan(&preset, [0.0, -1.0, 0.0], [0.0; 3], 0.0) < -0.9);
     }
@@ -1279,7 +1280,8 @@ mod tests {
 
     #[test]
     fn horizontal_camera_strafe_does_not_move_target_vertically() {
-        let preset = EspPreset::default();
+        let mut preset = EspPreset::default();
+        preset.horizontal_plane = EspHorizontalPlane::Xy;
         let stationary = project_esp_normalized(
             &preset,
             [10.0, 0.0, 2.0],
@@ -1305,6 +1307,7 @@ mod tests {
     #[test]
     fn yaw_offset_calibrates_a_different_game_zero_direction() {
         let mut preset = EspPreset::default();
+        preset.horizontal_plane = EspHorizontalPlane::Xy;
         preset.yaw_offset_degrees = 90.0;
         let projected = project_esp_normalized(
             &preset,
@@ -1321,6 +1324,7 @@ mod tests {
     #[test]
     fn inverted_yaw_flips_screen_side_without_moving_the_center() {
         let mut preset = EspPreset::default();
+        preset.horizontal_plane = EspHorizontalPlane::Xy;
         let normal_side = project_esp_normalized(
             &preset,
             [10.0, 5.0, 0.0],
@@ -1357,6 +1361,7 @@ mod tests {
     #[test]
     fn inverted_camera_yaw_only_changes_rotation_direction() {
         let mut preset = EspPreset::default();
+        preset.horizontal_plane = EspHorizontalPlane::Xy;
         preset.invert_camera_yaw = true;
         let projected = project_esp_normalized(
             &preset,

@@ -26821,8 +26821,16 @@ mod windows_overlay {
                         if !animations.is_empty()
                             && last_sample_at.elapsed() >= ESP_WORKER_STALL_TIMEOUT
                         {
-                            restart_esp_worker_if_current(generation);
-                            break;
+                            animations.clear();
+                            if visible {
+                                let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
+                                if hwnd_value != 0 {
+                                    unsafe {
+                                        let _ = ShowWindow(HWND(hwnd_value as _), SW_HIDE);
+                                    }
+                                }
+                                visible = false;
+                            }
                         }
                     }
                     Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
@@ -26856,35 +26864,37 @@ mod windows_overlay {
                     continue;
                 }
                 let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
-                if hwnd_value == 0 {
-                    continue;
-                }
-                let hwnd = HWND(hwnd_value as _);
                 if shapes.is_empty() {
-                    if visible {
+                    if visible && hwnd_value != 0 {
                         unsafe {
-                            let _ = ShowWindow(hwnd, SW_HIDE);
+                            let _ = ShowWindow(HWND(hwnd_value as _), SW_HIDE);
                         }
                         visible = false;
                     }
                     continue;
                 }
                 if renderer.is_none() {
-                    renderer = esp_gpu::EspGpuRenderer::new(hwnd).ok();
+                    renderer = esp_gpu::EspGpuRenderer::new().ok();
                 }
                 if let Some(gpu) = renderer.as_mut() {
                     if gpu.paint(&shapes).is_ok() {
                         if !visible {
-                            unsafe {
-                                let _ = ShowWindow(hwnd, SW_SHOWNA);
+                            let current_hwnd = ESP_OVERLAY_HWND.load(Ordering::Acquire);
+                            if current_hwnd != 0 {
+                                unsafe {
+                                    let _ = ShowWindow(HWND(current_hwnd as _), SW_SHOWNA);
+                                }
+                                visible = true;
                             }
-                            visible = true;
                         }
                     } else {
                         renderer = None;
                         if visible {
-                            unsafe {
-                                let _ = ShowWindow(hwnd, SW_HIDE);
+                            let current_hwnd = ESP_OVERLAY_HWND.load(Ordering::Acquire);
+                            if current_hwnd != 0 {
+                                unsafe {
+                                    let _ = ShowWindow(HWND(current_hwnd as _), SW_HIDE);
+                                }
                             }
                             visible = false;
                         }
@@ -26912,7 +26922,8 @@ mod windows_overlay {
                         true
                     }
                     Err(crossbeam_channel::TrySendError::Full(_)) => {
-                        last_render_delivery.elapsed() < ESP_WORKER_STALL_TIMEOUT
+                        // Render thread is busy presenting; keep trying without tearing down worker.
+                        true
                     }
                     Err(crossbeam_channel::TrySendError::Disconnected(_)) => false,
                 }

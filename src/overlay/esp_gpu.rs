@@ -6,7 +6,7 @@ use std::{
 };
 use windows::{
     Win32::{
-        Foundation::{HMODULE, HWND},
+        Foundation::{HINSTANCE, HMODULE, HWND},
         Graphics::{
             Direct2D::{
                 Common::{
@@ -38,16 +38,53 @@ use windows::{
                 Common::{
                     DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC,
                 },
-                DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
+                DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG,
                 DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice,
                 IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1,
             },
         },
-        UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos},
+        UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW,
+            SW_HIDE, SetWindowPos, ShowWindow, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+            WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+        },
     },
     core::Interface,
 };
 use windows_numerics::Vector2;
+
+pub(super) fn create_or_recreate_overlay_hwnd() -> Result<HWND> {
+    unsafe {
+        let old_hwnd_val = super::ESP_OVERLAY_HWND.swap(0, std::sync::atomic::Ordering::AcqRel);
+        if old_hwnd_val != 0 {
+            let old_hwnd = HWND(old_hwnd_val as _);
+            let _ = ShowWindow(old_hwnd, SW_HIDE);
+            let _ = DestroyWindow(old_hwnd);
+        }
+        let instance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)?;
+        let hwnd = CreateWindowExW(
+            WS_EX_LAYERED
+                | WS_EX_TRANSPARENT
+                | WS_EX_APPWINDOW
+                | WS_EX_TOPMOST
+                | WS_EX_NOACTIVATE
+                | windows::Win32::UI::WindowsAndMessaging::WS_EX_NOREDIRECTIONBITMAP,
+            windows::core::w!("MacroNestEspOverlay"),
+            windows::core::w!("MacroNest ESP Overlay"),
+            WS_POPUP,
+            0,
+            0,
+            32,
+            32,
+            None,
+            None,
+            Some(HINSTANCE(instance.0)),
+            None,
+        )?;
+        super::ESP_OVERLAY_HWND.store(hwnd.0 as isize, std::sync::atomic::Ordering::Release);
+        Ok(hwnd)
+    }
+}
 
 pub(super) struct EspGpuRenderer {
     hwnd: HWND,
@@ -68,8 +105,9 @@ pub(super) struct EspGpuRenderer {
 }
 
 impl EspGpuRenderer {
-    pub(super) fn new(hwnd: HWND) -> Result<Self> {
+    pub(super) fn new() -> Result<Self> {
         unsafe {
+            let hwnd = create_or_recreate_overlay_hwnd()?;
             let (left, top, width, height) = super::window_list::virtual_screen_bounds();
             if width <= 0 || height <= 0 {
                 bail!("invalid virtual screen bounds");
@@ -151,11 +189,51 @@ impl EspGpuRenderer {
         }
     }
 
+    pub(super) fn resize(&mut self, left: i32, top: i32, width: u32, height: u32) -> Result<()> {
+        unsafe {
+            SetWindowPos(
+                self.hwnd,
+                Some(HWND_TOPMOST),
+                left,
+                top,
+                width as i32,
+                height as i32,
+                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )?;
+            self.d2d.SetTarget(None);
+            self.swap_chain
+                .ResizeBuffers(2, width, height, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SWAP_CHAIN_FLAG(0))?;
+            let surface: IDXGISurface = self.swap_chain.GetBuffer(0)?;
+            let bitmap_properties = D2D1_BITMAP_PROPERTIES1 {
+                pixelFormat: D2D1_PIXEL_FORMAT {
+                    format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                },
+                dpiX: 96.0,
+                dpiY: 96.0,
+                bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                colorContext: Default::default(),
+            };
+            let target_bitmap =
+                self.d2d.CreateBitmapFromDxgiSurface(&surface, Some(&bitmap_properties))?;
+            self.d2d.SetTarget(&target_bitmap);
+            self._target_bitmap = target_bitmap;
+            self.origin = (left, top);
+            self.size = (width, height);
+            let _ = self._composition.Commit();
+            Ok(())
+        }
+    }
+
     pub(super) fn paint(&mut self, shapes: &[GeometryRenderShape]) -> Result<()> {
         unsafe {
             let (left, top, width, height) = super::window_list::virtual_screen_bounds();
             if (left, top) != self.origin || (width as u32, height as u32) != self.size {
-                bail!("display layout changed");
+                if width > 0 && height > 0 {
+                    self.resize(left, top, width as u32, height as u32)?;
+                } else {
+                    bail!("invalid virtual screen bounds");
+                }
             }
 
             self.d2d.BeginDraw();
