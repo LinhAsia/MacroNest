@@ -26943,6 +26943,7 @@ mod windows_overlay {
                         .map(EspSamplingPreset::new)
                         .collect::<Vec<_>>();
                     loaded_preset_revision = preset_revision;
+                    read_frame = EspReadFrame::default();
                 }
                 if presets.is_empty() {
                     read_frame = EspReadFrame::default();
