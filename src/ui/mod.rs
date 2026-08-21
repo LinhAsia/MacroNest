@@ -6550,6 +6550,7 @@ impl CrosshairApp {
                         ));
 
                         if draw_response.clicked() {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                             crate::overlay::screen_draw_toggle_from_ui();
                         }
 
@@ -6571,6 +6572,7 @@ impl CrosshairApp {
                         ));
 
                         if snap_response.clicked() {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                             crate::overlay::screen_draw_instant_screenshot();
                         }
 
@@ -6781,6 +6783,7 @@ impl CrosshairApp {
 
                         let instant_ocr_clicked = ocr_btn_response.clicked();
                         if instant_ocr_clicked {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                             crate::overlay::screen_draw_instant_ocr(
                                 self.state.quick_ocr_language.clone(),
                                 self.state.quick_ocr_freeze,
