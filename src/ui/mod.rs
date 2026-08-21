@@ -6572,8 +6572,7 @@ impl CrosshairApp {
                         ));
 
                         if snap_response.clicked() {
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                            crate::overlay::screen_draw_instant_screenshot();
+                            self.begin_instant_screenshot(ui.ctx(), false);
                         }
 
                         // Popup settings
@@ -6783,11 +6782,7 @@ impl CrosshairApp {
 
                         let instant_ocr_clicked = ocr_btn_response.clicked();
                         if instant_ocr_clicked {
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
-                            crate::overlay::screen_draw_instant_ocr(
-                                self.state.quick_ocr_language.clone(),
-                                self.state.quick_ocr_freeze,
-                            );
+                            self.begin_instant_ocr(ui.ctx(), false);
                         }
 
                         if button_response.clicked() && !instant_ocr_clicked {
@@ -15209,6 +15204,237 @@ impl CrosshairApp {
         });
     }
 
+    fn begin_instant_screenshot(&mut self, ctx: &egui::Context, was_minimized: bool) {
+        if self.native_capture_in_progress {
+            return;
+        }
+        self.native_capture_in_progress = true;
+
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
+                let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+            }
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
+        crate::overlay::wake_command_queue();
+
+        let ui_tx = self.ui_tx.clone();
+        let egui_ctx = ctx.clone();
+        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            let result = if let Some(capture) =
+                crate::window_list::capture_virtual_screen_region(left, top, width, height)
+            {
+                let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
+                    is_template: false,
+                    vietnamese,
+                };
+                crate::overlay::native_capture::run_capture_overlay(
+                    capture,
+                    left,
+                    top,
+                    width,
+                    height,
+                    mode,
+                )
+            } else {
+                crate::overlay::native_capture::NativeCaptureResult::Cancelled
+            };
+
+            if let crate::overlay::native_capture::NativeCaptureResult::SelectedRegion {
+                x,
+                y,
+                width: w,
+                height: h,
+            } = result
+            {
+                if w >= 4 && h >= 4 {
+                    if let Some(region_frame) =
+                        crate::window_list::capture_virtual_screen_region(x, y, w, h)
+                    {
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_image(arboard::ImageData {
+                                    width: region_frame.width,
+                                    height: region_frame.height,
+                                    bytes: std::borrow::Cow::Owned(region_frame.rgba),
+                                });
+                            }
+                        }));
+                    }
+                }
+            }
+
+            #[cfg(windows)]
+            unsafe {
+                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                    if was_minimized {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWMINNOACTIVE, ShowWindow,
+                        };
+                        let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+                    } else {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+                        };
+                        let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        let _ = SetForegroundWindow(hwnd);
+                    }
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let _ = ui_tx.send(UiCommand::NativeInstantCaptureFinished { was_minimized });
+            egui_ctx.request_repaint();
+        });
+    }
+
+    fn begin_instant_ocr(&mut self, ctx: &egui::Context, was_minimized: bool) {
+        if self.native_capture_in_progress {
+            return;
+        }
+        self.native_capture_in_progress = true;
+
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::ShowWindow;
+                let _ = ShowWindow(hwnd, windows::Win32::UI::WindowsAndMessaging::SW_HIDE);
+            }
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(false));
+        crate::overlay::wake_command_queue();
+
+        let ui_tx = self.ui_tx.clone();
+        let egui_ctx = ctx.clone();
+        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+        let ocr_lang = self.state.quick_ocr_language.clone();
+
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            let result = if let Some(capture) =
+                crate::window_list::capture_virtual_screen_region(left, top, width, height)
+            {
+                let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
+                    is_template: false,
+                    vietnamese,
+                };
+                crate::overlay::native_capture::run_capture_overlay(
+                    capture,
+                    left,
+                    top,
+                    width,
+                    height,
+                    mode,
+                )
+            } else {
+                crate::overlay::native_capture::NativeCaptureResult::Cancelled
+            };
+
+            if let crate::overlay::native_capture::NativeCaptureResult::SelectedRegion {
+                x,
+                y,
+                width: w,
+                height: h,
+            } = result
+            {
+                if w >= 4 && h >= 4 {
+                    if let Some(region_frame) =
+                        crate::window_list::capture_virtual_screen_region(x, y, w, h)
+                    {
+                        let ocr_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            crate::ocr::perform_ocr(
+                                &region_frame.rgba,
+                                region_frame.width as u32,
+                                region_frame.height as u32,
+                                &ocr_lang,
+                            )
+                        }));
+                        let rect = Some(windows::Win32::Foundation::RECT {
+                            left: x,
+                            top: y,
+                            right: x + w,
+                            bottom: y + h,
+                        });
+                        match ocr_res {
+                            Ok(Ok(ocr_result)) => {
+                                let trimmed = ocr_result.text.trim();
+                                if !trimmed.is_empty() {
+                                    let char_count = trimmed.chars().count();
+                                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        for _ in 0..5 {
+                                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                                if clipboard.set_text(trimmed.to_owned()).is_ok() {
+                                                    break;
+                                                }
+                                            }
+                                            std::thread::sleep(std::time::Duration::from_millis(20));
+                                        }
+                                    }));
+                                    let toast_msg = if vietnamese {
+                                        format!("✓ Đã sao chép {char_count} ký tự vào bộ nhớ tạm")
+                                    } else {
+                                        format!("✓ Copied {char_count} chars to Clipboard")
+                                    };
+                                    crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, false);
+                                } else {
+                                    let toast_msg = if vietnamese {
+                                        "⚠ Không tìm thấy chữ trong vùng chọn".to_owned()
+                                    } else {
+                                        "⚠ No text found in selected region".to_owned()
+                                    };
+                                    crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, true);
+                                }
+                            }
+                            _ => {
+                                let toast_msg = if vietnamese {
+                                    "⚠ Lỗi nhận diện chữ".to_owned()
+                                } else {
+                                    "⚠ OCR recognition failed".to_owned()
+                                };
+                                crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, true);
+                            }
+                        }
+                    }
+                }
+            }
+
+            #[cfg(windows)]
+            unsafe {
+                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                    if was_minimized {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWMINNOACTIVE, ShowWindow,
+                        };
+                        let _ = ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+                    } else {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+                        };
+                        let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        let _ = SetForegroundWindow(hwnd);
+                    }
+                }
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            let _ = ui_tx.send(UiCommand::NativeInstantCaptureFinished { was_minimized });
+            egui_ctx.request_repaint();
+        });
+    }
+
     pub(crate) fn finish_protractor_calibration_freeze(
         &mut self,
         ctx: &egui::Context,
@@ -16183,6 +16409,18 @@ impl eframe::App for CrosshairApp {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
                     }
 
+                    let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
+                    crate::overlay::wake_command_queue();
+                    ctx.request_repaint();
+                }
+                UiCommand::NativeInstantCaptureFinished { was_minimized } => {
+                    self.native_capture_in_progress = false;
+                    self.state.show_window = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(was_minimized));
+                    if !was_minimized {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    }
                     let _ = self.overlay_tx.send(OverlayCommand::SetUiVisible(true));
                     crate::overlay::wake_command_queue();
                     ctx.request_repaint();

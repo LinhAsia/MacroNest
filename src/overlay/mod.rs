@@ -2545,6 +2545,9 @@ mod windows_overlay {
             result: NativeCaptureResult,
             capture_frame: Option<crate::window_list::ScreenCaptureFrame>,
         },
+        NativeInstantCaptureFinished {
+            was_minimized: bool,
+        },
         MascotDragged {
             style: crate::model::MascotStyle,
             x: i32,
@@ -13576,7 +13579,7 @@ mod windows_overlay {
         }
     }
 
-    fn show_ocr_copy_toast_async(
+    pub(crate) fn show_ocr_copy_toast_async(
         rect: Option<windows::Win32::Foundation::RECT>,
         message: String,
         is_error: bool,
@@ -41314,6 +41317,11 @@ mod fallback {
         false
     }
     pub fn screen_draw_release_video_region_capture() {}
+    pub(crate) fn show_ocr_copy_toast_async(
+        _rect: Option<windows::Win32::Foundation::RECT>,
+        _message: String,
+        _is_error: bool,
+    ) {}
 }
 
 #[cfg(all(test, windows))]
