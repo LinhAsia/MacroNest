@@ -13183,6 +13183,10 @@ mod windows_overlay {
         #[cfg(windows)]
         unsafe {
             if !is_hold_trigger {
+                // Sleep briefly so the egui render frame that triggered this completes
+                // before we hide the window. Without this, send_viewport_cmd and ShowWindow
+                // race from two threads and crash.
+                thread::sleep(Duration::from_millis(50));
                 if let Some(hwnd) = find_app_ui_window() {
                     use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
                     let _ = ShowWindow(hwnd, SW_HIDE);
