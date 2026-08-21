@@ -6550,14 +6550,6 @@ impl CrosshairApp {
                         ));
 
                         if draw_response.clicked() {
-                            #[cfg(windows)]
-                            unsafe {
-                                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
-                                    let _ = ShowWindow(hwnd, SW_HIDE);
-                                }
-                            }
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                             crate::overlay::screen_draw_toggle_from_ui();
                         }
 
@@ -6579,14 +6571,6 @@ impl CrosshairApp {
                         ));
 
                         if snap_response.clicked() {
-                            #[cfg(windows)]
-                            unsafe {
-                                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
-                                    let _ = ShowWindow(hwnd, SW_HIDE);
-                                }
-                            }
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                             crate::overlay::screen_draw_instant_screenshot();
                         }
 
@@ -6797,14 +6781,6 @@ impl CrosshairApp {
 
                         let instant_ocr_clicked = ocr_btn_response.clicked();
                         if instant_ocr_clicked {
-                            #[cfg(windows)]
-                            unsafe {
-                                if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
-                                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
-                                    let _ = ShowWindow(hwnd, SW_HIDE);
-                                }
-                            }
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Visible(false));
                             crate::overlay::screen_draw_instant_ocr(
                                 self.state.quick_ocr_language.clone(),
                                 self.state.quick_ocr_freeze,
