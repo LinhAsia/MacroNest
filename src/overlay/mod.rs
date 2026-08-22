@@ -5021,17 +5021,14 @@ mod windows_overlay {
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
-                    let (ocr_enabled, ocr_hotkey, ocr_lang, ocr_freeze) = {
+                    let (ocr_hotkey, ocr_lang) = {
                         let hook_state = HOOK_STATE.lock();
                         (
-                            hook_state.quick_ocr_enabled,
                             hook_state.quick_ocr_hotkey.clone(),
                             hook_state.quick_ocr_language.clone(),
-                            hook_state.quick_ocr_freeze,
                         )
                     };
                     if quick_ocr_trigger_allowed
-                        && ocr_enabled
                         && let Some(trigger) = ocr_hotkey
                         && hotkey::binding_matches(&trigger, &binding)
                     {
@@ -5051,24 +5048,27 @@ mod windows_overlay {
                             return LRESULT(1);
                         }
                     }
-                    if is_key_down {
-                        if screen_draw_trigger_allowed
-                            && process_screen_draw_hotkey(&binding, is_repeat_key(&key_name))
-                        {
+                    let screen_draw_hotkey = {
+                        let state = SCREEN_DRAW_STATE.lock();
+                        state.trigger.clone()
+                    };
+                    if screen_draw_trigger_allowed
+                        && let Some(trigger) = screen_draw_hotkey
+                        && hotkey::binding_matches(&trigger, &binding)
+                    {
+                        if is_key_down && !is_repeat_key(&key_name) {
+                            let hotkey_trigger = trigger.clone();
+                            let ui_lang = PROTRACTOR_STATE.lock().ui_language;
+                            std::thread::spawn(move || {
+                                native_capture::run_native_screenshot_capture_overlay(
+                                    Some(hotkey_trigger),
+                                    ui_lang,
+                                );
+                            });
                             update_held_key(info.vkCode, is_key_down, is_key_up);
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
                         }
-                    } else if is_key_up
-                        && screen_draw_trigger_allowed
-                        && process_screen_draw_hotkey_release(&binding)
-                    {
-                        update_held_key(info.vkCode, is_key_down, is_key_up);
-                        update_modifier_state(info.vkCode, is_key_down);
-                        if !is_ui_in_foreground() {
-                            update_quick_key_display_key(&key_name, info.vkCode, false, true);
-                        }
-                        return LRESULT(1);
                     }
                 }
                 let windows_key_locked = {

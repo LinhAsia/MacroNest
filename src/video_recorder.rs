@@ -725,14 +725,13 @@ pub fn stop_blocking() {
 
 pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -> bool {
     let config = CONFIG.lock();
-    let matches = config.enabled
-        && config.hotkey.as_ref().is_some_and(|trigger| {
-            if is_down {
-                hotkey::binding_matches(trigger, binding)
-            } else {
-                trigger.key.eq_ignore_ascii_case(&binding.key)
-            }
-        });
+    let matches = config.hotkey.as_ref().is_some_and(|trigger| {
+        if is_down {
+            hotkey::binding_matches(trigger, binding)
+        } else {
+            trigger.key.eq_ignore_ascii_case(&binding.key)
+        }
+    });
     drop(config);
     if !matches {
         return false;
@@ -743,32 +742,20 @@ pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -
         }
         REGION_CAPTURE_ACTIVE.store(false, Ordering::Release);
         PRESS_HANDLED_ON_DOWN.store(false, Ordering::Release);
-        let press_id = HOTKEY_PRESS_ID
-            .fetch_add(1, Ordering::AcqRel)
-            .wrapping_add(1);
         if ACTIVE.load(Ordering::Acquire) || BUSY.load(Ordering::Acquire) {
             PRESS_HANDLED_ON_DOWN.store(true, Ordering::Release);
             toggle_async();
             return true;
         }
         let trigger = binding.clone();
+        REGION_CAPTURE_ACTIVE.store(true, Ordering::Release);
+        let hotkey_trigger = trigger.clone();
+        let ui_lang = crate::overlay::current_ui_language();
         thread::spawn(move || {
-            thread::sleep(Duration::from_millis(105));
-            if HOTKEY_DOWN.load(Ordering::Acquire)
-                && HOTKEY_PRESS_ID.load(Ordering::Acquire) == press_id
-                && !ACTIVE.load(Ordering::Acquire)
-                && !BUSY.load(Ordering::Acquire)
-            {
-                REGION_CAPTURE_ACTIVE.store(true, Ordering::Release);
-                let hotkey_trigger = trigger.clone();
-                let ui_lang = crate::overlay::current_ui_language();
-                thread::spawn(move || {
-                    crate::overlay::native_capture::run_native_video_record_region_overlay(
-                        Some(hotkey_trigger),
-                        ui_lang,
-                    );
-                });
-            }
+            crate::overlay::native_capture::run_native_video_record_region_overlay(
+                Some(hotkey_trigger),
+                ui_lang,
+            );
         });
     } else {
         let was_down = HOTKEY_DOWN.swap(false, Ordering::AcqRel);

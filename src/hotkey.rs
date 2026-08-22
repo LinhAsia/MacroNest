@@ -403,12 +403,23 @@ pub fn binding_is_down(binding: &HotkeyBinding) -> bool {
     if keys.is_empty() {
         return false;
     }
+    let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
     for key in keys {
-        if let Some(vk) = key_name_to_vk(&key) {
-            if (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) == 0 {
-                return false;
+        let upper = key.to_ascii_uppercase();
+        let down = match upper.as_str() {
+            "CTRL" | "CONTROL" => is_down(0x11) || is_down(0xA2) || is_down(0xA3),
+            "ALT" => is_down(0x12) || is_down(0xA4) || is_down(0xA5),
+            "SHIFT" => is_down(0x10) || is_down(0xA0) || is_down(0xA1),
+            "WIN" | "META" => is_down(0x5B) || is_down(0x5C),
+            _ => {
+                if let Some(vk) = key_name_to_vk(&key) {
+                    is_down(vk as i32)
+                } else {
+                    true
+                }
             }
-        } else {
+        };
+        if !down {
             return false;
         }
     }

@@ -129,6 +129,7 @@ struct CaptureState {
 
     // Result
     result: NativeCaptureResult,
+    created_at: std::time::Instant,
 }
 
 impl CaptureState {
@@ -206,6 +207,7 @@ impl CaptureState {
             adjust_drag_origin: (0, 0),
             adjust_rect_origin: RECT::default(),
             result: NativeCaptureResult::Cancelled,
+            created_at: std::time::Instant::now(),
         }
     }
 }
@@ -426,7 +428,9 @@ unsafe extern "system" fn capture_wnd_proc(
             let state = get_state(hwnd);
             if let Some(state) = state {
                 if let NativeCaptureMode::RegionSelect { hold_hotkey: Some(ref trigger), .. } = state.mode {
-                    if !crate::hotkey::binding_is_down(trigger) {
+                    if state.created_at.elapsed() >= std::time::Duration::from_millis(80)
+                        && !crate::hotkey::binding_is_down(trigger)
+                    {
                         let _ = KillTimer(Some(hwnd), 1);
                         if let Some(start) = state.start_point {
                             let mut pt = POINT::default();
@@ -464,7 +468,9 @@ unsafe extern "system" fn capture_wnd_proc(
             let state = get_state(hwnd);
             if let Some(state) = state {
                 if let NativeCaptureMode::RegionSelect { hold_hotkey: Some(ref trigger), .. } = state.mode {
-                    if !crate::hotkey::binding_is_down(trigger) {
+                    if state.created_at.elapsed() >= std::time::Duration::from_millis(80)
+                        && !crate::hotkey::binding_is_down(trigger)
+                    {
                         let _ = KillTimer(Some(hwnd), 1);
                         if let Some(start) = state.start_point {
                             let mut pt = POINT::default();
