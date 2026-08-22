@@ -16084,6 +16084,18 @@ impl eframe::App for CrosshairApp {
                     );
                     ctx.request_repaint();
                 }
+                UiCommand::TriggerInstantScreenshot => {
+                    let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+                    self.begin_instant_screenshot(ctx, minimized);
+                }
+                UiCommand::TriggerInstantOcr => {
+                    let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+                    self.begin_instant_ocr(ctx, minimized);
+                }
+                UiCommand::TriggerVideoRecordRegionSelect => {
+                    let minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+                    self.begin_video_record_region_select(ctx, minimized);
+                }
                 UiCommand::CrosshairDrawFinished {
                     profile_name,
                     asset_name,

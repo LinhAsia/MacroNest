@@ -760,9 +760,10 @@ pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -
                 && !BUSY.load(Ordering::Acquire)
             {
                 REGION_CAPTURE_ACTIVE.store(true, Ordering::Release);
-                if !crate::overlay::screen_draw_begin_video_region_capture(trigger) {
-                    REGION_CAPTURE_ACTIVE.store(false, Ordering::Release);
-                }
+                crate::overlay::send_ui_command(
+                    crate::overlay::UiCommand::TriggerVideoRecordRegionSelect,
+                );
+                crate::overlay::request_ui_repaint();
             }
         });
     } else {

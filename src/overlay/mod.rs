@@ -2409,6 +2409,9 @@ mod windows_overlay {
             width: i32,
             height: i32,
         },
+        TriggerInstantScreenshot,
+        TriggerInstantOcr,
+        TriggerVideoRecordRegionSelect,
         CrosshairDrawFinished {
             profile_name: String,
             asset_name: Option<String>,
@@ -5033,7 +5036,7 @@ mod windows_overlay {
                         && hotkey::binding_matches(&trigger, &binding)
                     {
                         if is_key_down && !is_repeat_key(&key_name) {
-                            screen_draw_begin_ocr_region_capture(trigger, ocr_lang, ocr_freeze);
+                            send_ui_command(UiCommand::TriggerInstantOcr);
                             request_ui_repaint();
                             update_held_key(info.vkCode, is_key_down, is_key_up);
                             update_modifier_state(info.vkCode, is_key_down);
@@ -12748,12 +12751,18 @@ mod windows_overlay {
         state.frame_rgba.resize(byte_len, 0);
 
         if let Some(ref bg) = state.freeze_frame {
-            if bg.len() == byte_len {
-                state.committed_rgba.extend_from_slice(bg);
+            let mut dimmed = bg.clone();
+            for pixel in dimmed.chunks_exact_mut(4) {
+                pixel[0] = ((pixel[0] as u16 * 140) / 255) as u8;
+                pixel[1] = ((pixel[1] as u16 * 140) / 255) as u8;
+                pixel[2] = ((pixel[2] as u16 * 140) / 255) as u8;
+            }
+            if dimmed.len() == byte_len {
+                state.committed_rgba.extend_from_slice(&dimmed);
             } else {
                 state.committed_rgba.resize(byte_len, 0);
-                let copy_len = bg.len().min(byte_len);
-                state.committed_rgba[..copy_len].copy_from_slice(&bg[..copy_len]);
+                let copy_len = dimmed.len().min(byte_len);
+                state.committed_rgba[..copy_len].copy_from_slice(&dimmed[..copy_len]);
             }
             state.committed_dirty = true;
         } else {
@@ -26871,7 +26880,7 @@ mod windows_overlay {
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
     }
 
-    fn send_ui_command(command: UiCommand) {
+    pub fn send_ui_command(command: UiCommand) {
         if let Some(tx) = UI_COMMAND_TX.lock().clone() {
             let _ = tx.send(command);
         }
@@ -41257,6 +41266,9 @@ mod fallback {
             asset_scale: Option<f32>,
             status: String,
         },
+        TriggerInstantScreenshot,
+        TriggerInstantOcr,
+        TriggerVideoRecordRegionSelect,
         MacroStepInlineFeedback {
             preset_id: u32,
             step_index: usize,
@@ -41450,6 +41462,7 @@ mod fallback {
         _message: String,
         _is_error: bool,
     ) {}
+    pub fn send_ui_command(_command: UiCommand) {}
 }
 
 #[cfg(all(test, windows))]
