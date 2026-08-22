@@ -12315,6 +12315,12 @@ mod windows_overlay {
     }
 
     fn start_native_screen_draw_region_capture() {
+        {
+            let mut state = SCREEN_DRAW_STATE.lock();
+            state.capturing_region = true;
+            state.active_control = ScreenDrawControl::None;
+        }
+
         thread::spawn(move || {
             let is_down = |vk: i32| unsafe {
                 (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk) as u16 & 0x8000) != 0
@@ -12322,10 +12328,12 @@ mod windows_overlay {
             while is_down(0x01) {
                 thread::sleep(Duration::from_millis(5));
             }
-            thread::sleep(Duration::from_millis(40));
+            thread::sleep(Duration::from_millis(30));
 
             let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
             if screen_w <= 0 || screen_h <= 0 {
+                let mut state = SCREEN_DRAW_STATE.lock();
+                state.capturing_region = false;
                 return;
             }
 
@@ -12333,7 +12341,11 @@ mod windows_overlay {
                 screen_x, screen_y, screen_w, screen_h,
             ) {
                 Some(c) => c,
-                None => return,
+                None => {
+                    let mut state = SCREEN_DRAW_STATE.lock();
+                    state.capturing_region = false;
+                    return;
+                }
             };
 
             let _ = blend_screen_draw_capture_region_onto_capture(
@@ -12407,11 +12419,16 @@ mod windows_overlay {
                         });
                         show_ocr_copy_toast_async(
                             rect,
-                            "✓ Đã sao chép ảnh vào bộ nhớ tạm".to_owned(),
+                            "✓ Đã chụp ảnh màn hình và sao chép vào bộ nhớ tạm".to_owned(),
                             false,
                         );
                     }
                 }
+            }
+
+            {
+                let mut state = SCREEN_DRAW_STATE.lock();
+                state.capturing_region = false;
             }
 
             #[cfg(windows)]
@@ -14909,7 +14926,7 @@ mod windows_overlay {
     }
 
     fn process_screen_draw_mouse_event(message: u32, screen_point: POINT) -> bool {
-        if !screen_draw_active() {
+        if !screen_draw_active() || screen_draw_get_capturing_region() {
             return false;
         }
         if message == WM_MOUSEMOVE && !screen_draw_needs_mouse_move_tracking() {
