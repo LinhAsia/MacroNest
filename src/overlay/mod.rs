@@ -7365,16 +7365,27 @@ mod windows_overlay {
 
         let anchor = hook_state.mouse_move_lock_anchor.unwrap_or(point);
         let mut blocked = false;
+        let mut allowed = point;
         if point.x < anchor.x && hook_state.mouse_move_locks.left > 0 {
+            allowed.x = anchor.x;
             blocked = true;
         } else if point.x > anchor.x && hook_state.mouse_move_locks.right > 0 {
+            allowed.x = anchor.x;
             blocked = true;
         }
 
         if point.y < anchor.y && hook_state.mouse_move_locks.up > 0 {
+            allowed.y = anchor.y;
             blocked = true;
         } else if point.y > anchor.y && hook_state.mouse_move_locks.down > 0 {
+            allowed.y = anchor.y;
             blocked = true;
+        }
+
+        if blocked {
+            unsafe {
+                let _ = SetCursorPos(allowed.x, allowed.y);
+            }
         }
 
         blocked
