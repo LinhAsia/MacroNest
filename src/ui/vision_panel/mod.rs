@@ -1235,7 +1235,7 @@ impl CrosshairApp {
                 | VisionCaptureTarget::PinPresetSourceCrop(_)
                 | VisionCaptureTarget::HudPresetRegion(_)
         );
-        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+        let ui_language = self.state.ui_language;
 
         // For RegionAdjust, capture existing region coords
         let existing_region = if is_region_adjust {
@@ -1278,17 +1278,21 @@ impl CrosshairApp {
                         initial_y: iy,
                         initial_w: iw,
                         initial_h: ih,
-                        vietnamese,
+                        ui_language,
                     }
                 } else if is_point_click {
                     crate::overlay::native_capture::NativeCaptureMode::PointClick {
-                        vietnamese,
+                        ui_language,
                         dim_background: !use_natural_point_click_preview,
                     }
                 } else {
                     crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
-                        is_template,
-                        vietnamese,
+                        kind: if is_template {
+                            crate::overlay::native_capture::RegionSelectKind::ImageTemplate
+                        } else {
+                            crate::overlay::native_capture::RegionSelectKind::ImageSearchArea
+                        },
+                        ui_language,
                     }
                 };
 

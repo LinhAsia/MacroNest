@@ -15224,7 +15224,7 @@ impl CrosshairApp {
 
         let ui_tx = self.ui_tx.clone();
         let egui_ctx = ctx.clone();
-        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+        let ui_language = self.state.ui_language;
 
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(60));
@@ -15234,8 +15234,8 @@ impl CrosshairApp {
                 crate::window_list::capture_virtual_screen_region(left, top, width, height)
             {
                 let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
-                    is_template: false,
-                    vietnamese,
+                    kind: crate::overlay::native_capture::RegionSelectKind::Screenshot,
+                    ui_language,
                 };
                 crate::overlay::native_capture::run_capture_overlay(
                     capture,
@@ -15269,6 +15269,18 @@ impl CrosshairApp {
                                 });
                             }
                         }));
+                        let rect = Some(windows::Win32::Foundation::RECT {
+                            left: x,
+                            top: y,
+                            right: x + w,
+                            bottom: y + h,
+                        });
+                        let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                            "✓ Đã chụp ảnh màn hình và sao chép vào bộ nhớ tạm".to_owned()
+                        } else {
+                            "✓ Screenshot copied to clipboard".to_owned()
+                        };
+                        crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, false);
                     }
                 }
             }
@@ -15317,7 +15329,7 @@ impl CrosshairApp {
 
         let ui_tx = self.ui_tx.clone();
         let egui_ctx = ctx.clone();
-        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+        let ui_language = self.state.ui_language;
         let ocr_lang = self.state.quick_ocr_language.clone();
 
         std::thread::spawn(move || {
@@ -15328,8 +15340,8 @@ impl CrosshairApp {
                 crate::window_list::capture_virtual_screen_region(left, top, width, height)
             {
                 let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
-                    is_template: false,
-                    vietnamese,
+                    kind: crate::overlay::native_capture::RegionSelectKind::Ocr,
+                    ui_language,
                 };
                 crate::overlay::native_capture::run_capture_overlay(
                     capture,
@@ -15383,14 +15395,14 @@ impl CrosshairApp {
                                             std::thread::sleep(std::time::Duration::from_millis(20));
                                         }
                                     }));
-                                    let toast_msg = if vietnamese {
+                                    let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
                                         format!("✓ Đã sao chép {char_count} ký tự vào bộ nhớ tạm")
                                     } else {
-                                        format!("✓ Copied {char_count} chars to Clipboard")
+                                        format!("✓ Copied {char_count} characters to clipboard")
                                     };
                                     crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, false);
                                 } else {
-                                    let toast_msg = if vietnamese {
+                                    let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
                                         "⚠ Không tìm thấy chữ trong vùng chọn".to_owned()
                                     } else {
                                         "⚠ No text found in selected region".to_owned()
@@ -15399,7 +15411,7 @@ impl CrosshairApp {
                                 }
                             }
                             _ => {
-                                let toast_msg = if vietnamese {
+                                let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
                                     "⚠ Lỗi nhận diện chữ".to_owned()
                                 } else {
                                     "⚠ OCR recognition failed".to_owned()
@@ -15455,7 +15467,7 @@ impl CrosshairApp {
 
         let ui_tx = self.ui_tx.clone();
         let egui_ctx = ctx.clone();
-        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+        let ui_language = self.state.ui_language;
 
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(60));
@@ -15465,8 +15477,8 @@ impl CrosshairApp {
                 crate::window_list::capture_virtual_screen_region(left, top, width, height)
             {
                 let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
-                    is_template: false,
-                    vietnamese,
+                    kind: crate::overlay::native_capture::RegionSelectKind::VideoRecord,
+                    ui_language,
                 };
                 crate::overlay::native_capture::run_capture_overlay(
                     capture,

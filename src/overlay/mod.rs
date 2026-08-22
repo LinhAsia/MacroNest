@@ -12364,9 +12364,10 @@ mod windows_overlay {
                     let _ = ShowWindow(HWND(screen_draw_hwnd_raw as *mut std::ffi::c_void), SW_HIDE);
                 }
             }
+            let ui_language = PROTRACTOR_STATE.lock().ui_language;
             let mode = native_capture::NativeCaptureMode::RegionSelect {
-                is_template: false,
-                vietnamese: true,
+                kind: native_capture::RegionSelectKind::Screenshot,
+                ui_language,
             };
             let result = native_capture::run_capture_overlay(
                 capture.clone(),
@@ -12417,11 +12418,12 @@ mod windows_overlay {
                             right: x + w,
                             bottom: y + h,
                         });
-                        show_ocr_copy_toast_async(
-                            rect,
-                            "✓ Đã chụp ảnh màn hình và sao chép vào bộ nhớ tạm".to_owned(),
-                            false,
-                        );
+                        let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                            "✓ Đã chụp ảnh màn hình và sao chép vào bộ nhớ tạm".to_owned()
+                        } else {
+                            "✓ Screenshot copied to clipboard".to_owned()
+                        };
+                        show_ocr_copy_toast_async(rect, toast_msg, false);
                     }
                 }
             }

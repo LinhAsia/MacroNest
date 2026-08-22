@@ -2246,7 +2246,7 @@ impl CrosshairApp {
 
         let ui_tx = self.ui_tx.clone();
         let egui_ctx = ctx.clone();
-        let vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+        let ui_language = self.state.ui_language;
 
         std::thread::spawn(move || {
             // Sleep to let OS process window hide
@@ -2258,7 +2258,7 @@ impl CrosshairApp {
                 crate::window_list::capture_virtual_screen_region(left, top, width, height)
             {
                 let mode = crate::overlay::native_capture::NativeCaptureMode::PointClick {
-                    vietnamese,
+                    ui_language,
                     dim_background: true,
                 };
                 let res = crate::overlay::native_capture::run_capture_overlay(

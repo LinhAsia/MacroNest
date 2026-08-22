@@ -33,6 +33,15 @@ fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
 use tiny_skia::{Color, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegionSelectKind {
+    ImageTemplate,
+    ImageSearchArea,
+    Screenshot,
+    Ocr,
+    VideoRecord,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NativeCaptureMode {
     ProtractorCalibration {
         ui_language: crate::model::UiLanguage,
@@ -41,11 +50,11 @@ pub enum NativeCaptureMode {
         ui_language: crate::model::UiLanguage,
     },
     RegionSelect {
-        is_template: bool,
-        vietnamese: bool,
+        kind: RegionSelectKind,
+        ui_language: crate::model::UiLanguage,
     },
     PointClick {
-        vietnamese: bool,
+        ui_language: crate::model::UiLanguage,
         dim_background: bool,
     },
     RegionAdjust {
@@ -54,7 +63,7 @@ pub enum NativeCaptureMode {
         initial_y: i32,
         initial_w: i32,
         initial_h: i32,
-        vietnamese: bool,
+        ui_language: crate::model::UiLanguage,
     },
 }
 
@@ -97,7 +106,9 @@ enum AdjustDragKind {
 
 struct CaptureState {
     capture_frame: crate::window_list::ScreenCaptureFrame,
-    dimmed_rgba: Vec<u8>,
+    original_bgra: Vec<u8>,
+    dimmed_bgra: Vec<u8>,
+    render_bgra: Vec<u8>,
     left: i32,
     top: i32,
     width: i32,
@@ -145,9 +156,26 @@ impl CaptureState {
         } else {
             RECT::default()
         };
+
+        let mut original_bgra = capture_frame.rgba.clone();
+        for pixel in original_bgra.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+
+        let mut dimmed_bgra = original_bgra.clone();
+        for pixel in dimmed_bgra.chunks_exact_mut(4) {
+            pixel[0] = ((pixel[0] as u16 * 127) / 255) as u8;
+            pixel[1] = ((pixel[1] as u16 * 127) / 255) as u8;
+            pixel[2] = ((pixel[2] as u16 * 127) / 255) as u8;
+        }
+
+        let render_bgra = dimmed_bgra.clone();
+
         Self {
-            dimmed_rgba: dim_capture_frame(&capture_frame),
             capture_frame,
+            original_bgra,
+            dimmed_bgra,
+            render_bgra,
             left,
             top,
             width,
@@ -163,16 +191,6 @@ impl CaptureState {
             result: NativeCaptureResult::Cancelled,
         }
     }
-}
-
-fn dim_capture_frame(capture_frame: &crate::window_list::ScreenCaptureFrame) -> Vec<u8> {
-    let mut dimmed = capture_frame.rgba.clone();
-    for pixel in dimmed.chunks_exact_mut(4) {
-        pixel[0] = ((pixel[0] as u16 * 127) / 255) as u8;
-        pixel[1] = ((pixel[1] as u16 * 127) / 255) as u8;
-        pixel[2] = ((pixel[2] as u16 * 127) / 255) as u8;
-    }
-    dimmed
 }
 
 fn region_select_rect(state: &CaptureState) -> Option<RECT> {
@@ -747,13 +765,11 @@ fn apply_adjust_drag(
     r
 }
 
-unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<()> {
+unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow::Result<()> {
     let ar = state.adjust_rect;
     let sw = state.width as usize;
-    let sh = state.height as usize;
 
-    // Build dimmed BGRA buf, then un-dim the selected area
-    let mut bgra = state.dimmed_rgba.clone();
+    state.render_bgra.copy_from_slice(&state.dimmed_bgra);
 
     let sel_l = ar.left.clamp(0, state.width) as usize;
     let sel_t = ar.top.clamp(0, state.height) as usize;
@@ -763,20 +779,15 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Re
     let sel_h = sel_b.saturating_sub(sel_t);
     if sel_w > 0 && sel_h > 0 {
         blit_rect(
-            &state.capture_frame.rgba,
+            &state.original_bgra,
             sw,
-            &mut bgra,
+            &mut state.render_bgra,
             sw,
             sel_l,
             sel_t,
             sel_w,
             sel_h,
         );
-    }
-
-    // RGBA -> BGRA swap
-    for pixel in bgra.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
     }
 
     let mut bmi = BITMAPINFO::default();
@@ -800,7 +811,7 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Re
         0,
         state.width,
         state.height,
-        Some(bgra.as_ptr() as *const std::ffi::c_void),
+        Some(state.render_bgra.as_ptr() as *const std::ffi::c_void),
         &bmi,
         DIB_RGB_COLORS,
         SRCCOPY,
@@ -1169,9 +1180,9 @@ unsafe fn draw_point_click_capture_to_dc(
             ..
         }
     ) {
-        &state.dimmed_rgba
+        &state.dimmed_bgra
     } else {
-        &state.capture_frame.rgba
+        &state.original_bgra
     };
     let sw = state.width as usize;
     let mut bgra = vec![0u8; dirty_w as usize * dirty_h as usize * 4];
@@ -1180,9 +1191,6 @@ unsafe fn draw_point_click_capture_to_dc(
         let dst_start = y * dirty_w as usize * 4;
         bgra[dst_start..dst_start + dirty_w as usize * 4]
             .copy_from_slice(&source[src_start..src_start + dirty_w as usize * 4]);
-    }
-    for pixel in bgra.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
     }
 
     let mut bmi = BITMAPINFO::default();
@@ -1416,7 +1424,7 @@ unsafe fn draw_point_click_capture_to_dc(
 
 unsafe fn draw_capture_to_dc(
     hdc: HDC,
-    state: &CaptureState,
+    state: &mut CaptureState,
     dirty: Option<RECT>,
 ) -> anyhow::Result<()> {
     if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
@@ -1427,83 +1435,172 @@ unsafe fn draw_capture_to_dc(
     let w = state.width as usize;
     let h = state.height as usize;
 
-    let mut pixmap = Pixmap::new(state.width as u32, state.height as u32)
-        .ok_or_else(|| anyhow::anyhow!("Failed to create tiny-skia Pixmap"))?;
+    let show_preview_panel = matches!(state.mode, NativeCaptureMode::PointClick { .. });
+    let show_cursor_tooltip = !matches!(state.mode, NativeCaptureMode::RegionSelect { .. });
 
-    // 1. Draw the screenshot onto the pixmap
-    pixmap.data_mut().copy_from_slice(&state.capture_frame.rgba);
+    let mut center_color = (0u8, 0u8, 0u8, 255u8);
+    let mut panel_x = 0.0f32;
+    let mut panel_y = 0.0f32;
+    let mut preview_panel_visible = false;
 
-    // 2. Draw a dark overlay over the whole screen when the capture flow asks for it.
-    let should_dim_background = !matches!(
-        state.mode,
-        NativeCaptureMode::PointClick {
-            dim_background: false,
-            ..
-        }
-    );
-    if should_dim_background {
-        let mut paint = Paint::default();
-        paint.set_color_rgba8(0, 0, 0, 128); // 50% opacity
-        let screen_rect =
-            Rect::from_xywh(0.0, 0.0, state.width as f32, state.height as f32).unwrap();
-        pixmap.fill_rect(screen_rect, &paint, tiny_skia::Transform::identity(), None);
-    }
+    if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
+        state.render_bgra.copy_from_slice(&state.dimmed_bgra);
 
-    // 3. Render specific overlay elements based on capture mode
-    match state.mode {
-        NativeCaptureMode::RegionSelect { .. } => {
-            if let (Some(start), Some(curr)) = (state.start_point, state.current_point) {
-                let x = start.0.min(curr.0);
-                let y = start.1.min(curr.1);
-                let rw = (start.0 - curr.0).abs() as usize;
-                let rh = (start.1 - curr.1).abs() as usize;
+        if let (Some(start), Some(curr)) = (state.start_point, state.current_point) {
+            let x = start.0.min(curr.0).clamp(0, state.width) as usize;
+            let y = start.1.min(curr.1).clamp(0, state.height) as usize;
+            let rw = (start.0 - curr.0).abs() as usize;
+            let rh = (start.1 - curr.1).abs() as usize;
+            let rw = rw.min(w.saturating_sub(x));
+            let rh = rh.min(h.saturating_sub(y));
 
-                if rw >= 2 && rh >= 2 {
-                    // Blit back original screenshot region (so it is bright)
-                    blit_rect(
-                        &state.capture_frame.rgba,
-                        w,
-                        pixmap.data_mut(),
-                        w,
-                        x as usize,
-                        y as usize,
-                        rw,
-                        rh,
-                    );
-
-                    // Draw selection border
-                    let mut border_paint = Paint::default();
-                    border_paint.set_color_rgba8(0, 160, 255, 255); // Blue border
-                    let mut stroke = Stroke::default();
-                    stroke.width = 1.5;
-
-                    let mut pb = PathBuilder::new();
-                    pb.move_to(x as f32, y as f32);
-                    pb.line_to((x as f32 + rw as f32), y as f32);
-                    pb.line_to((x as f32 + rw as f32), (y as f32 + rh as f32));
-                    pb.line_to(x as f32, (y as f32 + rh as f32));
-                    pb.close();
-                    if let Some(path) = pb.finish() {
-                        pixmap.stroke_path(
-                            &path,
-                            &border_paint,
-                            &stroke,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
-                    }
-                }
+            if rw >= 2 && rh >= 2 {
+                blit_rect(
+                    &state.original_bgra,
+                    w,
+                    &mut state.render_bgra,
+                    w,
+                    x,
+                    y,
+                    rw,
+                    rh,
+                );
             }
         }
-        NativeCaptureMode::ProtractorCalibration { .. } => {
-            // Draw already-clicked points
-            let mut pt_paint = Paint::default();
-            pt_paint.set_color_rgba8(255, 50, 50, 255);
-            let mut stroke = Stroke::default();
-            stroke.width = 2.0;
 
-            let mut white_paint = Paint::default();
-            white_paint.set_color_rgba8(255, 255, 255, 255);
+        let mut bmi = BITMAPINFO::default();
+        bmi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: state.width,
+            biHeight: -state.height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+
+        let _ = StretchDIBits(
+            hdc,
+            0,
+            0,
+            state.width,
+            state.height,
+            0,
+            0,
+            state.width,
+            state.height,
+            Some(state.render_bgra.as_ptr() as *const std::ffi::c_void),
+            &bmi,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+
+        if let (Some(start), Some(curr)) = (state.start_point, state.current_point) {
+            let x = start.0.min(curr.0);
+            let y = start.1.min(curr.1);
+            let rw = (start.0 - curr.0).abs();
+            let rh = (start.1 - curr.1).abs();
+
+            if rw >= 2 && rh >= 2 {
+                let border_pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
+                let old_pen = SelectObject(hdc, HGDIOBJ(border_pen.0));
+                let old_brush = SelectObject(
+                    hdc,
+                    windows::Win32::Graphics::Gdi::GetStockObject(
+                        windows::Win32::Graphics::Gdi::NULL_BRUSH,
+                    ),
+                );
+                let _ = windows::Win32::Graphics::Gdi::Rectangle(hdc, x, y, x + rw, y + rh);
+                SelectObject(hdc, old_pen);
+                SelectObject(hdc, old_brush);
+                let _ = DeleteObject(HGDIOBJ(border_pen.0));
+
+                let dim_text = format!("{rw} × {rh}");
+                let mut dim_u16: Vec<u16> = dim_text.encode_utf16().collect();
+                let dim_font = CreateFontW(
+                    14,
+                    0,
+                    0,
+                    0,
+                    FW_BOLD.0 as i32,
+                    0,
+                    0,
+                    0,
+                    FONT_CHARSET(0),
+                    FONT_OUTPUT_PRECISION(0),
+                    FONT_CLIP_PRECISION(0),
+                    FONT_QUALITY(0),
+                    0,
+                    w!("Segoe UI"),
+                );
+                let old_font = SelectObject(hdc, HGDIOBJ(dim_font.0));
+                let mut calc_r = RECT::default();
+                let _ = DrawTextW(hdc, &mut dim_u16, &mut calc_r, DT_CALCRECT);
+                let badge_w = calc_r.right - calc_r.left + 16;
+                let badge_h = 22;
+                let badge_x = x;
+                let badge_y = if y >= badge_h + 6 {
+                    y - badge_h - 4
+                } else {
+                    y + rh + 4
+                };
+                let bg_brush = CreateSolidBrush(rgb(0, 140, 230));
+                let badge_rect = RECT {
+                    left: badge_x,
+                    top: badge_y,
+                    right: badge_x + badge_w,
+                    bottom: badge_y + badge_h,
+                };
+                let _ = FillRect(hdc, &badge_rect, bg_brush);
+                let _ = SetBkMode(hdc, TRANSPARENT);
+                let _ = SetTextColor(hdc, rgb(255, 255, 255));
+                let mut text_rect = RECT {
+                    left: badge_x + 8,
+                    top: badge_y + 2,
+                    right: badge_x + badge_w - 8,
+                    bottom: badge_y + badge_h - 2,
+                };
+                let _ = DrawTextW(hdc, &mut dim_u16, &mut text_rect, DT_SINGLELINE | DT_VCENTER);
+                SelectObject(hdc, old_font);
+                let _ = DeleteObject(HGDIOBJ(dim_font.0));
+                let _ = DeleteObject(HGDIOBJ(bg_brush.0));
+            }
+        }
+    } else {
+        let mut pixmap = Pixmap::new(state.width as u32, state.height as u32)
+            .ok_or_else(|| anyhow::anyhow!("Failed to create tiny-skia Pixmap"))?;
+
+        // 1. Draw the screenshot onto the pixmap
+        pixmap.data_mut().copy_from_slice(&state.capture_frame.rgba);
+
+        // 2. Draw a dark overlay over the whole screen when the capture flow asks for it.
+        let should_dim_background = !matches!(
+            state.mode,
+            NativeCaptureMode::PointClick {
+                dim_background: false,
+                ..
+            }
+        );
+        if should_dim_background {
+            let mut paint = Paint::default();
+            paint.set_color_rgba8(0, 0, 0, 128); // 50% opacity
+            let screen_rect =
+                Rect::from_xywh(0.0, 0.0, state.width as f32, state.height as f32).unwrap();
+            pixmap.fill_rect(screen_rect, &paint, tiny_skia::Transform::identity(), None);
+        }
+
+        // 3. Render specific overlay elements based on capture mode
+        match state.mode {
+            NativeCaptureMode::RegionSelect { .. } => {}
+            NativeCaptureMode::ProtractorCalibration { .. } => {
+                // Draw already-clicked points
+                let mut pt_paint = Paint::default();
+                pt_paint.set_color_rgba8(255, 50, 50, 255);
+                let mut stroke = Stroke::default();
+                stroke.width = 2.0;
+
+                let mut white_paint = Paint::default();
+                white_paint.set_color_rgba8(255, 255, 255, 255);
 
             for (idx, pt) in state.protractor_points.iter().enumerate() {
                 let rx = pt.0 - state.left;
@@ -1683,15 +1780,6 @@ unsafe fn draw_capture_to_dc(
             // Handled by early return above
         }
     }
-
-    let show_preview_panel = matches!(state.mode, NativeCaptureMode::PointClick { .. });
-    let show_cursor_tooltip = !matches!(state.mode, NativeCaptureMode::RegionSelect { .. });
-
-    // Draw coordinate & color magnifier preview panel
-    let mut center_color = (0u8, 0u8, 0u8, 255u8);
-    let mut panel_x = 0.0f32;
-    let mut panel_y = 0.0f32;
-    let mut preview_panel_visible = false;
 
     if show_preview_panel && let Some(curr) = state.current_point {
         preview_panel_visible = true;
@@ -1877,21 +1965,22 @@ unsafe fn draw_capture_to_dc(
         pixel.swap(0, 2);
     }
 
-    let _ = StretchDIBits(
-        hdc,
-        0,
-        0,
-        state.width,
-        state.height,
-        0,
-        0,
-        state.width,
-        state.height,
-        Some(bgra.as_ptr() as *const std::ffi::c_void),
-        &bmi,
-        DIB_RGB_COLORS,
-        SRCCOPY,
-    );
+        let _ = StretchDIBits(
+            hdc,
+            0,
+            0,
+            state.width,
+            state.height,
+            0,
+            0,
+            state.width,
+            state.height,
+            Some(bgra.as_ptr() as *const std::ffi::c_void),
+            &bmi,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+    }
 
     // 5. Draw status bar & instructions using GDI DrawTextW
     let status_text = match state.mode {
@@ -1902,44 +1991,57 @@ unsafe fn draw_capture_to_dc(
             distance_measure_status_text(state, ui_language)
         }
         NativeCaptureMode::RegionSelect {
-            is_template,
-            vietnamese,
+            kind,
+            ui_language,
         } => {
-            if vietnamese {
-                if is_template {
-                    crate::lang::translate(
-                        crate::model::UiLanguage::Vietnamese,
-                        "Drag on screen to pick an image template. Press Esc to cancel.",
-                    )
-                    .unwrap_or("Drag on screen to pick an image template. Press Esc to cancel.")
-                } else {
-                    crate::lang::translate(
-                        crate::model::UiLanguage::Vietnamese,
-                        "Drag on screen to pick the image search area. Press Esc to cancel.",
-                    )
-                    .unwrap_or("Drag on screen to pick the image search area. Press Esc to cancel.")
+            let is_vn = ui_language == crate::model::UiLanguage::Vietnamese;
+            match kind {
+                RegionSelectKind::Screenshot => {
+                    if is_vn {
+                        "Kéo chuột trên màn hình để chọn vùng chụp ảnh. Nhấn Esc để hủy."
+                    } else {
+                        "Drag on screen to select screenshot region. Press Esc to cancel."
+                    }
                 }
-            } else {
-                if is_template {
-                    "Drag on screen to pick an image template. Press Esc to cancel."
-                } else {
-                    "Drag on screen to pick the image search area. Press Esc to cancel."
+                RegionSelectKind::Ocr => {
+                    if is_vn {
+                        "Kéo chuột trên màn hình để chọn vùng nhận diện chữ. Nhấn Esc để hủy."
+                    } else {
+                        "Drag on screen to select OCR text region. Press Esc to cancel."
+                    }
+                }
+                RegionSelectKind::VideoRecord => {
+                    if is_vn {
+                        "Kéo chuột trên màn hình để chọn vùng quay video. Nhấn Esc để hủy."
+                    } else {
+                        "Drag on screen to select video recording region. Press Esc to cancel."
+                    }
+                }
+                RegionSelectKind::ImageTemplate => {
+                    if is_vn {
+                        "Kéo chuột trên màn hình để chọn mẫu ảnh. Nhấn Esc để hủy."
+                    } else {
+                        "Drag on screen to pick an image template. Press Esc to cancel."
+                    }
+                }
+                RegionSelectKind::ImageSearchArea => {
+                    if is_vn {
+                        "Kéo chuột trên màn hình để chọn vùng tìm kiếm hình ảnh. Nhấn Esc để hủy."
+                    } else {
+                        "Drag on screen to pick the image search area. Press Esc to cancel."
+                    }
                 }
             }
         }
-        NativeCaptureMode::PointClick { vietnamese, .. } => {
-            if vietnamese {
-                crate::lang::translate(
-                    crate::model::UiLanguage::Vietnamese,
-                    "Click a point on screen to capture. Press Esc to cancel.",
-                )
-                .unwrap_or("Click a point on screen to capture. Press Esc to cancel.")
+        NativeCaptureMode::PointClick { ui_language, .. } => {
+            if ui_language == crate::model::UiLanguage::Vietnamese {
+                "Nhấp vào một điểm trên màn hình để chọn. Nhấn Esc để hủy."
             } else {
                 "Click a point on screen to capture. Press Esc to cancel."
             }
         }
-        NativeCaptureMode::RegionAdjust { vietnamese, .. } => {
-            if vietnamese {
+        NativeCaptureMode::RegionAdjust { ui_language, .. } => {
+            if ui_language == crate::model::UiLanguage::Vietnamese {
                 "Kéo các viền hộp để thay đổi kích thước, kéo giữa để di chuyển. Nhấn Enter để xác nhận, Esc để hủy."
             } else {
                 "Drag borders to resize, center to move. Press Enter to confirm, Esc to cancel."
@@ -2144,9 +2246,15 @@ unsafe fn draw_capture_to_dc(
             NativeCaptureMode::DistanceMeasure { ui_language } => {
                 ui_language == crate::model::UiLanguage::Vietnamese
             }
-            NativeCaptureMode::RegionSelect { vietnamese, .. } => vietnamese,
-            NativeCaptureMode::PointClick { vietnamese, .. } => vietnamese,
-            NativeCaptureMode::RegionAdjust { vietnamese, .. } => vietnamese,
+            NativeCaptureMode::RegionSelect { ui_language, .. } => {
+                ui_language == crate::model::UiLanguage::Vietnamese
+            }
+            NativeCaptureMode::PointClick { ui_language, .. } => {
+                ui_language == crate::model::UiLanguage::Vietnamese
+            }
+            NativeCaptureMode::RegionAdjust { ui_language, .. } => {
+                ui_language == crate::model::UiLanguage::Vietnamese
+            }
         };
 
         // Create Hex Code Font (18px bold)
@@ -2260,136 +2368,4 @@ unsafe fn draw_capture_to_dc(
     Ok(())
 }
 
-unsafe fn draw_region_select_capture_to_dc(hdc: HDC, state: &CaptureState) -> anyhow::Result<()> {
-    let mut bmi = BITMAPINFO::default();
-    bmi.bmiHeader = BITMAPINFOHEADER {
-        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: state.width,
-        biHeight: -state.height,
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB.0,
-        ..Default::default()
-    };
 
-    let mut dimmed_bgra = state.dimmed_rgba.clone();
-
-    if let Some(rect) = region_select_rect(state) {
-        let select_w = rect.right - rect.left;
-        let select_h = rect.bottom - rect.top;
-        if select_w >= 2 && select_h >= 2 {
-            blit_rect(
-                &state.capture_frame.rgba,
-                state.width as usize,
-                &mut dimmed_bgra,
-                state.width as usize,
-                rect.left as usize,
-                rect.top as usize,
-                select_w as usize,
-                select_h as usize,
-            );
-        }
-    }
-
-    for pixel in dimmed_bgra.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
-
-    let _ = StretchDIBits(
-        hdc,
-        0,
-        0,
-        state.width,
-        state.height,
-        0,
-        0,
-        state.width,
-        state.height,
-        Some(dimmed_bgra.as_ptr() as *const std::ffi::c_void),
-        &bmi,
-        DIB_RGB_COLORS,
-        SRCCOPY,
-    );
-
-    if let Some(rect) = region_select_rect(state) {
-        let select_w = rect.right - rect.left;
-        let select_h = rect.bottom - rect.top;
-        if select_w >= 2 && select_h >= 2 {
-            let pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
-            let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
-            let _ = MoveToEx(hdc, rect.left, rect.top, None);
-            let _ = LineTo(hdc, rect.right, rect.top);
-            let _ = LineTo(hdc, rect.right, rect.bottom);
-            let _ = LineTo(hdc, rect.left, rect.bottom);
-            let _ = LineTo(hdc, rect.left, rect.top);
-            let _ = SelectObject(hdc, old_pen);
-            let _ = DeleteObject(HGDIOBJ(pen.0));
-        }
-    }
-
-    let status_text = "Drag on screen to capture a region with your drawing. Press Esc to cancel.";
-    let font = CreateFontW(
-        22,
-        0,
-        0,
-        0,
-        FW_BOLD.0 as i32,
-        0,
-        0,
-        0,
-        FONT_CHARSET(0),
-        FONT_OUTPUT_PRECISION(0),
-        FONT_CLIP_PRECISION(0),
-        FONT_QUALITY(0),
-        0,
-        w!("Segoe UI"),
-    );
-    let old_font = SelectObject(hdc, HGDIOBJ(font.0));
-    let _ = SetBkMode(hdc, TRANSPARENT);
-    let _ = SetTextColor(hdc, rgb(255, 255, 255));
-
-    let mut text_u16: Vec<u16> = status_text.encode_utf16().collect();
-    let mut calc_rect = RECT::default();
-    let _ = DrawTextW(hdc, &mut text_u16, &mut calc_rect, DT_CALCRECT);
-    let text_w = calc_rect.right - calc_rect.left;
-    let text_h = calc_rect.bottom - calc_rect.top;
-    let pill_w = text_w + 48;
-    let pill_h = text_h + 16;
-    let pill_x = (state.width - pill_w) / 2;
-    let pill_y = 40;
-
-    let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
-    let pen = CreatePen(PS_SOLID, 1, rgb(110, 156, 210));
-    let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
-    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
-    let _ = windows::Win32::Graphics::Gdi::RoundRect(
-        hdc,
-        pill_x,
-        pill_y,
-        pill_x + pill_w,
-        pill_y + pill_h,
-        18,
-        18,
-    );
-    let mut text_rect = RECT {
-        left: pill_x,
-        top: pill_y,
-        right: pill_x + pill_w,
-        bottom: pill_y + pill_h,
-    };
-    let _ = DrawTextW(
-        hdc,
-        &mut text_u16,
-        &mut text_rect,
-        DT_CENTER | DT_SINGLELINE | DT_VCENTER,
-    );
-
-    let _ = SelectObject(hdc, old_brush);
-    let _ = SelectObject(hdc, old_pen);
-    let _ = SelectObject(hdc, old_font);
-    let _ = DeleteObject(HGDIOBJ(brush.0));
-    let _ = DeleteObject(HGDIOBJ(pen.0));
-    let _ = DeleteObject(HGDIOBJ(font.0));
-
-    Ok(())
-}
