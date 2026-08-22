@@ -5036,8 +5036,16 @@ mod windows_overlay {
                         && hotkey::binding_matches(&trigger, &binding)
                     {
                         if is_key_down && !is_repeat_key(&key_name) {
-                            send_ui_command(UiCommand::TriggerInstantOcr);
-                            request_ui_repaint();
+                            let lang = ocr_lang.clone();
+                            let hotkey_trigger = trigger.clone();
+                            let ui_lang = PROTRACTOR_STATE.lock().ui_language;
+                            std::thread::spawn(move || {
+                                native_capture::run_native_ocr_capture_overlay(
+                                    Some(hotkey_trigger),
+                                    lang,
+                                    ui_lang,
+                                );
+                            });
                             update_held_key(info.vkCode, is_key_down, is_key_up);
                             update_modifier_state(info.vkCode, is_key_down);
                             return LRESULT(1);
@@ -12371,6 +12379,7 @@ mod windows_overlay {
             let mode = native_capture::NativeCaptureMode::RegionSelect {
                 kind: native_capture::RegionSelectKind::Screenshot,
                 ui_language,
+                hold_hotkey: None,
             };
             let result = native_capture::run_capture_overlay(
                 capture.clone(),
@@ -13294,18 +13303,10 @@ mod windows_overlay {
 
     fn begin_screen_draw_capture_from_trigger(trigger: HotkeyBinding) {
         screen_draw_debug_log(format!("begin_capture key={}", trigger.key));
-        let mut session_id = None;
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            session_id = begin_screen_draw_capture_session(&mut state, Some(trigger.clone()));
-        }
-        let Some(session_id) = session_id else {
-            return;
-        };
-
-        reset_screen_draw_capture_overlay_state();
-        request_screen_draw_overlay_sync();
-        begin_screen_draw_region_capture(ScreenDrawCaptureMode::HoldTrigger(trigger), session_id);
+        let ui_lang = PROTRACTOR_STATE.lock().ui_language;
+        std::thread::spawn(move || {
+            native_capture::run_native_screenshot_capture_overlay(Some(trigger), ui_lang);
+        });
     }
 
     fn begin_video_region_capture(mode: ScreenDrawCaptureMode) -> bool {
@@ -26878,6 +26879,10 @@ mod windows_overlay {
     fn force_refresh_search_area_overlay() {
         SEARCH_AREA_OVERLAY_REFRESH_PENDING.store(false, Ordering::Release);
         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+    }
+
+    pub fn current_ui_language() -> crate::model::UiLanguage {
+        PROTRACTOR_STATE.lock().ui_language
     }
 
     pub fn send_ui_command(command: UiCommand) {
@@ -41462,6 +41467,9 @@ mod fallback {
         _message: String,
         _is_error: bool,
     ) {}
+    pub fn current_ui_language() -> crate::model::UiLanguage {
+        crate::model::UiLanguage::English
+    }
     pub fn send_ui_command(_command: UiCommand) {}
 }
 

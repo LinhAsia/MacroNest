@@ -1293,6 +1293,7 @@ impl CrosshairApp {
                             crate::overlay::native_capture::RegionSelectKind::ImageSearchArea
                         },
                         ui_language,
+                        hold_hotkey: None,
                     }
                 };
 

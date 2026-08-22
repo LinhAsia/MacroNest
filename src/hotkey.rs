@@ -397,6 +397,30 @@ pub fn to_windows_registration(
 }
 
 #[cfg(windows)]
+pub fn binding_is_down(binding: &HotkeyBinding) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    let keys = binding_key_names(binding);
+    if keys.is_empty() {
+        return false;
+    }
+    for key in keys {
+        if let Some(vk) = key_name_to_vk(&key) {
+            if (unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000) == 0 {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(not(windows))]
+pub fn binding_is_down(_binding: &HotkeyBinding) -> bool {
+    false
+}
+
+#[cfg(windows)]
 pub fn key_name_to_vk(name: &str) -> Option<u32> {
     Some(match name.to_ascii_uppercase().as_str() {
         "MOUSELEFT" | "LEFTBUTTON" | "LBUTTON" | "MOUSE LEFT" => 0x01,

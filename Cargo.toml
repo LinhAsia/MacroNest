@@ -108,10 +108,11 @@ resvg = "0.45"
 tiny-skia = "0.11"
 
 [profile.release]
-opt-level = "z"
-lto = "thin"
-codegen-units = 16
+opt-level = 2
+lto = false
+codegen-units = 256
 debug = 0
-strip = "symbols"
+strip = false
 panic = "unwind"
+
 

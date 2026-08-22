@@ -760,10 +760,14 @@ pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -
                 && !BUSY.load(Ordering::Acquire)
             {
                 REGION_CAPTURE_ACTIVE.store(true, Ordering::Release);
-                crate::overlay::send_ui_command(
-                    crate::overlay::UiCommand::TriggerVideoRecordRegionSelect,
-                );
-                crate::overlay::request_ui_repaint();
+                let hotkey_trigger = trigger.clone();
+                let ui_lang = crate::overlay::current_ui_language();
+                thread::spawn(move || {
+                    crate::overlay::native_capture::run_native_video_record_region_overlay(
+                        Some(hotkey_trigger),
+                        ui_lang,
+                    );
+                });
             }
         });
     } else {

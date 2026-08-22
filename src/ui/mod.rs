@@ -15236,6 +15236,7 @@ impl CrosshairApp {
                 let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
                     kind: crate::overlay::native_capture::RegionSelectKind::Screenshot,
                     ui_language,
+                    hold_hotkey: None,
                 };
                 crate::overlay::native_capture::run_capture_overlay(
                     capture,
@@ -15342,6 +15343,7 @@ impl CrosshairApp {
                 let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
                     kind: crate::overlay::native_capture::RegionSelectKind::Ocr,
                     ui_language,
+                    hold_hotkey: None,
                 };
                 crate::overlay::native_capture::run_capture_overlay(
                     capture,
@@ -15479,6 +15481,7 @@ impl CrosshairApp {
                 let mode = crate::overlay::native_capture::NativeCaptureMode::RegionSelect {
                     kind: crate::overlay::native_capture::RegionSelectKind::VideoRecord,
                     ui_language,
+                    hold_hotkey: None,
                 };
                 crate::overlay::native_capture::run_capture_overlay(
                     capture,

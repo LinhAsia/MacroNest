@@ -16,12 +16,12 @@ use windows::Win32::{
         CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
         DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW, HCURSOR,
         HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE,
-        IDC_SIZEWE, IMAGE_CURSOR, LR_SHARED, LoadCursorW, LoadImageW, MSG, PostMessageW,
+        IDC_SIZEWE, IMAGE_CURSOR, KillTimer, LR_SHARED, LoadCursorW, LoadImageW, MSG, PostMessageW,
         PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL, SWP_NOACTIVATE,
-        SWP_SHOWWINDOW, SetCursor, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
+        SWP_SHOWWINDOW, SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
         WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE, WM_DESTROY, WM_KEYDOWN,
-        WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT, WM_RBUTTONUP,
-        WM_SETCURSOR, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT, WM_RBUTTONUP,
+        WM_SETCURSOR, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
     },
 };
 use windows::core::w;
@@ -41,7 +41,7 @@ pub enum RegionSelectKind {
     VideoRecord,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NativeCaptureMode {
     ProtractorCalibration {
         ui_language: crate::model::UiLanguage,
@@ -52,6 +52,7 @@ pub enum NativeCaptureMode {
     RegionSelect {
         kind: RegionSelectKind,
         ui_language: crate::model::UiLanguage,
+        hold_hotkey: Option<crate::model::HotkeyBinding>,
     },
     PointClick {
         ui_language: crate::model::UiLanguage,
@@ -171,6 +172,22 @@ impl CaptureState {
 
         let render_bgra = dimmed_bgra.clone();
 
+        let (start_point, current_point) = if let NativeCaptureMode::RegionSelect {
+            hold_hotkey: Some(_),
+            ..
+        } = &mode
+        {
+            let mut pt = POINT::default();
+            if unsafe { GetCursorPos(&mut pt).is_ok() } {
+                let p = (pt.x - left, pt.y - top);
+                (Some(p), Some(p))
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
         Self {
             capture_frame,
             original_bgra,
@@ -181,8 +198,8 @@ impl CaptureState {
             width,
             height,
             mode,
-            start_point: None,
-            current_point: None,
+            start_point,
+            current_point,
             protractor_points: Vec::new(),
             adjust_rect,
             adjust_drag: None,
@@ -396,7 +413,91 @@ unsafe extern "system" fn capture_wnd_proc(
             SetWindowLongPtrW(hwnd, WINDOW_LONG_PTR_INDEX(GWLP_USERDATA.0), state as isize);
             LRESULT(1)
         }
-        WM_CREATE => LRESULT(0),
+        WM_CREATE => {
+            let state = get_state(hwnd);
+            if let Some(state) = state
+                && matches!(state.mode, NativeCaptureMode::RegionSelect { hold_hotkey: Some(_), .. })
+            {
+                let _ = SetTimer(Some(hwnd), 1, 10, None);
+            }
+            LRESULT(0)
+        }
+        WM_TIMER => {
+            let state = get_state(hwnd);
+            if let Some(state) = state {
+                if let NativeCaptureMode::RegionSelect { hold_hotkey: Some(ref trigger), .. } = state.mode {
+                    if !crate::hotkey::binding_is_down(trigger) {
+                        let _ = KillTimer(Some(hwnd), 1);
+                        if let Some(start) = state.start_point {
+                            let mut pt = POINT::default();
+                            let (rx, ry) = if GetCursorPos(&mut pt).is_ok() {
+                                (pt.x - state.left, pt.y - state.top)
+                            } else if let Some(cur) = state.current_point {
+                                cur
+                            } else {
+                                start
+                            };
+                            let x1 = start.0;
+                            let y1 = start.1;
+                            let x2 = rx;
+                            let y2 = ry;
+                            let fx = x1.min(x2) + state.left;
+                            let fy = y1.min(y2) + state.top;
+                            let fw = (x1 - x2).abs();
+                            let fh = (y1 - y2).abs();
+                            if fw >= 2 && fh >= 2 {
+                                state.result = NativeCaptureResult::SelectedRegion {
+                                    x: fx,
+                                    y: fy,
+                                    width: fw,
+                                    height: fh,
+                                };
+                            }
+                        }
+                        let _ = DestroyWindow(hwnd);
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+        WM_KEYUP | WM_SYSKEYUP => {
+            let state = get_state(hwnd);
+            if let Some(state) = state {
+                if let NativeCaptureMode::RegionSelect { hold_hotkey: Some(ref trigger), .. } = state.mode {
+                    if !crate::hotkey::binding_is_down(trigger) {
+                        let _ = KillTimer(Some(hwnd), 1);
+                        if let Some(start) = state.start_point {
+                            let mut pt = POINT::default();
+                            let (rx, ry) = if GetCursorPos(&mut pt).is_ok() {
+                                (pt.x - state.left, pt.y - state.top)
+                            } else if let Some(cur) = state.current_point {
+                                cur
+                            } else {
+                                start
+                            };
+                            let x1 = start.0;
+                            let y1 = start.1;
+                            let x2 = rx;
+                            let y2 = ry;
+                            let fx = x1.min(x2) + state.left;
+                            let fy = y1.min(y2) + state.top;
+                            let fw = (x1 - x2).abs();
+                            let fh = (y1 - y2).abs();
+                            if fw >= 2 && fh >= 2 {
+                                state.result = NativeCaptureResult::SelectedRegion {
+                                    x: fx,
+                                    y: fy,
+                                    width: fw,
+                                    height: fh,
+                                };
+                            }
+                        }
+                        let _ = DestroyWindow(hwnd);
+                    }
+                }
+            }
+            LRESULT(0)
+        }
         WM_SETCURSOR => {
             if let Some(state) = get_state(hwnd)
                 && matches!(state.mode, NativeCaptureMode::PointClick { .. })
@@ -1993,6 +2094,7 @@ unsafe fn draw_capture_to_dc(
         NativeCaptureMode::RegionSelect {
             kind,
             ui_language,
+            ..
         } => {
             let is_vn = ui_language == crate::model::UiLanguage::Vietnamese;
             match kind {
@@ -2370,6 +2472,190 @@ unsafe fn draw_capture_to_dc(
     let _ = DeleteObject(HGDIOBJ(font.0));
 
     Ok(())
+}
+
+pub fn run_native_ocr_capture_overlay(
+    trigger: Option<crate::model::HotkeyBinding>,
+    ocr_lang: String,
+    ui_language: crate::model::UiLanguage,
+) {
+    let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+    let result = if let Some(capture) =
+        crate::window_list::capture_virtual_screen_region(left, top, width, height)
+    {
+        let mode = NativeCaptureMode::RegionSelect {
+            kind: RegionSelectKind::Ocr,
+            ui_language,
+            hold_hotkey: trigger,
+        };
+        run_capture_overlay(capture, left, top, width, height, mode)
+    } else {
+        NativeCaptureResult::Cancelled
+    };
+
+    if let NativeCaptureResult::SelectedRegion {
+        x,
+        y,
+        width: w,
+        height: h,
+    } = result
+    {
+        if w >= 4 && h >= 4 {
+            if let Some(region_frame) =
+                crate::window_list::capture_virtual_screen_region(x, y, w, h)
+            {
+                let rect = Some(windows::Win32::Foundation::RECT {
+                    left: x,
+                    top: y,
+                    right: x + w,
+                    bottom: y + h,
+                });
+                let ocr_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::ocr::perform_ocr(
+                        &region_frame.rgba,
+                        region_frame.width as u32,
+                        region_frame.height as u32,
+                        &ocr_lang,
+                    )
+                }));
+
+                match ocr_res {
+                    Ok(Ok(ocr_result)) => {
+                        let trimmed = ocr_result.text.trim();
+                        if !trimmed.is_empty() {
+                            let text_to_copy = trimmed.to_owned();
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(text_to_copy.clone());
+                                }
+                            }));
+                            let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                                format!(
+                                    "✓ Đã sao chép: \"{}\"",
+                                    text_to_copy.chars().take(40).collect::<String>()
+                                )
+                            } else {
+                                format!(
+                                    "✓ Copied: \"{}\"",
+                                    text_to_copy.chars().take(40).collect::<String>()
+                                )
+                            };
+                            crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, false);
+                        } else {
+                            let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                                "⚠ Không nhận diện được văn bản".to_owned()
+                            } else {
+                                "⚠ No text recognized".to_owned()
+                            };
+                            crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, true);
+                        }
+                    }
+                    _ => {
+                        let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                            "⚠ Lỗi nhận diện chữ".to_owned()
+                        } else {
+                            "⚠ OCR recognition failed".to_owned()
+                        };
+                        crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, true);
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub fn run_native_video_record_region_overlay(
+    trigger: Option<crate::model::HotkeyBinding>,
+    ui_language: crate::model::UiLanguage,
+) {
+    let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+    let result = if let Some(capture) =
+        crate::window_list::capture_virtual_screen_region(left, top, width, height)
+    {
+        let mode = NativeCaptureMode::RegionSelect {
+            kind: RegionSelectKind::VideoRecord,
+            ui_language,
+            hold_hotkey: trigger,
+        };
+        run_capture_overlay(capture, left, top, width, height, mode)
+    } else {
+        NativeCaptureResult::Cancelled
+    };
+
+    if let NativeCaptureResult::SelectedRegion {
+        x,
+        y,
+        width: w,
+        height: h,
+    } = result
+    {
+        if w >= 4 && h >= 4 {
+            crate::overlay::send_ui_command(
+                crate::overlay::UiCommand::VideoRecordRegionSelected {
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                },
+            );
+            crate::overlay::request_ui_repaint();
+        }
+    }
+}
+
+pub fn run_native_screenshot_capture_overlay(
+    trigger: Option<crate::model::HotkeyBinding>,
+    ui_language: crate::model::UiLanguage,
+) {
+    let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+    let result = if let Some(capture) =
+        crate::window_list::capture_virtual_screen_region(left, top, width, height)
+    {
+        let mode = NativeCaptureMode::RegionSelect {
+            kind: RegionSelectKind::Screenshot,
+            ui_language,
+            hold_hotkey: trigger,
+        };
+        run_capture_overlay(capture, left, top, width, height, mode)
+    } else {
+        NativeCaptureResult::Cancelled
+    };
+
+    if let NativeCaptureResult::SelectedRegion {
+        x,
+        y,
+        width: w,
+        height: h,
+    } = result
+    {
+        if w >= 4 && h >= 4 {
+            if let Some(region_frame) =
+                crate::window_list::capture_virtual_screen_region(x, y, w, h)
+            {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_image(arboard::ImageData {
+                            width: region_frame.width,
+                            height: region_frame.height,
+                            bytes: std::borrow::Cow::Owned(region_frame.rgba),
+                        });
+                    }
+                }));
+                let rect = Some(windows::Win32::Foundation::RECT {
+                    left: x,
+                    top: y,
+                    right: x + w,
+                    bottom: y + h,
+                });
+                let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
+                    "✓ Đã chụp ảnh màn hình và sao chép vào bộ nhớ tạm".to_owned()
+                } else {
+                    "✓ Screenshot copied to clipboard".to_owned()
+                };
+                crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, false);
+            }
+        }
+    }
 }
 
 
