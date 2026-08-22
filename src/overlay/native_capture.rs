@@ -2070,7 +2070,11 @@ unsafe fn draw_capture_to_dc(
     let _ = SetBkMode(hdc, TRANSPARENT);
     let _ = SetTextColor(hdc, rgb(255, 255, 255));
 
-    if !matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
+    let hide_status_pill = matches!(state.mode, NativeCaptureMode::PointClick { .. })
+        || (matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) && state.start_point.is_some())
+        || (matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) && state.adjust_drag.is_some());
+
+    if !hide_status_pill {
         let mut text_u16: Vec<u16> = status_text.encode_utf16().collect();
         let mut calc_rect = RECT::default();
         let _ = DrawTextW(hdc, &mut text_u16, &mut calc_rect, DT_CALCRECT);
