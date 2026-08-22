@@ -159,6 +159,12 @@ pub fn set_config(config: VideoRecorderConfig) {
     *CONFIG.lock() = config;
 }
 
+pub fn set_region(region: Option<(i32, i32, i32, i32)>) {
+    let mut config = CONFIG.lock();
+    config.region = region;
+    config.mode = QuickVideoRecordMode::Region;
+}
+
 fn prepare_hardware_encoding_async(ffmpeg_exe: &Path) {
     if !ffmpeg_exe.exists() {
         return;

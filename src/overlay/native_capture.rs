@@ -1637,56 +1637,6 @@ unsafe fn draw_capture_to_dc(
                 SelectObject(hdc, old_pen);
                 SelectObject(hdc, old_brush);
                 let _ = DeleteObject(HGDIOBJ(border_pen.0));
-
-                let dim_text = format!("{rw} × {rh}");
-                let mut dim_u16: Vec<u16> = dim_text.encode_utf16().collect();
-                let dim_font = CreateFontW(
-                    14,
-                    0,
-                    0,
-                    0,
-                    FW_BOLD.0 as i32,
-                    0,
-                    0,
-                    0,
-                    FONT_CHARSET(0),
-                    FONT_OUTPUT_PRECISION(0),
-                    FONT_CLIP_PRECISION(0),
-                    FONT_QUALITY(0),
-                    0,
-                    w!("Segoe UI"),
-                );
-                let old_font = SelectObject(hdc, HGDIOBJ(dim_font.0));
-                let mut calc_r = RECT::default();
-                let _ = DrawTextW(hdc, &mut dim_u16, &mut calc_r, DT_CALCRECT);
-                let badge_w = calc_r.right - calc_r.left + 16;
-                let badge_h = 22;
-                let badge_x = x;
-                let badge_y = if y >= badge_h + 6 {
-                    y - badge_h - 4
-                } else {
-                    y + rh + 4
-                };
-                let bg_brush = CreateSolidBrush(rgb(0, 140, 230));
-                let badge_rect = RECT {
-                    left: badge_x,
-                    top: badge_y,
-                    right: badge_x + badge_w,
-                    bottom: badge_y + badge_h,
-                };
-                let _ = FillRect(hdc, &badge_rect, bg_brush);
-                let _ = SetBkMode(hdc, TRANSPARENT);
-                let _ = SetTextColor(hdc, rgb(255, 255, 255));
-                let mut text_rect = RECT {
-                    left: badge_x + 8,
-                    top: badge_y + 2,
-                    right: badge_x + badge_w - 8,
-                    bottom: badge_y + badge_h - 2,
-                };
-                let _ = DrawTextW(hdc, &mut dim_u16, &mut text_rect, DT_SINGLELINE | DT_VCENTER);
-                SelectObject(hdc, old_font);
-                let _ = DeleteObject(HGDIOBJ(dim_font.0));
-                let _ = DeleteObject(HGDIOBJ(bg_brush.0));
             }
         }
     } else {
@@ -2612,6 +2562,7 @@ pub fn run_native_video_record_region_overlay(
     } = result
     {
         if w >= 4 && h >= 4 {
+            crate::video_recorder::set_region(Some((x, y, w, h)));
             crate::overlay::send_ui_command(
                 crate::overlay::UiCommand::VideoRecordRegionSelected {
                     x,
@@ -2620,6 +2571,9 @@ pub fn run_native_video_record_region_overlay(
                     height: h,
                 },
             );
+            if !crate::video_recorder::is_recording() && !crate::video_recorder::is_busy() {
+                crate::video_recorder::toggle_async();
+            }
             crate::overlay::request_ui_repaint();
         }
     }

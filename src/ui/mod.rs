@@ -16081,6 +16081,9 @@ impl eframe::App for CrosshairApp {
                     self.state.quick_video_record_mode = QuickVideoRecordMode::Region;
                     self.sync_quick_video_record_config();
                     self.persist();
+                    if !crate::video_recorder::is_recording() && !crate::video_recorder::is_busy() {
+                        crate::video_recorder::toggle_async();
+                    }
                     self.status = format!(
                         "Video recording region set to {}x{} at {}, {}.",
                         width, height, x, y
