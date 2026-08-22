@@ -12315,36 +12315,43 @@ mod windows_overlay {
     }
 
     fn start_native_screen_draw_region_capture() {
-        let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
-        if screen_w <= 0 || screen_h <= 0 {
-            return;
-        }
-
-        let mut capture = match window_list::capture_virtual_screen_region(
-            screen_x, screen_y, screen_w, screen_h,
-        ) {
-            Some(c) => c,
-            None => return,
-        };
-
-        let _ = blend_screen_draw_capture_region_onto_capture(
-            &mut capture.rgba,
-            screen_x,
-            screen_y,
-            screen_w,
-            screen_h,
-        );
-
-        let screen_draw_hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
-        #[cfg(windows)]
-        unsafe {
-            if screen_draw_hwnd_raw != 0 {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
-                let _ = ShowWindow(HWND(screen_draw_hwnd_raw as *mut std::ffi::c_void), SW_HIDE);
-            }
-        }
-
         thread::spawn(move || {
+            let is_down = |vk: i32| unsafe {
+                (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk) as u16 & 0x8000) != 0
+            };
+            while is_down(0x01) {
+                thread::sleep(Duration::from_millis(5));
+            }
+            thread::sleep(Duration::from_millis(40));
+
+            let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
+            if screen_w <= 0 || screen_h <= 0 {
+                return;
+            }
+
+            let mut capture = match window_list::capture_virtual_screen_region(
+                screen_x, screen_y, screen_w, screen_h,
+            ) {
+                Some(c) => c,
+                None => return,
+            };
+
+            let _ = blend_screen_draw_capture_region_onto_capture(
+                &mut capture.rgba,
+                screen_x,
+                screen_y,
+                screen_w,
+                screen_h,
+            );
+
+            let screen_draw_hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
+            #[cfg(windows)]
+            unsafe {
+                if screen_draw_hwnd_raw != 0 {
+                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                    let _ = ShowWindow(HWND(screen_draw_hwnd_raw as *mut std::ffi::c_void), SW_HIDE);
+                }
+            }
             let mode = native_capture::NativeCaptureMode::RegionSelect {
                 is_template: false,
                 vietnamese: true,
@@ -12637,15 +12644,17 @@ mod windows_overlay {
         let should_restore_ui = state.restore_ui_on_deactivate;
         state.restore_ui_on_deactivate = false;
         if should_restore_ui {
-            #[cfg(windows)]
-            unsafe {
-                if let Some(hwnd) = find_app_ui_window() {
-                    use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNORMAL, SetForegroundWindow, ShowWindow};
-                    let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-                    let _ = SetForegroundWindow(hwnd);
+            std::thread::spawn(|| {
+                #[cfg(windows)]
+                unsafe {
+                    if let Some(hwnd) = find_app_ui_window() {
+                        use windows::Win32::UI::WindowsAndMessaging::{SW_SHOWNORMAL, SetForegroundWindow, ShowWindow};
+                        let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                        let _ = SetForegroundWindow(hwnd);
+                    }
                 }
-            }
-            send_ui_command(UiCommand::ShowWindow);
+                send_ui_command(UiCommand::ShowWindow);
+            });
         }
         if let Some(command) = crosshair_draw_finished {
             send_ui_command(UiCommand::UpdateScreenDrawConfig {
