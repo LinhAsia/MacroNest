@@ -428,8 +428,24 @@ unsafe extern "system" fn capture_wnd_proc(
             let state = get_state(hwnd);
             if let Some(state) = state {
                 if let NativeCaptureMode::RegionSelect { hold_hotkey: Some(ref trigger), .. } = state.mode {
-                    if state.created_at.elapsed() >= std::time::Duration::from_millis(80)
-                        && !crate::hotkey::binding_is_down(trigger)
+                    let mut pt = POINT::default();
+                    if GetCursorPos(&mut pt).is_ok() {
+                        let rx = pt.x - state.left;
+                        let ry = pt.y - state.top;
+                        if state.current_point != Some((rx, ry)) {
+                            let previous_rect = region_select_rect(state);
+                            state.current_point = Some((rx, ry));
+                            let next_rect = region_select_rect(state);
+                            if let Some(dirty) = union_selection_dirty_rect(previous_rect, next_rect) {
+                                InvalidateRect(hwnd, Some(&dirty), false);
+                            } else {
+                                InvalidateRect(hwnd, None, false);
+                            }
+                        }
+                    }
+
+                    if state.created_at.elapsed() >= std::time::Duration::from_millis(50)
+                        && !crate::overlay::screen_draw_trigger_binding_is_down(trigger)
                     {
                         let _ = KillTimer(Some(hwnd), 1);
                         if let Some(start) = state.start_point {
@@ -468,8 +484,8 @@ unsafe extern "system" fn capture_wnd_proc(
             let state = get_state(hwnd);
             if let Some(state) = state {
                 if let NativeCaptureMode::RegionSelect { hold_hotkey: Some(ref trigger), .. } = state.mode {
-                    if state.created_at.elapsed() >= std::time::Duration::from_millis(80)
-                        && !crate::hotkey::binding_is_down(trigger)
+                    if state.created_at.elapsed() >= std::time::Duration::from_millis(50)
+                        && !crate::overlay::screen_draw_trigger_binding_is_down(trigger)
                     {
                         let _ = KillTimer(Some(hwnd), 1);
                         if let Some(start) = state.start_point {

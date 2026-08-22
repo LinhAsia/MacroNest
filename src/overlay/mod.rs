@@ -14165,7 +14165,7 @@ mod windows_overlay {
         hook_state_key_is_down_or_async(hook_state, key_name)
     }
 
-    fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
+    pub(crate) fn screen_draw_trigger_binding_is_down(trigger: &HotkeyBinding) -> bool {
         let keys = hotkey::binding_key_names(trigger);
         if keys.is_empty() {
             return false;
