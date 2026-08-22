@@ -108,11 +108,11 @@ resvg = "0.45"
 tiny-skia = "0.11"
 
 [profile.release]
-opt-level = 2
-lto = false
-codegen-units = 256
+opt-level = 3
+lto = "fat"
+codegen-units = 1
 debug = 0
-strip = false
+strip = true
 panic = "unwind"
 
 
