@@ -18,8 +18,11 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use windows::Win32::{
     Foundation::{HWND, RECT},
-    Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect},
-    UI::WindowsAndMessaging::{GetForegroundWindow, IsWindow},
+    Graphics::{
+        Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
+        Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect},
+    },
+    UI::WindowsAndMessaging::{GetForegroundWindow, IsIconic, IsWindow},
 };
 
 use crate::{
@@ -746,22 +749,28 @@ pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -
         if is_repeat || HOTKEY_DOWN.swap(true, Ordering::AcqRel) {
             return true;
         }
-        REGION_CAPTURE_ACTIVE.store(false, Ordering::Release);
         PRESS_HANDLED_ON_DOWN.store(false, Ordering::Release);
         if ACTIVE.load(Ordering::Acquire) || BUSY.load(Ordering::Acquire) {
             PRESS_HANDLED_ON_DOWN.store(true, Ordering::Release);
             toggle_async();
             return true;
         }
+        let press_id = HOTKEY_PRESS_ID.fetch_add(1, Ordering::AcqRel) + 1;
         let trigger = binding.clone();
-        REGION_CAPTURE_ACTIVE.store(true, Ordering::Release);
-        let hotkey_trigger = trigger.clone();
         let ui_lang = crate::overlay::current_ui_language();
         thread::spawn(move || {
-            crate::overlay::native_capture::run_native_video_record_region_overlay(
-                Some(hotkey_trigger),
-                ui_lang,
-            );
+            thread::sleep(Duration::from_millis(250));
+            if HOTKEY_DOWN.load(Ordering::Acquire)
+                && HOTKEY_PRESS_ID.load(Ordering::Acquire) == press_id
+                && !ACTIVE.load(Ordering::Acquire)
+                && !BUSY.load(Ordering::Acquire)
+            {
+                REGION_CAPTURE_ACTIVE.store(true, Ordering::Release);
+                crate::overlay::native_capture::run_native_video_record_region_overlay(
+                    Some(trigger),
+                    ui_lang,
+                );
+            }
         });
     } else {
         let was_down = HOTKEY_DOWN.swap(false, Ordering::AcqRel);
@@ -1422,25 +1431,28 @@ fn window_source(hwnd: HWND, fps: u32) -> Result<(String, Option<RECT>), String>
     if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
         return Err("The selected window is no longer available.".to_owned());
     }
+    if unsafe { IsIconic(hwnd).as_bool() } {
+        return Err("The selected window is minimized. Please restore it before recording.".to_owned());
+    }
     let mut rect = RECT::default();
-    let border_rect =
-        if unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) }
-            .is_ok()
-        {
-            let width = rect.right - rect.left;
-            let height = rect.bottom - rect.top;
-            if width > 20 && height > 20 {
-                Some(rect)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-    Ok((
-        format!("gdigrab:-framerate={fps}|-i=hwnd=0x{:x}", hwnd.0 as usize),
-        border_rect,
-    ))
+    let dwm_ok = unsafe {
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut _ as *mut _,
+            std::mem::size_of::<RECT>() as u32,
+        )
+        .is_ok()
+    };
+    if !dwm_ok {
+        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) };
+    }
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    if width < 10 || height < 10 {
+        return Err("The selected window has invalid bounds or is hidden.".to_owned());
+    }
+    region_source(rect, fps)
 }
 
 fn region_source(mut region: RECT, fps: u32) -> Result<(String, Option<RECT>), String> {
@@ -1481,10 +1493,12 @@ fn region_source(mut region: RECT, fps: u32) -> Result<(String, Option<RECT>), S
 }
 
 fn selector_hwnd(selector: &str) -> Option<HWND> {
-    let marker = selector.rfind("(0x")?;
-    let hex = selector.get(marker + 3..selector.len().checked_sub(1)?)?;
-    let raw = usize::from_str_radix(hex, 16).ok()?;
-    Some(HWND(raw as *mut _))
+    crate::window_list::find_window_handle(Some(selector)).or_else(|| {
+        let marker = selector.rfind("(0x")?;
+        let hex = selector.get(marker + 3..selector.len().checked_sub(1)?)?;
+        let raw = usize::from_str_radix(hex, 16).ok()?;
+        Some(HWND(raw as *mut _))
+    })
 }
 
 fn unique_output_path(dir: &Path, stem: &str) -> PathBuf {

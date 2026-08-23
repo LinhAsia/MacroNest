@@ -334,7 +334,7 @@ mod windows_impl {
         true.into()
     }
 
-    fn find_window_handle(title: Option<&str>) -> Option<HWND> {
+    pub(crate) fn find_window_handle(title: Option<&str>) -> Option<HWND> {
         match title {
             Some(selector) => find_window_by_candidate_chain(selector, false),
             None => current_foreground_window(),
