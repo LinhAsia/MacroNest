@@ -171,7 +171,7 @@ impl EspGpuRenderer {
             }
             self.d2d.EndDraw(None, None).context("Direct2D EndDraw")?;
             self.swap_chain
-                .Present(1, DXGI_PRESENT(0))
+                .Present(0, DXGI_PRESENT(0))
                 .ok()
                 .context("DXGI Present")?;
             Ok(())

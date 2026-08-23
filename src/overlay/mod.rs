@@ -27169,7 +27169,15 @@ mod windows_overlay {
         }
     }
 
+    #[link(name = "winmm")]
+    unsafe extern "system" {
+        fn timeBeginPeriod(uPeriod: u32) -> u32;
+    }
+
     fn start_esp_worker(generation: u64) {
+        unsafe {
+            let _ = timeBeginPeriod(1);
+        }
         let (render_tx, render_rx) = crossbeam_channel::bounded::<Vec<EspRenderPreset>>(1);
         *GPU_OVERLAY_RENDER_SENDER.lock() = Some(render_tx.clone());
         thread::spawn(move || {
@@ -27185,7 +27193,7 @@ mod windows_overlay {
                     break;
                 }
                 let mut sample_received = false;
-                match render_rx.recv_timeout(Duration::from_millis(8)) {
+                match render_rx.recv_timeout(Duration::from_millis(1)) {
                     Ok(mut frames) => {
                         sample_received = true;
                         last_sample_at = Instant::now();
@@ -27236,10 +27244,10 @@ mod windows_overlay {
                 let mut shapes = Vec::new();
                 let mut animation_changed = false;
                 for animation in animations.values_mut() {
-                    let alpha = if animation.smoothing_ms == 0 {
+                    let alpha = if animation.smoothing_ms <= 1 {
                         1.0
                     } else {
-                        1.0 - (-3.0 * elapsed_ms / animation.smoothing_ms.max(5) as f32).exp()
+                        1.0 - (-3.0 * elapsed_ms / animation.smoothing_ms as f32).exp()
                     };
                     let next = interpolate_esp_shapes(
                         &animation.current,
@@ -33086,7 +33094,7 @@ mod windows_overlay {
             let mut cached = cached.borrow_mut();
             if let Some((cached_selector, cached_at, bounds)) = cached.as_ref()
                 && cached_selector == selector
-                && cached_at.elapsed() < Duration::from_millis(100)
+                && cached_at.elapsed() < Duration::from_millis(8)
             {
                 return *bounds;
             }
