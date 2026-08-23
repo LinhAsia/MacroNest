@@ -10871,13 +10871,38 @@ mod windows_overlay {
 
     fn crosshair_style_to_shapes(
         style: &CrosshairStyle,
-        cx: i32,
-        cy: i32,
+        paths: &crate::storage::AppPaths,
     ) -> Vec<GeometryRenderShape> {
         let mut shapes = Vec::new();
-        let target_x = cx + style.x_offset;
-        let target_y = cy + style.y_offset;
+        let target_x = style.x_offset;
+        let target_y = style.y_offset;
         let opacity = style.opacity.clamp(0.0, 1.0);
+
+        if let Some(custom_asset) = &style.custom_asset {
+            let asset_path = paths.asset_path(custom_asset);
+            if let Ok(svg_content) = std::fs::read_to_string(&asset_path) {
+                let size = (64.0 * style.custom_scale.clamp(0.1, 10.0)).round() as u32;
+                let half = (size / 2) as i32;
+                shapes.push(GeometryRenderShape {
+                    bounds: (
+                        target_x - half,
+                        target_y - half,
+                        target_x + half,
+                        target_y + half,
+                    ),
+                    draw: GeometryRenderDraw::Svg {
+                        x: target_x - half,
+                        y: target_y - half,
+                        width: size,
+                        height: size,
+                        opacity,
+                        rotation: 0.0,
+                        code: Arc::from(svg_content.into_boxed_str()),
+                    },
+                });
+                return shapes;
+            }
+        }
 
         let color = [
             style.color.r,
@@ -10912,6 +10937,24 @@ mod windows_overlay {
             ];
             let r = style.ring_radius.round() as i32;
             let thick = style.ring_thickness.max(1.0) as i32;
+            if style.outline_enabled && outline > 0.0 {
+                shapes.push(GeometryRenderShape {
+                    bounds: (
+                        target_x - r - thick - outline.ceil() as i32,
+                        target_y - r - thick - outline.ceil() as i32,
+                        target_x + r + thick + outline.ceil() as i32,
+                        target_y + r + thick + outline.ceil() as i32,
+                    ),
+                    draw: GeometryRenderDraw::Circle {
+                        cx: target_x,
+                        cy: target_y,
+                        radius: r,
+                        stroke: outline_color,
+                        fill: None,
+                        thickness: thick + (outline * 2.0).ceil() as i32,
+                    },
+                });
+            }
             shapes.push(GeometryRenderShape {
                 bounds: (
                     target_x - r - thick,
@@ -11042,6 +11085,166 @@ mod windows_overlay {
         shapes
     }
 
+    fn screen_draw_stroke_to_shapes(stroke: &ScreenDrawStroke) -> Vec<GeometryRenderShape> {
+        if stroke.points.is_empty() {
+            return Vec::new();
+        }
+        let mut shapes = Vec::new();
+        let color = [
+            stroke.color.r,
+            stroke.color.g,
+            stroke.color.b,
+            if stroke.effect == ScreenDrawEffect::Highlight {
+                80
+            } else {
+                stroke.color.a
+            },
+        ];
+        let thick = stroke.brush_size.max(1.0) as i32;
+        match stroke.tool {
+            ScreenDrawTool::Brush => {
+                if stroke.points.len() >= 2 {
+                    let pts: Vec<(i32, i32)> = stroke.points.iter().map(|p| (p.x, p.y)).collect();
+                    let min_x = pts.iter().map(|p| p.0).min().unwrap_or(0);
+                    let max_x = pts.iter().map(|p| p.0).max().unwrap_or(0);
+                    let min_y = pts.iter().map(|p| p.1).min().unwrap_or(0);
+                    let max_y = pts.iter().map(|p| p.1).max().unwrap_or(0);
+                    shapes.push(GeometryRenderShape {
+                        bounds: (min_x - thick, min_y - thick, max_x + thick, max_y + thick),
+                        draw: GeometryRenderDraw::Polyline {
+                            points: pts,
+                            stroke: color,
+                            thickness: thick,
+                        },
+                    });
+                } else if let Some(p) = stroke.points.first() {
+                    shapes.push(GeometryRenderShape {
+                        bounds: (p.x - thick, p.y - thick, p.x + thick, p.y + thick),
+                        draw: GeometryRenderDraw::Point {
+                            x: p.x,
+                            y: p.y,
+                            radius: thick / 2,
+                            fill: color,
+                        },
+                    });
+                }
+            }
+            ScreenDrawTool::Line => {
+                if let (Some(p1), Some(p2)) = (stroke.points.first(), stroke.points.last()) {
+                    shapes.push(GeometryRenderShape {
+                        bounds: (
+                            p1.x.min(p2.x) - thick,
+                            p1.y.min(p2.y) - thick,
+                            p1.x.max(p2.x) + thick,
+                            p1.y.max(p2.y) + thick,
+                        ),
+                        draw: GeometryRenderDraw::Line {
+                            x1: p1.x,
+                            y1: p1.y,
+                            x2: p2.x,
+                            y2: p2.y,
+                            stroke: color,
+                            thickness: thick,
+                        },
+                    });
+                }
+            }
+            ScreenDrawTool::Arrow => {
+                if let (Some(p1), Some(p2)) = (stroke.points.first(), stroke.points.last()) {
+                    let head = (stroke.brush_size * 3.5).max(12.0) as i32;
+                    shapes.push(GeometryRenderShape {
+                        bounds: (
+                            p1.x.min(p2.x) - head,
+                            p1.y.min(p2.y) - head,
+                            p1.x.max(p2.x) + head,
+                            p1.y.max(p2.y) + head,
+                        ),
+                        draw: GeometryRenderDraw::Arrow {
+                            x1: p1.x,
+                            y1: p1.y,
+                            x2: p2.x,
+                            y2: p2.y,
+                            stroke: color,
+                            thickness: thick,
+                            head_size: head,
+                        },
+                    });
+                }
+            }
+            ScreenDrawTool::Rectangle => {
+                if let (Some(p1), Some(p2)) = (stroke.points.first(), stroke.points.last()) {
+                    let min_x = p1.x.min(p2.x);
+                    let max_x = p1.x.max(p2.x);
+                    let min_y = p1.y.min(p2.y);
+                    let max_y = p1.y.max(p2.y);
+                    shapes.push(GeometryRenderShape {
+                        bounds: (min_x - thick, min_y - thick, max_x + thick, max_y + thick),
+                        draw: GeometryRenderDraw::Polygon {
+                            points: vec![
+                                (min_x, min_y),
+                                (max_x, min_y),
+                                (max_x, max_y),
+                                (min_x, max_y),
+                            ],
+                            stroke: color,
+                            fill: if stroke.filled { Some(color) } else { None },
+                            thickness: thick,
+                        },
+                    });
+                }
+            }
+            ScreenDrawTool::Circle => {
+                if let (Some(p1), Some(p2)) = (stroke.points.first(), stroke.points.last()) {
+                    let cx = (p1.x + p2.x) / 2;
+                    let cy = (p1.y + p2.y) / 2;
+                    let rx = (p1.x - p2.x).abs() / 2;
+                    let ry = (p1.y - p2.y).abs() / 2;
+                    let radius = rx.max(ry);
+                    shapes.push(GeometryRenderShape {
+                        bounds: (
+                            cx - radius - thick,
+                            cy - radius - thick,
+                            cx + radius + thick,
+                            cy + radius + thick,
+                        ),
+                        draw: GeometryRenderDraw::Circle {
+                            cx,
+                            cy,
+                            radius,
+                            stroke: color,
+                            fill: if stroke.filled { Some(color) } else { None },
+                            thickness: thick,
+                        },
+                    });
+                }
+            }
+            ScreenDrawTool::Text => {
+                if let Some(p) = stroke.points.first() {
+                    if !stroke.text.is_empty() {
+                        shapes.push(GeometryRenderShape {
+                            bounds: (
+                                p.x,
+                                p.y,
+                                p.x + stroke.text_box_width,
+                                p.y + stroke.text_box_height,
+                            ),
+                            draw: GeometryRenderDraw::Label(GeometryRenderText {
+                                x: p.x + stroke.text_box_width / 2,
+                                y: p.y + stroke.text_box_height / 2,
+                                font_size: stroke.brush_size as i32,
+                                color,
+                                rotation_deg: stroke.text_rotation_deg,
+                                text: stroke.text.clone(),
+                            }),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+        shapes
+    }
+
     unsafe fn refresh_overlay(runtime: &mut Runtime) -> Result<()> {
         if SCREEN_DRAW_STATE.lock().crosshair_draw_target.is_some() {
             set_gpu_overlay_layer_shapes(OverlayLayer::Crosshair, Vec::new());
@@ -11065,13 +11268,9 @@ mod windows_overlay {
             return Ok(());
         }
 
-        let (screen_x, screen_y, screen_w, screen_h) = window_list::virtual_screen_bounds();
-        let center_x = screen_x + screen_w / 2;
-        let center_y = screen_y + screen_h / 2;
-
         let mut all_crosshair_shapes = Vec::new();
         for profile in &visible_profiles {
-            let shapes = crosshair_style_to_shapes(&profile.style, center_x, center_y);
+            let shapes = crosshair_style_to_shapes(&profile.style, &runtime.paths);
             all_crosshair_shapes.extend(shapes);
         }
 
@@ -12823,6 +13022,7 @@ mod windows_overlay {
         state.color_pick_restore_freeze_screen = None;
         state.color_pick_restore_freeze_frame = None;
         state.color_pick_preview = None;
+        set_gpu_overlay_layer_shapes(OverlayLayer::ScreenDraw, Vec::new());
         if state.crosshair_draw_target.is_some() {
             state.crosshair_draw_target = None;
         }
@@ -17807,6 +18007,15 @@ mod windows_overlay {
                 }
             }
         }
+
+        let mut draw_shapes = Vec::new();
+        for s in &state_guard.strokes {
+            draw_shapes.extend(screen_draw_stroke_to_shapes(s));
+        }
+        if let Some(s) = state_guard.current_stroke.as_ref() {
+            draw_shapes.extend(screen_draw_stroke_to_shapes(s));
+        }
+        set_gpu_overlay_layer_shapes(OverlayLayer::ScreenDraw, draw_shapes);
 
         let mut dirty_snapshot =
             extract_screen_draw_rgba_region(state_guard.frame_rgba.as_slice(), width, dirty_rect);
