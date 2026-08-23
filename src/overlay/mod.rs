@@ -10869,222 +10869,6 @@ mod windows_overlay {
         }
     }
 
-    fn crosshair_style_to_shapes(
-        style: &CrosshairStyle,
-        paths: &crate::storage::AppPaths,
-    ) -> Vec<GeometryRenderShape> {
-        let mut shapes = Vec::new();
-        let target_x = style.x_offset;
-        let target_y = style.y_offset;
-        let opacity = style.opacity.clamp(0.0, 1.0);
-
-        if let Some(custom_asset) = &style.custom_asset {
-            let asset_path = paths.asset_path(custom_asset);
-            if let Ok(svg_content) = std::fs::read_to_string(&asset_path) {
-                let size = (64.0 * style.custom_scale.clamp(0.1, 10.0)).round() as u32;
-                let half = (size / 2) as i32;
-                shapes.push(GeometryRenderShape {
-                    bounds: (
-                        target_x - half,
-                        target_y - half,
-                        target_x + half,
-                        target_y + half,
-                    ),
-                    draw: GeometryRenderDraw::Svg {
-                        x: target_x - half,
-                        y: target_y - half,
-                        width: size,
-                        height: size,
-                        opacity,
-                        rotation: 0.0,
-                        code: Arc::from(svg_content.into_boxed_str()),
-                    },
-                });
-                return shapes;
-            }
-        }
-
-        let color = [
-            style.color.r,
-            style.color.g,
-            style.color.b,
-            ((style.color.a as f32) * opacity).clamp(0.0, 255.0) as u8,
-        ];
-        let outline_color = [
-            style.outline_color.r,
-            style.outline_color.g,
-            style.outline_color.b,
-            ((style.outline_color.a as f32) * opacity).clamp(0.0, 255.0) as u8,
-        ];
-
-        let outline = if style.outline_enabled {
-            style.outline_thickness.max(0.0)
-        } else {
-            0.0
-        };
-        let thickness = style.thickness.max(1.0);
-        let gap = style.gap.max(0.0);
-        let h_len = style.horizontal_length.max(0.0);
-        let v_len = style.vertical_length.max(0.0);
-
-        // Ring
-        if style.ring_enabled && style.ring_radius > 0.0 {
-            let ring_color = [
-                style.ring_color.r,
-                style.ring_color.g,
-                style.ring_color.b,
-                ((style.ring_color.a as f32) * opacity).clamp(0.0, 255.0) as u8,
-            ];
-            let r = style.ring_radius.round() as i32;
-            let thick = style.ring_thickness.max(1.0) as i32;
-            if style.outline_enabled && outline > 0.0 {
-                shapes.push(GeometryRenderShape {
-                    bounds: (
-                        target_x - r - thick - outline.ceil() as i32,
-                        target_y - r - thick - outline.ceil() as i32,
-                        target_x + r + thick + outline.ceil() as i32,
-                        target_y + r + thick + outline.ceil() as i32,
-                    ),
-                    draw: GeometryRenderDraw::Circle {
-                        cx: target_x,
-                        cy: target_y,
-                        radius: r,
-                        stroke: outline_color,
-                        fill: None,
-                        thickness: thick + (outline * 2.0).ceil() as i32,
-                    },
-                });
-            }
-            shapes.push(GeometryRenderShape {
-                bounds: (
-                    target_x - r - thick,
-                    target_y - r - thick,
-                    target_x + r + thick,
-                    target_y + r + thick,
-                ),
-                draw: GeometryRenderDraw::Circle {
-                    cx: target_x,
-                    cy: target_y,
-                    radius: r,
-                    stroke: ring_color,
-                    fill: None,
-                    thickness: thick,
-                },
-            });
-        }
-
-        // 4 Arms
-        let arms = [
-            // Left arm
-            (
-                (target_x as f32 - gap - h_len).round() as i32,
-                (target_y as f32 - thickness / 2.0).round() as i32,
-                h_len.round() as i32,
-                thickness.round() as i32,
-            ),
-            // Right arm
-            (
-                (target_x as f32 + gap).round() as i32,
-                (target_y as f32 - thickness / 2.0).round() as i32,
-                h_len.round() as i32,
-                thickness.round() as i32,
-            ),
-            // Top arm
-            (
-                (target_x as f32 - thickness / 2.0).round() as i32,
-                (target_y as f32 - gap - v_len).round() as i32,
-                thickness.round() as i32,
-                v_len.round() as i32,
-            ),
-            // Bottom arm
-            (
-                (target_x as f32 - thickness / 2.0).round() as i32,
-                (target_y as f32 + gap).round() as i32,
-                thickness.round() as i32,
-                v_len.round() as i32,
-            ),
-        ];
-
-        for &(x, y, w, h) in &arms {
-            if w <= 0 || h <= 0 {
-                continue;
-            }
-            if style.outline_enabled && outline > 0.0 {
-                let out_i = outline.ceil() as i32;
-                let ox = x - out_i;
-                let oy = y - out_i;
-                let ow = w + out_i * 2;
-                let oh = h + out_i * 2;
-                shapes.push(GeometryRenderShape {
-                    bounds: (ox, oy, ox + ow, oy + oh),
-                    draw: GeometryRenderDraw::Polygon {
-                        points: vec![
-                            (ox, oy),
-                            (ox + ow, oy),
-                            (ox + ow, oy + oh),
-                            (ox, oy + oh),
-                        ],
-                        stroke: outline_color,
-                        fill: Some(outline_color),
-                        thickness: 1,
-                    },
-                });
-            }
-            shapes.push(GeometryRenderShape {
-                bounds: (x, y, x + w, y + h),
-                draw: GeometryRenderDraw::Polygon {
-                    points: vec![
-                        (x, y),
-                        (x + w, y),
-                        (x + w, y + h),
-                        (x, y + h),
-                    ],
-                    stroke: color,
-                    fill: Some(color),
-                    thickness: 1,
-                },
-            });
-        }
-
-        // Center dot
-        if style.center_dot && style.center_dot_size > 0.0 {
-            let radius = (style.center_dot_size / 2.0).round().max(1.0) as i32;
-            if style.outline_enabled && outline > 0.0 {
-                let out_r = radius + outline.ceil() as i32;
-                shapes.push(GeometryRenderShape {
-                    bounds: (
-                        target_x - out_r,
-                        target_y - out_r,
-                        target_x + out_r,
-                        target_y + out_r,
-                    ),
-                    draw: GeometryRenderDraw::Point {
-                        x: target_x,
-                        y: target_y,
-                        radius: out_r,
-                        fill: outline_color,
-                    },
-                });
-            }
-            shapes.push(GeometryRenderShape {
-                bounds: (
-                    target_x - radius,
-                    target_y - radius,
-                    target_x + radius,
-                    target_y + radius,
-                ),
-                draw: GeometryRenderDraw::Point {
-                    x: target_x,
-                    y: target_y,
-                    radius,
-                    fill: color,
-                },
-            });
-        }
-
-        shapes
-    }
-
     fn screen_draw_stroke_to_shapes(stroke: &ScreenDrawStroke) -> Vec<GeometryRenderShape> {
         if stroke.points.is_empty() {
             return Vec::new();
@@ -11246,8 +11030,8 @@ mod windows_overlay {
     }
 
     unsafe fn refresh_overlay(runtime: &mut Runtime) -> Result<()> {
+        set_gpu_overlay_layer_shapes(OverlayLayer::Crosshair, Vec::new());
         if SCREEN_DRAW_STATE.lock().crosshair_draw_target.is_some() {
-            set_gpu_overlay_layer_shapes(OverlayLayer::Crosshair, Vec::new());
             let _ = clear_screen_draw_overlay_window(runtime.overlay_hwnd);
             let _ = ShowWindow(runtime.overlay_hwnd, SW_HIDE);
             return Ok(());
@@ -11263,18 +11047,79 @@ mod windows_overlay {
                 .collect::<Vec<_>>()
         };
         if visible_profiles.is_empty() {
-            set_gpu_overlay_layer_shapes(OverlayLayer::Crosshair, Vec::new());
             let _ = ShowWindow(runtime.overlay_hwnd, SW_HIDE);
             return Ok(());
         }
 
-        let mut all_crosshair_shapes = Vec::new();
-        for profile in &visible_profiles {
-            let shapes = crosshair_style_to_shapes(&profile.style, &runtime.paths);
-            all_crosshair_shapes.extend(shapes);
+        let mut min_x = i32::MAX;
+        let mut min_y = i32::MAX;
+        let mut max_x = i32::MIN;
+        let mut max_y = i32::MIN;
+        struct ActiveCrosshair {
+            layer: RgbaImage,
+            left: i32,
+            top: i32,
         }
 
-        set_gpu_overlay_layer_shapes(OverlayLayer::Crosshair, all_crosshair_shapes);
+        let mut actives = Vec::new();
+        for profile in &visible_profiles {
+            let custom_path = profile
+                .style
+                .custom_asset
+                .as_ref()
+                .map(|name| runtime.paths.asset_path(name));
+            let rendered = render_crosshair(&profile.style, custom_path.as_deref())?;
+            let layer = RgbaImage::from_raw(rendered.width, rendered.height, rendered.rgba)
+                .context("Failed to build crosshair layer")?;
+            let left = profile.style.x_offset - rendered.center_x;
+            let top = profile.style.y_offset - rendered.center_y;
+            min_x = min_x.min(left);
+            min_y = min_y.min(top);
+            max_x = max_x.max(left + rendered.width as i32);
+            max_y = max_y.max(top + rendered.height as i32);
+            actives.push(ActiveCrosshair { layer, left, top });
+        }
+
+        let width = (max_x - min_x).max(1) as u32;
+        let height = (max_y - min_y).max(1) as u32;
+        let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
+        for active in actives {
+            let rel_left = (active.left - min_x).max(0) as usize;
+            let rel_top = (active.top - min_y).max(0) as usize;
+            let layer_width = active.layer.width() as usize;
+            let layer_height = active.layer.height() as usize;
+            let canvas_width = canvas.width() as usize;
+            let canvas_height = canvas.height() as usize;
+            let copy_width = layer_width.min(canvas_width.saturating_sub(rel_left));
+            let copy_height = layer_height.min(canvas_height.saturating_sub(rel_top));
+            if copy_width == 0 || copy_height == 0 {
+                continue;
+            }
+            let src = active.layer.as_raw();
+            let dst = canvas.as_mut();
+            for row in 0..copy_height {
+                let src_row = row * layer_width * 4;
+                let dst_row = ((rel_top + row) * canvas_width + rel_left) * 4;
+                for col in 0..copy_width {
+                    let src_offset = src_row + col * 4;
+                    let dst_offset = dst_row + col * 4;
+                    let src_a = src[src_offset + 3];
+                    if src_a == 0 {
+                        continue;
+                    }
+                    blend_premultiplied_rgba(
+                        &mut dst[dst_offset..dst_offset + 4],
+                        src[src_offset],
+                        src[src_offset + 1],
+                        src[src_offset + 2],
+                        src_a,
+                    );
+                }
+            }
+        }
+
+        paint_crosshair_canvas(runtime.overlay_hwnd, canvas, min_x, min_y)?;
+        let _ = ShowWindow(runtime.overlay_hwnd, SW_SHOWNA);
         Ok(())
     }
 
