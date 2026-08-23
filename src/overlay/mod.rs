@@ -27188,12 +27188,13 @@ mod windows_overlay {
             let mut last_frame = Instant::now();
             let mut last_sample_at = Instant::now();
             let mut last_had_extra = false;
+            let mut last_shapes_empty = false;
             loop {
                 if ESP_WORKER_GENERATION.load(Ordering::Acquire) != generation {
                     break;
                 }
                 let mut sample_received = false;
-                match render_rx.recv_timeout(Duration::from_millis(1)) {
+                match render_rx.recv_timeout(Duration::from_millis(8)) {
                     Ok(mut frames) => {
                         sample_received = true;
                         last_sample_at = Instant::now();
@@ -27276,6 +27277,15 @@ mod windows_overlay {
                     continue;
                 }
                 last_had_extra = has_extra;
+
+                if shapes.is_empty() {
+                    if last_shapes_empty {
+                        continue;
+                    }
+                    last_shapes_empty = true;
+                } else {
+                    last_shapes_empty = false;
+                }
 
                 let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
                 if hwnd_value == 0 {
@@ -33085,7 +33095,7 @@ mod windows_overlay {
             let mut cached = cached.borrow_mut();
             if let Some((cached_selector, cached_at, bounds)) = cached.as_ref()
                 && cached_selector == selector
-                && cached_at.elapsed() < Duration::from_millis(8)
+                && cached_at.elapsed() < Duration::from_millis(50)
             {
                 return *bounds;
             }
