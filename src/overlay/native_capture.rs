@@ -3,13 +3,13 @@
 use windows::Win32::{
     Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleDC,
-        CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush, DIB_RGB_COLORS, DT_CALCRECT,
-        DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject, DrawTextW, EndPaint,
-        FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION, FONT_QUALITY, FW_BOLD, FillRect,
-        GetDC, HDC, HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT, PS_SOLID, Rectangle, ReleaseDC,
-        SRCCOPY, SelectObject, SetBkMode, SetTextColor, SetViewportOrgEx, StretchDIBits,
-        TRANSPARENT, UpdateWindow,
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleBitmap,
+        CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush,
+        DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
+        DrawTextW, EndPaint, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
+        FONT_QUALITY, FW_BOLD, FillRect, GetDC, HDC, HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT,
+        PS_SOLID, Rectangle, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetTextColor,
+        SetViewportOrgEx, StretchDIBits, TRANSPARENT, UpdateWindow,
     },
     UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN, VK_SHIFT},
     UI::WindowsAndMessaging::{
@@ -19,9 +19,10 @@ use windows::Win32::{
         IDC_SIZEWE, IMAGE_CURSOR, KillTimer, LR_SHARED, LoadCursorW, LoadImageW, MSG, PostMessageW,
         PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL, SWP_NOACTIVATE,
         SWP_SHOWWINDOW, SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
-        WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE, WM_DESTROY, WM_KEYDOWN,
-        WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT, WM_RBUTTONUP,
-        WM_SETCURSOR, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
+        WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT,
+        WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
+        WS_EX_TOPMOST, WS_POPUP,
     },
 };
 use windows::core::w;
@@ -409,6 +410,7 @@ unsafe extern "system" fn capture_wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
+        WM_ERASEBKGND => LRESULT(1),
         WM_NCCREATE => {
             let cs = lparam.0 as *const CREATESTRUCTW;
             let state = (*cs).lpCreateParams as *mut CaptureState;
@@ -889,6 +891,10 @@ fn apply_adjust_drag(
 }
 
 unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow::Result<()> {
+    let mem_dc = CreateCompatibleDC(Some(hdc));
+    let mem_bmp = CreateCompatibleBitmap(hdc, state.width, state.height);
+    let old_bmp = SelectObject(mem_dc, HGDIOBJ(mem_bmp.0));
+
     let ar = state.adjust_rect;
     let sw = state.width as usize;
 
@@ -925,7 +931,7 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
     };
 
     let _ = StretchDIBits(
-        hdc,
+        mem_dc,
         0,
         0,
         state.width,
@@ -942,13 +948,13 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
 
     // Draw selection border
     let pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
-    let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+    let old_pen = SelectObject(mem_dc, HGDIOBJ(pen.0));
     let null_brush =
         windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH);
-    let old_brush = SelectObject(hdc, null_brush);
-    let _ = windows::Win32::Graphics::Gdi::Rectangle(hdc, ar.left, ar.top, ar.right, ar.bottom);
-    let _ = SelectObject(hdc, old_pen);
-    let _ = SelectObject(hdc, old_brush);
+    let old_brush = SelectObject(mem_dc, null_brush);
+    let _ = windows::Win32::Graphics::Gdi::Rectangle(mem_dc, ar.left, ar.top, ar.right, ar.bottom);
+    let _ = SelectObject(mem_dc, old_pen);
+    let _ = SelectObject(mem_dc, old_brush);
     let _ = DeleteObject(HGDIOBJ(pen.0));
 
     // Draw 8 resize handles (filled squares with blue border)
@@ -967,19 +973,19 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
     ];
     let h_fill = CreateSolidBrush(rgb(220, 238, 255));
     let h_pen = CreatePen(PS_SOLID, 2, rgb(0, 130, 220));
-    let old_pen = SelectObject(hdc, HGDIOBJ(h_pen.0));
-    let old_brush = SelectObject(hdc, HGDIOBJ(h_fill.0));
+    let old_pen = SelectObject(mem_dc, HGDIOBJ(h_pen.0));
+    let old_brush = SelectObject(mem_dc, HGDIOBJ(h_fill.0));
     for (hx, hy) in handle_centers {
         let _ = windows::Win32::Graphics::Gdi::Rectangle(
-            hdc,
+            mem_dc,
             hx - hr / 2,
             hy - hr / 2,
             hx + hr / 2,
             hy + hr / 2,
         );
     }
-    let _ = SelectObject(hdc, old_pen);
-    let _ = SelectObject(hdc, old_brush);
+    let _ = SelectObject(mem_dc, old_pen);
+    let _ = SelectObject(mem_dc, old_brush);
     let _ = DeleteObject(HGDIOBJ(h_pen.0));
     let _ = DeleteObject(HGDIOBJ(h_fill.0));
 
@@ -1003,9 +1009,9 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
         0,
         w!("Segoe UI"),
     );
-    let old_font = SelectObject(hdc, HGDIOBJ(font.0));
-    let _ = SetBkMode(hdc, TRANSPARENT);
-    let _ = SetTextColor(hdc, rgb(255, 255, 255));
+    let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+    let _ = SetBkMode(mem_dc, TRANSPARENT);
+    let _ = SetTextColor(mem_dc, rgb(255, 255, 255));
     let mut sz_u16: Vec<u16> = size_text.encode_utf16().collect();
     let label_y = if ar.top > 22 {
         ar.top - 22
@@ -1019,12 +1025,12 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
         bottom: label_y + 20,
     };
     let _ = DrawTextW(
-        hdc,
+        mem_dc,
         &mut sz_u16,
         &mut lbl_rect,
         DT_CENTER | DT_SINGLELINE | DT_VCENTER,
     );
-    let _ = SelectObject(hdc, old_font);
+    let _ = SelectObject(mem_dc, old_font);
     let _ = DeleteObject(HGDIOBJ(font.0));
 
     // Status bar pill
@@ -1045,11 +1051,11 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
         0,
         w!("Segoe UI"),
     );
-    let old_font2 = SelectObject(hdc, HGDIOBJ(font2.0));
-    let _ = SetTextColor(hdc, rgb(255, 255, 255));
+    let old_font2 = SelectObject(mem_dc, HGDIOBJ(font2.0));
+    let _ = SetTextColor(mem_dc, rgb(255, 255, 255));
     let mut txt_u16: Vec<u16> = status_text.encode_utf16().collect();
     let mut calc_rect = RECT::default();
-    let _ = DrawTextW(hdc, &mut txt_u16, &mut calc_rect, DT_CALCRECT);
+    let _ = DrawTextW(mem_dc, &mut txt_u16, &mut calc_rect, DT_CALCRECT);
     let text_w = calc_rect.right - calc_rect.left;
     let text_h = calc_rect.bottom - calc_rect.top;
     let pill_w = text_w + 48;
@@ -1059,10 +1065,10 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
 
     let brush2 = CreateSolidBrush(rgb(12, 18, 28));
     let pen2 = CreatePen(PS_SOLID, 1, rgb(110, 156, 210));
-    let old_brush2 = SelectObject(hdc, HGDIOBJ(brush2.0));
-    let old_pen2 = SelectObject(hdc, HGDIOBJ(pen2.0));
+    let old_brush2 = SelectObject(mem_dc, HGDIOBJ(brush2.0));
+    let old_pen2 = SelectObject(mem_dc, HGDIOBJ(pen2.0));
     let _ = windows::Win32::Graphics::Gdi::RoundRect(
-        hdc,
+        mem_dc,
         pill_x,
         pill_y,
         pill_x + pill_w,
@@ -1077,17 +1083,33 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
         bottom: pill_y + pill_h,
     };
     let _ = DrawTextW(
-        hdc,
+        mem_dc,
         &mut txt_u16,
         &mut text_rect,
         DT_CENTER | DT_SINGLELINE | DT_VCENTER,
     );
-    let _ = SelectObject(hdc, old_brush2);
-    let _ = SelectObject(hdc, old_pen2);
-    let _ = SelectObject(hdc, old_font2);
+    let _ = SelectObject(mem_dc, old_brush2);
+    let _ = SelectObject(mem_dc, old_pen2);
+    let _ = SelectObject(mem_dc, old_font2);
     let _ = DeleteObject(HGDIOBJ(brush2.0));
     let _ = DeleteObject(HGDIOBJ(pen2.0));
     let _ = DeleteObject(HGDIOBJ(font2.0));
+
+    let _ = BitBlt(
+        hdc,
+        0,
+        0,
+        state.width,
+        state.height,
+        Some(mem_dc),
+        0,
+        0,
+        SRCCOPY,
+    );
+
+    let _ = SelectObject(mem_dc, old_bmp);
+    let _ = DeleteObject(HGDIOBJ(mem_bmp.0));
+    let _ = DeleteDC(mem_dc);
 
     Ok(())
 }
@@ -1555,16 +1577,18 @@ unsafe fn draw_capture_to_dc(
         return Ok(());
     }
 
+    if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
+        draw_point_click_capture_to_dc(hdc, state, dirty)?;
+        return Ok(());
+    }
+
+    // Use memory DC double-buffering to eliminate all flicker during selection & painting
+    let mem_dc = CreateCompatibleDC(Some(hdc));
+    let mem_bmp = CreateCompatibleBitmap(hdc, state.width, state.height);
+    let old_bmp = SelectObject(mem_dc, HGDIOBJ(mem_bmp.0));
+
     let w = state.width as usize;
     let h = state.height as usize;
-
-    let show_preview_panel = matches!(state.mode, NativeCaptureMode::PointClick { .. });
-    let show_cursor_tooltip = !matches!(state.mode, NativeCaptureMode::RegionSelect { .. });
-
-    let mut center_color = (0u8, 0u8, 0u8, 255u8);
-    let mut panel_x = 0.0f32;
-    let mut panel_y = 0.0f32;
-    let mut preview_panel_visible = false;
 
     if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
         state.render_bgra.copy_from_slice(&state.dimmed_bgra);
@@ -1603,7 +1627,7 @@ unsafe fn draw_capture_to_dc(
         };
 
         let _ = StretchDIBits(
-            hdc,
+            mem_dc,
             0,
             0,
             state.width,
@@ -1626,17 +1650,55 @@ unsafe fn draw_capture_to_dc(
 
             if rw >= 2 && rh >= 2 {
                 let border_pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
-                let old_pen = SelectObject(hdc, HGDIOBJ(border_pen.0));
+                let old_pen = SelectObject(mem_dc, HGDIOBJ(border_pen.0));
                 let old_brush = SelectObject(
-                    hdc,
+                    mem_dc,
                     windows::Win32::Graphics::Gdi::GetStockObject(
                         windows::Win32::Graphics::Gdi::NULL_BRUSH,
                     ),
                 );
-                let _ = windows::Win32::Graphics::Gdi::Rectangle(hdc, x, y, x + rw, y + rh);
-                SelectObject(hdc, old_pen);
-                SelectObject(hdc, old_brush);
+                let _ = windows::Win32::Graphics::Gdi::Rectangle(mem_dc, x, y, x + rw, y + rh);
+                SelectObject(mem_dc, old_pen);
+                SelectObject(mem_dc, old_brush);
                 let _ = DeleteObject(HGDIOBJ(border_pen.0));
+
+                // Draw live region dimension label
+                let size_text = format!("{rw} x {rh}");
+                let font_size = CreateFontW(
+                    18,
+                    0,
+                    0,
+                    0,
+                    FW_BOLD.0 as i32,
+                    0,
+                    0,
+                    0,
+                    FONT_CHARSET(0),
+                    FONT_OUTPUT_PRECISION(0),
+                    FONT_CLIP_PRECISION(0),
+                    FONT_QUALITY(0),
+                    0,
+                    w!("Segoe UI"),
+                );
+                let old_font = SelectObject(mem_dc, HGDIOBJ(font_size.0));
+                let _ = SetBkMode(mem_dc, TRANSPARENT);
+                let _ = SetTextColor(mem_dc, rgb(255, 255, 255));
+                let mut sz_u16: Vec<u16> = size_text.encode_utf16().collect();
+                let label_y = if y > 22 { y - 22 } else { y + rh + 4 };
+                let mut lbl_rect = RECT {
+                    left: x,
+                    top: label_y,
+                    right: x + rw,
+                    bottom: label_y + 20,
+                };
+                let _ = DrawTextW(
+                    mem_dc,
+                    &mut sz_u16,
+                    &mut lbl_rect,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+                );
+                let _ = SelectObject(mem_dc, old_font);
+                let _ = DeleteObject(HGDIOBJ(font_size.0));
             }
         }
     } else {
@@ -1646,27 +1708,16 @@ unsafe fn draw_capture_to_dc(
         // 1. Draw the screenshot onto the pixmap
         pixmap.data_mut().copy_from_slice(&state.capture_frame.rgba);
 
-        // 2. Draw a dark overlay over the whole screen when the capture flow asks for it.
-        let should_dim_background = !matches!(
-            state.mode,
-            NativeCaptureMode::PointClick {
-                dim_background: false,
-                ..
-            }
-        );
-        if should_dim_background {
-            let mut paint = Paint::default();
-            paint.set_color_rgba8(0, 0, 0, 128); // 50% opacity
-            let screen_rect =
-                Rect::from_xywh(0.0, 0.0, state.width as f32, state.height as f32).unwrap();
-            pixmap.fill_rect(screen_rect, &paint, tiny_skia::Transform::identity(), None);
-        }
+        // 2. Draw a dark overlay over the whole screen
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(0, 0, 0, 128); // 50% opacity
+        let screen_rect =
+            Rect::from_xywh(0.0, 0.0, state.width as f32, state.height as f32).unwrap();
+        pixmap.fill_rect(screen_rect, &paint, tiny_skia::Transform::identity(), None);
 
         // 3. Render specific overlay elements based on capture mode
         match state.mode {
-            NativeCaptureMode::RegionSelect { .. } => {}
             NativeCaptureMode::ProtractorCalibration { .. } => {
-                // Draw already-clicked points
                 let mut pt_paint = Paint::default();
                 pt_paint.set_color_rgba8(255, 50, 50, 255);
                 let mut stroke = Stroke::default();
@@ -1675,49 +1726,135 @@ unsafe fn draw_capture_to_dc(
                 let mut white_paint = Paint::default();
                 white_paint.set_color_rgba8(255, 255, 255, 255);
 
-            for (idx, pt) in state.protractor_points.iter().enumerate() {
-                let rx = pt.0 - state.left;
-                let ry = pt.1 - state.top;
+                for pt in &state.protractor_points {
+                    let rx = pt.0 - state.left;
+                    let ry = pt.1 - state.top;
 
-                // Draw filled point (radius 6)
-                let mut pb = PathBuilder::new();
-                pb.push_circle(rx as f32, ry as f32, 6.0);
-                let path = pb.finish().unwrap();
-                pixmap.fill_path(
-                    &path,
-                    &pt_paint,
-                    tiny_skia::FillRule::Winding,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
+                    let mut pb = PathBuilder::new();
+                    pb.push_circle(rx as f32, ry as f32, 6.0);
+                    let path = pb.finish().unwrap();
+                    pixmap.fill_path(
+                        &path,
+                        &pt_paint,
+                        tiny_skia::FillRule::Winding,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
 
-                // Draw outline (radius 10)
-                let mut pb = PathBuilder::new();
-                pb.push_circle(rx as f32, ry as f32, 10.0);
-                let path = pb.finish().unwrap();
-                pixmap.stroke_path(
-                    &path,
-                    &white_paint,
-                    &stroke,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
+                    let mut pb = PathBuilder::new();
+                    pb.push_circle(rx as f32, ry as f32, 10.0);
+                    let path = pb.finish().unwrap();
+                    pixmap.stroke_path(
+                        &path,
+                        &white_paint,
+                        &stroke,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+
+                if let Some(curr) = state.current_point {
+                    let count = state.protractor_points.len();
+                    if count == 1 {
+                        let pt1 = state.protractor_points[0];
+                        let r1x = pt1.0 - state.left;
+                        let r1y = pt1.1 - state.top;
+
+                        let mut line_paint = Paint::default();
+                        line_paint.set_color_rgba8(255, 50, 50, 180);
+                        let mut dashed_stroke = Stroke::default();
+                        dashed_stroke.width = 1.5;
+                        dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![4.0, 4.0], 0.0);
+
+                        let mut pb = PathBuilder::new();
+                        pb.move_to(r1x as f32, r1y as f32);
+                        pb.line_to(curr.0 as f32, curr.1 as f32);
+                        let path = pb.finish().unwrap();
+                        pixmap.stroke_path(
+                            &path,
+                            &line_paint,
+                            &dashed_stroke,
+                            tiny_skia::Transform::identity(),
+                            None,
+                        );
+                    } else if count == 2 {
+                        let pt1 = state.protractor_points[0];
+                        let pt2 = state.protractor_points[1];
+                        let curr_abs = (curr.0 + state.left, curr.1 + state.top);
+
+                        if let Some((center, radius)) =
+                            crate::protractor::circle_from_3_points(pt1, pt2, curr_abs)
+                        {
+                            let rcx = center.0 - state.left;
+                            let rcy = center.1 - state.top;
+
+                            let mut circle_paint = Paint::default();
+                            circle_paint.set_color_rgba8(255, 50, 50, 180);
+                            let mut dashed_stroke = Stroke::default();
+                            dashed_stroke.width = 1.5;
+                            dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![4.0, 4.0], 0.0);
+
+                            let mut pb = PathBuilder::new();
+                            pb.push_circle(rcx as f32, rcy as f32, radius);
+                            let path = pb.finish().unwrap();
+                            pixmap.stroke_path(
+                                &path,
+                                &circle_paint,
+                                &dashed_stroke,
+                                tiny_skia::Transform::identity(),
+                                None,
+                            );
+                        }
+                    }
+                }
             }
+            NativeCaptureMode::DistanceMeasure { .. } => {
+                let mut pt_paint = Paint::default();
+                pt_paint.set_color_rgba8(255, 196, 0, 255);
+                let mut stroke = Stroke::default();
+                stroke.width = 2.0;
 
-            // Draw line/circle preview based on current mouse coordinate
-            if let Some(curr) = state.current_point {
-                let count = state.protractor_points.len();
-                if count == 1 {
-                    // Draw dashed line from Point 1 to cursor
-                    let pt1 = state.protractor_points[0];
+                let mut white_paint = Paint::default();
+                white_paint.set_color_rgba8(255, 255, 255, 255);
+
+                for pt in &state.protractor_points {
+                    let rx = pt.0 - state.left;
+                    let ry = pt.1 - state.top;
+
+                    let mut pb = PathBuilder::new();
+                    pb.push_circle(rx as f32, ry as f32, 6.0);
+                    let path = pb.finish().unwrap();
+                    pixmap.fill_path(
+                        &path,
+                        &pt_paint,
+                        tiny_skia::FillRule::Winding,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+
+                    let mut pb = PathBuilder::new();
+                    pb.push_circle(rx as f32, ry as f32, 10.0);
+                    let path = pb.finish().unwrap();
+                    pixmap.stroke_path(
+                        &path,
+                        &white_paint,
+                        &stroke,
+                        tiny_skia::Transform::identity(),
+                        None,
+                    );
+                }
+
+                if let Some(curr) = state.current_point
+                    && let Some(pt1) = state.protractor_points.first()
+                {
                     let r1x = pt1.0 - state.left;
                     let r1y = pt1.1 - state.top;
 
                     let mut line_paint = Paint::default();
-                    line_paint.set_color_rgba8(255, 50, 50, 180);
+                    line_paint.set_color_rgba8(255, 196, 0, 220);
                     let mut dashed_stroke = Stroke::default();
-                    dashed_stroke.width = 1.5;
-                    dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![4.0, 4.0], 0.0);
+                    dashed_stroke.width = 1.8;
+                    dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![6.0, 4.0], 0.0);
 
                     let mut pb = PathBuilder::new();
                     pb.move_to(r1x as f32, r1y as f32);
@@ -1730,316 +1867,29 @@ unsafe fn draw_capture_to_dc(
                         tiny_skia::Transform::identity(),
                         None,
                     );
-                } else if count == 2 {
-                    // Draw circle passing through Point 1, Point 2 and cursor
-                    let pt1 = state.protractor_points[0];
-                    let pt2 = state.protractor_points[1];
-                    let curr_abs = (curr.0 + state.left, curr.1 + state.top);
-
-                    if let Some((center, radius)) =
-                        crate::protractor::circle_from_3_points(pt1, pt2, curr_abs)
-                    {
-                        let rcx = center.0 - state.left;
-                        let rcy = center.1 - state.top;
-
-                        let mut circle_paint = Paint::default();
-                        circle_paint.set_color_rgba8(255, 50, 50, 180);
-                        let mut dashed_stroke = Stroke::default();
-                        dashed_stroke.width = 1.5;
-                        dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![4.0, 4.0], 0.0);
-
-                        let mut pb = PathBuilder::new();
-                        pb.push_circle(rcx as f32, rcy as f32, radius);
-                        let path = pb.finish().unwrap();
-                        pixmap.stroke_path(
-                            &path,
-                            &circle_paint,
-                            &dashed_stroke,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
-                    }
                 }
             }
+            _ => {}
         }
-        NativeCaptureMode::DistanceMeasure { .. } => {
-            let mut pt_paint = Paint::default();
-            pt_paint.set_color_rgba8(255, 196, 0, 255);
-            let mut stroke = Stroke::default();
-            stroke.width = 2.0;
 
-            let mut white_paint = Paint::default();
-            white_paint.set_color_rgba8(255, 255, 255, 255);
-
-            for pt in &state.protractor_points {
-                let rx = pt.0 - state.left;
-                let ry = pt.1 - state.top;
-
-                let mut pb = PathBuilder::new();
-                pb.push_circle(rx as f32, ry as f32, 6.0);
-                let path = pb.finish().unwrap();
-                pixmap.fill_path(
-                    &path,
-                    &pt_paint,
-                    tiny_skia::FillRule::Winding,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
-
-                let mut pb = PathBuilder::new();
-                pb.push_circle(rx as f32, ry as f32, 10.0);
-                let path = pb.finish().unwrap();
-                pixmap.stroke_path(
-                    &path,
-                    &white_paint,
-                    &stroke,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
-            }
-
-            if let Some(curr) = state.current_point
-                && let Some(pt1) = state.protractor_points.first()
-            {
-                let r1x = pt1.0 - state.left;
-                let r1y = pt1.1 - state.top;
-
-                let mut line_paint = Paint::default();
-                line_paint.set_color_rgba8(255, 196, 0, 220);
-                let mut dashed_stroke = Stroke::default();
-                dashed_stroke.width = 1.8;
-                dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![6.0, 4.0], 0.0);
-
-                let mut pb = PathBuilder::new();
-                pb.move_to(r1x as f32, r1y as f32);
-                pb.line_to(curr.0 as f32, curr.1 as f32);
-                let path = pb.finish().unwrap();
-                pixmap.stroke_path(
-                    &path,
-                    &line_paint,
-                    &dashed_stroke,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
-            }
-        }
-        NativeCaptureMode::PointClick { .. } => {
-            // Draw crosshair at current point
-            if let Some(curr) = state.current_point {
-                let mut ch_paint = Paint::default();
-                ch_paint.set_color_rgba8(0, 160, 255, 200);
-                let mut stroke = Stroke::default();
-                stroke.width = 1.0;
-
-                let cx = curr.0 as f32;
-                let cy = curr.1 as f32;
-
-                let mut pb = PathBuilder::new();
-                pb.move_to(cx - 10.0, cy);
-                pb.line_to(cx + 10.0, cy);
-                pb.move_to(cx, cy - 10.0);
-                pb.line_to(cx, cy + 10.0);
-                let path = pb.finish().unwrap();
-                pixmap.stroke_path(
-                    &path,
-                    &ch_paint,
-                    &stroke,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
-            }
-        }
-        NativeCaptureMode::RegionAdjust { .. } => {
-            // Handled by early return above
-        }
-    }
-
-    if show_preview_panel && let Some(curr) = state.current_point {
-        preview_panel_visible = true;
-
-        let panel_w = 200.0f32;
-        let panel_h = 246.0f32;
-        let (panel_origin_x, panel_origin_y) = point_click_panel_origin(state, curr);
-        panel_x = panel_origin_x as f32;
-        panel_y = panel_origin_y as f32;
-
-        // Draw background
-        let mut bg_paint = Paint::default();
-        bg_paint.set_color_rgba8(12, 18, 28, 255);
-        let mut border_paint = Paint::default();
-        border_paint.set_color_rgba8(110, 156, 210, 255);
-        let border_stroke = Stroke {
-            width: 1.0,
+        let mut bmi = BITMAPINFO::default();
+        bmi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: state.width,
+            biHeight: -state.height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
             ..Default::default()
         };
-        draw_rounded_rect(
-            &mut pixmap,
-            panel_x,
-            panel_y,
-            panel_w,
-            panel_h,
-            10.0,
-            &bg_paint,
-            Some((&border_paint, &border_stroke)),
-        );
 
-        // Draw magnified preview
-        let content_left = panel_x + 28.0;
-        let preview_y = panel_y + 12.0;
-        let preview_w = 144.0f32;
-        let preview_h = 144.0f32;
-        let sample_size = 17;
-        let cell_size = preview_w / sample_size as f32;
-
-        for dy in 0..sample_size {
-            let sy = curr.1 - 8 + dy as i32;
-            for dx in 0..sample_size {
-                let sx = curr.0 - 8 + dx as i32;
-
-                let mut r = 0u8;
-                let mut g = 0u8;
-                let mut b = 0u8;
-                let mut a = 255u8;
-
-                if sx >= 0 && sx < state.width && sy >= 0 && sy < state.height {
-                    let idx = (sy as usize * state.width as usize + sx as usize) * 4;
-                    if idx + 3 < state.capture_frame.rgba.len() {
-                        r = state.capture_frame.rgba[idx];
-                        g = state.capture_frame.rgba[idx + 1];
-                        b = state.capture_frame.rgba[idx + 2];
-                        a = state.capture_frame.rgba[idx + 3];
-                    }
-                }
-
-                if dx == 8 && dy == 8 {
-                    center_color = (r, g, b, a);
-                }
-
-                let cx = content_left + dx as f32 * cell_size;
-                let cy = preview_y + dy as f32 * cell_size;
-                let cell_rect = Rect::from_xywh(cx, cy, cell_size, cell_size).unwrap();
-                let mut cell_paint = Paint::default();
-                cell_paint.set_color_rgba8(r, g, b, a);
-                pixmap.fill_rect(
-                    cell_rect,
-                    &cell_paint,
-                    tiny_skia::Transform::identity(),
-                    None,
-                );
-            }
+        let mut bgra = pixmap.data().to_vec();
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
         }
-
-        // Draw center pixel border highlight
-        let center_cx = content_left + 8.0 * cell_size;
-        let center_cy = preview_y + 8.0 * cell_size;
-        let mut center_pb = PathBuilder::new();
-        center_pb.move_to(center_cx, center_cy);
-        center_pb.line_to(center_cx + cell_size, center_cy);
-        center_pb.line_to(center_cx + cell_size, center_cy + cell_size);
-        center_pb.line_to(center_cx, center_cy + cell_size);
-        center_pb.close();
-        if let Some(center_path) = center_pb.finish() {
-            let mut center_border_paint = Paint::default();
-            center_border_paint.set_color_rgba8(120, 220, 255, 255);
-            let center_border_stroke = Stroke {
-                width: 2.0,
-                ..Default::default()
-            };
-            pixmap.stroke_path(
-                &center_path,
-                &center_border_paint,
-                &center_border_stroke,
-                tiny_skia::Transform::identity(),
-                None,
-            );
-        }
-
-        // Draw preview outline border
-        let mut preview_pb = PathBuilder::new();
-        let radius = 6.0f32;
-        preview_pb.move_to(content_left + radius, preview_y);
-        preview_pb.line_to(content_left + preview_w - radius, preview_y);
-        preview_pb.quad_to(
-            content_left + preview_w,
-            preview_y,
-            content_left + preview_w,
-            preview_y + radius,
-        );
-        preview_pb.line_to(content_left + preview_w, preview_y + preview_h - radius);
-        preview_pb.quad_to(
-            content_left + preview_w,
-            preview_y + preview_h,
-            content_left + preview_w - radius,
-            preview_y + preview_h,
-        );
-        preview_pb.line_to(content_left + radius, preview_y + preview_h);
-        preview_pb.quad_to(
-            content_left,
-            preview_y + preview_h,
-            content_left,
-            preview_y + preview_h - radius,
-        );
-        preview_pb.line_to(content_left, preview_y + radius);
-        preview_pb.quad_to(content_left, preview_y, content_left + radius, preview_y);
-        preview_pb.close();
-        if let Some(preview_path) = preview_pb.finish() {
-            let mut preview_border_paint = Paint::default();
-            preview_border_paint.set_color_rgba8(146, 192, 248, 255);
-            let preview_border_stroke = Stroke {
-                width: 1.0,
-                ..Default::default()
-            };
-            pixmap.stroke_path(
-                &preview_path,
-                &preview_border_paint,
-                &preview_border_stroke,
-                tiny_skia::Transform::identity(),
-                None,
-            );
-        }
-
-        // Draw swatch
-        let swatch_x = panel_x + 12.0;
-        let swatch_y = panel_y + 168.0;
-        let mut swatch_fill_paint = Paint::default();
-        swatch_fill_paint.set_color_rgba8(center_color.0, center_color.1, center_color.2, 255);
-        let mut swatch_border_paint = Paint::default();
-        swatch_border_paint.set_color_rgba8(255, 255, 255, 255);
-        let swatch_border_stroke = Stroke {
-            width: 1.0,
-            ..Default::default()
-        };
-        draw_rounded_rect(
-            &mut pixmap,
-            swatch_x,
-            swatch_y,
-            26.0,
-            26.0,
-            6.0,
-            &swatch_fill_paint,
-            Some((&swatch_border_paint, &swatch_border_stroke)),
-        );
-    }
-
-    // 4. Copy Pixmap to GDI window HDC
-    let mut bmi = BITMAPINFO::default();
-    bmi.bmiHeader = BITMAPINFOHEADER {
-        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: state.width,
-        biHeight: -state.height,
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB.0,
-        ..Default::default()
-    };
-
-    let mut bgra = pixmap.data().to_vec();
-    for pixel in bgra.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
 
         let _ = StretchDIBits(
-            hdc,
+            mem_dc,
             0,
             0,
             state.width,
@@ -2055,7 +1905,7 @@ unsafe fn draw_capture_to_dc(
         );
     }
 
-    // 5. Draw status bar & instructions using GDI DrawTextW
+    // Draw status bar & instructions pill using GDI DrawTextW on mem_dc
     let status_text = match state.mode {
         NativeCaptureMode::ProtractorCalibration { ui_language } => {
             protractor_calibration_status_text(state, ui_language)
@@ -2140,67 +1990,62 @@ unsafe fn draw_capture_to_dc(
         w!("Segoe UI"),
     );
 
-    let old_font = SelectObject(hdc, HGDIOBJ(font.0));
-    let _ = SetBkMode(hdc, TRANSPARENT);
-    let _ = SetTextColor(hdc, rgb(255, 255, 255));
+    let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+    let _ = SetBkMode(mem_dc, TRANSPARENT);
+    let _ = SetTextColor(mem_dc, rgb(255, 255, 255));
 
-    let hide_status_pill = matches!(state.mode, NativeCaptureMode::PointClick { .. })
-        || (matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) && state.start_point.is_some())
-        || (matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) && state.adjust_drag.is_some());
+    let mut text_u16: Vec<u16> = status_text.encode_utf16().collect();
+    let mut calc_rect = RECT::default();
+    let _ = DrawTextW(mem_dc, &mut text_u16, &mut calc_rect, DT_CALCRECT);
+    let text_w = calc_rect.right - calc_rect.left;
+    let text_h = calc_rect.bottom - calc_rect.top;
 
-    if !hide_status_pill {
-        let mut text_u16: Vec<u16> = status_text.encode_utf16().collect();
-        let mut calc_rect = RECT::default();
-        let _ = DrawTextW(hdc, &mut text_u16, &mut calc_rect, DT_CALCRECT);
-        let text_w = calc_rect.right - calc_rect.left;
-        let text_h = calc_rect.bottom - calc_rect.top;
+    let pill_w = text_w + 48;
+    let pill_h = text_h + 16;
+    let pill_x = (state.width - pill_w) / 2;
+    let pill_y = 40;
 
-        let pill_w = text_w + 48;
-        let pill_h = text_h + 16;
-        let pill_x = (state.width - pill_w) / 2;
-        let pill_y = 40;
+    let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
+    let pen = windows::Win32::Graphics::Gdi::CreatePen(
+        windows::Win32::Graphics::Gdi::PS_SOLID,
+        1,
+        rgb(110, 156, 210),
+    );
+    let old_brush = SelectObject(mem_dc, HGDIOBJ(brush.0));
+    let old_pen = SelectObject(mem_dc, HGDIOBJ(pen.0));
 
-        // Draw pill background (using GDI round rect)
-        let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
-        let pen = windows::Win32::Graphics::Gdi::CreatePen(
-            windows::Win32::Graphics::Gdi::PS_SOLID,
-            1,
-            rgb(110, 156, 210),
-        );
-        let old_brush = SelectObject(hdc, HGDIOBJ(brush.0));
-        let old_pen = SelectObject(hdc, HGDIOBJ(pen.0));
+    let _ = windows::Win32::Graphics::Gdi::RoundRect(
+        mem_dc,
+        pill_x,
+        pill_y,
+        pill_x + pill_w,
+        pill_y + pill_h,
+        18,
+        18,
+    );
 
-        let _ = windows::Win32::Graphics::Gdi::RoundRect(
-            hdc,
-            pill_x,
-            pill_y,
-            pill_x + pill_w,
-            pill_y + pill_h,
-            18,
-            18,
-        );
+    let mut text_rect = RECT {
+        left: pill_x,
+        top: pill_y,
+        right: pill_x + pill_w,
+        bottom: pill_y + pill_h,
+    };
+    let _ = DrawTextW(
+        mem_dc,
+        &mut text_u16,
+        &mut text_rect,
+        DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+    );
 
-        let mut text_rect = RECT {
-            left: pill_x,
-            top: pill_y,
-            right: pill_x + pill_w,
-            bottom: pill_y + pill_h,
-        };
-        let _ = DrawTextW(
-            hdc,
-            &mut text_u16,
-            &mut text_rect,
-            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
-        );
-
-        // Clean up pill graphics objects
-        let _ = SelectObject(hdc, old_brush);
-        let _ = SelectObject(hdc, old_pen);
-        let _ = DeleteObject(HGDIOBJ(brush.0));
-        let _ = DeleteObject(HGDIOBJ(pen.0));
-    }
+    let _ = SelectObject(mem_dc, old_brush);
+    let _ = SelectObject(mem_dc, old_pen);
+    let _ = SelectObject(mem_dc, old_font);
+    let _ = DeleteObject(HGDIOBJ(brush.0));
+    let _ = DeleteObject(HGDIOBJ(pen.0));
+    let _ = DeleteObject(HGDIOBJ(font.0));
 
     // Render coordinates tooltip next to mouse cursor
+    let show_cursor_tooltip = !matches!(state.mode, NativeCaptureMode::RegionSelect { .. });
     if show_cursor_tooltip && let Some(curr) = state.current_point {
         let abs_x = curr.0 + state.left;
         let abs_y = curr.1 + state.top;
@@ -2226,13 +2071,13 @@ unsafe fn draw_capture_to_dc(
         let mut coords_u16: Vec<u16> = coords_str.encode_utf16().collect();
 
         let mut c_calc = RECT::default();
-        let _ = DrawTextW(hdc, &mut coords_u16, &mut c_calc, DT_CALCRECT);
+        let _ = DrawTextW(mem_dc, &mut coords_u16, &mut c_calc, DT_CALCRECT);
         let cw = c_calc.right - c_calc.left;
         let ch = c_calc.bottom - c_calc.top;
         let (warning_u16, warning_w, warning_h) = if let Some(text) = tooltip_warning {
             let mut warning_u16: Vec<u16> = text.encode_utf16().collect();
             let mut warning_calc = RECT::default();
-            let _ = DrawTextW(hdc, &mut warning_u16, &mut warning_calc, DT_CALCRECT);
+            let _ = DrawTextW(mem_dc, &mut warning_u16, &mut warning_calc, DT_CALCRECT);
             (
                 Some(warning_u16),
                 warning_calc.right - warning_calc.left,
@@ -2255,7 +2100,6 @@ unsafe fn draw_capture_to_dc(
         let tooltip_x = (curr.0 + 15).clamp(8, max_tooltip_x);
         let tooltip_y = (curr.1 + 15).clamp(8, max_tooltip_y);
 
-        // Draw small dark tooltip background
         let t_brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(15, 23, 42));
         let t_pen = windows::Win32::Graphics::Gdi::CreatePen(
             windows::Win32::Graphics::Gdi::PS_SOLID,
@@ -2266,11 +2110,11 @@ unsafe fn draw_capture_to_dc(
                 rgb(0, 160, 255)
             },
         );
-        let old_tb = SelectObject(hdc, HGDIOBJ(t_brush.0));
-        let old_tp = SelectObject(hdc, HGDIOBJ(t_pen.0));
+        let old_tb = SelectObject(mem_dc, HGDIOBJ(t_brush.0));
+        let old_tp = SelectObject(mem_dc, HGDIOBJ(t_pen.0));
 
         let _ = windows::Win32::Graphics::Gdi::RoundRect(
-            hdc,
+            mem_dc,
             tooltip_x,
             tooltip_y,
             tooltip_x + tooltip_w,
@@ -2285,16 +2129,16 @@ unsafe fn draw_capture_to_dc(
             right: tooltip_x + content_w + 8,
             bottom: tooltip_y + ch + 5,
         };
-        let _ = SetTextColor(hdc, rgb(255, 255, 255));
+        let _ = SetTextColor(mem_dc, rgb(255, 255, 255));
         let _ = DrawTextW(
-            hdc,
+            mem_dc,
             &mut coords_u16,
             &mut coords_rect,
             DT_CENTER | DT_SINGLELINE | DT_VCENTER,
         );
 
         if let Some(mut warning_u16) = warning_u16 {
-            let _ = SetTextColor(hdc, rgb(255, 196, 148));
+            let _ = SetTextColor(mem_dc, rgb(255, 196, 148));
             let mut warning_rect = RECT {
                 left: tooltip_x + 8,
                 top: coords_rect.bottom + 4,
@@ -2302,146 +2146,35 @@ unsafe fn draw_capture_to_dc(
                 bottom: coords_rect.bottom + 4 + warning_h,
             };
             let _ = DrawTextW(
-                hdc,
+                mem_dc,
                 &mut warning_u16,
                 &mut warning_rect,
                 DT_CENTER | DT_SINGLELINE | DT_VCENTER,
             );
         }
 
-        let _ = SelectObject(hdc, old_tb);
-        let _ = SelectObject(hdc, old_tp);
+        let _ = SelectObject(mem_dc, old_tb);
+        let _ = SelectObject(mem_dc, old_tp);
         let _ = DeleteObject(HGDIOBJ(t_brush.0));
         let _ = DeleteObject(HGDIOBJ(t_pen.0));
     }
 
-    // Draw preview panel text if panel is visible
-    if preview_panel_visible {
-        let vietnamese = match state.mode {
-            NativeCaptureMode::ProtractorCalibration { ui_language } => {
-                ui_language == crate::model::UiLanguage::Vietnamese
-            }
-            NativeCaptureMode::DistanceMeasure { ui_language } => {
-                ui_language == crate::model::UiLanguage::Vietnamese
-            }
-            NativeCaptureMode::RegionSelect { ui_language, .. } => {
-                ui_language == crate::model::UiLanguage::Vietnamese
-            }
-            NativeCaptureMode::PointClick { ui_language, .. } => {
-                ui_language == crate::model::UiLanguage::Vietnamese
-            }
-            NativeCaptureMode::RegionAdjust { ui_language, .. } => {
-                ui_language == crate::model::UiLanguage::Vietnamese
-            }
-        };
+    // Finally: atomic BitBlt of completed frame from mem_dc to window hdc
+    let _ = BitBlt(
+        hdc,
+        0,
+        0,
+        state.width,
+        state.height,
+        Some(mem_dc),
+        0,
+        0,
+        SRCCOPY,
+    );
 
-        // Create Hex Code Font (18px bold)
-        let hex_font = CreateFontW(
-            18,
-            0,
-            0,
-            0,
-            700, // FW_BOLD
-            0,
-            0,
-            0,
-            FONT_CHARSET(0),
-            FONT_OUTPUT_PRECISION(0),
-            FONT_CLIP_PRECISION(0),
-            FONT_QUALITY(0),
-            0,
-            w!("Segoe UI"),
-        );
-
-        // Create Label Font (13px normal)
-        let label_font = CreateFontW(
-            13,
-            0,
-            0,
-            0,
-            400, // FW_NORMAL
-            0,
-            0,
-            0,
-            FONT_CHARSET(0),
-            FONT_OUTPUT_PRECISION(0),
-            FONT_CLIP_PRECISION(0),
-            FONT_QUALITY(0),
-            0,
-            w!("Segoe UI"),
-        );
-
-        let _ = SetBkMode(hdc, TRANSPARENT);
-
-        // 1. Draw Hex code
-        let hex_str = format!(
-            "#{:02X}{:02X}{:02X}",
-            center_color.0, center_color.1, center_color.2
-        );
-        let mut hex_u16: Vec<u16> = hex_str.encode_utf16().collect();
-        let mut hex_rect = RECT {
-            left: (panel_x + 48.0) as i32,
-            top: (panel_y + 171.0) as i32,
-            right: (panel_x + 192.0) as i32,
-            bottom: (panel_y + 194.0) as i32,
-        };
-        let old_f = SelectObject(hdc, HGDIOBJ(hex_font.0));
-        let _ = SetTextColor(hdc, rgb(255, 255, 255));
-        let _ = DrawTextW(hdc, &mut hex_u16, &mut hex_rect, DT_SINGLELINE | DT_VCENTER);
-
-        // 2. Draw Coordinates
-        if let Some(curr) = state.current_point {
-            let abs_x = curr.0 + state.left;
-            let abs_y = curr.1 + state.top;
-            let coords_str = format!("X: {abs_x}  Y: {abs_y}");
-            let mut coords_u16: Vec<u16> = coords_str.encode_utf16().collect();
-            let mut coords_rect = RECT {
-                left: (panel_x + 12.0) as i32,
-                top: (panel_y + 202.0) as i32,
-                right: (panel_x + 192.0) as i32,
-                bottom: (panel_y + 220.0) as i32,
-            };
-            let _ = SelectObject(hdc, HGDIOBJ(label_font.0));
-            let _ = SetTextColor(hdc, rgb(188, 206, 230));
-            let _ = DrawTextW(
-                hdc,
-                &mut coords_u16,
-                &mut coords_rect,
-                DT_SINGLELINE | DT_VCENTER,
-            );
-        }
-
-        // 3. Draw Center Pixel label
-        let center_pixel_text = if vietnamese {
-            "Màu tại tâm"
-        } else {
-            "Center color"
-        };
-        let mut center_u16: Vec<u16> = center_pixel_text.encode_utf16().collect();
-        let mut center_rect = RECT {
-            left: (panel_x + 12.0) as i32,
-            top: (panel_y + 222.0) as i32,
-            right: (panel_x + 192.0) as i32,
-            bottom: (panel_y + 240.0) as i32,
-        };
-        let _ = SelectObject(hdc, HGDIOBJ(label_font.0));
-        let _ = SetTextColor(hdc, rgb(188, 206, 230));
-        let _ = DrawTextW(
-            hdc,
-            &mut center_u16,
-            &mut center_rect,
-            DT_SINGLELINE | DT_VCENTER,
-        );
-
-        // Cleanup
-        let _ = SelectObject(hdc, old_f);
-        let _ = DeleteObject(HGDIOBJ(hex_font.0));
-        let _ = DeleteObject(HGDIOBJ(label_font.0));
-    }
-
-    // Restore font and delete
-    let _ = SelectObject(hdc, old_font);
-    let _ = DeleteObject(HGDIOBJ(font.0));
+    let _ = SelectObject(mem_dc, old_bmp);
+    let _ = DeleteObject(HGDIOBJ(mem_bmp.0));
+    let _ = DeleteDC(mem_dc);
 
     Ok(())
 }
