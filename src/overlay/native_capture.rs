@@ -273,70 +273,7 @@ fn clamp_dirty_rect(state: &CaptureState, rect: RECT) -> Option<RECT> {
     }
 }
 
-fn point_click_panel_origin(state: &CaptureState, point: (i32, i32)) -> (i32, i32) {
-    let panel_w = 200;
-    let panel_h = 246;
-    let margin = 18;
-    let safe_r = 40;
-    let safe_left = point.0 - safe_r;
-    let safe_right = point.0 + safe_r;
-    let safe_top = point.1 - safe_r;
-    let safe_bottom = point.1 + safe_r;
-    let candidates = [
-        (state.width - panel_w - margin, margin),
-        (margin, margin),
-        (
-            state.width - panel_w - margin,
-            state.height - panel_h - margin,
-        ),
-        (margin, state.height - panel_h - margin),
-    ];
-    candidates
-        .into_iter()
-        .find(|(x, y)| {
-            *x + panel_w < safe_left
-                || *x > safe_right
-                || *y + panel_h < safe_top
-                || *y > safe_bottom
-        })
-        .unwrap_or(candidates[0])
-}
 
-fn point_click_dirty_rect(state: &CaptureState, point: Option<(i32, i32)>) -> Option<RECT> {
-    let point = point?;
-    let mut rect = RECT {
-        left: point.0 - 280,
-        top: point.1 - 32,
-        right: point.0 + 280,
-        bottom: point.1 + 72,
-    };
-    let (panel_x, panel_y) = point_click_panel_origin(state, point);
-    rect = union_rect(
-        rect,
-        RECT {
-            left: panel_x - 2,
-            top: panel_y - 2,
-            right: panel_x + 202,
-            bottom: panel_y + 248,
-        },
-    );
-    clamp_dirty_rect(state, rect)
-}
-
-fn union_point_click_dirty_rect(
-    state: &CaptureState,
-    previous: Option<(i32, i32)>,
-    next: Option<(i32, i32)>,
-) -> Option<RECT> {
-    match (
-        point_click_dirty_rect(state, previous),
-        point_click_dirty_rect(state, next),
-    ) {
-        (Some(a), Some(b)) => Some(union_rect(a, b)),
-        (Some(rect), None) | (None, Some(rect)) => Some(rect),
-        (None, None) => None,
-    }
-}
 
 pub fn run_capture_overlay(
     capture_frame: crate::window_list::ScreenCaptureFrame,
@@ -611,16 +548,7 @@ unsafe extern "system" fn capture_wnd_proc(
                                     InvalidateRect(hwnd, None, false);
                                 }
                             } else if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
-                                if let Some(dirty) = union_point_click_dirty_rect(
-                                    state,
-                                    previous_point,
-                                    state.current_point,
-                                ) {
-                                    InvalidateRect(hwnd, Some(&dirty), false);
-                                } else {
-                                    InvalidateRect(hwnd, None, false);
-                                }
-                                let _ = UpdateWindow(hwnd);
+                                InvalidateRect(hwnd, None, false);
                             } else {
                                 InvalidateRect(hwnd, None, false);
                             }
@@ -1328,286 +1256,13 @@ fn draw_rounded_rect(
     }
 }
 
-unsafe fn draw_point_click_capture_to_dc(
-    hdc: HDC,
-    state: &CaptureState,
-    dirty: Option<RECT>,
-) -> anyhow::Result<()> {
-    let dirty = dirty
-        .and_then(|rect| clamp_dirty_rect(state, rect))
-        .unwrap_or(RECT {
-            left: 0,
-            top: 0,
-            right: state.width,
-            bottom: state.height,
-        });
-    let dirty_w = dirty.right - dirty.left;
-    let dirty_h = dirty.bottom - dirty.top;
-    if dirty_w <= 0 || dirty_h <= 0 {
-        return Ok(());
-    }
-
-    let source = if matches!(
-        state.mode,
-        NativeCaptureMode::PointClick {
-            dim_background: true,
-            ..
-        }
-    ) {
-        &state.dimmed_bgra
-    } else {
-        &state.original_bgra
-    };
-    let sw = state.width as usize;
-    let mut bgra = vec![0u8; dirty_w as usize * dirty_h as usize * 4];
-    for y in 0..dirty_h as usize {
-        let src_start = ((dirty.top as usize + y) * sw + dirty.left as usize) * 4;
-        let dst_start = y * dirty_w as usize * 4;
-        bgra[dst_start..dst_start + dirty_w as usize * 4]
-            .copy_from_slice(&source[src_start..src_start + dirty_w as usize * 4]);
-    }
-
-    let mut bmi = BITMAPINFO::default();
-    bmi.bmiHeader = BITMAPINFOHEADER {
-        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: dirty_w,
-        biHeight: -dirty_h,
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB.0,
-        ..Default::default()
-    };
-    let mut dib_bits: *mut std::ffi::c_void = std::ptr::null_mut();
-    let dib = CreateDIBSection(Some(hdc), &bmi, DIB_RGB_COLORS, &mut dib_bits, None, 0)?;
-    if !dib_bits.is_null() {
-        std::ptr::copy_nonoverlapping(bgra.as_ptr(), dib_bits as *mut u8, bgra.len());
-    }
-    let draw_hdc = CreateCompatibleDC(Some(hdc));
-    let old_bitmap = SelectObject(draw_hdc, HGDIOBJ(dib.0));
-    let _ = SetViewportOrgEx(draw_hdc, -dirty.left, -dirty.top, None);
-
-    let Some(curr) = state.current_point else {
-        let _ = BitBlt(
-            hdc,
-            dirty.left,
-            dirty.top,
-            dirty_w,
-            dirty_h,
-            Some(draw_hdc),
-            0,
-            0,
-            SRCCOPY,
-        );
-        let _ = SelectObject(draw_hdc, old_bitmap);
-        let _ = DeleteObject(HGDIOBJ(dib.0));
-        let _ = DeleteDC(draw_hdc);
-        return Ok(());
-    };
-
-    let (panel_x, panel_y) = point_click_panel_origin(state, curr);
-    let panel_brush = CreateSolidBrush(rgb(12, 18, 28));
-    let panel_pen = CreatePen(PS_SOLID, 1, rgb(110, 156, 210));
-    let old_brush = SelectObject(draw_hdc, HGDIOBJ(panel_brush.0));
-    let old_pen = SelectObject(draw_hdc, HGDIOBJ(panel_pen.0));
-    let _ = windows::Win32::Graphics::Gdi::RoundRect(
-        draw_hdc,
-        panel_x,
-        panel_y,
-        panel_x + 200,
-        panel_y + 246,
-        10,
-        10,
-    );
-    let _ = SelectObject(draw_hdc, old_brush);
-    let _ = SelectObject(draw_hdc, old_pen);
-    let _ = DeleteObject(HGDIOBJ(panel_brush.0));
-    let _ = DeleteObject(HGDIOBJ(panel_pen.0));
-
-    let preview_x = panel_x + 28;
-    let preview_y = panel_y + 12;
-    let cell = 8;
-    let mut center_color = (0u8, 0u8, 0u8);
-    for dy in 0..17 {
-        let sy = curr.1 - 8 + dy;
-        for dx in 0..17 {
-            let sx = curr.0 - 8 + dx;
-            let (mut r, mut g, mut b) = (0u8, 0u8, 0u8);
-            if sx >= 0 && sx < state.width && sy >= 0 && sy < state.height {
-                let idx = (sy as usize * state.width as usize + sx as usize) * 4;
-                r = state.capture_frame.rgba[idx];
-                g = state.capture_frame.rgba[idx + 1];
-                b = state.capture_frame.rgba[idx + 2];
-            }
-            if dx == 8 && dy == 8 {
-                center_color = (r, g, b);
-            }
-            let brush = CreateSolidBrush(rgb(r, g, b));
-            let rect = RECT {
-                left: preview_x + dx * cell,
-                top: preview_y + dy * cell,
-                right: preview_x + (dx + 1) * cell,
-                bottom: preview_y + (dy + 1) * cell,
-            };
-            let _ = FillRect(draw_hdc, &rect, brush);
-            let _ = DeleteObject(HGDIOBJ(brush.0));
-        }
-    }
-
-    let border_pen = CreatePen(PS_SOLID, 1, rgb(146, 192, 248));
-    let old_pen = SelectObject(draw_hdc, HGDIOBJ(border_pen.0));
-    let null_brush =
-        windows::Win32::Graphics::Gdi::GetStockObject(windows::Win32::Graphics::Gdi::NULL_BRUSH);
-    let old_brush = SelectObject(draw_hdc, null_brush);
-    let _ = Rectangle(
-        draw_hdc,
-        preview_x,
-        preview_y,
-        preview_x + 17 * cell,
-        preview_y + 17 * cell,
-    );
-    let _ = Rectangle(
-        draw_hdc,
-        preview_x + 8 * cell,
-        preview_y + 8 * cell,
-        preview_x + 9 * cell,
-        preview_y + 9 * cell,
-    );
-    let _ = SelectObject(draw_hdc, old_pen);
-    let _ = SelectObject(draw_hdc, old_brush);
-    let _ = DeleteObject(HGDIOBJ(border_pen.0));
-
-    let swatch_brush = CreateSolidBrush(rgb(center_color.0, center_color.1, center_color.2));
-    let swatch_rect = RECT {
-        left: panel_x + 12,
-        top: panel_y + 168,
-        right: panel_x + 38,
-        bottom: panel_y + 194,
-    };
-    let _ = FillRect(draw_hdc, &swatch_rect, swatch_brush);
-    let _ = DeleteObject(HGDIOBJ(swatch_brush.0));
-
-    let font = CreateFontW(
-        18,
-        0,
-        0,
-        0,
-        700,
-        0,
-        0,
-        0,
-        FONT_CHARSET(0),
-        FONT_OUTPUT_PRECISION(0),
-        FONT_CLIP_PRECISION(0),
-        FONT_QUALITY(0),
-        0,
-        w!("Segoe UI"),
-    );
-    let old_font = SelectObject(draw_hdc, HGDIOBJ(font.0));
-    let _ = SetBkMode(draw_hdc, TRANSPARENT);
-    let _ = SetTextColor(draw_hdc, rgb(255, 255, 255));
-    let mut hex_u16: Vec<u16> = format!(
-        "#{:02X}{:02X}{:02X}",
-        center_color.0, center_color.1, center_color.2
-    )
-    .encode_utf16()
-    .collect();
-    let mut hex_rect = RECT {
-        left: panel_x + 48,
-        top: panel_y + 171,
-        right: panel_x + 192,
-        bottom: panel_y + 194,
-    };
-    let _ = DrawTextW(
-        draw_hdc,
-        &mut hex_u16,
-        &mut hex_rect,
-        DT_SINGLELINE | DT_VCENTER,
-    );
-
-    let mut coord_u16: Vec<u16> = format!("X: {}  Y: {}", curr.0 + state.left, curr.1 + state.top)
-        .encode_utf16()
-        .collect();
-    let mut coord_rect = RECT {
-        left: panel_x + 12,
-        top: panel_y + 202,
-        right: panel_x + 192,
-        bottom: panel_y + 220,
-    };
-    let _ = SetTextColor(draw_hdc, rgb(188, 206, 230));
-    let _ = DrawTextW(
-        draw_hdc,
-        &mut coord_u16,
-        &mut coord_rect,
-        DT_SINGLELINE | DT_VCENTER,
-    );
-
-    let mut tip_u16: Vec<u16> = format!("X: {}, Y: {}", curr.0 + state.left, curr.1 + state.top)
-        .encode_utf16()
-        .collect();
-    let tooltip_x = (curr.0 + 15).clamp(8, (state.width - 160).max(8));
-    let tooltip_y = (curr.1 + 15).clamp(8, (state.height - 34).max(8));
-    let tip_brush = CreateSolidBrush(rgb(15, 23, 42));
-    let tip_pen = CreatePen(PS_SOLID, 1, rgb(0, 160, 255));
-    let old_brush = SelectObject(draw_hdc, HGDIOBJ(tip_brush.0));
-    let old_pen = SelectObject(draw_hdc, HGDIOBJ(tip_pen.0));
-    let _ = windows::Win32::Graphics::Gdi::RoundRect(
-        draw_hdc,
-        tooltip_x,
-        tooltip_y,
-        tooltip_x + 152,
-        tooltip_y + 30,
-        6,
-        6,
-    );
-    let _ = SelectObject(draw_hdc, old_brush);
-    let _ = SelectObject(draw_hdc, old_pen);
-    let _ = DeleteObject(HGDIOBJ(tip_brush.0));
-    let _ = DeleteObject(HGDIOBJ(tip_pen.0));
-    let _ = SetTextColor(draw_hdc, rgb(255, 255, 255));
-    let mut tip_rect = RECT {
-        left: tooltip_x + 8,
-        top: tooltip_y + 5,
-        right: tooltip_x + 144,
-        bottom: tooltip_y + 25,
-    };
-    let _ = DrawTextW(
-        draw_hdc,
-        &mut tip_u16,
-        &mut tip_rect,
-        DT_SINGLELINE | DT_VCENTER,
-    );
-
-    let _ = SelectObject(draw_hdc, old_font);
-    let _ = DeleteObject(HGDIOBJ(font.0));
-    let _ = BitBlt(
-        hdc,
-        dirty.left,
-        dirty.top,
-        dirty_w,
-        dirty_h,
-        Some(draw_hdc),
-        0,
-        0,
-        SRCCOPY,
-    );
-    let _ = SelectObject(draw_hdc, old_bitmap);
-    let _ = DeleteObject(HGDIOBJ(dib.0));
-    let _ = DeleteDC(draw_hdc);
-    Ok(())
-}
-
 unsafe fn draw_capture_to_dc(
     hdc: HDC,
     state: &mut CaptureState,
-    dirty: Option<RECT>,
+    _dirty: Option<RECT>,
 ) -> anyhow::Result<()> {
     if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
         draw_region_adjust_to_dc(hdc, state)?;
-        return Ok(());
-    }
-
-    if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
-        draw_point_click_capture_to_dc(hdc, state, dirty)?;
         return Ok(());
     }
 
@@ -1619,10 +1274,23 @@ unsafe fn draw_capture_to_dc(
     let w = state.width as usize;
     let h = state.height as usize;
 
-    if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
-        state.render_bgra.copy_from_slice(&state.dimmed_bgra);
+    if matches!(
+        state.mode,
+        NativeCaptureMode::RegionSelect { .. } | NativeCaptureMode::PointClick { .. }
+    ) {
+        let is_dimmed = match state.mode {
+            NativeCaptureMode::PointClick { dim_background, .. } => dim_background,
+            _ => true,
+        };
+        if is_dimmed {
+            state.render_bgra.copy_from_slice(&state.dimmed_bgra);
+        } else {
+            state.render_bgra.copy_from_slice(&state.original_bgra);
+        }
 
-        if let (Some(start), Some(curr)) = (state.start_point, state.current_point) {
+        if let (Some(start), Some(curr)) = (state.start_point, state.current_point)
+            && matches!(state.mode, NativeCaptureMode::RegionSelect { .. })
+        {
             let x = start.0.min(curr.0).clamp(0, state.width) as usize;
             let y = start.1.min(curr.1).clamp(0, state.height) as usize;
             let rw = (start.0 - curr.0).abs() as usize;
@@ -1670,6 +1338,21 @@ unsafe fn draw_capture_to_dc(
             DIB_RGB_COLORS,
             SRCCOPY,
         );
+
+        if matches!(state.mode, NativeCaptureMode::PointClick { .. })
+            && let Some(curr) = state.current_point
+        {
+            let cx = curr.0;
+            let cy = curr.1;
+            let cross_pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
+            let old_pen = SelectObject(mem_dc, HGDIOBJ(cross_pen.0));
+            let _ = MoveToEx(mem_dc, cx - 14, cy, None);
+            let _ = LineTo(mem_dc, cx + 15, cy);
+            let _ = MoveToEx(mem_dc, cx, cy - 14, None);
+            let _ = LineTo(mem_dc, cx, cy + 15);
+            let _ = SelectObject(mem_dc, old_pen);
+            let _ = DeleteObject(HGDIOBJ(cross_pen.0));
+        }
 
         if let (Some(start), Some(curr)) = (state.start_point, state.current_point) {
             let x = start.0.min(curr.0);
@@ -2120,6 +1803,19 @@ unsafe fn draw_capture_to_dc(
                     )
                 } else {
                     format!("X: {}, Y: {}", abs_x, abs_y)
+                }
+            }
+            NativeCaptureMode::PointClick { .. } => {
+                let rx_u = curr.0.clamp(0, state.width - 1) as usize;
+                let ry_u = curr.1.clamp(0, state.height - 1) as usize;
+                let idx = (ry_u * state.width as usize + rx_u) * 4;
+                if idx + 2 < state.capture_frame.rgba.len() {
+                    let r = state.capture_frame.rgba[idx];
+                    let g = state.capture_frame.rgba[idx + 1];
+                    let b = state.capture_frame.rgba[idx + 2];
+                    format!("X: {abs_x}, Y: {abs_y}  |  #{r:02X}{g:02X}{b:02X}")
+                } else {
+                    format!("X: {abs_x}, Y: {abs_y}")
                 }
             }
             _ => format!("X: {}, Y: {}", abs_x, abs_y),
