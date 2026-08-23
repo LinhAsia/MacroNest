@@ -11,13 +11,14 @@ use windows::{
             Direct2D::{
                 Common::{
                     D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
+                    D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, D2D1_FILL_MODE_WINDING,
                     D2D1_PIXEL_FORMAT,
                 },
                 D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_NONE,
                 D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1,
                 D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
                 D2D1_INTERPOLATION_MODE_LINEAR, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
-                ID2D1SolidColorBrush,
+                ID2D1Factory, ID2D1GeometrySink, ID2D1PathGeometry, ID2D1SolidColorBrush,
             },
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
             Direct3D11::{
@@ -230,28 +231,113 @@ impl EspGpuRenderer {
                 self.d2d
                     .DrawEllipse(&ellipse, &brush, (*thickness).max(1) as f32, None);
             }
+            GeometryRenderDraw::Arrow {
+                x1,
+                y1,
+                x2,
+                y2,
+                stroke,
+                thickness,
+                head_size,
+            } => {
+                let brush = self.brush(*stroke)?;
+                let p1 = point(*x1 - ox, *y1 - oy);
+                let p2 = point(*x2 - ox, *y2 - oy);
+                let thick = (*thickness).max(1) as f32;
+                self.d2d.DrawLine(p1, p2, &brush, thick, None);
+
+                let dx = (*x2 - *x1) as f32;
+                let dy = (*y2 - *y1) as f32;
+                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let ux = dx / len;
+                let uy = dy / len;
+                let angle = 28.0_f32.to_radians();
+                let sin_a = angle.sin();
+                let cos_a = angle.cos();
+                for side in [-1.0_f32, 1.0_f32] {
+                    let rx = ux * cos_a - side * uy * sin_a;
+                    let ry = uy * cos_a + side * ux * sin_a;
+                    let hx = (*x2 - ox) as f32 - rx * *head_size as f32;
+                    let hy = (*y2 - oy) as f32 - ry * *head_size as f32;
+                    self.d2d.DrawLine(
+                        p2,
+                        windows_numerics::Vector2 { X: hx, Y: hy },
+                        &brush,
+                        thick,
+                        None,
+                    );
+                }
+            }
+            GeometryRenderDraw::Polyline {
+                points,
+                stroke,
+                thickness,
+            } => {
+                if points.len() >= 2 {
+                    let brush = self.brush(*stroke)?;
+                    let thick = (*thickness).max(1) as f32;
+                    for window in points.windows(2) {
+                        let p1 = point(window[0].0 - ox, window[0].1 - oy);
+                        let p2 = point(window[1].0 - ox, window[1].1 - oy);
+                        self.d2d.DrawLine(p1, p2, &brush, thick, None);
+                    }
+                }
+            }
             GeometryRenderDraw::Polygon {
                 points,
                 stroke,
                 fill,
                 thickness,
-            } if points.len() == 4 => {
-                // ponytail: ESP only emits axis-aligned four-point boxes. If general polygons
-                // ever use this backend, replace this with one cached ID2D1PathGeometry.
-                let rect = D2D_RECT_F {
-                    left: points.iter().map(|p| p.0).min().unwrap_or(0) as f32 - ox as f32,
-                    top: points.iter().map(|p| p.1).min().unwrap_or(0) as f32 - oy as f32,
-                    right: points.iter().map(|p| p.0).max().unwrap_or(0) as f32 - ox as f32,
-                    bottom: points.iter().map(|p| p.1).max().unwrap_or(0) as f32 - oy as f32,
-                };
-                if let Some(fill) = fill {
-                    let brush = self.brush(*fill)?;
-                    self.d2d.FillRectangle(&rect, &brush);
+            } => {
+                if points.len() == 4 {
+                    let min_x = points.iter().map(|p| p.0).min().unwrap_or(0);
+                    let max_x = points.iter().map(|p| p.0).max().unwrap_or(0);
+                    let min_y = points.iter().map(|p| p.1).min().unwrap_or(0);
+                    let max_y = points.iter().map(|p| p.1).max().unwrap_or(0);
+                    let is_axis_aligned = points
+                        .iter()
+                        .all(|p| (p.0 == min_x || p.0 == max_x) && (p.1 == min_y || p.1 == max_y));
+                    if is_axis_aligned {
+                        let rect = D2D_RECT_F {
+                            left: (min_x - ox) as f32,
+                            top: (min_y - oy) as f32,
+                            right: (max_x - ox) as f32,
+                            bottom: (max_y - oy) as f32,
+                        };
+                        if let Some(fill) = fill {
+                            let brush = self.brush(*fill)?;
+                            self.d2d.FillRectangle(&rect, &brush);
+                        }
+                        let brush = self.brush(*stroke)?;
+                        self.d2d
+                            .DrawRectangle(&rect, &brush, (*thickness).max(1) as f32, None);
+                        return Ok(());
+                    }
                 }
-                let brush = self.brush(*stroke)?;
-                self.d2d
-                    .DrawRectangle(&rect, &brush, (*thickness).max(1) as f32, None);
-            }
+                if points.len() >= 3 {
+                    let factory: ID2D1Factory = self.d2d.GetFactory()?;
+                    let path_geometry = factory.CreatePathGeometry()?;
+                    let sink: ID2D1GeometrySink = path_geometry.Open()?;
+                    sink.SetFillMode(D2D1_FILL_MODE_WINDING);
+                    let p0 = point(points[0].0 - ox, points[0].1 - oy);
+                    sink.BeginFigure(p0, D2D1_FIGURE_BEGIN_FILLED);
+                        let d2d_pts: Vec<windows_numerics::Vector2> = points[1..]
+                            .iter()
+                            .map(|p| point(p.0 - ox, p.1 - oy))
+                            .collect();
+                        sink.AddLines(&d2d_pts);
+                        sink.EndFigure(D2D1_FIGURE_END_CLOSED);
+                        sink.Close()?;
+
+                        if let Some(fill) = fill {
+                            let brush = self.brush(*fill)?;
+                            self.d2d.FillGeometry(&path_geometry, &brush, None);
+                        }
+                        let brush = self.brush(*stroke)?;
+                        self.d2d
+                            .DrawGeometry(&path_geometry, &brush, (*thickness).max(1) as f32, None);
+                    }
+                }
             GeometryRenderDraw::Label(text) => {
                 let brush = self.brush(text.color)?;
                 let format = self.text_format(text.font_size)?;
