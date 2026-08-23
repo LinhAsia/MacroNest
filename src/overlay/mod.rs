@@ -432,8 +432,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(HashMap::new()));
     static SWALLOWED_MOUSE_TRIGGER_RELEASES: Lazy<Mutex<HashSet<String>>> =
         Lazy::new(|| Mutex::new(HashSet::new()));
-    pub static ACTIVE_MACRO_STEPS: Lazy<Mutex<HashMap<u32, HashSet<usize>>>> =
-        Lazy::new(|| Mutex::new(HashMap::new()));
+    pub static ACTIVE_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
+        Lazy::new(|| Mutex::new(HashSet::new()));
 
     static GEOMETRY_SVG_CACHE: Lazy<
         Mutex<HashMap<(Arc<str>, u32, u32, u32, i32), RenderedSvgImage>>,
@@ -1632,44 +1632,34 @@ mod windows_overlay {
         pb.finish()
     }
 
-    pub fn add_active_step(preset_id: u32, step_index: usize) {
-        let mut active = ACTIVE_MACRO_STEPS.lock();
-        active.entry(preset_id).or_default().insert(step_index);
+    pub fn add_active_preset(preset_id: u32) {
+        let mut active = ACTIVE_MACRO_PRESETS.lock();
+        active.insert(preset_id);
         drop(active);
         request_ui_repaint();
     }
 
-    pub fn remove_active_step(preset_id: u32, step_index: usize) {
-        let mut active = ACTIVE_MACRO_STEPS.lock();
-        if let Some(set) = active.get_mut(&preset_id) {
-            set.remove(&step_index);
-            if set.is_empty() {
-                active.remove(&preset_id);
-            }
-        }
-
+    pub fn remove_active_preset(preset_id: u32) {
+        let mut active = ACTIVE_MACRO_PRESETS.lock();
+        active.remove(&preset_id);
         drop(active);
         request_ui_repaint();
     }
 
-    pub struct ActiveStepGuard {
+    pub struct ActivePresetGuard {
         preset_id: u32,
-        step_index: usize,
     }
 
-    impl ActiveStepGuard {
-        pub fn new(preset_id: u32, step_index: usize) -> Self {
-            add_active_step(preset_id, step_index);
-            Self {
-                preset_id,
-                step_index,
-            }
+    impl ActivePresetGuard {
+        pub fn new(preset_id: u32) -> Self {
+            add_active_preset(preset_id);
+            Self { preset_id }
         }
     }
 
-    impl Drop for ActiveStepGuard {
+    impl Drop for ActivePresetGuard {
         fn drop(&mut self) {
-            remove_active_step(self.preset_id, self.step_index);
+            remove_active_preset(self.preset_id);
         }
     }
 
@@ -30447,6 +30437,7 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
     ) -> MacroRunFlow {
+        let _preset_guard = ActivePresetGuard::new(preset_id);
         let mut pending_macro_preset_changes = HashMap::new();
         execute_macro_sequence_with_pending(
             preset_id,
@@ -30514,7 +30505,6 @@ mod windows_overlay {
                 continue;
             }
 
-            let _guard = ActiveStepGuard::new(preset_id, absolute_index);
             if sleep_for_macro_delay(
                 preset_id,
                 step.get_delay_ms(),
@@ -31259,6 +31249,7 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         bypass_enabled: bool,
     ) -> MacroRunFlow {
+        let _preset_guard = ActivePresetGuard::new(preset_id);
         let mut pending_macro_preset_changes = HashMap::new();
         execute_hold_macro_sequence_with_pending(
             preset_id,
@@ -31335,7 +31326,6 @@ mod windows_overlay {
                 continue;
             }
 
-            let _guard = ActiveStepGuard::new(preset_id, absolute_index);
             if sleep_for_hold_delay(
                 preset_id,
                 step.get_delay_ms(),
@@ -32470,11 +32460,11 @@ mod windows_overlay {
 
             IfConditionType::PresetRunning => {
                 if let Some(pid) = running_preset_id {
-                    let active = ACTIVE_MACRO_STEPS.lock();
+                    let active = ACTIVE_MACRO_PRESETS.lock();
                     if pid == 0 {
                         !active.is_empty()
                     } else {
-                        active.contains_key(&pid)
+                        active.contains(&pid)
                     }
                 } else {
                     false
@@ -41343,9 +41333,9 @@ mod fallback {
         bail!("This application currently supports Windows only")
     }
 
-    pub static ACTIVE_MACRO_STEPS: once_cell::sync::Lazy<
-        parking_lot::Mutex<std::collections::HashMap<u32, std::collections::HashSet<usize>>>,
-    > = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+    pub static ACTIVE_MACRO_PRESETS: once_cell::sync::Lazy<
+        parking_lot::Mutex<std::collections::HashSet<u32>>,
+    > = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(std::collections::HashSet::new()));
     pub fn is_vision_following_active_by_spec(_spec: &str) -> bool {
         false
     }
