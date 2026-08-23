@@ -4832,32 +4832,6 @@ impl CrosshairApp {
             } else {
                 ui.visuals().widgets.noninteractive.bg_stroke.color
             };
-            if Self::with_emphasized_button_hover(ui, |ui| {
-                ui.add_enabled(
-                    paste_enabled,
-                    Button::new(Self::material_icon_text(0xe14d, 18.0))
-                        .min_size(egui::vec2(28.0, 28.0))
-                        .fill(paste_fill)
-                        .stroke(egui::Stroke::new(1.0, paste_stroke)),
-                )
-            })
-            .on_hover_text(Self::tr_lang(
-                language,
-                if paste_feedback_active {
-                    "Pasted"
-                } else {
-                    "Paste macro groups"
-                },
-                if paste_feedback_active {
-                    "Pasted"
-                } else {
-                    "Paste macro groups"
-                },
-            ))
-            .clicked()
-            {
-                self.paste_macro_groups_into_folder(paste_target_folder);
-            }
             let copy_feedback_active = clipboard_feedback_active
                 && self.macro_group_clipboard_feedback
                     == Some(super::MacroGroupClipboardFeedback::Copy);
@@ -4883,7 +4857,7 @@ impl CrosshairApp {
             if Self::with_emphasized_button_hover(ui, |ui| {
                 ui.add_enabled(
                     copy_enabled,
-                    Button::new(Self::material_icon_text(0xe14f, 18.0))
+                    Button::new(Self::material_icon_text(0xe14d, 18.0))
                         .min_size(egui::vec2(28.0, 28.0))
                         .fill(copy_fill)
                         .stroke(egui::Stroke::new(1.0, copy_stroke)),
@@ -4905,6 +4879,32 @@ impl CrosshairApp {
             .clicked()
             {
                 self.copy_selected_macro_groups();
+            }
+            if Self::with_emphasized_button_hover(ui, |ui| {
+                ui.add_enabled(
+                    paste_enabled,
+                    Button::new(Self::material_icon_text(0xe14f, 18.0))
+                        .min_size(egui::vec2(28.0, 28.0))
+                        .fill(paste_fill)
+                        .stroke(egui::Stroke::new(1.0, paste_stroke)),
+                )
+            })
+            .on_hover_text(Self::tr_lang(
+                language,
+                if paste_feedback_active {
+                    "Pasted"
+                } else {
+                    "Paste macro groups"
+                },
+                if paste_feedback_active {
+                    "Pasted"
+                } else {
+                    "Paste macro groups"
+                },
+            ))
+            .clicked()
+            {
+                self.paste_macro_groups_into_folder(paste_target_folder);
             }
             let cut_feedback_active = clipboard_feedback_active
                 && self.macro_group_clipboard_feedback
@@ -6411,6 +6411,25 @@ impl CrosshairApp {
                                         group.enabled = !group.enabled;
                                         live_sync = true;
                                     }
+                                    if Self::sound_style_remove_button(ui).clicked() {
+                                        remove_group = Some(group.id);
+                                    }
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_enabled(
+                                            !self.macro_group_clipboard.is_empty(),
+                                            Button::new(Self::material_icon_text(0xe14f, 15.0))
+                                                .min_size(egui::vec2(28.0, 22.0)),
+                                        )
+                                    })
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Paste macro group after this one",
+                                        "Dán nhóm macro vào sau nhóm này",
+                                    ))
+                                    .clicked()
+                                    {
+                                        deferred_paste_groups_after = Some(group.id);
+                                    }
                                     let copy_group_feedback_active =
                                         Self::is_copy_feedback_active(
                                             self.macro_group_clipboard_feedback_until,
@@ -6428,8 +6447,8 @@ impl CrosshairApp {
                                      };
                                      if Self::with_emphasized_button_hover(ui, |ui| {
                                          ui.add_sized(
-                                             [36.0, 24.0],
-                                             Button::new(Self::material_icon_text(0xe14f, 18.0))
+                                             [28.0, 22.0],
+                                             Button::new(Self::material_icon_text(0xe14d, 15.0))
                                                  .fill(copy_fill)
                                                  .stroke(egui::Stroke::new(1.0, copy_stroke)),
                                          )
@@ -6451,25 +6470,6 @@ impl CrosshairApp {
                                              "Đã sao chép nhóm macro vào bộ nhớ tạm.",
                                          ).to_owned();
                                      }
-                                     if Self::with_emphasized_button_hover(ui, |ui| {
-                                         ui.add_enabled(
-                                             !self.macro_group_clipboard.is_empty(),
-                                             Button::new(Self::material_icon_text(0xe14d, 18.0))
-                                                 .min_size(egui::vec2(36.0, 24.0)),
-                                         )
-                                     })
-                                     .on_hover_text(Self::tr_lang(
-                                         language,
-                                         "Paste macro group after this one",
-                                         "Dán nhóm macro vào sau nhóm này",
-                                     ))
-                                     .clicked()
-                                     {
-                                         deferred_paste_groups_after = Some(group.id);
-                                     }
-                                    if Self::sound_style_remove_button(ui).clicked() {
-                                        remove_group = Some(group.id);
-                                    }
                                     if Self::sound_style_toggle_button(
                                         ui,
                                         if group.collapsed {
@@ -7113,8 +7113,8 @@ impl CrosshairApp {
                                             }
                                             let paste_btn = ui.add_enabled(
                                                 self.macro_preset_clipboard.is_some(),
-                                                Button::new(Self::material_icon_text(0xe14d, 18.0))
-                                                    .min_size(egui::vec2(36.0, 24.0)),
+                                                Button::new(Self::material_icon_text(0xe14f, 15.0))
+                                                    .min_size(egui::vec2(28.0, 22.0)),
                                             )
                                             .on_hover_text(Self::tr_lang(
                                                 language,
@@ -7142,8 +7142,8 @@ impl CrosshairApp {
                                             };
 
                                             let copy_btn = ui.add(
-                                                Button::new(Self::material_icon_text(0xe14f, 18.0))
-                                                    .min_size(egui::vec2(36.0, 24.0))
+                                                Button::new(Self::material_icon_text(0xe14d, 15.0))
+                                                    .min_size(egui::vec2(28.0, 22.0))
                                                     .fill(copy_fill)
                                                     .stroke(egui::Stroke::new(1.0, copy_stroke)),
                                             )
@@ -12516,8 +12516,20 @@ if supports_move_mouse || show_detection_tuning {
                                                     self.macro_selected_steps_copy_feedback_until,
                                                 );
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            let paste_btn = Button::new(Self::tr_lang(language, "Paste", "Paste"))
-                                                .min_size(egui::vec2(42.0, 20.0));
+                                            ui.spacing_mut().item_spacing.x = 4.0;
+                                            if has_selected_steps {
+                                                let delete_btn = Button::new(Self::material_icon_text(0xe872, 15.0))
+                                                    .min_size(egui::vec2(28.0, 22.0));
+                                                if ui
+                                                    .add(delete_btn)
+                                                    .on_hover_text(Self::tr_lang(language, "Delete selected steps", "Delete selected steps"))
+                                                    .clicked()
+                                                {
+                                                    delete_selected_steps = Some((group.id, preset.id));
+                                                }
+                                            }
+                                            let paste_btn = Button::new(Self::material_icon_text(0xe14f, 15.0))
+                                                .min_size(egui::vec2(28.0, 22.0));
                                             if ui
                                                 .add_enabled(!self.macro_step_clipboard.is_empty(), paste_btn)
                                                 .on_hover_text(Self::tr_lang(
@@ -12532,16 +12544,16 @@ if supports_move_mouse || show_detection_tuning {
                                             if has_selected_steps {
                                                 if selected_copy_feedback_active {
                                                     ui.add_sized(
-                                                        [36.0, 24.0],
+                                                        [28.0, 22.0],
                                                         egui::Label::new(
                                                             RichText::new("✓")
-                                                            .color(Color32::from_rgb(126, 224, 182))
-                                                            .strong(),
+                                                                .color(Color32::from_rgb(126, 224, 182))
+                                                                .strong(),
                                                         ),
                                                     );
                                                 } else {
-                                                    let copy_btn = Button::new(Self::material_icon_text(0xe14f, 18.0))
-                                                        .min_size(egui::vec2(36.0, 24.0));
+                                                    let copy_btn = Button::new(Self::material_icon_text(0xe14d, 15.0))
+                                                        .min_size(egui::vec2(28.0, 22.0));
                                                     if ui
                                                         .add(copy_btn)
                                                         .on_hover_text(Self::tr_lang(language, "Copy the selected steps in this preset.", "Copy the selected steps in this preset."))
@@ -12549,15 +12561,6 @@ if supports_move_mouse || show_detection_tuning {
                                                     {
                                                         copy_selected_steps = Some((group.id, preset.id));
                                                     }
-                                                }
-                                                let delete_btn = Button::new(Self::tr_lang(language, "Delete", "Delete"))
-                                                    .min_size(egui::vec2(50.0, 20.0));
-                                                if ui
-                                                    .add(delete_btn)
-                                                    .on_hover_text(Self::tr_lang(language, "Delete selected steps", "Delete selected steps"))
-                                                    .clicked()
-                                                {
-                                                    delete_selected_steps = Some((group.id, preset.id));
                                                 }
                                             }
                                         });
@@ -16154,8 +16157,8 @@ if supports_move_mouse || show_detection_tuning {
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                                 let paste_btn = ui.add_enabled(
                                                     !self.macro_step_clipboard.is_empty(),
-                                                    Button::new(Self::material_icon_text(0xe14d, 14.0))
-                                                        .min_size(vec2(26.0, 20.0)),
+                                                    Button::new(Self::material_icon_text(0xe14f, 15.0))
+                                                        .min_size(vec2(28.0, 22.0)),
                                                 )
                                                 .on_hover_text(Self::tr_lang(
                                                     language,
@@ -16183,8 +16186,8 @@ if supports_move_mouse || show_detection_tuning {
                                                     ui.visuals().widgets.inactive.bg_stroke.color
                                                 };
                                                 let copy_btn = ui.add(
-                                                    Button::new(Self::material_icon_text(0xe14f, 14.0))
-                                                        .min_size(vec2(26.0, 20.0))
+                                                    Button::new(Self::material_icon_text(0xe14d, 15.0))
+                                                        .min_size(vec2(28.0, 22.0))
                                                         .fill(copy_fill)
                                                         .stroke(egui::Stroke::new(1.0, copy_stroke)),
                                                 )
