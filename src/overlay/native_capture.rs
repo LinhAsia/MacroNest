@@ -231,7 +231,7 @@ fn region_select_rect(state: &CaptureState) -> Option<RECT> {
 }
 
 fn union_selection_dirty_rect(previous: Option<RECT>, next: Option<RECT>) -> Option<RECT> {
-    let padding = 6;
+    let padding = 40;
     let expand = |rect: RECT| RECT {
         left: rect.left - padding,
         top: rect.top - padding,
@@ -989,12 +989,12 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
     let _ = DeleteObject(HGDIOBJ(h_pen.0));
     let _ = DeleteObject(HGDIOBJ(h_fill.0));
 
-    // Size label
+    // Size label badge
     let rw = (ar.right - ar.left).abs();
     let rh = (ar.bottom - ar.top).abs();
-    let size_text = format!("{rw} x {rh}");
+    let size_text = format!("{rw} × {rh}");
     let font = CreateFontW(
-        18,
+        15,
         0,
         0,
         0,
@@ -1010,27 +1010,56 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
         w!("Segoe UI"),
     );
     let old_font = SelectObject(mem_dc, HGDIOBJ(font.0));
+    let mut sz_u16: Vec<u16> = size_text.encode_utf16().collect();
+    let mut sz_calc = RECT::default();
+    let _ = DrawTextW(mem_dc, &mut sz_u16, &mut sz_calc, DT_CALCRECT);
+    let text_w = sz_calc.right - sz_calc.left;
+    let text_h = sz_calc.bottom - sz_calc.top;
+
+    let badge_w = text_w + 16;
+    let badge_h = text_h + 8;
+    let badge_x = ar.left.clamp(4, (state.width - badge_w - 4).max(4));
+    let badge_y = if ar.top >= badge_h + 6 {
+        ar.top - badge_h - 4
+    } else {
+        (ar.top + 6).min((state.height - badge_h - 4).max(0))
+    };
+
+    let b_brush = CreateSolidBrush(rgb(15, 23, 42));
+    let b_pen = CreatePen(PS_SOLID, 1, rgb(0, 160, 255));
+    let old_b = SelectObject(mem_dc, HGDIOBJ(b_brush.0));
+    let old_p = SelectObject(mem_dc, HGDIOBJ(b_pen.0));
+
+    let _ = windows::Win32::Graphics::Gdi::RoundRect(
+        mem_dc,
+        badge_x,
+        badge_y,
+        badge_x + badge_w,
+        badge_y + badge_h,
+        6,
+        6,
+    );
+
+    let mut lbl_rect = RECT {
+        left: badge_x,
+        top: badge_y,
+        right: badge_x + badge_w,
+        bottom: badge_y + badge_h,
+    };
     let _ = SetBkMode(mem_dc, TRANSPARENT);
     let _ = SetTextColor(mem_dc, rgb(255, 255, 255));
-    let mut sz_u16: Vec<u16> = size_text.encode_utf16().collect();
-    let label_y = if ar.top > 22 {
-        ar.top - 22
-    } else {
-        ar.bottom + 4
-    };
-    let mut lbl_rect = RECT {
-        left: ar.left,
-        top: label_y,
-        right: ar.right,
-        bottom: label_y + 20,
-    };
     let _ = DrawTextW(
         mem_dc,
         &mut sz_u16,
         &mut lbl_rect,
         DT_CENTER | DT_SINGLELINE | DT_VCENTER,
     );
+
+    let _ = SelectObject(mem_dc, old_b);
+    let _ = SelectObject(mem_dc, old_p);
     let _ = SelectObject(mem_dc, old_font);
+    let _ = DeleteObject(HGDIOBJ(b_brush.0));
+    let _ = DeleteObject(HGDIOBJ(b_pen.0));
     let _ = DeleteObject(HGDIOBJ(font.0));
 
     // Status bar pill
@@ -1662,10 +1691,10 @@ unsafe fn draw_capture_to_dc(
                 SelectObject(mem_dc, old_brush);
                 let _ = DeleteObject(HGDIOBJ(border_pen.0));
 
-                // Draw live region dimension label
-                let size_text = format!("{rw} x {rh}");
+                // Draw live region dimension label badge
+                let size_text = format!("{rw} × {rh}");
                 let font_size = CreateFontW(
-                    18,
+                    15,
                     0,
                     0,
                     0,
@@ -1681,23 +1710,56 @@ unsafe fn draw_capture_to_dc(
                     w!("Segoe UI"),
                 );
                 let old_font = SelectObject(mem_dc, HGDIOBJ(font_size.0));
+                let mut sz_u16: Vec<u16> = size_text.encode_utf16().collect();
+                let mut sz_calc = RECT::default();
+                let _ = DrawTextW(mem_dc, &mut sz_u16, &mut sz_calc, DT_CALCRECT);
+                let text_w = sz_calc.right - sz_calc.left;
+                let text_h = sz_calc.bottom - sz_calc.top;
+
+                let badge_w = text_w + 16;
+                let badge_h = text_h + 8;
+                let badge_x = x.clamp(4, (state.width - badge_w - 4).max(4));
+                let badge_y = if y >= badge_h + 6 {
+                    y - badge_h - 4
+                } else {
+                    (y + 6).min((state.height - badge_h - 4).max(0))
+                };
+
+                let b_brush = CreateSolidBrush(rgb(15, 23, 42));
+                let b_pen = CreatePen(PS_SOLID, 1, rgb(0, 160, 255));
+                let old_b = SelectObject(mem_dc, HGDIOBJ(b_brush.0));
+                let old_p = SelectObject(mem_dc, HGDIOBJ(b_pen.0));
+
+                let _ = windows::Win32::Graphics::Gdi::RoundRect(
+                    mem_dc,
+                    badge_x,
+                    badge_y,
+                    badge_x + badge_w,
+                    badge_y + badge_h,
+                    6,
+                    6,
+                );
+
+                let mut lbl_rect = RECT {
+                    left: badge_x,
+                    top: badge_y,
+                    right: badge_x + badge_w,
+                    bottom: badge_y + badge_h,
+                };
                 let _ = SetBkMode(mem_dc, TRANSPARENT);
                 let _ = SetTextColor(mem_dc, rgb(255, 255, 255));
-                let mut sz_u16: Vec<u16> = size_text.encode_utf16().collect();
-                let label_y = if y > 22 { y - 22 } else { y + rh + 4 };
-                let mut lbl_rect = RECT {
-                    left: x,
-                    top: label_y,
-                    right: x + rw,
-                    bottom: label_y + 20,
-                };
                 let _ = DrawTextW(
                     mem_dc,
                     &mut sz_u16,
                     &mut lbl_rect,
                     DT_CENTER | DT_SINGLELINE | DT_VCENTER,
                 );
+
+                let _ = SelectObject(mem_dc, old_b);
+                let _ = SelectObject(mem_dc, old_p);
                 let _ = SelectObject(mem_dc, old_font);
+                let _ = DeleteObject(HGDIOBJ(b_brush.0));
+                let _ = DeleteObject(HGDIOBJ(b_pen.0));
                 let _ = DeleteObject(HGDIOBJ(font_size.0));
             }
         }
