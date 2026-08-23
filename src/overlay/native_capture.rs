@@ -2562,17 +2562,8 @@ pub fn run_native_video_record_region_overlay(
     } = result
     {
         if w >= 4 && h >= 4 {
-            crate::video_recorder::set_region(Some((x, y, w, h)));
-            crate::overlay::send_ui_command(
-                crate::overlay::UiCommand::VideoRecordRegionSelected {
-                    x,
-                    y,
-                    width: w,
-                    height: h,
-                },
-            );
             if !crate::video_recorder::is_recording() && !crate::video_recorder::is_busy() {
-                crate::video_recorder::toggle_async();
+                crate::video_recorder::start_region_async((x, y, w, h));
             }
             crate::overlay::request_ui_repaint();
         }
