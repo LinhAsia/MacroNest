@@ -213,65 +213,7 @@ impl CaptureState {
     }
 }
 
-fn region_select_rect(state: &CaptureState) -> Option<RECT> {
-    let (start, curr) = (state.start_point?, state.current_point?);
-    let left = start.0.min(curr.0);
-    let top = start.1.min(curr.1);
-    let right = start.0.max(curr.0);
-    let bottom = start.1.max(curr.1);
-    if right - left < 2 || bottom - top < 2 {
-        return None;
-    }
-    Some(RECT {
-        left,
-        top,
-        right,
-        bottom,
-    })
-}
 
-fn union_selection_dirty_rect(previous: Option<RECT>, next: Option<RECT>) -> Option<RECT> {
-    let padding = 40;
-    let expand = |rect: RECT| RECT {
-        left: rect.left - padding,
-        top: rect.top - padding,
-        right: rect.right + padding,
-        bottom: rect.bottom + padding,
-    };
-    match (previous.map(expand), next.map(expand)) {
-        (Some(a), Some(b)) => Some(RECT {
-            left: a.left.min(b.left),
-            top: a.top.min(b.top),
-            right: a.right.max(b.right),
-            bottom: a.bottom.max(b.bottom),
-        }),
-        (Some(rect), None) | (None, Some(rect)) => Some(rect),
-        (None, None) => None,
-    }
-}
-
-fn union_rect(a: RECT, b: RECT) -> RECT {
-    RECT {
-        left: a.left.min(b.left),
-        top: a.top.min(b.top),
-        right: a.right.max(b.right),
-        bottom: a.bottom.max(b.bottom),
-    }
-}
-
-fn clamp_dirty_rect(state: &CaptureState, rect: RECT) -> Option<RECT> {
-    let rect = RECT {
-        left: rect.left.clamp(0, state.width),
-        top: rect.top.clamp(0, state.height),
-        right: rect.right.clamp(0, state.width),
-        bottom: rect.bottom.clamp(0, state.height),
-    };
-    if rect.right <= rect.left || rect.bottom <= rect.top {
-        None
-    } else {
-        Some(rect)
-    }
-}
 
 
 
@@ -372,12 +314,8 @@ unsafe extern "system" fn capture_wnd_proc(
                         let rx = pt.x - state.left;
                         let ry = pt.y - state.top;
                         if state.current_point != Some((rx, ry)) {
-                            let previous_rect = region_select_rect(state);
                             state.current_point = Some((rx, ry));
-                            let next_rect = region_select_rect(state);
-                            if let Some(dirty) = union_selection_dirty_rect(previous_rect, next_rect) {
-                                InvalidateRect(hwnd, Some(&dirty), false);
-                            } else {
+                            unsafe {
                                 InvalidateRect(hwnd, None, false);
                             }
                         }
@@ -526,32 +464,14 @@ unsafe extern "system" fn capture_wnd_proc(
                                 state.height,
                             );
                         }
-                        InvalidateRect(hwnd, None, false);
+                        unsafe {
+                            InvalidateRect(hwnd, None, false);
+                        }
                     } else {
-                        let previous_rect =
-                            if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
-                                region_select_rect(state)
-                            } else {
-                                None
-                            };
-                        let previous_point = state.current_point;
                         state.current_point =
                             Some(distance_measure_constrained_local_point(state, (rx, ry)));
                         unsafe {
-                            if matches!(state.mode, NativeCaptureMode::RegionSelect { .. }) {
-                                let next_rect = region_select_rect(state);
-                                if let Some(dirty) =
-                                    union_selection_dirty_rect(previous_rect, next_rect)
-                                {
-                                    InvalidateRect(hwnd, Some(&dirty), false);
-                                } else {
-                                    InvalidateRect(hwnd, None, false);
-                                }
-                            } else if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
-                                InvalidateRect(hwnd, None, false);
-                            } else {
-                                InvalidateRect(hwnd, None, false);
-                            }
+                            InvalidateRect(hwnd, None, false);
                         }
                     }
                 }
@@ -561,7 +481,7 @@ unsafe extern "system" fn capture_wnd_proc(
         WM_LBUTTONUP => {
             let state = get_state(hwnd);
             if let Some(state) = state {
-                ReleaseCapture();
+                let _ = ReleaseCapture();
                 let mut pt = POINT::default();
                 if GetCursorPos(&mut pt).is_ok() {
                     let rx = pt.x - state.left;
@@ -573,7 +493,9 @@ unsafe extern "system" fn capture_wnd_proc(
                         NativeCaptureMode::RegionAdjust { .. } => {
                             // End drag, keep rect as-is (confirm via Enter or right-click)
                             state.adjust_drag = None;
-                            InvalidateRect(hwnd, None, false);
+                            unsafe {
+                                InvalidateRect(hwnd, None, false);
+                            }
                         }
                         NativeCaptureMode::RegionSelect { .. } => {
                             if let Some(start) = state.start_point {
@@ -596,7 +518,7 @@ unsafe extern "system" fn capture_wnd_proc(
                                     };
                                 }
                             }
-                            DestroyWindow(hwnd);
+                            let _ = DestroyWindow(hwnd);
                         }
                         NativeCaptureMode::PointClick { .. } => {
                             let w = state.width;
@@ -618,7 +540,7 @@ unsafe extern "system" fn capture_wnd_proc(
                                 y: ry + state.top,
                                 color,
                             };
-                            DestroyWindow(hwnd);
+                            let _ = DestroyWindow(hwnd);
                         }
                         NativeCaptureMode::ProtractorCalibration { .. } => {
                             state
@@ -629,9 +551,11 @@ unsafe extern "system" fn capture_wnd_proc(
                                 state.result = NativeCaptureResult::ProtractorPoints(
                                     state.protractor_points.clone(),
                                 );
-                                DestroyWindow(hwnd);
+                                let _ = DestroyWindow(hwnd);
                             } else {
-                                InvalidateRect(hwnd, None, false);
+                                unsafe {
+                                    InvalidateRect(hwnd, None, false);
+                                }
                             }
                         }
                         NativeCaptureMode::DistanceMeasure { .. } => {
@@ -644,9 +568,11 @@ unsafe extern "system" fn capture_wnd_proc(
                                 state.result = NativeCaptureResult::DistancePoints(
                                     state.protractor_points.clone(),
                                 );
-                                DestroyWindow(hwnd);
+                                let _ = DestroyWindow(hwnd);
                             } else {
-                                InvalidateRect(hwnd, None, false);
+                                unsafe {
+                                    InvalidateRect(hwnd, None, false);
+                                }
                             }
                         }
                     }
@@ -670,7 +596,7 @@ unsafe extern "system" fn capture_wnd_proc(
                             height: rh,
                         };
                     }
-                    DestroyWindow(hwnd);
+                    let _ = DestroyWindow(hwnd);
                 }
             }
             LRESULT(0)
@@ -678,7 +604,7 @@ unsafe extern "system" fn capture_wnd_proc(
         WM_KEYDOWN => {
             let state = get_state(hwnd);
             if wparam.0 == VK_ESCAPE.0 as usize {
-                DestroyWindow(hwnd);
+                let _ = DestroyWindow(hwnd);
             } else if wparam.0 == VK_RETURN.0 as usize {
                 if let Some(state) = state {
                     if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
@@ -693,7 +619,7 @@ unsafe extern "system" fn capture_wnd_proc(
                                 height: rh,
                             };
                         }
-                        DestroyWindow(hwnd);
+                        let _ = DestroyWindow(hwnd);
                     }
                 }
             }
@@ -714,7 +640,7 @@ unsafe extern "system" fn capture_wnd_proc(
                     let _ = draw_capture_to_dc(hdc, state, Some(ps.rcPaint));
                 }
             }
-            EndPaint(hwnd, &ps);
+            let _ = EndPaint(hwnd, &ps);
             LRESULT(0)
         }
         WM_DESTROY => {
@@ -739,7 +665,7 @@ unsafe fn InvalidateRect(hwnd: HWND, rect: Option<&RECT>, erase: bool) {
         Some(r) => r as *const RECT,
         None => std::ptr::null(),
     };
-    windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), Some(lp_rect), erase);
+    let _ = windows::Win32::Graphics::Gdi::InvalidateRect(Some(hwnd), Some(lp_rect), erase);
 }
 
 const ADJUST_HANDLE_RADIUS: i32 = 10;
