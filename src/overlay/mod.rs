@@ -3630,7 +3630,7 @@ mod windows_overlay {
             let esp_hwnd = CreateWindowExW(
                 WS_EX_LAYERED
                     | WS_EX_TRANSPARENT
-                    | WS_EX_APPWINDOW
+                    | WS_EX_TOOLWINDOW
                     | WS_EX_TOPMOST
                     | WS_EX_NOACTIVATE
                     | windows::Win32::UI::WindowsAndMessaging::WS_EX_NOREDIRECTIONBITMAP,
@@ -27282,15 +27282,6 @@ mod windows_overlay {
                     continue;
                 }
                 let hwnd = HWND(hwnd_value as _);
-                if shapes.is_empty() {
-                    if visible {
-                        unsafe {
-                            let _ = ShowWindow(hwnd, SW_HIDE);
-                        }
-                        visible = false;
-                    }
-                    continue;
-                }
                 if renderer.is_none() {
                     renderer = esp_gpu::EspGpuRenderer::new(hwnd).ok();
                 }
