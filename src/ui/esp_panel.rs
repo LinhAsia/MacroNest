@@ -1,4 +1,4 @@
-use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Grid, RichText, TextEdit};
+use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Frame, Grid, RichText, TextEdit};
 
 use crate::model::{
     EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspMarkerSource, EspOrientationSource,
@@ -1223,13 +1223,23 @@ impl CrosshairApp {
                         }
                     });
 
-                Grid::new(("esp_settings", preset.id))
-                    .num_columns(2)
-                    .spacing([8.0, 4.0])
+                ui.add_space(4.0);
+
+                // --- BOX 1: Camera & 3D Projection ---
+                Frame::group(ui.style())
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .rounding(4.0)
                     .show(ui, |ui| {
-                        // --- Value type & Height axis ---
-                        ui.label("Value type");
-                        ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new("📐 Camera & 3D Projection")
+                                .strong()
+                                .color(Color32::from_rgb(100, 200, 255)),
+                        );
+                        ui.add_space(4.0);
+
+                        // Row 1: Coordinate system & FOV
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Value type:");
                             ComboBox::from_id_salt(("esp_type", preset.id))
                                 .selected_text(memory_type_name(preset.value_type))
                                 .show_ui(ui, |ui| {
@@ -1248,7 +1258,9 @@ impl CrosshairApp {
                                         );
                                     }
                                 });
-                            ui.label("Height axis");
+
+                            ui.add_space(8.0);
+                            ui.label("Height axis:");
                             ComboBox::from_id_salt(("esp_plane", preset.id))
                                 .selected_text(match preset.horizontal_plane {
                                     EspHorizontalPlane::Xz => "Y is Height (NeoX / IdentityV)",
@@ -1266,178 +1278,193 @@ impl CrosshairApp {
                                         "Z is Height (Unreal)",
                                     );
                                 });
-                        });
-                        ui.end_row();
 
-                        // --- Angle / Orientation options ---
-                        ui.label("Angle options");
-                        ui.vertical(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                if preset.orientation_source == EspOrientationSource::Angles {
-                                    angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
-                                    angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
-                                } else {
-                                    ui.label("Yaw = atan2(Direction B, Direction A)");
-                                    angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
-                                    ui.checkbox(&mut preset.swap_direction_pair, "Swap direction A/B");
-                                    ui.checkbox(&mut preset.invert_direction_a, "Invert direction A");
-                                    ui.checkbox(&mut preset.invert_direction_b, "Invert direction B");
+                            ui.add_space(8.0);
+                            ui.label("Horizontal FOV:");
+                            ui.add(
+                                DragValue::new(&mut preset.horizontal_fov)
+                                    .speed(1.0)
+                                    .range(1.0..=179.0),
+                            );
+                        });
+
+                        ui.add_space(3.0);
+
+                        // Row 2: Angle units / Direction toggles
+                        ui.horizontal_wrapped(|ui| {
+                            if preset.orientation_source == EspOrientationSource::Angles {
+                                angle_unit(ui, "Yaw", preset.id, &mut preset.yaw_unit);
+                                angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
+                            } else {
+                                ui.label(RichText::new("Yaw = atan2(Dir B, Dir A)").weak());
+                                angle_unit(ui, "Pitch", preset.id, &mut preset.pitch_unit);
+                                ui.checkbox(&mut preset.swap_direction_pair, "Swap A/B");
+                                ui.checkbox(&mut preset.invert_direction_a, "Invert A");
+                                ui.checkbox(&mut preset.invert_direction_b, "Invert B");
+                            }
+                        });
+
+                        ui.add_space(3.0);
+
+                        // Row 3: Invert & Mirror toggles
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw")
+                                .on_hover_text("Reverse only camera rotation. Use this when lateral movement is correct but rotating the camera moves ESP the wrong way.");
+                            ui.checkbox(&mut preset.invert_camera_pitch, "Reverse pitch")
+                                .on_hover_text("Reverse only camera pitch angle. Use this when looking down with camera moves ESP the wrong way.");
+                            ui.checkbox(&mut preset.invert_vertical, "Invert height (Z)")
+                                .on_hover_text("Invert target elevation difference. Use this when moving player up/down moves ESP the wrong way.");
+                            ui.checkbox(&mut preset.invert_yaw, "Mirror screen X")
+                                .on_hover_text("Mirror only the final left/right screen position.");
+                            ui.checkbox(&mut preset.invert_pitch, "Mirror screen Y")
+                                .on_hover_text("Mirror only the final up/down screen position.");
+                        });
+
+                        ui.add_space(3.0);
+
+                        // Row 4: Yaw offset & Direction B/A ratio
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Yaw offset:").on_hover_text("Use this when the marker is consistently rotated left/right.");
+                            ui.add(
+                                DragValue::new(&mut preset.yaw_offset_degrees)
+                                    .speed(1.0)
+                                    .range(-360.0..=360.0)
+                                    .suffix("°"),
+                            );
+                            for value in [-180.0, -90.0, 0.0, 90.0, 180.0] {
+                                if ui.small_button(format!("{value:+.0}")).clicked() {
+                                    preset.yaw_offset_degrees = value;
                                 }
-                                ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw value")
-                                    .on_hover_text("Reverse only camera rotation. Use this when lateral movement is correct but rotating the camera moves ESP the wrong way.");
-                                ui.checkbox(&mut preset.invert_camera_pitch, "Reverse pitch value")
-                                    .on_hover_text("Reverse only camera pitch angle. Use this when looking down with camera moves ESP the wrong way.");
-                            });
+                            }
+
+                            ui.add_space(8.0);
+                            ui.label("Dir B/A ratio:").on_hover_text("Scales Direction B relative to A before atan2.");
+                            ui.add(
+                                DragValue::new(&mut preset.direction_multiplier)
+                                    .speed(0.001)
+                                    .range(0.0001..=100.0),
+                            );
+                            if ui.small_button("Reset").clicked() {
+                                preset.direction_multiplier = 1.0;
+                            }
                         });
-                        ui.end_row();
 
-                        // --- Invert / Mirror ---
-                        ui.label("Invert / Mirror");
-                        ui.vertical(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.checkbox(&mut preset.invert_vertical, "Invert elevation (height)")
-                                    .on_hover_text("Invert target elevation difference. Use this when moving player up/down moves ESP the wrong way.");
-                                ui.checkbox(&mut preset.invert_yaw, "Mirror screen X")
-                                    .on_hover_text("Mirror only the final left/right screen position.");
-                                ui.checkbox(&mut preset.invert_pitch, "Mirror screen Y")
-                                    .on_hover_text("Mirror only the final up/down screen position.");
-                                ui.label("Horizontal FOV");
-                                ui.add(DragValue::new(&mut preset.horizontal_fov).speed(1.0).range(1.0..=179.0));
-                            });
-                        });
-                        ui.end_row();
+                        ui.add_space(3.0);
 
-                        // --- Yaw zero offset ---
-                        ui.label("Yaw zero offset").on_hover_text("Use this when the marker is consistently rotated left/right. Try +90, -90, then 180.");
-                        ui.vertical(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.add(
-                                    DragValue::new(&mut preset.yaw_offset_degrees)
-                                        .speed(1.0)
-                                        .range(-360.0..=360.0)
-                                        .suffix(" deg"),
-                                );
-                                for value in [-180.0, -90.0, 0.0, 90.0, 180.0] {
-                                    if ui.small_button(format!("{value:+.0}")).clicked() {
-                                        preset.yaw_offset_degrees = value;
-                                    }
-                                }
-                                ui.label("Direction B/A ratio").on_hover_text(
-                                    "Scales Direction B relative to A before atan2. Use this when horizontal ESP is correct near one direction but increasingly wrong while rotating.",
-                                );
-                                ui.add(
-                                    DragValue::new(&mut preset.direction_multiplier)
-                                        .speed(0.001)
-                                        .range(0.0001..=100.0),
-                                );
-                                if ui.small_button("Reset scale").clicked() {
-                                    preset.direction_multiplier = 1.0;
-                                }
-                            });
-                        });
-                        ui.end_row();
+                        // Row 5: Pitch controls
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Pitch input:");
+                            ComboBox::from_id_salt(("esp_pitch_input", preset.id))
+                                .selected_text(match preset.pitch_input {
+                                    EspPitchInput::Angle => "Angle",
+                                    EspPitchInput::SineComponent => "Direction component (asin)",
+                                    EspPitchInput::TangentComponent => "Slope component (atan)",
+                                })
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut preset.pitch_input, EspPitchInput::Angle, "Angle");
+                                    ui.selectable_value(
+                                        &mut preset.pitch_input,
+                                        EspPitchInput::SineComponent,
+                                        "Direction component (asin)",
+                                    );
+                                    ui.selectable_value(
+                                        &mut preset.pitch_input,
+                                        EspPitchInput::TangentComponent,
+                                        "Slope component (atan)",
+                                    );
+                                });
 
-                        ui.label("Pitch input");
-                        ComboBox::from_id_salt(("esp_pitch_input", preset.id))
-                            .selected_text(match preset.pitch_input {
-                                EspPitchInput::Angle => "Angle",
-                                EspPitchInput::SineComponent => "Direction component (asin)",
-                                EspPitchInput::TangentComponent => "Slope component (atan)",
-                            })
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut preset.pitch_input, EspPitchInput::Angle, "Angle");
-                                ui.selectable_value(
-                                    &mut preset.pitch_input,
-                                    EspPitchInput::SineComponent,
-                                    "Direction component (asin)",
-                                );
-                                ui.selectable_value(
-                                    &mut preset.pitch_input,
-                                    EspPitchInput::TangentComponent,
-                                    "Slope component (atan)",
-                                );
-                            });
-                        ui.end_row();
-
-                        ui.label("Pitch scale").on_hover_text(
-                            "Scale only camera pitch response; values below 1 slow vertical ESP movement without changing horizontal FOV.",
-                        );
-                        ui.horizontal(|ui| {
+                            ui.add_space(6.0);
+                            ui.label("Pitch scale:").on_hover_text("Scale only camera pitch response.");
                             ui.add(
                                 DragValue::new(&mut preset.pitch_multiplier)
                                     .speed(0.01)
                                     .range(0.0..=10.0),
                             );
-                            if ui.small_button("Reset scale").clicked() {
+                            if ui.small_button("Reset").clicked() {
                                 preset.pitch_multiplier = 1.0;
                             }
-                        });
-                        ui.end_row();
 
-                        ui.label("Vertical projection scale").on_hover_text(
-                            "Scales only final screen Y. Lower this when every vertical movement is too large while horizontal alignment is already correct.",
-                        );
-                        ui.horizontal(|ui| {
+                            ui.add_space(6.0);
+                            ui.label("Pitch offset:").on_hover_text("Use only when marker is consistently too high/low as camera tilts.");
+                            ui.add(
+                                DragValue::new(&mut preset.pitch_offset_degrees)
+                                    .speed(1.0)
+                                    .range(-180.0..=180.0)
+                                    .suffix("°"),
+                            );
+                            if ui.small_button("Reset").clicked() {
+                                preset.pitch_offset_degrees = 0.0;
+                            }
+                        });
+
+                        ui.add_space(3.0);
+
+                        // Row 6: Vertical projection scale, Target height, World height scale
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Vertical proj scale:").on_hover_text("Scales only final screen Y.");
                             ui.add(
                                 DragValue::new(&mut preset.vertical_projection_multiplier)
                                     .speed(0.01)
                                     .range(0.0..=10.0),
                             );
-                            if ui.small_button("Reset vertical").clicked() {
+                            if ui.small_button("Reset").clicked() {
                                 preset.vertical_projection_multiplier = 1.0;
                             }
-                        });
-                        ui.end_row();
 
-                        // --- Pitch zero offset ---
-                        ui.label("Pitch zero offset").on_hover_text("Use only when every marker is consistently too high/low as the camera tilts.");
-                        ui.horizontal(|ui| {
-                            ui.add(
-                                DragValue::new(&mut preset.pitch_offset_degrees)
-                                    .speed(1.0)
-                                    .range(-180.0..=180.0)
-                                    .suffix(" deg"),
-                            );
-                            if ui.small_button("Reset pitch").clicked() {
-                                preset.pitch_offset_degrees = 0.0;
-                            }
-                            ui.label("Target height").on_hover_text("World-unit correction for a target pivot at feet/waist. Start at 0; adjust only after yaw is correct.");
+                            ui.add_space(8.0);
+                            ui.label("Target height:").on_hover_text("World-unit correction for target pivot at feet/waist.");
                             ui.add(
                                 DragValue::new(&mut preset.target_vertical_offset)
                                     .speed(1.0)
                                     .range(-10000.0..=10000.0),
                             );
-                            ui.label("World height scale").on_hover_text(
-                                "Scales Target height - Camera height in world coordinates. It does not change camera pitch response.",
-                            );
+
+                            ui.add_space(8.0);
+                            ui.label("Height scale:").on_hover_text("Scales Target height - Camera height in world coordinates.");
                             ui.add(
                                 DragValue::new(&mut preset.height_scale)
                                     .speed(0.001)
                                     .range(0.0001..=100.0),
                             );
-                            if ui.small_button("Reset height scale").clicked() {
+                            if ui.small_button("Reset").clicked() {
                                 preset.height_scale = 1.0;
                             }
                         });
-                        ui.end_row();
 
-                        // --- Screen offset ---
-                        ui.label("Screen offset").on_hover_text("Final pixel correction. It does not fix a wrong axis or angle convention.");
+                        ui.add_space(3.0);
+
+                        // Row 7: Screen offset
                         ui.horizontal(|ui| {
+                            ui.label("Screen offset:").on_hover_text("Final pixel correction.");
                             ui.label("X");
                             ui.add(DragValue::new(&mut preset.screen_offset_x).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
                             ui.label("Y");
                             ui.add(DragValue::new(&mut preset.screen_offset_y).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
-                            if ui.small_button("Reset screen").clicked() {
+                            if ui.small_button("Reset").clicked() {
                                 preset.screen_offset_x = 0.0;
                                 preset.screen_offset_y = 0.0;
                             }
                         });
-                        ui.end_row();
+                    });
 
-                        // --- Calibration ---
-                        ui.label("Calibration").on_hover_text("Auto calibration: stand on four different sides, aim the screen center at the target, then capture once per side.");
-                        ui.horizontal(|ui| {
+                ui.add_space(4.0);
+
+                // --- BOX 2: Calibration & Combination Matrix ---
+                Frame::group(ui.style())
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .rounding(4.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new("🎯 Calibration & Helpers")
+                                .strong()
+                                .color(Color32::from_rgb(255, 200, 100)),
+                        );
+                        ui.add_space(4.0);
+
+                        // Auto Calibration
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Auto Calibration:");
                             if ui.small_button("Apply suggested start").on_hover_text("Suggested: XY + vertical Z, yaw Degrees, pitch Radians, FOV 90. If sideways try ±90; if behind try 180.").clicked() {
                                 preset.horizontal_plane = EspHorizontalPlane::Xy;
                                 preset.yaw_unit = EspAngleUnit::Degrees;
@@ -1483,66 +1510,78 @@ impl CrosshairApp {
                                 ui.label(RichText::new(feedback).color(ui.visuals().weak_text_color()));
                             }
                         });
-                        ui.end_row();
 
-                        // --- Combination Matrix ---
-                        ui.label("Combination Matrix");
-                        ui.vertical(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.checkbox(
-                                    &mut preset.permutation_debug_mode,
-                                    "Render all combinations (Single target)",
-                                )
-                                .on_hover_text(
-                                    "Simultaneously renders all 128 combinations of Plane (XZ/XY), Swap A/B, Invert A/B, Reverse Yaw, and Yaw Offsets with numbered labels. Look at your target in-game to see which # number lands directly on it, then apply below!",
+                        ui.add_space(3.0);
+
+                        // Combination Matrix
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(
+                                &mut preset.permutation_debug_mode,
+                                "Render all 128 combinations (Single target)",
+                            )
+                            .on_hover_text(
+                                "Simultaneously renders all 128 combinations of Plane, Swap A/B, Invert A/B, Reverse Yaw, and Yaw Offsets with numbered labels. Look at your target in-game to see which # number lands directly on it, then apply below!",
+                            );
+
+                            if preset.permutation_debug_mode {
+                                let perms = crate::model::esp_debug_permutations();
+                                let selected_perm = self.esp_selected_permutation.entry(preset.id).or_insert(1);
+                                ui.label("Pick #:");
+                                ui.add(
+                                    DragValue::new(selected_perm)
+                                        .range(1..=perms.len())
+                                        .speed(1.0),
                                 );
-
-                                if preset.permutation_debug_mode {
-                                    let perms = crate::model::esp_debug_permutations();
-                                    let selected_perm = self.esp_selected_permutation.entry(preset.id).or_insert(1);
-                                    ui.label("Pick #:");
-                                    ui.add(
-                                        DragValue::new(selected_perm)
-                                            .range(1..=perms.len())
-                                            .speed(1.0),
+                                if let Some(target_cfg) = perms.iter().find(|c| c.index == *selected_perm) {
+                                    ui.label(
+                                        RichText::new(&target_cfg.short_desc)
+                                            .color(Color32::from_rgb(
+                                                target_cfg.color[0],
+                                                target_cfg.color[1],
+                                                target_cfg.color[2],
+                                            ))
+                                            .strong(),
                                     );
-                                    if let Some(target_cfg) = perms.iter().find(|c| c.index == *selected_perm) {
-                                        ui.label(
-                                            RichText::new(&target_cfg.short_desc)
-                                                .color(Color32::from_rgb(
-                                                    target_cfg.color[0],
-                                                    target_cfg.color[1],
-                                                    target_cfg.color[2],
-                                                ))
-                                                .strong(),
-                                        );
-                                        if ui
-                                            .button(format!("Apply #{} to Preset", target_cfg.index))
-                                            .clicked()
-                                        {
-                                            preset.horizontal_plane = target_cfg.horizontal_plane;
-                                            preset.swap_direction_pair = target_cfg.swap_direction_pair;
-                                            preset.invert_direction_a = target_cfg.invert_direction_a;
-                                            preset.invert_direction_b = target_cfg.invert_direction_b;
-                                            preset.invert_camera_yaw = target_cfg.invert_camera_yaw;
-                                            preset.yaw_offset_degrees = target_cfg.yaw_offset_degrees;
-                                            preset.invert_camera_pitch = target_cfg.invert_camera_pitch;
-                                            preset.invert_vertical = target_cfg.invert_vertical;
-                                            preset.pitch_input = target_cfg.pitch_input;
-                                            preset.pitch_unit = target_cfg.pitch_unit;
-                                            preset.invert_yaw = false;
-                                            preset.invert_pitch = false;
-                                            preset.permutation_debug_mode = false;
-                                        }
+                                    if ui
+                                        .button(format!("Apply #{} to Preset", target_cfg.index))
+                                        .clicked()
+                                    {
+                                        preset.horizontal_plane = target_cfg.horizontal_plane;
+                                        preset.swap_direction_pair = target_cfg.swap_direction_pair;
+                                        preset.invert_direction_a = target_cfg.invert_direction_a;
+                                        preset.invert_direction_b = target_cfg.invert_direction_b;
+                                        preset.invert_camera_yaw = target_cfg.invert_camera_yaw;
+                                        preset.yaw_offset_degrees = target_cfg.yaw_offset_degrees;
+                                        preset.invert_camera_pitch = target_cfg.invert_camera_pitch;
+                                        preset.invert_vertical = target_cfg.invert_vertical;
+                                        preset.pitch_input = target_cfg.pitch_input;
+                                        preset.pitch_unit = target_cfg.pitch_unit;
+                                        preset.invert_yaw = false;
+                                        preset.invert_pitch = false;
+                                        preset.permutation_debug_mode = false;
                                     }
                                 }
-                            });
+                            }
                         });
-                        ui.end_row();
+                    });
 
-                        // --- Marker ---
-                        ui.label("Marker");
+                ui.add_space(4.0);
+
+                // --- BOX 3: Marker & Styling ---
+                Frame::group(ui.style())
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .rounding(4.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new("🎨 Marker & Styling")
+                                .strong()
+                                .color(Color32::from_rgb(180, 140, 255)),
+                        );
+                        ui.add_space(4.0);
+
+                        // Marker source & Shape settings
                         ui.horizontal_wrapped(|ui| {
+                            ui.label("Source:");
                             ComboBox::from_id_salt(("esp_marker_source", preset.id))
                                 .selected_text(match preset.marker_source {
                                     EspMarkerSource::Geometry => "Geometry",
@@ -1558,7 +1597,10 @@ impl CrosshairApp {
                                     ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Image, "Image");
                                     ui.selectable_value(&mut preset.marker_source, EspMarkerSource::None, "None (Tracer / Audio only)");
                                 });
+
                             if preset.marker_source == EspMarkerSource::Geometry {
+                                ui.add_space(6.0);
+                                ui.label("Shape:");
                                 ComboBox::from_id_salt(("esp_marker", preset.id))
                                     .selected_text(match preset.marker {
                                         EspMarkerKind::Dot => "Dot",
@@ -1572,32 +1614,34 @@ impl CrosshairApp {
                                     });
                                 match preset.marker {
                                     EspMarkerKind::Dot => {
-                                        ui.label("Radius");
+                                        ui.label("Radius:");
                                         ui.add(DragValue::new(&mut preset.dot_radius).speed(1.0).range(1.0..=100.0));
                                     }
                                     EspMarkerKind::Box => {
-                                        ui.label("Width");
+                                        ui.label("Width:");
                                         ui.add(DragValue::new(&mut preset.box_width).speed(1.0).range(2.0..=1000.0));
-                                        ui.label("Height");
+                                        ui.label("Height:");
                                         ui.add(DragValue::new(&mut preset.box_height).speed(1.0).range(2.0..=1000.0));
                                     }
                                     EspMarkerKind::None => {}
                                 }
                                 if preset.marker != EspMarkerKind::None {
-                                    ui.label("Thickness");
+                                    ui.label("Thickness:");
                                     ui.add(DragValue::new(&mut preset.thickness).speed(1.0).range(1.0..=30.0));
                                     ui.checkbox(&mut preset.filled, "Fill");
                                 }
                             } else if preset.marker_source == EspMarkerSource::Text {
-                                ui.label("Offset X");
+                                ui.add_space(6.0);
+                                ui.label("Offset X:");
                                 ui.add(DragValue::new(&mut preset.text_offset_x).speed(1.0));
-                                ui.label("Offset Y");
+                                ui.label("Offset Y:");
                                 ui.add(DragValue::new(&mut preset.text_offset_y).speed(1.0));
-                                ui.label("Size");
+                                ui.label("Size:");
                                 ui.add(DragValue::new(&mut preset.text_font_size).speed(1.0).range(8.0..=256.0));
-                                ui.label("Opacity");
+                                ui.label("Opacity:");
                                 ui.add(DragValue::new(&mut preset.text_opacity).speed(0.01).range(0.0..=1.0));
                             } else {
+                                ui.add_space(6.0);
                                 let label = if preset.marker_source == EspMarkerSource::Svg { "Choose SVG" } else { "Import image" };
                                 if ui.button(label).clicked() {
                                     let mut dialog = rfd::FileDialog::new();
@@ -1617,118 +1661,145 @@ impl CrosshairApp {
                                 }
                                 if preset.marker_source == EspMarkerSource::Image {
                                     let hint = RichText::new("Image file").color(ui.visuals().weak_text_color());
-                                    ui.add_sized([260.0, 21.0], TextEdit::singleline(&mut preset.marker_asset_path).hint_text(hint));
+                                    ui.add_sized([200.0, 21.0], TextEdit::singleline(&mut preset.marker_asset_path).hint_text(hint));
                                 }
                                 if preset.marker_source == EspMarkerSource::Svg {
-                                    ui.label("SVG width");
+                                    ui.label("Width:");
                                     ui.add(DragValue::new(&mut preset.svg_width).speed(1.0).range(2.0..=1000.0));
-                                    ui.label("SVG height");
+                                    ui.label("Height:");
                                     ui.add(DragValue::new(&mut preset.svg_height).speed(1.0).range(2.0..=1000.0));
                                 } else {
-                                    ui.label("Image width");
+                                    ui.label("Width:");
                                     ui.add(DragValue::new(&mut preset.image_width).speed(1.0).range(2.0..=1000.0));
-                                    ui.label("Image height");
+                                    ui.label("Height:");
                                     ui.add(DragValue::new(&mut preset.image_height).speed(1.0).range(2.0..=1000.0));
                                 }
-                                ui.checkbox(&mut preset.marker_billboard_3d, "World-space billboard")
-                                    .on_hover_text("Keep the sprite facing the camera and scale it by world distance. A billboard intentionally stays flat to the viewer; perspective size is its visible 3D effect.");
+                                ui.checkbox(&mut preset.marker_billboard_3d, "Billboard 3D")
+                                    .on_hover_text("Keep the sprite facing the camera and scale it by world distance.");
                             }
                         });
-                        ui.end_row();
 
-                        // --- Marker offset ---
-                        ui.label("Marker offset").on_hover_text("Move only the marker in screen pixels; this does not alter projection, FOV, or marker size.");
+                        // Text content editor (if Text source)
+                        if preset.marker_source == EspMarkerSource::Text {
+                            ui.add_space(3.0);
+                            ui.horizontal(|ui| {
+                                ui.label("Text:");
+                                let text_id = ui.make_persistent_id(("esp_marker_text", preset.id));
+                                let text_width = (ui.available_width() - 10.0).max(100.0);
+                                Self::render_interpolated_text_edit(
+                                    ui,
+                                    &mut preset.marker_text,
+                                    text_id,
+                                    text_width,
+                                    text_width,
+                                    21.0,
+                                    72.0,
+                                    "Text with {variable}, e.g. Hunter: {health}",
+                                    true,
+                                );
+                            });
+                        }
+
+                        // SVG source editor (if SVG source)
+                        if preset.marker_source == EspMarkerSource::Svg {
+                            ui.add_space(3.0);
+                            ui.horizontal(|ui| {
+                                ui.label("SVG source:");
+                                let hint = RichText::new("Paste <svg ...>...</svg> here, or choose an SVG file above")
+                                    .color(ui.visuals().weak_text_color());
+                                egui::ScrollArea::vertical()
+                                    .id_salt(("esp_svg_source_scroll", preset.id))
+                                    .max_height(72.0)
+                                    .show(ui, |ui| {
+                                        ui.add_sized(
+                                            [(ui.available_width() - 10.0).max(100.0), 72.0],
+                                            TextEdit::multiline(&mut preset.marker_svg_source)
+                                                .desired_rows(3)
+                                                .hint_text(hint),
+                                        );
+                                    });
+                            });
+                        }
+
+                        ui.add_space(3.0);
+
+                        // Marker screen offset
                         ui.horizontal(|ui| {
+                            ui.label("Marker offset:").on_hover_text("Move only the marker in screen pixels; does not alter projection.");
                             ui.label("X");
                             ui.add(DragValue::new(&mut preset.marker_offset_x).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
                             ui.label("Y");
                             ui.add(DragValue::new(&mut preset.marker_offset_y).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
-                            if ui.small_button("Reset marker offset").clicked() {
+                            if ui.small_button("Reset").clicked() {
                                 preset.marker_offset_x = 0.0;
                                 preset.marker_offset_y = 0.0;
                             }
                         });
-                        ui.end_row();
 
-                        // --- Text (only when marker is Text) ---
-                        if preset.marker_source == EspMarkerSource::Text {
-                            ui.label("Text");
-                            let text_id = ui.make_persistent_id(("esp_marker_text", preset.id));
-                            let text_width = ui.available_width();
-                            Self::render_interpolated_text_edit(
-                                ui,
-                                &mut preset.marker_text,
-                                text_id,
-                                text_width,
-                                text_width,
-                                21.0,
-                                72.0,
-                                "Text with {variable}, e.g. Hunter: {health}",
-                                true,
-                            );
-                            ui.end_row();
-                        }
+                        ui.add_space(3.0);
 
-                        // --- SVG inline editor ---
-                        if preset.marker_source == EspMarkerSource::Svg {
-                            ui.label("SVG source");
-                            let hint = RichText::new("Paste <svg ...>...</svg> here, or choose an SVG file above")
-                                .color(ui.visuals().weak_text_color());
-                            egui::ScrollArea::vertical()
-                                .id_salt(("esp_svg_source_scroll", preset.id))
-                                .max_height(72.0)
-                                .show(ui, |ui| {
-                                    ui.add_sized(
-                                        [ui.available_width(), 72.0],
-                                        TextEdit::multiline(&mut preset.marker_svg_source)
-                                            .desired_rows(3)
-                                            .hint_text(hint),
-                                    );
-                                });
-                            ui.end_row();
-                        }
-
-                        // --- Scale with distance ---
-                        ui.label("Scale");
-                        ui.horizontal(|ui| {
+                        // Distance Scaling
+                        ui.horizontal_wrapped(|ui| {
                             ui.checkbox(&mut preset.scale_with_distance, "Scale with distance")
-                                .on_hover_text("Scale every marker type from the existing camera-target distance; no target box address is needed.");
-                            ui.label("Reference distance");
-                            ui.add(DragValue::new(&mut preset.distance_reference).speed(1.0).range(0.01..=1_000_000.0))
-                                .on_hover_text("At this world distance, the marker uses its configured base size.");
-                            ui.label("Strength");
-                            ui.add(
-                                DragValue::new(&mut preset.distance_scale_strength_percent)
-                                    .speed(1.0)
-                                    .range(0.0..=100.0)
-                                    .suffix("%"),
-                            )
-                            .on_hover_text("100% uses full inverse-distance scaling; lower values make size changes gentler.");
-                            ui.label("Size offset");
-                            ui.add(DragValue::new(&mut preset.marker_size_offset_percent).speed(1.0).range(-95.0..=1000.0).suffix("%"));
+                                .on_hover_text("Scale marker from existing camera-target distance.");
+                            if preset.scale_with_distance {
+                                ui.label("Reference dist:");
+                                ui.add(DragValue::new(&mut preset.distance_reference).speed(1.0).range(0.01..=1_000_000.0));
+                                ui.label("Strength:");
+                                ui.add(
+                                    DragValue::new(&mut preset.distance_scale_strength_percent)
+                                        .speed(1.0)
+                                        .range(0.0..=100.0)
+                                        .suffix("%"),
+                                );
+                                ui.label("Size offset:");
+                                ui.add(DragValue::new(&mut preset.marker_size_offset_percent).speed(1.0).range(-95.0..=1000.0).suffix("%"));
+                            }
                         });
-                        ui.end_row();
+                    });
 
-                        // --- Color / Tracer / Update / Smooth ---
-                        ui.label("Display");
-                        ui.horizontal(|ui| {
+                ui.add_space(4.0);
+
+                // --- BOX 4: Display & Overlay Effects ---
+                Frame::group(ui.style())
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .rounding(4.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new("👁️ Display & Overlay")
+                                .strong()
+                                .color(Color32::from_rgb(120, 230, 180)),
+                        );
+                        ui.add_space(4.0);
+
+                        ui.horizontal_wrapped(|ui| {
                             let mut color = Color32::from_rgba_unmultiplied(
                                 preset.color.r, preset.color.g, preset.color.b, preset.color.a,
                             );
-                            ui.label("Color");
+                            ui.label("Color:");
                             if ui.color_edit_button_srgba(&mut color).changed() {
                                 preset.color = RgbaColor { r: color.r(), g: color.g(), b: color.b(), a: color.a() };
                             }
+
+                            ui.add_space(8.0);
                             ui.checkbox(&mut preset.show_tracer, "Tracer");
                             if preset.show_tracer {
                                 ui.checkbox(&mut preset.tracer_from_top, "From Top")
-                                    .on_hover_text("Vẽ đường tracer từ đỉnh màn hình xuống mục tiêu (thay vì từ đáy màn hình lên).");
+                                    .on_hover_text("Draw tracer from top of screen to target instead of bottom.");
                             }
+
+                            ui.add_space(6.0);
                             ui.checkbox(&mut preset.show_distance, "Distance");
+
+                            ui.add_space(6.0);
                             ui.checkbox(&mut preset.debug_mode, "Debug Mode")
                                 .on_hover_text("Clicking any Box marker displays its memory address & X Y Z coordinates and copies the address to clipboard.");
-                            ui.label("Update");
+
+                            ui.add_space(8.0);
+                            ui.label("Update:");
                             ui.add(DragValue::new(&mut preset.update_interval_ms).speed(1.0).range(1..=1000).suffix(" ms"));
+
+                            ui.add_space(6.0);
                             let mut smooth_enabled = preset.motion_smoothing_ms > 0;
                             if ui.checkbox(&mut smooth_enabled, "Smooth").clicked() {
                                 preset.motion_smoothing_ms = if smooth_enabled { 40 } else { 0 };
@@ -1740,40 +1811,57 @@ impl CrosshairApp {
                                         .range(1..=500)
                                         .suffix(" ms"),
                                 )
-                                .on_hover_text("Thời gian trôi mượt ESP (smooth kiểu cũ). Số ms càng cao trôi càng đằm.");
+                                .on_hover_text("Smooth interpolation duration.");
                             }
                         });
-                        ui.end_row();
+                    });
 
-                        // --- Target sound ---
-                        ui.label("Target sound");
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut preset.target_audio_enabled, "Enable")
+                ui.add_space(4.0);
+
+                // --- BOX 5: Spatial Target Audio ---
+                Frame::group(ui.style())
+                    .inner_margin(egui::Margin::symmetric(10, 8))
+                    .rounding(4.0)
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new("🔊 Spatial Target Audio")
+                                .strong()
+                                .color(Color32::from_rgb(255, 150, 150)),
+                        );
+                        ui.add_space(4.0);
+
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut preset.target_audio_enabled, "Enable sound")
                                 .on_hover_text("Play spatial audio from the target: stereo follows its direction and volume fades with distance.");
-                            if ui.button("Choose sound").clicked()
-                                && let Some(path) = rfd::FileDialog::new()
-                                    .add_filter("Audio", &["wav", "mp3", "flac", "ogg", "m4a", "aac"])
-                                    .pick_file()
-                            {
-                                preset.target_audio_path = path.to_string_lossy().into_owned();
-                            }
-                            let hint = RichText::new("Audio file").color(ui.visuals().weak_text_color());
-                            ui.add_sized([220.0, 21.0], TextEdit::singleline(&mut preset.target_audio_path).hint_text(hint));
-                            ui.checkbox(&mut preset.target_audio_loop, "Loop");
-                        });
-                        ui.end_row();
 
-                        // --- Volume ---
-                        ui.label("Volume");
-                        ui.horizontal(|ui| {
-                            ui.add(DragValue::new(&mut preset.target_audio_volume).speed(0.01).range(0.0..=2.0))
-                                .on_hover_text("1.0 is the original file volume; up to 2.0 boosts it.");
-                            ui.label("Full volume within");
-                            ui.add(DragValue::new(&mut preset.target_audio_full_volume_distance).speed(1.0).range(0.0..=1_000_000.0));
-                            ui.label("Silent after");
-                            ui.add(DragValue::new(&mut preset.target_audio_max_distance).speed(1.0).range(0.01..=1_000_000.0));
+                            if preset.target_audio_enabled {
+                                if ui.button("Choose sound").clicked()
+                                    && let Some(path) = rfd::FileDialog::new()
+                                        .add_filter("Audio", &["wav", "mp3", "flac", "ogg", "m4a", "aac"])
+                                        .pick_file()
+                                {
+                                    preset.target_audio_path = path.to_string_lossy().into_owned();
+                                }
+                                let hint = RichText::new("Audio file").color(ui.visuals().weak_text_color());
+                                ui.add_sized([220.0, 21.0], TextEdit::singleline(&mut preset.target_audio_path).hint_text(hint));
+                                ui.checkbox(&mut preset.target_audio_loop, "Loop");
+                            }
                         });
-                        ui.end_row();
+
+                        if preset.target_audio_enabled {
+                            ui.add_space(3.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Volume:");
+                                ui.add(DragValue::new(&mut preset.target_audio_volume).speed(0.01).range(0.0..=2.0))
+                                    .on_hover_text("1.0 is original volume, up to 2.0 boosts it.");
+                                ui.add_space(6.0);
+                                ui.label("Full volume within:");
+                                ui.add(DragValue::new(&mut preset.target_audio_full_volume_distance).speed(1.0).range(0.0..=1_000_000.0));
+                                ui.add_space(6.0);
+                                ui.label("Silent after:");
+                                ui.add(DragValue::new(&mut preset.target_audio_max_distance).speed(1.0).range(0.01..=1_000_000.0));
+                            });
+                        }
                     });
             });
             if copy_preset_index == Some(index) {
