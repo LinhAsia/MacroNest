@@ -2122,12 +2122,12 @@ fn filter_candidate_slice(
     range: Option<(ScanValue, ScanValue)>,
     progress: Option<&AtomicUsize>,
 ) -> io::Result<usize> {
-    crate::platform::set_current_thread_high_priority();
     const BATCH_BYTES: usize = 64 * 1024;
     let process = ScanProcess::open(pid, false)?;
     let mut buffer = [0u8; BATCH_BYTES];
     let mut index = 0;
     let mut write = 0;
+    let mut accumulated_progress = 0usize;
     while index < candidates.len() {
         let batch_base = candidates[index].address & !(PAGE_BYTES - 1);
         let mut end = index + 1;
@@ -2139,8 +2139,12 @@ fn filter_candidate_slice(
             (last_addr - batch_base).div_ceil(PAGE_BYTES) * PAGE_BYTES
         }.min(BATCH_BYTES);
         if let Ok(count) = process.read(batch_base, &mut buffer[..batch_size]) {
-            if let Some(progress) = progress {
-                progress.fetch_add(count, Ordering::Relaxed);
+            accumulated_progress += count;
+            if accumulated_progress >= 256 * 1024 {
+                if let Some(progress) = progress {
+                    progress.fetch_add(accumulated_progress, Ordering::Relaxed);
+                }
+                accumulated_progress = 0;
             }
             for read in index..end {
                 let candidate = candidates[read];
@@ -2164,6 +2168,11 @@ fn filter_candidate_slice(
         }
         index = end;
     }
+    if accumulated_progress > 0 {
+        if let Some(progress) = progress {
+            progress.fetch_add(accumulated_progress, Ordering::Relaxed);
+        }
+    }
     Ok(write)
 }
 
@@ -2172,28 +2181,29 @@ pub fn refresh_scan_candidates(
     candidates: &mut [ScanCandidate],
     value_type: ScanValueType,
 ) -> io::Result<()> {
-    let process = ScanProcess::open(pid, false)?;
-    let mut page = [0; PAGE_BYTES];
-    let mut index = 0;
-    while index < candidates.len() {
-        let page_base = candidates[index].address & !(PAGE_BYTES - 1);
-        let mut end = index + 1;
-        while end < candidates.len() && candidates[end].address < page_base + PAGE_BYTES {
-            end += 1;
-        }
-        if let Ok(count) = process.read(page_base, &mut page) {
-            for candidate in &mut candidates[index..end] {
-                let offset = candidate.address - page_base;
-                if offset + value_type.width() <= count
-                    && let Some(current) = value_type.decode(&page[offset..])
-                {
-                    candidate.set_current(current);
+    with_cached_read_process(pid, |process| {
+        let mut page = [0; PAGE_BYTES];
+        let mut index = 0;
+        while index < candidates.len() {
+            let page_base = candidates[index].address & !(PAGE_BYTES - 1);
+            let mut end = index + 1;
+            while end < candidates.len() && candidates[end].address < page_base + PAGE_BYTES {
+                end += 1;
+            }
+            if let Ok(count) = process.read(page_base, &mut page) {
+                for candidate in &mut candidates[index..end] {
+                    let offset = candidate.address - page_base;
+                    if offset + value_type.width() <= count
+                        && let Some(current) = value_type.decode(&page[offset..])
+                    {
+                        candidate.set_current(current);
+                    }
                 }
             }
+            index = end;
         }
-        index = end;
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn scan_value_matches(

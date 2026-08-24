@@ -167,12 +167,7 @@ mod windows_platform {
     }
 
     pub fn set_current_thread_high_priority() {
-        unsafe {
-            use windows::Win32::System::Threading::{
-                GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_HIGHEST,
-            };
-            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-        }
+        // ponytail: Keep scan worker threads at normal priority so scanning does not starve target game threads.
     }
 
     pub fn set_high_priority() {
@@ -831,10 +826,7 @@ mod windows_platform {
     }
 
     pub fn trim_working_set() {
-        unsafe {
-            use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
-            let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
-        }
+        // ponytail: Emptying working set flushes RAM to pagefile and causes hard page faults on subsequent scans.
     }
 }
 
