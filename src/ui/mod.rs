@@ -797,6 +797,9 @@ pub struct CrosshairApp {
     vietnamese_input_disabled_texture: Option<TextureHandle>,
     titlebar_app_icon_texture: Option<TextureHandle>,
     guides_author_logo_texture: Option<TextureHandle>,
+    normal_app_icon: Option<std::sync::Arc<eframe::egui::IconData>>,
+    recording_app_icon: Option<std::sync::Arc<eframe::egui::IconData>>,
+    recording_icon_applied: bool,
     active_mouse_record_preset_id: Option<u32>,
     active_macro_record_preset_id: Option<u32>,
     active_hud_preview_preset_id: Option<u32>,
@@ -1171,6 +1174,9 @@ impl CrosshairApp {
             vietnamese_input_disabled_texture: None,
             titlebar_app_icon_texture: None,
             guides_author_logo_texture: None,
+            normal_app_icon: crate::app_icon::icon_data(64).ok().map(std::sync::Arc::new),
+            recording_app_icon: crate::app_icon::recording_icon_data(64).ok().map(std::sync::Arc::new),
+            recording_icon_applied: false,
             active_mouse_record_preset_id: None,
             active_macro_record_preset_id: None,
             active_hud_preview_preset_id: None,
@@ -15647,6 +15653,21 @@ impl eframe::App for CrosshairApp {
             self.state.active_panel = AppPanel::Macros;
         }
         crate::overlay::set_ui_context(ctx.clone());
+        let is_recording = crate::video_recorder::is_recording();
+        if self.recording_icon_applied != is_recording {
+            self.recording_icon_applied = is_recording;
+            if is_recording {
+                if let Some(rec_icon) = &self.recording_app_icon {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(rec_icon.clone())));
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title("MacroNest 🔴 [REC]".to_owned()));
+            } else {
+                if let Some(norm_icon) = &self.normal_app_icon {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(norm_icon.clone())));
+                }
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title("MacroNest".to_owned()));
+            }
+        }
         self.apply_theme(ctx);
         let wants_native_shadow = false;
         if self.native_shadow_applied != wants_native_shadow {
@@ -15736,7 +15757,13 @@ impl eframe::App for CrosshairApp {
                     ctx.request_repaint();
                 }
                 UiCommand::StartupIconLoaded(icon) => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
+                    self.normal_app_icon = Some(icon.clone());
+                    if let Ok(rec_icon) = crate::app_icon::recording_icon_data(64) {
+                        self.recording_app_icon = Some(std::sync::Arc::new(rec_icon));
+                    }
+                    if !self.recording_icon_applied {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
+                    }
                 }
                 UiCommand::StartupStateLoaded {
                     state,

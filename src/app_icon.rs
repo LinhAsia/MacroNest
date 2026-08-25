@@ -34,6 +34,80 @@ pub fn icon_data(size: u32) -> Result<IconData> {
     })
 }
 
+pub fn recording_icon_data(size: u32) -> Result<IconData> {
+    let mut pixmap = render_pixmap(size, false)?;
+    let w = pixmap.width() as f32;
+    let h = pixmap.height() as f32;
+
+    let dot_radius = (w * 0.26).max(4.0);
+    let center_x = w - dot_radius - 1.0;
+    let center_y = h - dot_radius - 1.0;
+
+    let mut paint = tiny_skia::Paint::default();
+    paint.anti_alias = true;
+
+    // Dark border for contrast
+    paint.set_color_rgba8(15, 23, 42, 240);
+    let outer_path = {
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.push_circle(center_x, center_y, dot_radius + 2.0);
+        pb.finish()
+    };
+    if let Some(path) = outer_path {
+        pixmap.fill_path(
+            &path,
+            &paint,
+            tiny_skia::FillRule::Winding,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+    }
+
+    // Glowing vibrant red recording badge
+    paint.set_color_rgba8(239, 68, 68, 255);
+    let inner_path = {
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.push_circle(center_x, center_y, dot_radius);
+        pb.finish()
+    };
+    if let Some(path) = inner_path {
+        pixmap.fill_path(
+            &path,
+            &paint,
+            tiny_skia::FillRule::Winding,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+    }
+
+    // Specular shine highlight
+    paint.set_color_rgba8(255, 255, 255, 190);
+    let shine_path = {
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.push_circle(
+            center_x - dot_radius * 0.3,
+            center_y - dot_radius * 0.3,
+            dot_radius * 0.32,
+        );
+        pb.finish()
+    };
+    if let Some(path) = shine_path {
+        pixmap.fill_path(
+            &path,
+            &paint,
+            tiny_skia::FillRule::Winding,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+    }
+
+    Ok(IconData {
+        rgba: pixmap.data().to_vec(),
+        width: pixmap.width(),
+        height: pixmap.height(),
+    })
+}
+
 pub fn ensure_ico_file(path: &Path, size: u32) -> Result<()> {
     ensure_ico_file_variant(path, size, false)
 }
