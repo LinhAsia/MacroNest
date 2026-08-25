@@ -1048,8 +1048,8 @@ mod windows_impl {
         })
     }
 
-    struct WgcSession {
-        hwnd: HWND,
+    pub(crate) struct WgcSession {
+        pub(crate) hwnd: HWND,
         dxgi_device: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice,
         d3d_device: ID11Device,
         frame_pool: Direct3D11CaptureFramePool,
@@ -1071,7 +1071,7 @@ mod windows_impl {
 
     static WGC_MANAGER: Lazy<Mutex<Option<WgcSession>>> = Lazy::new(|| Mutex::new(None));
 
-    fn init_wgc_session(hwnd: HWND) -> anyhow::Result<WgcSession> {
+    pub(crate) fn init_wgc_session(hwnd: HWND) -> anyhow::Result<WgcSession> {
         let mut d3d_device: Option<ID3D11Device> = None;
         unsafe {
             D3D11CreateDevice(
@@ -1118,7 +1118,7 @@ mod windows_impl {
     }
 
     impl WgcSession {
-        fn get_next_frame(&mut self) -> anyhow::Result<ScreenCaptureFrame> {
+        pub(crate) fn get_next_frame(&mut self) -> anyhow::Result<ScreenCaptureFrame> {
             let mut frame_opt = None;
             for _ in 0..15 {
                 if let Ok(frame) = self.frame_pool.TryGetNextFrame() {

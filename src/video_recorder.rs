@@ -76,6 +76,8 @@ struct RecordingProcess {
     copy_after_recording: bool,
     ffmpeg_exe: PathBuf,
     ui_language: crate::model::UiLanguage,
+    stream_stop: Option<Arc<AtomicBool>>,
+    stream_thread: Option<JoinHandle<()>>,
 }
 
 static CONFIG: Lazy<Mutex<VideoRecorderConfig>> =
@@ -826,7 +828,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         }
     };
     let border_rect = match &source {
-        CaptureSource::Desktop { .. } => None,
+        CaptureSource::Desktop { .. } | CaptureSource::WgcWindow { .. } => None,
         CaptureSource::Region { region, .. } => Some(*region),
     };
     let (region_border, recording_active_signal) = match border_rect {
@@ -857,34 +859,102 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));
 
-    command.args([
-        "-y",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-thread_queue_size",
-        "1024",
-        "-rtbufsize",
-        "512M",
-        "-f",
-        "gdigrab",
-        "-draw_mouse",
-        "1",
-    ]);
+    let (mut wgc_session_opt, initial_frame_opt) = match &source {
+        CaptureSource::WgcWindow { hwnd, .. } => {
+            let mut session = match crate::window_list::init_wgc_session(*hwnd) {
+                Ok(s) => s,
+                Err(err) => {
+                    audio_stop.store(true, Ordering::Release);
+                    let _ = audio_start.send(());
+                    let _ = audio_thread.join();
+                    let _ = fs::remove_file(&audio_path);
+                    return Err(format!("Could not initialize window capture: {err}"));
+                }
+            };
+            let initial_frame = match session.get_next_frame() {
+                Ok(f) => f,
+                Err(err) => {
+                    audio_stop.store(true, Ordering::Release);
+                    let _ = audio_start.send(());
+                    let _ = audio_thread.join();
+                    let _ = fs::remove_file(&audio_path);
+                    return Err(format!("Could not capture initial window frame: {err}"));
+                }
+            };
+            (Some(session), Some(initial_frame))
+        }
+        _ => (None, None),
+    };
 
-    match source {
+    match &source {
         CaptureSource::Desktop { fps } => {
-            command.arg("-framerate").arg(fps.to_string());
-            command.arg("-i").arg("desktop");
+            command.args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-thread_queue_size",
+                "1024",
+                "-rtbufsize",
+                "512M",
+                "-f",
+                "gdigrab",
+                "-draw_mouse",
+                "1",
+                "-framerate",
+                &fps.to_string(),
+                "-i",
+                "desktop",
+            ]);
         }
         CaptureSource::Region { region, fps } => {
             let width = region.right - region.left;
             let height = region.bottom - region.top;
-            command.arg("-framerate").arg(fps.to_string());
-            command.arg("-offset_x").arg(region.left.to_string());
-            command.arg("-offset_y").arg(region.top.to_string());
-            command.arg("-video_size").arg(format!("{width}x{height}"));
-            command.arg("-i").arg("desktop");
+            command.args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-thread_queue_size",
+                "1024",
+                "-rtbufsize",
+                "512M",
+                "-f",
+                "gdigrab",
+                "-draw_mouse",
+                "1",
+                "-framerate",
+                &fps.to_string(),
+                "-offset_x",
+                &region.left.to_string(),
+                "-offset_y",
+                &region.top.to_string(),
+                "-video_size",
+                &format!("{width}x{height}"),
+                "-i",
+                "desktop",
+            ]);
+        }
+        CaptureSource::WgcWindow { fps, .. } => {
+            let initial = initial_frame_opt.as_ref().unwrap();
+            let width = initial.width;
+            let height = initial.height;
+            command.args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "-s",
+                &format!("{width}x{height}"),
+                "-r",
+                &fps.to_string(),
+                "-i",
+                "pipe:0",
+            ]);
         }
     }
 
@@ -913,7 +983,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     ]);
     command.arg(&output_path);
 
-    let child = match command.spawn() {
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
             audio_stop.store(true, Ordering::Release);
@@ -923,6 +993,54 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             return Err(format!("Could not start FFmpeg: {error}"));
         }
     };
+
+    let (stream_stop, stream_thread) = if let Some(session) = wgc_session_opt.take() {
+        let initial = initial_frame_opt.unwrap();
+        let width = initial.width;
+        let height = initial.height;
+        let fps = match source {
+            CaptureSource::WgcWindow { fps, .. } => fps,
+            _ => 60,
+        };
+        let stdin = match child.stdin.take() {
+            Some(pipe) => pipe,
+            None => {
+                audio_stop.store(true, Ordering::Release);
+                let _ = audio_start.send(());
+                let _ = audio_thread.join();
+                let _ = fs::remove_file(&audio_path);
+                return Err("Could not connect to FFmpeg video stream.".to_owned());
+            }
+        };
+        let stop_signal = Arc::new(AtomicBool::new(false));
+        let feeder_stop = stop_signal.clone();
+        let frame_interval = Duration::from_micros(1_000_000 / (fps.max(1) as u64));
+        let thread_handle = thread::spawn(move || {
+            let mut last_frame = initial.rgba;
+            let mut wgc = session;
+            let mut pipe = stdin;
+            while !feeder_stop.load(Ordering::Acquire) {
+                let loop_start = Instant::now();
+                if let Ok(frame) = wgc.get_next_frame() {
+                    if frame.width == width && frame.height == height {
+                        last_frame = frame.rgba;
+                    }
+                }
+                if pipe.write_all(&last_frame).is_err() {
+                    break;
+                }
+                let elapsed = loop_start.elapsed();
+                if elapsed < frame_interval {
+                    thread::sleep(frame_interval - elapsed);
+                }
+            }
+            let _ = pipe.flush();
+        });
+        (Some(stop_signal), Some(thread_handle))
+    } else {
+        (None, None)
+    };
+
     let output_check = output_path.clone();
     thread::spawn(move || {
         let start = Instant::now();
@@ -953,6 +1071,8 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         copy_after_recording: config.copy_after_recording,
         ffmpeg_exe: config.ffmpeg_exe,
         ui_language: config.ui_language,
+        stream_stop,
+        stream_thread,
     });
     ACTIVE.store(true, Ordering::Release);
     *STATUS.lock() = format!("Recording: {}", output_path.display());
@@ -968,6 +1088,12 @@ fn stop_recording_inner() {
     recording.region_border.take();
     ACTIVE.store(false, Ordering::Release);
     *STATUS.lock() = "Finishing video...".to_owned();
+    if let Some(stop) = recording.stream_stop.take() {
+        stop.store(true, Ordering::Release);
+    }
+    if let Some(thread) = recording.stream_thread.take() {
+        let _ = thread.join();
+    }
     if let Some(stdin) = recording.child.stdin.as_mut() {
         let _ = stdin.write_all(b"q\n");
         let _ = stdin.flush();
@@ -1364,24 +1490,29 @@ pub fn copy_video_to_clipboard(video_path: &Path) -> Result<(), String> {
 }
 
 enum CaptureSource {
-    Desktop {
-        fps: u32,
-    },
-    Region {
-        region: RECT,
-        fps: u32,
-    },
+    Desktop { fps: u32 },
+    Region { region: RECT, fps: u32 },
+    WgcWindow { hwnd: HWND, fps: u32 },
 }
 
 fn capture_source(config: &VideoRecorderConfig) -> Result<CaptureSource, String> {
     let fps = config.fps.clamp(1, 240);
     match config.mode {
         QuickVideoRecordMode::FullScreen => Ok(CaptureSource::Desktop { fps }),
-        QuickVideoRecordMode::FocusedWindow => window_source(unsafe { GetForegroundWindow() }, fps),
+        QuickVideoRecordMode::FocusedWindow => {
+            let hwnd = unsafe { GetForegroundWindow() };
+            if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
+                return Err("No focused window found.".to_owned());
+            }
+            Ok(CaptureSource::WgcWindow { hwnd, fps })
+        }
         QuickVideoRecordMode::SelectedWindow => {
             let hwnd = selector_hwnd(&config.target_window)
                 .ok_or_else(|| "Select a window to record first.".to_owned())?;
-            window_source(hwnd, fps)
+            if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
+                return Err("The selected window is no longer available.".to_owned());
+            }
+            Ok(CaptureSource::WgcWindow { hwnd, fps })
         }
         QuickVideoRecordMode::Region => {
             let (x, y, width, height) = config
@@ -1398,35 +1529,6 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<CaptureSource, String>
             )
         }
     }
-}
-
-fn window_source(hwnd: HWND, fps: u32) -> Result<CaptureSource, String> {
-    if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
-        return Err("The selected window is no longer available.".to_owned());
-    }
-    if unsafe { IsIconic(hwnd).as_bool() } {
-        let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
-        thread::sleep(Duration::from_millis(50));
-    }
-    let mut rect = RECT::default();
-    let dwm_ok = unsafe {
-        DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_EXTENDED_FRAME_BOUNDS,
-            &mut rect as *mut _ as *mut _,
-            std::mem::size_of::<RECT>() as u32,
-        )
-        .is_ok()
-    };
-    if !dwm_ok {
-        let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect) };
-    }
-    let width = rect.right - rect.left;
-    let height = rect.bottom - rect.top;
-    if width < 10 || height < 10 {
-        return Err("The selected window has invalid bounds or is hidden.".to_owned());
-    }
-    region_source(rect, fps)
 }
 
 fn region_source(mut region: RECT, fps: u32) -> Result<CaptureSource, String> {
