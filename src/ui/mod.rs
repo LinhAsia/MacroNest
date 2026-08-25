@@ -798,7 +798,6 @@ pub struct CrosshairApp {
     titlebar_app_icon_texture: Option<TextureHandle>,
     guides_author_logo_texture: Option<TextureHandle>,
     normal_app_icon: Option<std::sync::Arc<eframe::egui::IconData>>,
-    recording_app_icon: Option<std::sync::Arc<eframe::egui::IconData>>,
     recording_icon_applied: bool,
     active_mouse_record_preset_id: Option<u32>,
     active_macro_record_preset_id: Option<u32>,
@@ -1175,7 +1174,6 @@ impl CrosshairApp {
             titlebar_app_icon_texture: None,
             guides_author_logo_texture: None,
             normal_app_icon: crate::app_icon::icon_data(64).ok().map(std::sync::Arc::new),
-            recording_app_icon: crate::app_icon::recording_icon_data(64).ok().map(std::sync::Arc::new),
             recording_icon_applied: false,
             active_mouse_record_preset_id: None,
             active_macro_record_preset_id: None,
@@ -15659,14 +15657,8 @@ impl eframe::App for CrosshairApp {
             self.recording_icon_applied = is_recording;
             crate::platform::update_native_taskbar_recording_state(is_recording);
             if is_recording {
-                if let Some(rec_icon) = &self.recording_app_icon {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(rec_icon.clone())));
-                }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title("MacroNest 🔴 [REC]".to_owned()));
             } else {
-                if let Some(norm_icon) = &self.normal_app_icon {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(norm_icon.clone())));
-                }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title("MacroNest".to_owned()));
             }
         }
@@ -15760,12 +15752,7 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::StartupIconLoaded(icon) => {
                     self.normal_app_icon = Some(icon.clone());
-                    if let Ok(rec_icon) = crate::app_icon::recording_icon_data(64) {
-                        self.recording_app_icon = Some(std::sync::Arc::new(rec_icon));
-                    }
-                    if !self.recording_icon_applied {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
-                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
                 }
                 UiCommand::StartupStateLoaded {
                     state,

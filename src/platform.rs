@@ -602,14 +602,9 @@ mod windows_platform {
     }
 
     pub fn update_native_taskbar_recording_state(is_recording: bool) {
-        use windows::Win32::Foundation::{LPARAM, WPARAM};
         use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
-        use windows::Win32::UI::Shell::{
-            ITaskbarList3, TaskbarList, TBPF_INDETERMINATE, TBPF_NOPROGRESS,
-        };
-        use windows::Win32::UI::WindowsAndMessaging::{
-            HICON, ICON_BIG, ICON_SMALL, SendMessageW, WM_SETICON,
-        };
+        use windows::Win32::UI::Shell::{ITaskbarList3, TaskbarList};
+        use windows::Win32::UI::WindowsAndMessaging::HICON;
         use windows::core::w;
 
         let Some(raw_hwnd) = *MAIN_HWND.lock() else {
@@ -624,7 +619,7 @@ mod windows_platform {
                 let _ = taskbar.HrInit();
                 if is_recording {
                     if RECORDING_HICON.lock().is_none() {
-                        if let Ok(icon_data) = crate::app_icon::recording_icon_data(64) {
+                        if let Ok(icon_data) = crate::app_icon::recording_overlay_badge_icon_data(24) {
                             if let Some(hicon) = create_hicon_from_rgba(
                                 icon_data.width,
                                 icon_data.height,
@@ -637,27 +632,13 @@ mod windows_platform {
                     if let Some(raw_hicon) = *RECORDING_HICON.lock() {
                         let hicon = HICON(raw_hicon as *mut _);
                         let _ = taskbar.SetOverlayIcon(hwnd, hicon, w!("Recording"));
-                        let _ = SendMessageW(
-                            hwnd,
-                            WM_SETICON,
-                            Some(WPARAM(ICON_BIG as usize)),
-                            Some(LPARAM(hicon.0 as isize)),
-                        );
-                        let _ = SendMessageW(
-                            hwnd,
-                            WM_SETICON,
-                            Some(WPARAM(ICON_SMALL as usize)),
-                            Some(LPARAM(hicon.0 as isize)),
-                        );
                     }
-                    let _ = taskbar.SetProgressState(hwnd, TBPF_INDETERMINATE);
                 } else {
                     let _ = taskbar.SetOverlayIcon(
                         hwnd,
                         HICON(std::ptr::null_mut()),
                         windows::core::PCWSTR::null(),
                     );
-                    let _ = taskbar.SetProgressState(hwnd, TBPF_NOPROGRESS);
                 }
             }
         }

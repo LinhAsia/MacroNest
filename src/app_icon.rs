@@ -34,23 +34,20 @@ pub fn icon_data(size: u32) -> Result<IconData> {
     })
 }
 
-pub fn recording_icon_data(size: u32) -> Result<IconData> {
-    let mut pixmap = render_pixmap(size, false)?;
-    let w = pixmap.width() as f32;
-    let h = pixmap.height() as f32;
-
-    let dot_radius = (w * 0.26).max(4.0);
-    let center_x = w - dot_radius - 1.0;
-    let center_y = h - dot_radius - 1.0;
+pub fn recording_overlay_badge_icon_data(size: u32) -> Result<IconData> {
+    let size = size.clamp(16, 64);
+    let mut pixmap = Pixmap::new(size, size).context("Failed to create badge pixmap")?;
+    let center = size as f32 * 0.5;
+    let radius = (size as f32 * 0.42).max(4.0);
 
     let mut paint = tiny_skia::Paint::default();
     paint.anti_alias = true;
 
-    // Dark border for contrast
-    paint.set_color_rgba8(15, 23, 42, 240);
+    // Dark outline ring for high contrast
+    paint.set_color_rgba8(15, 23, 42, 230);
     let outer_path = {
         let mut pb = tiny_skia::PathBuilder::new();
-        pb.push_circle(center_x, center_y, dot_radius + 2.0);
+        pb.push_circle(center, center, radius + 1.5);
         pb.finish()
     };
     if let Some(path) = outer_path {
@@ -63,11 +60,11 @@ pub fn recording_icon_data(size: u32) -> Result<IconData> {
         );
     }
 
-    // Glowing vibrant red recording badge
+    // Glowing vibrant red recording circle
     paint.set_color_rgba8(239, 68, 68, 255);
     let inner_path = {
         let mut pb = tiny_skia::PathBuilder::new();
-        pb.push_circle(center_x, center_y, dot_radius);
+        pb.push_circle(center, center, radius);
         pb.finish()
     };
     if let Some(path) = inner_path {
@@ -80,14 +77,14 @@ pub fn recording_icon_data(size: u32) -> Result<IconData> {
         );
     }
 
-    // Specular shine highlight
-    paint.set_color_rgba8(255, 255, 255, 190);
+    // Specular shine dot in top-left of circle
+    paint.set_color_rgba8(255, 255, 255, 220);
     let shine_path = {
         let mut pb = tiny_skia::PathBuilder::new();
         pb.push_circle(
-            center_x - dot_radius * 0.3,
-            center_y - dot_radius * 0.3,
-            dot_radius * 0.32,
+            center - radius * 0.3,
+            center - radius * 0.3,
+            radius * 0.32,
         );
         pb.finish()
     };
