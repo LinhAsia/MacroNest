@@ -7043,8 +7043,8 @@ impl CrosshairApp {
                         } else {
                             Self::tr_lang(
                                 self.state.ui_language,
-                                "Instant record (full screen)",
-                                "Quay nhanh (toàn màn hình)",
+                                "Start recording",
+                                "Bắt đầu quay video",
                             )
                         };
 
@@ -7058,11 +7058,6 @@ impl CrosshairApp {
 
                         if rec_response.clicked() {
                             if !recorder_busy && self.ffmpeg_installed {
-                                if !recording {
-                                    self.state.quick_video_record_mode =
-                                        QuickVideoRecordMode::FullScreen;
-                                    self.sync_quick_video_record_config();
-                                }
                                 crate::video_recorder::toggle_async();
                             }
                         }

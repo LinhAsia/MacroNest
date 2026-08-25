@@ -827,7 +827,6 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     };
     let border_rect = match &source {
         CaptureSource::Desktop { .. } => None,
-        CaptureSource::Window { rect, .. } => Some(*rect),
         CaptureSource::Region { region, .. } => Some(*region),
     };
     let (region_border, recording_active_signal) = match border_rect {
@@ -877,10 +876,6 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         CaptureSource::Desktop { fps } => {
             command.arg("-framerate").arg(fps.to_string());
             command.arg("-i").arg("desktop");
-        }
-        CaptureSource::Window { title, fps, .. } => {
-            command.arg("-framerate").arg(fps.to_string());
-            command.arg("-i").arg(format!("title={title}"));
         }
         CaptureSource::Region { region, fps } => {
             let width = region.right - region.left;
@@ -1372,11 +1367,6 @@ enum CaptureSource {
     Desktop {
         fps: u32,
     },
-    Window {
-        title: String,
-        fps: u32,
-        rect: RECT,
-    },
     Region {
         region: RECT,
         fps: u32,
@@ -1436,15 +1426,7 @@ fn window_source(hwnd: HWND, fps: u32) -> Result<CaptureSource, String> {
     if width < 10 || height < 10 {
         return Err("The selected window has invalid bounds or is hidden.".to_owned());
     }
-    if let Some(title) = crate::window_list::window_title(hwnd).filter(|t| !t.trim().is_empty()) {
-        Ok(CaptureSource::Window {
-            title: title.trim().to_owned(),
-            fps,
-            rect,
-        })
-    } else {
-        region_source(rect, fps)
-    }
+    region_source(rect, fps)
 }
 
 fn region_source(mut region: RECT, fps: u32) -> Result<CaptureSource, String> {
@@ -1465,14 +1447,16 @@ fn region_source(mut region: RECT, fps: u32) -> Result<CaptureSource, String> {
     region.top = region
         .top
         .clamp(info.rcMonitor.top, info.rcMonitor.bottom - 2);
-    region.right = region.right.clamp(region.left + 2, info.rcMonitor.right);
-    region.bottom = region.bottom.clamp(region.top + 2, info.rcMonitor.bottom);
-    if (region.right - region.left) % 2 != 0 {
-        region.right -= 1;
+    let mut width = (region.right - region.left).max(2);
+    let mut height = (region.bottom - region.top).max(2);
+    if width % 2 != 0 {
+        width -= 1;
     }
-    if (region.bottom - region.top) % 2 != 0 {
-        region.bottom -= 1;
+    if height % 2 != 0 {
+        height -= 1;
     }
+    region.right = region.left + width;
+    region.bottom = region.top + height;
     Ok(CaptureSource::Region { region, fps })
 }
 
