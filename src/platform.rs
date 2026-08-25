@@ -523,6 +523,146 @@ mod windows_platform {
         make_hwnd_no_activate(hwnd)
     }
 
+    static MAIN_HWND: parking_lot::Mutex<Option<isize>> = parking_lot::Mutex::new(None);
+    static RECORDING_HICON: parking_lot::Mutex<Option<isize>> = parking_lot::Mutex::new(None);
+
+    pub fn cache_main_hwnd(frame: &Frame) {
+        if let Ok(window_handle) = frame.window_handle() {
+            if let RawWindowHandle::Win32(handle) = window_handle.as_raw() {
+                *MAIN_HWND.lock() = Some(handle.hwnd.get() as isize);
+            }
+        }
+    }
+
+    pub fn create_hicon_from_rgba(
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) -> Option<windows::Win32::UI::WindowsAndMessaging::HICON> {
+        use windows::Win32::Graphics::Gdi::*;
+        use windows::Win32::UI::WindowsAndMessaging::*;
+
+        unsafe {
+            let mut bgra = Vec::with_capacity(rgba.len());
+            for chunk in rgba.chunks_exact(4) {
+                bgra.push(chunk[2]);
+                bgra.push(chunk[1]);
+                bgra.push(chunk[0]);
+                bgra.push(chunk[3]);
+            }
+
+            let hdc = GetDC(None);
+            if hdc.0.is_null() {
+                return None;
+            }
+
+            let bi = BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            };
+
+            let mut ppv_bits = std::ptr::null_mut();
+            let hbm_color = CreateDIBSection(
+                Some(hdc),
+                &bi as *const _ as *const _,
+                DIB_RGB_COLORS,
+                &mut ppv_bits,
+                None,
+                0,
+            )
+            .ok()?;
+
+            if !ppv_bits.is_null() {
+                std::ptr::copy_nonoverlapping(bgra.as_ptr(), ppv_bits as *mut u8, bgra.len());
+            }
+
+            let hbm_mask = CreateBitmap(width as i32, height as i32, 1, 1, None);
+
+            let icon_info = ICONINFO {
+                fIcon: true.into(),
+                xHotspot: 0,
+                yHotspot: 0,
+                hbmMask: hbm_mask,
+                hbmColor: hbm_color,
+            };
+
+            let hicon = CreateIconIndirect(&icon_info).ok();
+
+            let _ = DeleteObject(hbm_color.into());
+            let _ = DeleteObject(hbm_mask.into());
+            let _ = ReleaseDC(None, hdc);
+
+            hicon
+        }
+    }
+
+    pub fn update_native_taskbar_recording_state(is_recording: bool) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
+        use windows::Win32::UI::Shell::{
+            ITaskbarList3, TaskbarList, TBPF_INDETERMINATE, TBPF_NOPROGRESS,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            HICON, ICON_BIG, ICON_SMALL, SendMessageW, WM_SETICON,
+        };
+        use windows::core::w;
+
+        let Some(raw_hwnd) = *MAIN_HWND.lock() else {
+            return;
+        };
+        let hwnd = HWND(raw_hwnd as *mut _);
+
+        unsafe {
+            if let Ok(taskbar) =
+                CoCreateInstance::<_, ITaskbarList3>(&TaskbarList, None, CLSCTX_INPROC_SERVER)
+            {
+                let _ = taskbar.HrInit();
+                if is_recording {
+                    if RECORDING_HICON.lock().is_none() {
+                        if let Ok(icon_data) = crate::app_icon::recording_icon_data(64) {
+                            if let Some(hicon) = create_hicon_from_rgba(
+                                icon_data.width,
+                                icon_data.height,
+                                &icon_data.rgba,
+                            ) {
+                                *RECORDING_HICON.lock() = Some(hicon.0 as isize);
+                            }
+                        }
+                    }
+                    if let Some(raw_hicon) = *RECORDING_HICON.lock() {
+                        let hicon = HICON(raw_hicon as *mut _);
+                        let _ = taskbar.SetOverlayIcon(hwnd, hicon, w!("Recording"));
+                        let _ = SendMessageW(
+                            hwnd,
+                            WM_SETICON,
+                            Some(WPARAM(ICON_BIG as usize)),
+                            Some(LPARAM(hicon.0 as isize)),
+                        );
+                        let _ = SendMessageW(
+                            hwnd,
+                            WM_SETICON,
+                            Some(WPARAM(ICON_SMALL as usize)),
+                            Some(LPARAM(hicon.0 as isize)),
+                        );
+                    }
+                    let _ = taskbar.SetProgressState(hwnd, TBPF_INDETERMINATE);
+                } else {
+                    let _ = taskbar.SetOverlayIcon(
+                        hwnd,
+                        HICON(std::ptr::null_mut()),
+                        windows::core::PCWSTR::null(),
+                    );
+                    let _ = taskbar.SetProgressState(hwnd, TBPF_NOPROGRESS);
+                }
+            }
+        }
+    }
+
     pub fn make_hwnd_no_activate(hwnd: HWND) -> bool {
         unsafe {
             let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;

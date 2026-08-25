@@ -28335,6 +28335,78 @@ mod windows_overlay {
             in_front: projection.in_front,
         };
         if !projection.on_screen {
+            if preset.show_tracer && preset.clamp_offscreen_tracer {
+                let (dir_x, dir_y) = if projection.in_front {
+                    (projection.normalized_x, -projection.normalized_y)
+                } else {
+                    (-projection.normalized_x, projection.normalized_y)
+                };
+                let max_mag = dir_x.abs().max(dir_y.abs()).max(0.001);
+                let clamped_nx = (dir_x / max_mag).clamp(-1.0, 1.0);
+                let clamped_ny = (dir_y / max_mag).clamp(-1.0, 1.0);
+
+                let margin = 12.0f32;
+                let inner_w = (width as f32 - margin * 2.0).max(10.0);
+                let inner_h = (height as f32 - margin * 2.0).max(10.0);
+                let target_x = left + ((clamped_nx + 1.0) * 0.5 * inner_w + margin).round() as i32;
+                let target_y = top + ((clamped_ny + 1.0) * 0.5 * inner_h + margin).round() as i32;
+
+                let origin_x = left + width / 2;
+                let origin_y = if preset.tracer_from_top {
+                    top
+                } else {
+                    top + height
+                };
+
+                let effective_color = preset
+                    .custom_entity_colors
+                    .get(&((entity_index + 1) as u32))
+                    .copied()
+                    .unwrap_or(preset.color);
+                let color = [
+                    effective_color.r,
+                    effective_color.g,
+                    effective_color.b,
+                    effective_color.a,
+                ];
+                let thickness = preset.thickness.round().max(1.0) as i32;
+
+                let mut offscreen_shapes = Vec::new();
+                offscreen_shapes.push(GeometryRenderShape {
+                    bounds: (
+                        origin_x.min(target_x),
+                        origin_y.min(target_y),
+                        origin_x.max(target_x),
+                        origin_y.max(target_y),
+                    ),
+                    draw: GeometryRenderDraw::Line {
+                        x1: origin_x,
+                        y1: origin_y,
+                        x2: target_x,
+                        y2: target_y,
+                        stroke: color,
+                        thickness,
+                    },
+                });
+                let dot_radius = (thickness * 2).clamp(3, 8);
+                offscreen_shapes.push(GeometryRenderShape {
+                    bounds: (
+                        target_x - dot_radius,
+                        target_y - dot_radius,
+                        target_x + dot_radius,
+                        target_y + dot_radius,
+                    ),
+                    draw: GeometryRenderDraw::Circle {
+                        cx: target_x,
+                        cy: target_y,
+                        radius: dot_radius,
+                        stroke: color,
+                        fill: Some(color),
+                        thickness: 1,
+                    },
+                });
+                return (offscreen_shapes, Some(snapshot));
+            }
             return (Vec::new(), Some(snapshot));
         }
         let x = left

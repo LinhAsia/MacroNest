@@ -1166,62 +1166,111 @@ impl CrosshairApp {
                                 memory_expression_row(ui, label, value);
                             }
                         }
-                        for (label, value) in [
-                            ("Camera X", &mut preset.camera_x),
-                            ("Camera Y", &mut preset.camera_y),
-                            ("Camera Z", &mut preset.camera_z),
-                        ] {
-                            ui.label(label);
-                            ui.add(
-                                TextEdit::singleline(value).desired_width(420.0).hint_text(
-                                    RichText::new("address / module+offset [offsets] / @alias")
-                                        .color(ui.visuals().weak_text_color()),
-                                ),
-                            );
-                            ui.end_row();
-                        }
-                        ui.label("Orientation source");
-                        ComboBox::from_id_salt(("esp_orientation_source", preset.id))
-                            .selected_text(match preset.orientation_source {
-                                EspOrientationSource::Angles => "Yaw + pitch angles",
-                                EspOrientationSource::DirectionPairPitch => {
-                                    "Horizontal direction pair + pitch"
-                                }
-                            })
-                            .width(240.0)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(
-                                    &mut preset.orientation_source,
-                                    EspOrientationSource::Angles,
-                                    "Yaw + pitch angles",
-                                );
-                                ui.selectable_value(
-                                    &mut preset.orientation_source,
-                                    EspOrientationSource::DirectionPairPitch,
-                                    "Horizontal direction pair + pitch",
-                                );
-                            });
-                        ui.end_row();
-                        match preset.orientation_source {
-                            EspOrientationSource::Angles => {
-                                for (label, value) in [
-                                    ("Camera yaw", &mut preset.camera_yaw),
-                                    ("Camera pitch", &mut preset.camera_pitch),
-                                ] {
-                                    memory_expression_row(ui, label, value);
-                                }
-                            }
-                            EspOrientationSource::DirectionPairPitch => {
-                                for (label, value) in [
-                                    ("Camera direction A", &mut preset.camera_direction_a),
-                                    ("Camera pitch", &mut preset.camera_pitch),
-                                    ("Camera direction B", &mut preset.camera_direction_b),
-                                ] {
-                                    memory_expression_row(ui, label, value);
-                                }
-                            }
-                        }
                     });
+
+                ui.add_space(2.0);
+
+                ui.columns(2, |columns| {
+                    // --- Left Column: Camera Position (X, Y, Z) ---
+                    columns[0].vertical(|ui| {
+                        Grid::new(("esp_camera_pos_grid", preset.id))
+                            .num_columns(2)
+                            .spacing([8.0, 4.0])
+                            .show(ui, |ui| {
+                                for (label, value) in [
+                                    ("Camera X", &mut preset.camera_x),
+                                    ("Camera Y", &mut preset.camera_y),
+                                    ("Camera Z", &mut preset.camera_z),
+                                ] {
+                                    ui.label(label);
+                                    ui.add(
+                                        TextEdit::singleline(value)
+                                            .desired_width(ui.available_width() - 8.0)
+                                            .hint_text(
+                                                RichText::new(
+                                                    "address / module+offset [offsets] / @alias",
+                                                )
+                                                .color(ui.visuals().weak_text_color()),
+                                            ),
+                                    );
+                                    ui.end_row();
+                                }
+                            });
+                    });
+
+                    // --- Right Column: Orientation Source & Direction/Pitch ---
+                    columns[1].vertical(|ui| {
+                        Grid::new(("esp_camera_orient_grid", preset.id))
+                            .num_columns(2)
+                            .spacing([8.0, 4.0])
+                            .show(ui, |ui| {
+                                ui.label("Orientation source");
+                                ComboBox::from_id_salt(("esp_orientation_source", preset.id))
+                                    .selected_text(match preset.orientation_source {
+                                        EspOrientationSource::Angles => "Yaw + pitch angles",
+                                        EspOrientationSource::DirectionPairPitch => {
+                                            "Horizontal direction pair + pitch"
+                                        }
+                                    })
+                                    .width(ui.available_width() - 8.0)
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut preset.orientation_source,
+                                            EspOrientationSource::Angles,
+                                            "Yaw + pitch angles",
+                                        );
+                                        ui.selectable_value(
+                                            &mut preset.orientation_source,
+                                            EspOrientationSource::DirectionPairPitch,
+                                            "Horizontal direction pair + pitch",
+                                        );
+                                    });
+                                ui.end_row();
+
+                                match preset.orientation_source {
+                                    EspOrientationSource::Angles => {
+                                        for (label, value) in [
+                                            ("Camera yaw", &mut preset.camera_yaw),
+                                            ("Camera pitch", &mut preset.camera_pitch),
+                                        ] {
+                                            ui.label(label);
+                                            ui.add(
+                                                TextEdit::singleline(value)
+                                                    .desired_width(ui.available_width() - 8.0)
+                                                    .hint_text(
+                                                        RichText::new(
+                                                            "address / module+offset [offsets] / @alias",
+                                                        )
+                                                        .color(ui.visuals().weak_text_color()),
+                                                    ),
+                                            );
+                                            ui.end_row();
+                                        }
+                                    }
+                                    EspOrientationSource::DirectionPairPitch => {
+                                        for (label, value) in [
+                                            ("Camera direction A", &mut preset.camera_direction_a),
+                                            ("Camera pitch", &mut preset.camera_pitch),
+                                            ("Camera direction B", &mut preset.camera_direction_b),
+                                        ] {
+                                            ui.label(label);
+                                            ui.add(
+                                                TextEdit::singleline(value)
+                                                    .desired_width(ui.available_width() - 8.0)
+                                                    .hint_text(
+                                                        RichText::new(
+                                                            "address / module+offset [offsets] / @alias",
+                                                        )
+                                                        .color(ui.visuals().weak_text_color()),
+                                                    ),
+                                            );
+                                            ui.end_row();
+                                        }
+                                    }
+                                }
+                            });
+                    });
+                });
 
                 ui.add_space(4.0);
 
@@ -1784,6 +1833,7 @@ impl CrosshairApp {
                                     ui.checkbox(&mut preset.show_tracer, "Tracer");
                                     if preset.show_tracer {
                                         ui.checkbox(&mut preset.tracer_from_top, "From Top");
+                                        ui.checkbox(&mut preset.clamp_offscreen_tracer, "Clamp off-screen");
                                     }
 
                                     ui.add_space(4.0);

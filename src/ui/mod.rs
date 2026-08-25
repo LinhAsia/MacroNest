@@ -15653,9 +15653,11 @@ impl eframe::App for CrosshairApp {
             self.state.active_panel = AppPanel::Macros;
         }
         crate::overlay::set_ui_context(ctx.clone());
+        crate::platform::cache_main_hwnd(frame);
         let is_recording = crate::video_recorder::is_recording();
         if self.recording_icon_applied != is_recording {
             self.recording_icon_applied = is_recording;
+            crate::platform::update_native_taskbar_recording_state(is_recording);
             if is_recording {
                 if let Some(rec_icon) = &self.recording_app_icon {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(rec_icon.clone())));

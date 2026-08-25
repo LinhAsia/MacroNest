@@ -1075,6 +1075,8 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         stream_thread,
     });
     ACTIVE.store(true, Ordering::Release);
+    crate::platform::update_native_taskbar_recording_state(true);
+    crate::overlay::request_ui_repaint();
     *STATUS.lock() = format!("Recording: {}", output_path.display());
     spawn_exit_watchdog(session_id);
     Ok(())
@@ -1083,10 +1085,14 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
 fn stop_recording_inner() {
     let Some(mut recording) = PROCESS.lock().take() else {
         ACTIVE.store(false, Ordering::Release);
+        crate::platform::update_native_taskbar_recording_state(false);
+        crate::overlay::request_ui_repaint();
         return;
     };
     recording.region_border.take();
     ACTIVE.store(false, Ordering::Release);
+    crate::platform::update_native_taskbar_recording_state(false);
+    crate::overlay::request_ui_repaint();
     *STATUS.lock() = "Finishing video...".to_owned();
     if let Some(stop) = recording.stream_stop.take() {
         stop.store(true, Ordering::Release);

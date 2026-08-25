@@ -178,6 +178,8 @@ pub struct EspPreset {
     pub show_tracer: bool,
     #[serde(default)]
     pub tracer_from_top: bool,
+    #[serde(default)]
+    pub clamp_offscreen_tracer: bool,
     pub show_distance: bool,
     pub debug_mode: bool,
     #[serde(default)]
@@ -292,6 +294,7 @@ impl EspPreset {
             },
             show_tracer: false,
             tracer_from_top: false,
+            clamp_offscreen_tracer: false,
             show_distance: false,
             debug_mode: false,
             permutation_debug_mode: false,
