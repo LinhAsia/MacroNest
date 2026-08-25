@@ -28345,11 +28345,8 @@ mod windows_overlay {
                 let clamped_nx = (dir_x / max_mag).clamp(-1.0, 1.0);
                 let clamped_ny = (dir_y / max_mag).clamp(-1.0, 1.0);
 
-                let margin = 12.0f32;
-                let inner_w = (width as f32 - margin * 2.0).max(10.0);
-                let inner_h = (height as f32 - margin * 2.0).max(10.0);
-                let target_x = left + ((clamped_nx + 1.0) * 0.5 * inner_w + margin).round() as i32;
-                let target_y = top + ((clamped_ny + 1.0) * 0.5 * inner_h + margin).round() as i32;
+                let target_x = left + ((clamped_nx + 1.0) * 0.5 * width as f32).round() as i32;
+                let target_y = top + ((clamped_ny + 1.0) * 0.5 * height as f32).round() as i32;
 
                 let origin_x = left + width / 2;
                 let origin_y = if preset.tracer_from_top {
@@ -28386,23 +28383,6 @@ mod windows_overlay {
                         y2: target_y,
                         stroke: color,
                         thickness,
-                    },
-                });
-                let dot_radius = (thickness * 2).clamp(3, 8);
-                offscreen_shapes.push(GeometryRenderShape {
-                    bounds: (
-                        target_x - dot_radius,
-                        target_y - dot_radius,
-                        target_x + dot_radius,
-                        target_y + dot_radius,
-                    ),
-                    draw: GeometryRenderDraw::Circle {
-                        cx: target_x,
-                        cy: target_y,
-                        radius: dot_radius,
-                        stroke: color,
-                        fill: Some(color),
-                        thickness: 1,
                     },
                 });
                 return (offscreen_shapes, Some(snapshot));
