@@ -19919,24 +19919,31 @@ if supports_move_mouse || show_detection_tuning {
                     }
 
                     MacroAction::ShowHud => {
-                        if let Ok(preset_id) = step.key.trim().parse::<u32>() {
-                            if let Some(hud) = hud_presets.iter().find(|h| h.id == preset_id) {
-                                let mut hud_clone = hud.clone();
-                                if !step.text_override.is_empty() {
-                                    hud_clone.text = step.text_override.clone();
-                                }
-                                let _ = overlay_tx.send(
-                                    crate::overlay::OverlayCommand::PreviewHudPreset(vec![
-                                        hud_clone,
-                                    ]),
-                                );
-                            }
+                        let key_trim = step.key.trim();
+                        let mut hud_clone = if let Ok(preset_id) = key_trim.parse::<u32>() {
+                            hud_presets
+                                .iter()
+                                .find(|h| h.id == preset_id)
+                                .cloned()
+                                .or_else(|| hud_presets.first().cloned())
+                                .unwrap_or_else(|| Self::default_macro_step_hud_preset(&step.text_override))
+                        } else if !key_trim.is_empty() {
+                            hud_presets
+                                .iter()
+                                .find(|h| h.name.eq_ignore_ascii_case(key_trim))
+                                .cloned()
+                                .or_else(|| hud_presets.first().cloned())
+                                .unwrap_or_else(|| Self::default_macro_step_hud_preset(&step.text_override))
                         } else {
-                            let _ =
-                                overlay_tx.send(crate::overlay::OverlayCommand::PreviewHudPreset(
-                                    vec![Self::default_macro_step_hud_preset(&step.text_override)],
-                                ));
+                            hud_presets
+                                .first()
+                                .cloned()
+                                .unwrap_or_else(|| Self::default_macro_step_hud_preset(&step.text_override))
+                        };
+                        if !step.text_override.trim().is_empty() {
+                            hud_clone.text = step.text_override.trim().to_owned();
                         }
+                        let _ = overlay_tx.send(crate::overlay::OverlayCommand::PreviewHudPreset(vec![hud_clone]));
                     }
                     _ => {}
                 }

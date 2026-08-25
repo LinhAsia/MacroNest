@@ -35315,24 +35315,28 @@ mod windows_overlay {
         let key_trim = step.key.trim();
         let preset = {
             let hook_state = HOOK_STATE.lock();
-            hook_state
-                .hud_presets
-                .iter()
-                .find(|preset| {
-                    key_trim.parse::<u32>().map_or(false, |id| preset.id == id)
-                        || preset.name.eq_ignore_ascii_case(key_trim)
-                })
-                .cloned()
+            if key_trim.is_empty() {
+                hook_state.hud_presets.first().cloned()
+            } else {
+                hook_state
+                    .hud_presets
+                    .iter()
+                    .find(|preset| {
+                        key_trim.parse::<u32>().map_or(false, |id| preset.id == id)
+                            || preset.name.eq_ignore_ascii_case(key_trim)
+                    })
+                    .cloned()
+                    .or_else(|| hook_state.hud_presets.first().cloned())
+            }
         }
         .context("Toolbox preset was not found")?;
-        let text = if step.text_override.trim().is_empty() {
+        let mut text = if step.text_override.trim().is_empty() {
             preset.text.trim().to_owned()
         } else {
             step.text_override.trim().to_owned()
         };
         if text.is_empty() {
-            hide_hud_now();
-            return Ok(());
+            text = if preset.name.is_empty() { "HUD".to_owned() } else { preset.name.clone() };
         }
 
         let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(1);
@@ -35396,15 +35400,13 @@ mod windows_overlay {
     }
 
     fn show_legacy_hud_text(owner_preset_id: u32, step: &MacroStep) {
-        let text = if step.text_override.trim().is_empty() {
+        let text = if !step.text_override.trim().is_empty() {
+            step.text_override.trim().to_owned()
+        } else if !step.key.trim().is_empty() {
             step.key.trim().to_owned()
         } else {
-            step.text_override.trim().to_owned()
+            "HUD".to_owned()
         };
-        if text.is_empty() {
-            hide_hud_now();
-            return;
-        }
 
         let preset = HudPreset::default_step_preview();
         let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(1);

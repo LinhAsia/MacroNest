@@ -4932,13 +4932,22 @@ impl CrosshairApp {
         self.clear_geometry_spec_preview();
         self.clear_geometry_preset_preview();
 
-        self.disable_hud_preview_modes();
+        if self.disable_hud_preview_modes() {
+            self.sync_hud_presets();
+            self.persist();
+        }
         crate::overlay::hide_hud_now();
 
-        self.disable_timer_preview_modes();
+        if self.disable_timer_preview_modes() {
+            self.sync_timer_presets();
+            self.persist();
+        }
         crate::overlay::clear_timer_overlays_now();
 
-        self.disable_pin_preview_modes();
+        if self.disable_pin_preview_modes() {
+            self.sync_window_presets();
+            self.persist();
+        }
         crate::overlay::clear_pin_overlay_now();
 
         crate::overlay::disable_crosshair_profile("");
