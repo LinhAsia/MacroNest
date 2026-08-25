@@ -658,7 +658,11 @@ fn install_video_audio_preview(
 
     let channels = decoded.channels.max(1);
     let sample_rate = decoded.sample_rate.max(1);
-    let clip_end_ms = end_ms.max(start_ms.saturating_add(1));
+    let clip_end_ms = if end_ms > start_ms {
+        end_ms
+    } else {
+        u64::MAX
+    };
     let start_frame = ((start_ms as f64 / 1000.0) * sample_rate as f64)
         .floor()
         .max(0.0) as usize;

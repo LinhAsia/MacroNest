@@ -22,7 +22,7 @@ use windows::Win32::{
         Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
         Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect},
     },
-    UI::WindowsAndMessaging::{GetForegroundWindow, IsIconic, IsWindow},
+    UI::WindowsAndMessaging::{GetForegroundWindow, IsIconic, IsWindow, SW_RESTORE, ShowWindow},
 };
 
 use crate::{
@@ -402,7 +402,8 @@ fn start_video_library_playback_inner(
     if !video_path.is_file() {
         return Err("Video file was not found.".to_owned());
     }
-    let duration = (end_seconds - start_seconds).max(0.05);
+    let has_duration_limit = end_seconds > start_seconds;
+    let duration = end_seconds - start_seconds;
     let (sender, receiver) = sync_channel(2);
     let stop = Arc::new(AtomicBool::new(false));
     let finished = Arc::new(AtomicBool::new(false));
@@ -416,8 +417,8 @@ fn start_video_library_playback_inner(
     let worker_ready = ready.clone();
     thread::spawn(move || {
         let result = (|| -> Result<(), String> {
-            let mut child = Command::new(ffmpeg_exe)
-                .creation_flags(CREATE_NO_WINDOW)
+            let mut cmd = Command::new(ffmpeg_exe);
+            cmd.creation_flags(CREATE_NO_WINDOW)
                 .args([
                     "-hide_banner",
                     "-loglevel",
@@ -430,19 +431,21 @@ fn start_video_library_playback_inner(
                 ])
                 .arg(format!("{:.3}", start_seconds.max(0.0)))
                 .args(["-i"])
-                .arg(video_path)
-                .args([
-                    "-t",
-                    &format!("{duration:.3}"),
-                    "-an",
-                    "-vf",
-                    "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=60",
-                    "-pix_fmt",
-                    "rgba",
-                    "-f",
-                    "rawvideo",
-                    "pipe:1",
-                ])
+                .arg(video_path);
+            if has_duration_limit {
+                cmd.args(["-t", &format!("{duration:.3}")]);
+            }
+            cmd.args([
+                "-an",
+                "-vf",
+                "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=60",
+                "-pix_fmt",
+                "rgba",
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ]);
+            let mut child = cmd
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()
@@ -812,7 +815,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     ));
     let (audio_stop, audio_thread, audio_start) = start_system_audio_capture(&audio_path)?;
 
-    let (source, border_rect) = match capture_source(&config) {
+    let source = match capture_source(&config) {
         Ok(res) => res,
         Err(err) => {
             audio_stop.store(true, Ordering::Release);
@@ -821,6 +824,11 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             let _ = fs::remove_file(&audio_path);
             return Err(err);
         }
+    };
+    let border_rect = match &source {
+        CaptureSource::Desktop { .. } => None,
+        CaptureSource::Window { rect, .. } => Some(*rect),
+        CaptureSource::Region { region, .. } => Some(*region),
     };
     let (region_border, recording_active_signal) = match border_rect {
         Some(rect) => {
@@ -850,84 +858,64 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));
 
-    if source.starts_with("gdigrab:") {
-        let args_str = &source["gdigrab:".len()..];
-        let parts: Vec<&str> = args_str.split('|').collect();
-        command.args([
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-thread_queue_size",
-            "1024",
-            "-rtbufsize",
-            "512M",
-            "-f",
-            "gdigrab",
-            "-draw_mouse",
-            "1",
-        ]);
-        for part in parts {
-            if let Some((k, v)) = part.split_once('=') {
-                command.arg(k).arg(v);
-            }
+    command.args([
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-thread_queue_size",
+        "1024",
+        "-rtbufsize",
+        "512M",
+        "-f",
+        "gdigrab",
+        "-draw_mouse",
+        "1",
+    ]);
+
+    match source {
+        CaptureSource::Desktop { fps } => {
+            command.arg("-framerate").arg(fps.to_string());
+            command.arg("-i").arg("desktop");
         }
-        command.args([
-            "-vf",
-            "format=yuv420p",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-tune",
-            "zerolatency",
-            "-crf",
-            "20",
-            "-g",
-            &gop_size,
-            "-bf",
-            "0",
-            "-fps_mode",
-            "cfr",
-            "-avoid_negative_ts",
-            "make_zero",
-            "-movflags",
-            "+faststart",
-        ]);
-    } else {
-        command.args([
-            "-y",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            &source,
-            "-vf",
-            "hwdownload,format=bgra,format=yuv420p",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-tune",
-            "zerolatency",
-            "-crf",
-            "20",
-            "-g",
-            &gop_size,
-            "-bf",
-            "0",
-            "-fps_mode",
-            "cfr",
-            "-avoid_negative_ts",
-            "make_zero",
-            "-movflags",
-            "+faststart",
-        ]);
+        CaptureSource::Window { title, fps, .. } => {
+            command.arg("-framerate").arg(fps.to_string());
+            command.arg("-i").arg(format!("title={title}"));
+        }
+        CaptureSource::Region { region, fps } => {
+            let width = region.right - region.left;
+            let height = region.bottom - region.top;
+            command.arg("-framerate").arg(fps.to_string());
+            command.arg("-offset_x").arg(region.left.to_string());
+            command.arg("-offset_y").arg(region.top.to_string());
+            command.arg("-video_size").arg(format!("{width}x{height}"));
+            command.arg("-i").arg("desktop");
+        }
     }
+
+    command.args([
+        "-vf",
+        "format=yuv420p",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-tune",
+        "zerolatency",
+        "-crf",
+        "20",
+        "-g",
+        &gop_size,
+        "-bf",
+        "0",
+        "-fps_mode",
+        "cfr",
+        "-avoid_negative_ts",
+        "make_zero",
+        "-movflags",
+        "+faststart",
+    ]);
     command.arg(&output_path);
 
     let child = match command.spawn() {
@@ -1380,30 +1368,25 @@ pub fn copy_video_to_clipboard(video_path: &Path) -> Result<(), String> {
     Err(last_error.unwrap_or_else(|| "Could not open the clipboard.".to_owned()))
 }
 
-fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>), String> {
+enum CaptureSource {
+    Desktop {
+        fps: u32,
+    },
+    Window {
+        title: String,
+        fps: u32,
+        rect: RECT,
+    },
+    Region {
+        region: RECT,
+        fps: u32,
+    },
+}
+
+fn capture_source(config: &VideoRecorderConfig) -> Result<CaptureSource, String> {
     let fps = config.fps.clamp(1, 240);
     match config.mode {
-        QuickVideoRecordMode::FullScreen => {
-            let screen_w = unsafe {
-                windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
-                    windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN,
-                )
-            };
-            let screen_h = unsafe {
-                windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
-                    windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN,
-                )
-            };
-            Ok((
-                format!("gdigrab:-framerate={fps}|-i=desktop"),
-                Some(RECT {
-                    left: 0,
-                    top: 0,
-                    right: screen_w,
-                    bottom: screen_h,
-                }),
-            ))
-        }
+        QuickVideoRecordMode::FullScreen => Ok(CaptureSource::Desktop { fps }),
         QuickVideoRecordMode::FocusedWindow => window_source(unsafe { GetForegroundWindow() }, fps),
         QuickVideoRecordMode::SelectedWindow => {
             let hwnd = selector_hwnd(&config.target_window)
@@ -1427,12 +1410,13 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<(String, Option<RECT>)
     }
 }
 
-fn window_source(hwnd: HWND, fps: u32) -> Result<(String, Option<RECT>), String> {
+fn window_source(hwnd: HWND, fps: u32) -> Result<CaptureSource, String> {
     if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
         return Err("The selected window is no longer available.".to_owned());
     }
     if unsafe { IsIconic(hwnd).as_bool() } {
-        return Err("The selected window is minimized. Please restore it before recording.".to_owned());
+        let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
+        thread::sleep(Duration::from_millis(50));
     }
     let mut rect = RECT::default();
     let dwm_ok = unsafe {
@@ -1452,10 +1436,18 @@ fn window_source(hwnd: HWND, fps: u32) -> Result<(String, Option<RECT>), String>
     if width < 10 || height < 10 {
         return Err("The selected window has invalid bounds or is hidden.".to_owned());
     }
-    region_source(rect, fps)
+    if let Some(title) = crate::window_list::window_title(hwnd).filter(|t| !t.trim().is_empty()) {
+        Ok(CaptureSource::Window {
+            title: title.trim().to_owned(),
+            fps,
+            rect,
+        })
+    } else {
+        region_source(rect, fps)
+    }
 }
 
-fn region_source(mut region: RECT, fps: u32) -> Result<(String, Option<RECT>), String> {
+fn region_source(mut region: RECT, fps: u32) -> Result<CaptureSource, String> {
     let monitor = unsafe { MonitorFromRect(&region, MONITOR_DEFAULTTONEAREST) };
     if monitor.0.is_null() {
         return Err("Could not find the monitor for this region.".to_owned());
@@ -1481,15 +1473,7 @@ fn region_source(mut region: RECT, fps: u32) -> Result<(String, Option<RECT>), S
     if (region.bottom - region.top) % 2 != 0 {
         region.bottom -= 1;
     }
-    let width = region.right - region.left;
-    let height = region.bottom - region.top;
-    Ok((
-        format!(
-            "gdigrab:-framerate={fps}|-offset_x={}|-offset_y={}|-video_size={}x{}|-i=desktop",
-            region.left, region.top, width, height
-        ),
-        Some(region),
-    ))
+    Ok(CaptureSource::Region { region, fps })
 }
 
 fn selector_hwnd(selector: &str) -> Option<HWND> {

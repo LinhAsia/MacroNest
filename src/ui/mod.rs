@@ -8299,7 +8299,9 @@ impl CrosshairApp {
                         rgba,
                         position_seconds,
                     } => {
-                        if position_seconds >= self.video_library_trim_end_seconds {
+                        if self.video_library_trim_end_seconds > 0.0
+                            && position_seconds >= self.video_library_trim_end_seconds
+                        {
                             self.video_library_playback_position_seconds =
                                 self.video_library_trim_end_seconds;
                             playback_finished = true;
@@ -8330,7 +8332,11 @@ impl CrosshairApp {
             playback_finished |= playback.is_finished();
         }
         if playback_reached_end {
-            self.video_library_playback_position_seconds = self.video_library_trim_end_seconds;
+            self.video_library_playback_position_seconds = if self.video_library_trim_end_seconds > 0.0 {
+                self.video_library_trim_end_seconds
+            } else {
+                self.video_library_playback_position_seconds
+            };
         }
         if playback_finished {
             self.stop_video_library_playback();
@@ -9014,7 +9020,28 @@ impl CrosshairApp {
                 .unwrap_or(1.0);
             self.video_library_target_size_mb =
                 (source_mb * 0.65).round().clamp(1.0, 2048.0) as u32;
-            self.video_library_pending_preview = Some((path, 0.5));
+            self.video_library_pending_preview = Some((path.clone(), 0.5));
+
+            // Immediately start playing the selected video
+            let playback = crate::video_recorder::start_video_library_playback(
+                self.paths.ffmpeg_exe.clone(),
+                path.clone(),
+                0.0,
+                0.0,
+            );
+            match playback {
+                Ok(playback) => {
+                    audio::play_video_audio_preview_async(
+                        path.to_string_lossy().into_owned(),
+                        0,
+                        0,
+                    );
+                    self.video_library_playback = Some(playback);
+                    self.video_library_playback_path = Some(path);
+                    self.video_library_playback_position_seconds = 0.0;
+                }
+                Err(error) => self.status = format!("Could not play video: {error}"),
+            }
         }
         if let Some(path) = toggle_playback {
             if self.video_library_playback_path.as_ref() == Some(&path) {
