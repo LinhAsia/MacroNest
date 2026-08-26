@@ -167,7 +167,13 @@ mod windows_platform {
     }
 
     pub fn set_current_thread_high_priority() {
-        // ponytail: Keep scan worker threads at normal priority so scanning does not starve target game threads.
+        // Set worker threads to below normal priority so heavy scanning never starves game or UI threads.
+        unsafe {
+            use windows::Win32::System::Threading::{
+                GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,
+            };
+            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        }
     }
 
     pub fn set_high_priority() {
