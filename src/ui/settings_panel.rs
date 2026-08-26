@@ -32,39 +32,84 @@ struct UpdateManifest {
 
 impl CrosshairApp {
     fn sync_windows_startup(&self) -> Result<()> {
-        let mut command = Command::new("reg.exe");
-        command.creation_flags(0x08000000);
-        if self.state.start_with_windows {
-            let exe = std::env::current_exe()?;
-            let tray_arg = if self.state.start_hidden_to_tray {
-                " --start-in-tray"
-            } else {
-                ""
-            };
-            let value = format!("\"{}\"{tray_arg}", exe.display());
-            command.args([
-                "add",
-                WINDOWS_STARTUP_KEY,
-                "/v",
-                WINDOWS_STARTUP_VALUE,
-                "/t",
-                "REG_SZ",
-                "/d",
-                &value,
-                "/f",
-            ]);
+        let exe = std::env::current_exe()?;
+        let tray_arg = if self.state.start_hidden_to_tray {
+            " --start-in-tray"
         } else {
-            command.args([
+            ""
+        };
+
+        if self.state.start_with_windows {
+            // 1. Try creating a Task Scheduler entry with HIGHEST privilege (Admin, NO UAC prompt, 0s startup delay)
+            let mut sch_cmd = Command::new("schtasks.exe");
+            sch_cmd.creation_flags(0x08000000);
+            sch_cmd.args([
+                "/create",
+                "/tn",
+                WINDOWS_STARTUP_VALUE,
+                "/tr",
+                &format!("'{}'{}", exe.display(), tray_arg),
+                "/sc",
+                "ONLOGON",
+                "/rl",
+                "HIGHEST",
+                "/delay",
+                "0000:00",
+                "/f",
+                "/it",
+            ]);
+            let sch_ok = sch_cmd.status().map(|s| s.success()).unwrap_or(false);
+
+            // Clean up any legacy registry Run key if Task Scheduler succeeded
+            if sch_ok {
+                let mut reg_del = Command::new("reg.exe");
+                reg_del.creation_flags(0x08000000);
+                reg_del.args([
+                    "delete",
+                    WINDOWS_STARTUP_KEY,
+                    "/v",
+                    WINDOWS_STARTUP_VALUE,
+                    "/f",
+                ]);
+                let _ = reg_del.output();
+            } else {
+                // Fallback to registry Run key if Task Scheduler was not permitted
+                let mut reg_cmd = Command::new("reg.exe");
+                reg_cmd.creation_flags(0x08000000);
+                let value = format!("\"{}\"{tray_arg}", exe.display());
+                reg_cmd.args([
+                    "add",
+                    WINDOWS_STARTUP_KEY,
+                    "/v",
+                    WINDOWS_STARTUP_VALUE,
+                    "/t",
+                    "REG_SZ",
+                    "/d",
+                    &value,
+                    "/f",
+                ]);
+                let output = reg_cmd.output()?;
+                if !output.status.success() {
+                    bail!(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+                }
+            }
+        } else {
+            // Delete both Task Scheduler and Registry Run entries
+            let mut sch_cmd = Command::new("schtasks.exe");
+            sch_cmd.creation_flags(0x08000000);
+            sch_cmd.args(["/delete", "/tn", WINDOWS_STARTUP_VALUE, "/f"]);
+            let _ = sch_cmd.output();
+
+            let mut reg_cmd = Command::new("reg.exe");
+            reg_cmd.creation_flags(0x08000000);
+            reg_cmd.args([
                 "delete",
                 WINDOWS_STARTUP_KEY,
                 "/v",
                 WINDOWS_STARTUP_VALUE,
                 "/f",
             ]);
-        }
-        let output = command.output()?;
-        if self.state.start_with_windows && !output.status.success() {
-            bail!(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+            let _ = reg_cmd.output();
         }
         Ok(())
     }
