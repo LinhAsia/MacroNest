@@ -57,7 +57,7 @@ const MAX_VISIBLE_RESULTS: usize = 1_000;
 const MAX_VISIBLE_INSTRUCTIONS: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum MemoryScanAction {
+pub(crate) enum MemoryScanAction {
     FirstScan,
     Unknown,
     Exact,
@@ -767,7 +767,7 @@ pub(crate) struct MemoryPanelState {
     address_list_pinned: bool,
     show_scan_previous: bool,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
-    capturing_hotkey: Option<MemoryScanAction>,
+    pub(super) capturing_hotkey: Option<MemoryScanAction>,
     edit_value_index: Option<usize>,
     edit_value_input: String,
     edit_value_position: Option<egui::Pos2>,
@@ -13527,6 +13527,7 @@ impl CrosshairApp {
         let Some(action) = self.memory_panel.capturing_hotkey else {
             return;
         };
+        ctx.request_repaint_after(Duration::from_millis(16));
         if let Some(binding) = self.capture_next_input(ctx) {
             self.finish_memory_hotkey_capture(action, binding);
         }

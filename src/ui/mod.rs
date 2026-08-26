@@ -17803,7 +17803,9 @@ impl eframe::App for CrosshairApp {
                     } else {
                         self.render_macro_panel(ui);
                     }
-                    if self.capture_target.is_some() {
+                    if self.capture_target.is_some()
+                        || self.memory_panel.capturing_hotkey.is_some()
+                    {
                         ctx.request_repaint_after(Duration::from_millis(16));
                     }
                 } else {
@@ -17831,7 +17833,9 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Memory => unreachable!(),
                                 AppPanel::Network => unreachable!(),
                             };
-                            if self.capture_target.is_some() {
+                            if self.capture_target.is_some()
+                                || self.memory_panel.capturing_hotkey.is_some()
+                            {
                                 ctx.request_repaint_after(Duration::from_millis(16));
                             }
                         });
