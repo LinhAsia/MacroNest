@@ -23,10 +23,11 @@ use crate::{
         PointerScanLimits, RawMemorySnapshot, ScanCandidate, ScanComparison, ScanValue,
         ScanValueType, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
         adjacent_readable_memory_region, capture_memory_snapshot, capture_pointer_map_with_budget,
-        compare_pointer_paths, filter_aob_scan_candidates, filter_memory_snapshot_with_progress,
-        filter_scan_candidates, filter_scan_candidates_with_progress, filter_text_scan_candidates,
+        compare_pointer_paths, filter_aob_scan_candidates, filter_aob_scan_candidates_numeric,
+        filter_memory_snapshot_with_progress, filter_scan_candidates,
+        filter_scan_candidates_with_progress, filter_text_scan_candidates, is_aob_pattern_input,
         query_memory_region, read_memory_bytes, read_scan_value, read_text_memory,
-        refresh_scan_candidates, scan_aob_memory_range_with_progress,
+        refresh_scan_candidates, scan_aob_memory_as_numeric, scan_aob_memory_range_with_progress,
         scan_aob_memory_with_progress, scan_entity_lists_with_progress,
         scan_memory_range_with_progress, scan_pointer_paths_to_targets_with_budget,
         scan_pointer_paths_with_budget_options, scan_text_memory_with_progress,
@@ -12730,6 +12731,7 @@ impl CrosshairApp {
         } else {
             None
         };
+        let is_aob = self.memory_panel.is_aob_scan || is_aob_pattern_input(&self.memory_panel.value_input);
         let exact = if matches!(
             action,
             MemoryScanAction::Unknown | MemoryScanAction::Between
@@ -12742,7 +12744,7 @@ impl CrosshairApp {
         ) {
             None
         } else {
-            if self.memory_panel.is_aob_scan {
+            if is_aob {
                 if self.memory_panel.value_input.trim().is_empty() {
                     self.memory_panel.status = "AOB pattern cannot be empty".to_owned();
                     return;
@@ -12792,7 +12794,7 @@ impl CrosshairApp {
             .unwrap_or(value_type.width())
             .clamp(1, 4096);
         self.memory_panel.fast_scan_alignment = alignment.to_string();
-        let scan_options = if self.memory_panel.is_aob_scan {
+        let scan_options = if is_aob {
             MemoryScanOptions {
                 writable: false,
                 executable: true,
@@ -12859,7 +12861,6 @@ impl CrosshairApp {
         let case_sensitive = self.memory_panel.text_case_sensitive;
         let null_terminated = self.memory_panel.text_null_terminated;
         let pause_while_scanning = self.memory_panel.pause_while_scanning;
-        let is_aob = self.memory_panel.is_aob_scan;
         thread::spawn(move || {
             let _pause = if pause_while_scanning {
                 match PausedProcess::new(pid) {
@@ -12877,12 +12878,12 @@ impl CrosshairApp {
                 None
             };
             let result = if is_aob {
-                if action == MemoryScanAction::Exact && !text_candidates.is_empty() {
-                    filter_aob_scan_candidates(pid, text_candidates, &text)
+                if action == MemoryScanAction::Exact && !candidates.is_empty() {
+                    filter_aob_scan_candidates_numeric(pid, candidates, &text, value_type)
                 } else {
-                    scan_aob_memory_with_progress(pid, &text, result_limit, scan_options, progress)
+                    scan_aob_memory_as_numeric(pid, &text, value_type, result_limit, scan_options, progress)
                 }
-                .map(ScanJobCandidates::Text)
+                .map(ScanJobCandidates::Numeric)
             } else if let Some(encoding) = text_encoding {
                 if action == MemoryScanAction::Exact && !text_candidates.is_empty() {
                     filter_text_scan_candidates(

@@ -1910,6 +1910,26 @@ fn aob_bytes_equal(actual: &[u8], pattern: &[AobByte]) -> bool {
     })
 }
 
+pub fn is_aob_pattern_input(input: &str) -> bool {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
+    if tokens.is_empty() {
+        return false;
+    }
+    if tokens.len() == 1 {
+        let t = tokens[0];
+        return t == "??" || t == "?";
+    }
+    tokens.iter().all(|t| {
+        t.eq_ignore_ascii_case("?")
+            || t.eq_ignore_ascii_case("??")
+            || (t.len() <= 2 && t.chars().all(|c| c.is_ascii_hexdigit()))
+    })
+}
+
 pub fn scan_aob_memory_with_progress(
     pid: u32,
     pattern_str: &str,
@@ -1917,6 +1937,41 @@ pub fn scan_aob_memory_with_progress(
     options: MemoryScanOptions,
     total: Arc<AtomicUsize>,
 ) -> io::Result<Vec<TextScanCandidate>> {
+    let addrs = scan_aob_memory_addresses(pid, pattern_str, result_limit, options, total)?;
+    Ok(addrs
+        .into_iter()
+        .map(|address| TextScanCandidate {
+            address,
+            previous: pattern_str.to_owned(),
+            current: pattern_str.to_owned(),
+        })
+        .collect())
+}
+
+pub fn scan_aob_memory_as_numeric(
+    pid: u32,
+    pattern_str: &str,
+    value_type: ScanValueType,
+    result_limit: usize,
+    options: MemoryScanOptions,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<ScanCandidate>> {
+    let addrs = scan_aob_memory_addresses(pid, pattern_str, result_limit, options, total)?;
+    let mut candidates = Vec::with_capacity(addrs.len());
+    for address in addrs {
+        let current = read_scan_value(pid, address, value_type).unwrap_or(ScanValue::I32(0));
+        candidates.push(ScanCandidate::new(address, current));
+    }
+    Ok(candidates)
+}
+
+pub fn scan_aob_memory_addresses(
+    pid: u32,
+    pattern_str: &str,
+    result_limit: usize,
+    options: MemoryScanOptions,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<usize>> {
     let pattern = parse_aob_pattern(pattern_str).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -1924,14 +1979,166 @@ pub fn scan_aob_memory_with_progress(
         )
     })?;
     let process = ScanProcess::open(pid, false)?;
-    scan_aob_regions(
-        &process,
-        &pattern,
-        pattern_str,
-        result_limit,
-        scan_regions_for(&process, options),
-        total,
-    )
+    let regions = scan_regions_for(&process, options)
+        .into_iter()
+        .flat_map(|region| {
+            (0..region.size)
+                .step_by(SCAN_BUCKET_BYTES)
+                .map(move |offset| ScanRegion {
+                    base: region.base + offset,
+                    size: (region.size - offset).min(SCAN_BUCKET_BYTES),
+                })
+        })
+        .collect::<Vec<_>>();
+
+    let max_threads = thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4)
+        .clamp(2, 32);
+    let worker_count = max_threads.min(regions.len().max(1));
+    let total_bytes = regions
+        .iter()
+        .map(|region| region.size)
+        .fold(0usize, usize::saturating_add);
+    let target_bytes = total_bytes.div_ceil(worker_count).max(1);
+    let mut buckets = vec![Vec::new(); worker_count];
+    let mut bucket_index = 0;
+    let mut bucket_bytes = 0usize;
+    for region in regions {
+        if bucket_bytes >= target_bytes && bucket_index + 1 < worker_count {
+            bucket_index += 1;
+            bucket_bytes = 0;
+        }
+        bucket_bytes = bucket_bytes.saturating_add(region.size);
+        buckets[bucket_index].push(region);
+    }
+    let claimed_results = Arc::new(AtomicUsize::new(0));
+    let pattern_arc = Arc::new(pattern);
+    let workers = buckets
+        .into_iter()
+        .map(|regions| {
+            let progress = Arc::clone(&total);
+            let claimed_results = Arc::clone(&claimed_results);
+            let pattern = Arc::clone(&pattern_arc);
+            thread::spawn(move || {
+                scan_aob_bucket(
+                    pid,
+                    regions,
+                    &pattern,
+                    result_limit,
+                    claimed_results,
+                    progress,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let mut all_results = Vec::new();
+    for worker in workers {
+        if let Ok(Ok(bucket_res)) = worker.join() {
+            all_results.extend(bucket_res);
+            if all_results.len() >= result_limit {
+                all_results.truncate(result_limit);
+                break;
+            }
+        }
+    }
+    all_results.sort_unstable();
+    all_results.dedup();
+    Ok(all_results)
+}
+
+fn scan_aob_bucket(
+    pid: u32,
+    regions: Vec<ScanRegion>,
+    pattern: &[AobByte],
+    result_limit: usize,
+    claimed_results: Arc<AtomicUsize>,
+    progress: Arc<AtomicUsize>,
+) -> io::Result<Vec<usize>> {
+    crate::platform::set_current_thread_high_priority();
+    let process = ScanProcess::open(pid, false)?;
+    let mut found = Vec::new();
+    let mut buffer = Vec::new();
+    let overlap = pattern.len().saturating_sub(1);
+
+    let first_exact_idx = pattern.iter().position(|b| matches!(b, AobByte::Exact(_)));
+    let first_exact_byte = first_exact_idx.and_then(|idx| match pattern[idx] {
+        AobByte::Exact(b) => Some(b),
+        _ => None,
+    });
+
+    'regions: for region in regions {
+        let end = region.base.saturating_add(region.size);
+        let mut chunk_base = region.base;
+        while chunk_base < end {
+            if claimed_results.load(Ordering::Relaxed) >= result_limit {
+                break 'regions;
+            }
+            let prefix = if chunk_base == region.base {
+                0
+            } else {
+                overlap.min(chunk_base - region.base)
+            };
+            let read_base = chunk_base - prefix;
+            let length = (end - read_base).min(SCAN_CHUNK_BYTES + prefix);
+            buffer.resize(length, 0);
+            if let Ok(count) = process.read(read_base, &mut buffer) {
+                progress.fetch_add(count, Ordering::Relaxed);
+                let haystack = &buffer[..count];
+                if count < pattern.len() {
+                    chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
+                    continue;
+                }
+
+                if let (Some(f_idx), Some(target_byte)) = (first_exact_idx, first_exact_byte) {
+                    let mut cursor = f_idx;
+                    let max_target_pos = count.saturating_sub(pattern.len() - f_idx);
+                    while cursor <= max_target_pos {
+                        let sub = &haystack[cursor..=max_target_pos];
+                        if let Some(pos) = sub.iter().position(|&b| b == target_byte) {
+                            let match_target_idx = cursor + pos;
+                            let cand_offset = match_target_idx - f_idx;
+                            if aob_bytes_equal(
+                                &haystack[cand_offset..cand_offset + pattern.len()],
+                                pattern,
+                            ) {
+                                found.push(read_base + cand_offset);
+                                if claimed_results.fetch_add(1, Ordering::Relaxed) + 1
+                                    >= result_limit
+                                {
+                                    break 'regions;
+                                }
+                            }
+                            cursor = match_target_idx + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                } else {
+                    let max_start = count.saturating_sub(pattern.len());
+                    for offset in 0..=max_start {
+                        if aob_bytes_equal(&haystack[offset..offset + pattern.len()], pattern) {
+                            found.push(read_base + offset);
+                            if claimed_results.fetch_add(1, Ordering::Relaxed) + 1 >= result_limit {
+                                break 'regions;
+                            }
+                        }
+                    }
+                }
+            }
+            chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
+        }
+    }
+    Ok(found)
+}
+
+fn intersect_scan_region(region: ScanRegion, start: usize, end: usize) -> Option<ScanRegion> {
+    let intersection_start = region.base.max(start);
+    let intersection_end = region.base.saturating_add(region.size).min(end);
+    (intersection_start < intersection_end).then_some(ScanRegion {
+        base: intersection_start,
+        size: intersection_end - intersection_start,
+    })
 }
 
 pub fn scan_aob_memory_range_with_progress(
@@ -1951,81 +2158,20 @@ pub fn scan_aob_memory_range_with_progress(
     })?;
     let process = ScanProcess::open(pid, false)?;
     let end = base.saturating_add(size);
-    let regions = scan_regions_for(&process, options)
+    let regions: Vec<ScanRegion> = scan_regions_for(&process, options)
         .into_iter()
         .filter_map(|region| intersect_scan_region(region, base, end))
         .collect();
-    scan_aob_regions(
-        &process,
-        &pattern,
-        pattern_str,
-        result_limit,
-        regions,
-        total,
-    )
-}
-
-fn intersect_scan_region(region: ScanRegion, start: usize, end: usize) -> Option<ScanRegion> {
-    let intersection_start = region.base.max(start);
-    let intersection_end = region.base.saturating_add(region.size).min(end);
-    (intersection_start < intersection_end).then_some(ScanRegion {
-        base: intersection_start,
-        size: intersection_end - intersection_start,
-    })
-}
-
-fn scan_aob_regions(
-    process: &ScanProcess,
-    pattern: &[AobByte],
-    pattern_str: &str,
-    result_limit: usize,
-    regions: Vec<ScanRegion>,
-    total: Arc<AtomicUsize>,
-) -> io::Result<Vec<TextScanCandidate>> {
-    crate::platform::set_current_thread_high_priority();
-    let mut found = Vec::new();
-    let mut buffer = Vec::new();
-    let overlap = pattern.len().saturating_sub(1);
-    'regions: for region in regions {
-        let end = region.base.saturating_add(region.size);
-        let mut chunk_base = region.base;
-        while chunk_base < end {
-            let prefix = if chunk_base == region.base {
-                0
-            } else {
-                overlap.min(chunk_base - region.base)
-            };
-            let read_base = chunk_base - prefix;
-            let length = (end - read_base).min(SCAN_CHUNK_BYTES + prefix);
-            buffer.resize(length, 0);
-            if let Ok(count) = process.read(read_base, &mut buffer) {
-                total.fetch_add(count, Ordering::Relaxed);
-                let haystack = &buffer[..count];
-                if count < pattern.len() {
-                    chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
-                    continue;
-                }
-                let max_start = count.saturating_sub(pattern.len());
-                for offset in 0..=max_start {
-                    // The prefix is pattern.len() - 1, so a complete match that starts
-                    // there necessarily crosses into this new chunk and is not a duplicate.
-                    if !aob_bytes_equal(&haystack[offset..offset + pattern.len()], pattern) {
-                        continue;
-                    }
-                    found.push(TextScanCandidate {
-                        address: read_base + offset,
-                        previous: pattern_str.to_owned(),
-                        current: pattern_str.to_owned(),
-                    });
-                    if found.len() >= result_limit.max(1) {
-                        break 'regions;
-                    }
-                }
-            }
-            chunk_base = chunk_base.saturating_add(SCAN_CHUNK_BYTES);
-        }
-    }
-    Ok(found)
+    let claimed = Arc::new(AtomicUsize::new(0));
+    let addrs = scan_aob_bucket(pid, regions, &pattern, result_limit, claimed, total)?;
+    Ok(addrs
+        .into_iter()
+        .map(|address| TextScanCandidate {
+            address,
+            previous: pattern_str.to_owned(),
+            current: pattern_str.to_owned(),
+        })
+        .collect())
 }
 
 pub fn filter_aob_scan_candidates(
@@ -2047,6 +2193,29 @@ pub fn filter_aob_scan_candidates(
                 previous: candidate.current,
                 current: pattern_str.to_owned(),
             });
+        }
+    }
+    Ok(kept)
+}
+
+pub fn filter_aob_scan_candidates_numeric(
+    pid: u32,
+    candidates: Vec<ScanCandidate>,
+    pattern_str: &str,
+    value_type: ScanValueType,
+) -> io::Result<Vec<ScanCandidate>> {
+    let pattern = parse_aob_pattern(pattern_str)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid AOB pattern format"))?;
+    let process = ScanProcess::open(pid, false)?;
+    let mut bytes = vec![0; pattern.len()];
+    let mut kept = Vec::new();
+    for candidate in candidates {
+        if process.read(candidate.address, &mut bytes).ok() == Some(pattern.len())
+            && aob_bytes_equal(&bytes, &pattern)
+        {
+            let current = read_scan_value(pid, candidate.address, value_type)
+                .unwrap_or(ScanValue::I32(0));
+            kept.push(ScanCandidate::new(candidate.address, current));
         }
     }
     Ok(kept)
