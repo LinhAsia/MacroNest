@@ -20,17 +20,18 @@ use crate::{
     process_memory::{
         EntityListCandidate, EntityListScanResult, EntityListValidation, MemoryRegionInfo,
         MemoryScanOptions, PausedProcess, PointerMap, PointerPath, PointerPathComparison,
-        PointerScanLimits, ScanCandidate, ScanComparison, ScanValue,
+        PointerScanLimits, RawMemorySnapshot, ScanCandidate, ScanComparison, ScanValue,
         ScanValueType, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
-        adjacent_readable_memory_region, capture_pointer_map_with_budget,
-        compare_pointer_paths, filter_aob_scan_candidates, filter_scan_candidates,
-        filter_scan_candidates_with_progress, filter_text_scan_candidates, query_memory_region,
-        read_memory_bytes, read_scan_value, read_text_memory, refresh_scan_candidates,
-        scan_aob_memory_range_with_progress, scan_aob_memory_with_progress,
-        scan_entity_lists_with_progress, scan_memory_range_with_progress,
-        scan_pointer_paths_to_targets_with_budget, scan_pointer_paths_with_budget_options,
-        scan_text_memory_with_progress, scan_view_projection_candidates, validate_entity_list,
-        write_code_bytes, write_scan_value, write_text_memory,
+        adjacent_readable_memory_region, capture_memory_snapshot, capture_pointer_map_with_budget,
+        compare_pointer_paths, filter_aob_scan_candidates, filter_memory_snapshot_with_progress,
+        filter_scan_candidates, filter_scan_candidates_with_progress, filter_text_scan_candidates,
+        query_memory_region, read_memory_bytes, read_scan_value, read_text_memory,
+        refresh_scan_candidates, scan_aob_memory_range_with_progress,
+        scan_aob_memory_with_progress, scan_entity_lists_with_progress,
+        scan_memory_range_with_progress, scan_pointer_paths_to_targets_with_budget,
+        scan_pointer_paths_with_budget_options, scan_text_memory_with_progress,
+        scan_view_projection_candidates, validate_entity_list, write_code_bytes,
+        write_scan_value, write_text_memory,
     },
     window_list,
 };
@@ -635,6 +636,7 @@ struct CodeRelocateResult {
 enum ScanJobCandidates {
     Numeric(Vec<ScanCandidate>),
     Text(Vec<TextScanCandidate>),
+    Snapshot(Arc<RawMemorySnapshot>),
 }
 
 #[derive(Clone)]
@@ -735,6 +737,7 @@ pub(crate) struct MemoryPanelState {
     fast_scan_alignment: String,
     pause_while_scanning: bool,
     candidates: Vec<ScanCandidate>,
+    raw_snapshot: Option<Arc<RawMemorySnapshot>>,
     live_candidate_values: HashMap<usize, ScanValue>,
     text_candidates: Vec<TextScanCandidate>,
     selected_results: HashSet<usize>,
@@ -841,6 +844,7 @@ impl Default for MemoryPanelState {
             fast_scan_alignment: "4".to_owned(),
             pause_while_scanning: false,
             candidates: Vec::new(),
+            raw_snapshot: None,
             live_candidate_values: HashMap::new(),
             text_candidates: Vec::new(),
             selected_results: HashSet::new(),
@@ -2173,7 +2177,8 @@ impl CrosshairApp {
                             action,
                             MemoryScanAction::FirstScan | MemoryScanAction::Unknown
                         ) || !self.memory_panel.candidates.is_empty()
-                            || !self.memory_panel.text_candidates.is_empty())));
+                            || !self.memory_panel.text_candidates.is_empty()
+                            || self.memory_panel.raw_snapshot.is_some())));
             if ui
                 .add_enabled_ui(enabled, |ui| {
                     ui.add_sized(
@@ -2444,12 +2449,20 @@ impl CrosshairApp {
         let frame = Frame::group(ui.style()).inner_margin(egui::Margin::same(5));
         frame.show(ui, |ui| {
             ui.set_min_size(size - vec2(12.0, 12.0));
-            let result_count = self
+            let result_count = if let Some(snap) = self.memory_panel.raw_snapshot.as_ref() {
+                snap.total_slots
+            } else {
+                self.memory_panel
+                    .candidates
+                    .len()
+                    .max(self.memory_panel.text_candidates.len())
+            };
+            let visible_count = self
                 .memory_panel
                 .candidates
                 .len()
-                .max(self.memory_panel.text_candidates.len());
-            let visible_count = result_count.min(MAX_VISIBLE_RESULTS);
+                .max(self.memory_panel.text_candidates.len())
+                .min(MAX_VISIBLE_RESULTS);
             if !pinned {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(self.tr("Scan results", "Scan results")).strong());
@@ -2469,6 +2482,18 @@ impl CrosshairApp {
                 && ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::A))
             {
                 self.memory_panel.selected_results = (0..visible_count).collect();
+            }
+            if self.memory_panel.raw_snapshot.is_some() && self.memory_panel.candidates.is_empty() {
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        RichText::new(self.tr(
+                            "Snapshot active. Perform a Next scan to narrow down results.",
+                            "Đã chụp snapshot bộ nhớ. Hãy thực hiện Next scan để lọc địa chỉ.",
+                        ))
+                        .weak(),
+                    );
+                });
+                return;
             }
             if result_count == 0 && !self.memory_panel.scanning {
                 ui.centered_and_justified(|ui| {
@@ -12673,6 +12698,14 @@ impl CrosshairApp {
                 alignment: self.memory_panel.fast_scan.then_some(alignment),
             }
         };
+        let snapshot_for_filter = if action.comparison().is_some() && text_encoding.is_none() && self.memory_panel.candidates.is_empty() {
+            self.memory_panel.raw_snapshot.clone()
+        } else {
+            None
+        };
+        if action.comparison().is_none() {
+            self.memory_panel.raw_snapshot = None;
+        }
         let candidates = if action.comparison().is_some() && text_encoding.is_none() {
             std::mem::take(&mut self.memory_panel.candidates)
         } else {
@@ -12688,7 +12721,10 @@ impl CrosshairApp {
         self.memory_panel.scan_progress.store(0, Ordering::Relaxed);
         self.memory_panel.live_candidate_values.clear();
         self.memory_panel.scan_input_count = if action.comparison().is_some() {
-            candidates.len().max(text_candidates.len())
+            candidates
+                .len()
+                .max(text_candidates.len())
+                .max(snapshot_for_filter.as_ref().map_or(0, |s| s.total_slots))
         } else {
             0
         };
@@ -12755,16 +12791,33 @@ impl CrosshairApp {
                 .map(ScanJobCandidates::Text)
             } else if let Some(comparison) = action.comparison() {
                 progress.store(0, Ordering::Relaxed);
-                filter_scan_candidates_with_progress(
-                    pid,
-                    candidates,
-                    value_type,
-                    comparison,
-                    exact,
-                    range,
-                    Some(progress),
-                )
-                .map(ScanJobCandidates::Numeric)
+                if let Some(snapshot) = snapshot_for_filter {
+                    filter_memory_snapshot_with_progress(
+                        pid,
+                        &snapshot,
+                        value_type,
+                        comparison,
+                        exact,
+                        range,
+                        result_limit,
+                        Some(progress),
+                    )
+                    .map(ScanJobCandidates::Numeric)
+                } else {
+                    filter_scan_candidates_with_progress(
+                        pid,
+                        candidates,
+                        value_type,
+                        comparison,
+                        exact,
+                        range,
+                        Some(progress),
+                    )
+                    .map(ScanJobCandidates::Numeric)
+                }
+            } else if action == MemoryScanAction::Unknown {
+                capture_memory_snapshot(pid, value_type, scan_options, progress)
+                    .map(|snap| ScanJobCandidates::Snapshot(Arc::new(snap)))
             } else {
                 scan_memory_range_with_progress(
                     pid,
@@ -12820,9 +12873,19 @@ impl CrosshairApp {
         }
         let ScanJobResult { action, result, .. } = outcome;
         match result {
+            Ok(ScanJobCandidates::Snapshot(snapshot)) => {
+                let count = snapshot.total_slots;
+                self.memory_panel.raw_snapshot = Some(snapshot);
+                self.memory_panel.candidates.clear();
+                self.memory_panel.live_candidate_values.clear();
+                self.memory_panel.text_candidates.clear();
+                self.memory_panel.status =
+                    format!("{} — {count} result(s)", action.label());
+            }
             Ok(ScanJobCandidates::Numeric(candidates)) => {
                 let count = candidates.len();
                 self.memory_panel.candidates = candidates;
+                self.memory_panel.raw_snapshot = None;
                 self.memory_panel.live_candidate_values.clear();
                 self.memory_panel.text_candidates.clear();
                 self.memory_panel.status =
@@ -12832,6 +12895,7 @@ impl CrosshairApp {
                 let count = candidates.len();
                 self.memory_panel.text_candidates = candidates;
                 self.memory_panel.candidates.clear();
+                self.memory_panel.raw_snapshot = None;
                 self.memory_panel.live_candidate_values.clear();
                 self.memory_panel.status =
                     format!("{} — {count} text result(s)", action.label());
@@ -12846,6 +12910,7 @@ impl CrosshairApp {
         self.memory_panel.job_rx = None;
         self.memory_panel.scanning = false;
         self.memory_panel.candidates = Vec::new();
+        self.memory_panel.raw_snapshot = None;
         self.memory_panel.live_candidate_values = HashMap::new();
         self.memory_panel.text_candidates = Vec::new();
         self.memory_panel.selected_results = HashSet::new();
