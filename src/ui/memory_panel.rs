@@ -875,7 +875,7 @@ impl Default for MemoryPanelState {
             has_scan_session: false,
             pinned: false,
             address_list_pinned: false,
-            show_scan_previous: true,
+            show_scan_previous: false,
             hotkeys: HashMap::new(),
             capturing_hotkey: None,
             edit_value_index: None,
@@ -2309,16 +2309,17 @@ impl CrosshairApp {
                 )
             } else {
                 let candidate = self.memory_panel.candidates[index];
+                let initial = candidate.current(self.memory_panel.value_type);
                 let current = self
                     .memory_panel
                     .live_candidate_values
                     .get(&index)
                     .copied()
-                    .unwrap_or_else(|| candidate.current(self.memory_panel.value_type));
+                    .unwrap_or(initial);
                 (
                     candidate.address,
                     format_scan_value(current, self.memory_panel.hex),
-                    "-".to_owned(),
+                    format_scan_value(initial, self.memory_panel.hex),
                 )
             };
         let selected = self.memory_panel.selected_results.contains(&index);
@@ -2683,18 +2684,17 @@ impl CrosshairApp {
                                 )
                             } else {
                                 let candidate = self.memory_panel.candidates[index];
+                                let initial = candidate.current(self.memory_panel.value_type);
                                 let current = self
                                     .memory_panel
                                     .live_candidate_values
                                     .get(&index)
                                     .copied()
-                                    .unwrap_or_else(|| {
-                                        candidate.current(self.memory_panel.value_type)
-                                    });
+                                    .unwrap_or(initial);
                                 (
                                     candidate.address,
                                     format_scan_value(current, self.memory_panel.hex),
-                                    "-".to_owned(),
+                                    format_scan_value(initial, self.memory_panel.hex),
                                 )
                             };
                         let selected = self.memory_panel.selected_results.contains(&index);
@@ -4860,6 +4860,19 @@ impl CrosshairApp {
                             })
                             .inner;
 
+                        let is_hovered = ui.rect_contains_pointer(row_res.rect);
+                        if is_hovered || selected {
+                            ui.painter().rect_filled(
+                                row_res.rect,
+                                2.0,
+                                Color32::from_rgba_premultiplied(
+                                    84,
+                                    178,
+                                    222,
+                                    if selected { 58 } else { 32 },
+                                ),
+                            );
+                        }
                         if selected {
                             ui.painter().rect_stroke(
                                 row_res.rect,
