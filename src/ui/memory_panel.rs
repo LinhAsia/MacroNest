@@ -146,6 +146,8 @@ struct SavedMemoryAddress {
     pointer: Option<PointerSpec>,
     frozen: Option<ScanValue>,
     saved_to_library: bool,
+    aob_sample_1: Option<Vec<u8>>,
+    aob_pattern: Option<String>,
 }
 
 #[derive(Clone)]
@@ -2771,6 +2773,21 @@ impl CrosshairApp {
                             );
                         }
                         response.context_menu(|ui| {
+                            if ui.button(self.tr("Copy address", "Sao chép địa chỉ")).clicked() {
+                                ui.ctx().copy_text(format_prefixed_memory_address(address_value));
+                                ui.close();
+                            }
+                            if ui.button(self.tr("Copy AOB (32 bytes)", "Sao chép AOB (32 byte)")).clicked() {
+                                if let Some(pid) = self.memory_panel.process_pid {
+                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 32) {
+                                        let aob = format_aob_hex(&bytes);
+                                        ui.ctx().copy_text(aob.clone());
+                                        self.memory_panel.status = format!("Copied AOB (32 bytes): {aob}");
+                                    }
+                                }
+                                ui.close();
+                            }
+                            ui.separator();
                             let label = if marked {
                                 "Remove not-relevant mark"
                             } else {
@@ -3734,6 +3751,92 @@ impl CrosshairApp {
                                 if ui
                                     .add_enabled(
                                         single_target,
+                                        Button::new(self.tr("Copy AOB (32 bytes)", "Sao chép AOB (32 byte)")),
+                                    )
+                                    .on_hover_text("Copy 32 raw bytes of memory at this address as an AOB string")
+                                    .clicked()
+                                {
+                                    if let Some(pid) = self.memory_panel.process_pid {
+                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 32) {
+                                            let aob = format_aob_hex(&bytes);
+                                            ui.ctx().copy_text(aob.clone());
+                                            self.memory_panel.status = format!("Copied AOB (32 bytes): {aob}");
+                                        }
+                                    }
+                                    ui.close();
+                                }
+                                if ui
+                                    .add_enabled(
+                                        single_target,
+                                        Button::new(self.tr(
+                                            "AOB: Capture Sample 1 (64 bytes)",
+                                            "AOB: Chụp Mẫu 1 (64 byte)",
+                                        )),
+                                    )
+                                    .on_hover_text("Capture 64 bytes in current session as Sample 1 for wildcard comparison")
+                                    .clicked()
+                                {
+                                    if let Some(pid) = self.memory_panel.process_pid {
+                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                            let aob = format_aob_hex(&bytes);
+                                            if let Some(entry) = self.memory_panel.saved.get_mut(index) {
+                                                entry.aob_sample_1 = Some(bytes);
+                                            }
+                                            ui.ctx().copy_text(aob.clone());
+                                            self.memory_panel.status = format!("Sample 1 captured (64 bytes): {aob}");
+                                        }
+                                    }
+                                    ui.close();
+                                }
+                                let has_sample_1 = saved.aob_sample_1.is_some();
+                                if ui
+                                    .add_enabled(
+                                        single_target && has_sample_1,
+                                        Button::new(self.tr(
+                                            "AOB: Match Sample 2 -> Generate Pattern (??)",
+                                            "AOB: So khớp Mẫu 2 -> Tạo mã (??)",
+                                        )),
+                                    )
+                                    .on_hover_text("Compare against Sample 1, insert '??' wildcards for changing bytes, and generate final AOB pattern")
+                                    .clicked()
+                                {
+                                    if let Some(pid) = self.memory_panel.process_pid {
+                                        if let Ok(sample_2) = read_memory_bytes(pid, saved.address, 64) {
+                                            if let Some(sample_1) = saved.aob_sample_1.as_ref() {
+                                                let pattern = generate_aob_pattern(sample_1, &sample_2);
+                                                ui.ctx().copy_text(pattern.clone());
+                                                if let Some(entry) = self.memory_panel.saved.get_mut(index) {
+                                                    entry.aob_pattern = Some(pattern.clone());
+                                                }
+                                                self.memory_panel.status = format!("Generated AOB Pattern with '??': {pattern}");
+                                            }
+                                        }
+                                    }
+                                    ui.close();
+                                }
+                                let has_pattern = saved.aob_pattern.is_some();
+                                if ui
+                                    .add_enabled(
+                                        single_target && has_pattern,
+                                        Button::new(self.tr(
+                                            "AOB: Auto-find address by pattern",
+                                            "AOB: Tự động tìm lại địa chỉ bằng mã AOB",
+                                        )),
+                                    )
+                                    .on_hover_text("Scan target process for generated AOB pattern and update address automatically")
+                                    .clicked()
+                                {
+                                    if let (Some(pid), Some(pattern)) = (self.memory_panel.process_pid, saved.aob_pattern.as_ref()) {
+                                        let pattern_clone = pattern.clone();
+                                        let saved_idx = index;
+                                        self.find_saved_address_by_aob(pid, saved_idx, &pattern_clone);
+                                    }
+                                    ui.close();
+                                }
+                                ui.separator();
+                                if ui
+                                    .add_enabled(
+                                        single_target,
                                         Button::new(self.tr(
                                             "Change address / Pointer",
                                             "Thay đổi địa chỉ / Pointer",
@@ -4541,6 +4644,8 @@ impl CrosshairApp {
                 pointer,
                 frozen: None,
                 saved_to_library: false,
+                aob_sample_1: None,
+                aob_pattern: None,
             });
             self.memory_panel.status = "Saved address loaded".to_owned();
         }
@@ -6355,6 +6460,8 @@ impl CrosshairApp {
             pointer,
             frozen: None,
             saved_to_library: true,
+            aob_sample_1: None,
+            aob_pattern: None,
         });
         self.persist_memory_pointers();
         dialog.status = "Candidate saved to MEMORY addresses and library.".to_owned();
@@ -7318,6 +7425,8 @@ impl CrosshairApp {
                             pointer: None,
                             frozen: None,
                             saved_to_library: false,
+                            aob_sample_1: None,
+                            aob_pattern: None,
                         });
                     }
                 });
@@ -8461,6 +8570,8 @@ impl CrosshairApp {
                         pointer: Some(pointer),
                         frozen: None,
                         saved_to_library: false,
+                        aob_sample_1: None,
+                        aob_pattern: None,
                     });
                     added += 1;
                 }
@@ -8648,6 +8759,8 @@ impl CrosshairApp {
             pointer: Some(pointer),
             frozen: None,
             saved_to_library: save_to_library,
+            aob_sample_1: None,
+            aob_pattern: None,
         });
         let msg = format!("✔ Pointer {desc} added to Address list!");
         self.memory_panel.status = msg.clone();
@@ -10568,6 +10681,8 @@ impl CrosshairApp {
             pointer: None,
             frozen: None,
             saved_to_library: false,
+            aob_sample_1: None,
+            aob_pattern: None,
         });
         self.memory_panel.status =
             format!("Address {} added", format_prefixed_memory_address(address));
@@ -11954,6 +12069,8 @@ impl CrosshairApp {
             pointer: None,
             frozen: None,
             saved_to_library: false,
+            aob_sample_1: None,
+            aob_pattern: None,
         });
         self.memory_panel.status =
             format!("Address {} added", format_prefixed_memory_address(address));
@@ -12961,6 +13078,8 @@ impl CrosshairApp {
                     pointer: None,
                     frozen: None,
                     saved_to_library: false,
+                    aob_sample_1: None,
+                    aob_pattern: None,
                 });
                 continue;
             }
@@ -12987,6 +13106,8 @@ impl CrosshairApp {
                 pointer: None,
                 frozen: None,
                 saved_to_library: false,
+                aob_sample_1: None,
+                aob_pattern: None,
             });
         }
         self.memory_panel.status = format!("{} address(es) saved", self.memory_panel.saved.len());
@@ -13037,8 +13158,53 @@ impl CrosshairApp {
             pointer,
             frozen: None,
             saved_to_library: false,
+            aob_sample_1: None,
+            aob_pattern: None,
         });
         self.memory_panel.manual_address.clear();
+    }
+
+    fn find_saved_address_by_aob(&mut self, pid: u32, saved_idx: usize, pattern: &str) {
+        let scan_options = MemoryScanOptions {
+            writable: self.memory_panel.scan_writable,
+            executable: self.memory_panel.scan_executable,
+            copy_on_write: self.memory_panel.scan_copy_on_write,
+            active_memory_only: self.memory_panel.scan_active_memory_only,
+            mem_private: self.memory_panel.scan_mem_private,
+            mem_image: self.memory_panel.scan_mem_image,
+            mem_mapped: self.memory_panel.scan_mem_mapped,
+            alignment: self.memory_panel.fast_scan.then_some(
+                self.memory_panel
+                    .fast_scan_alignment
+                    .parse::<usize>()
+                    .unwrap_or(4)
+                    .max(1),
+            ),
+        };
+        let progress = Arc::clone(&self.memory_panel.scan_progress);
+        progress.store(0, Ordering::Relaxed);
+        self.memory_panel.status = "Scanning AOB pattern…".to_owned();
+        match scan_aob_memory_with_progress(pid, pattern, 10, scan_options, progress) {
+            Ok(candidates) if !candidates.is_empty() => {
+                let new_addr = candidates[0].address;
+                if let Some(entry) = self.memory_panel.saved.get_mut(saved_idx) {
+                    entry.address = new_addr;
+                    entry.current = read_scan_value(pid, new_addr, entry.value_type).ok();
+                }
+                self.memory_panel.status = format!(
+                    "✔ AOB matched ({} match)! Address updated to 0x{:X}",
+                    candidates.len(),
+                    new_addr
+                );
+            }
+            Ok(_) => {
+                self.memory_panel.status =
+                    "AOB pattern not found in target process memory".to_owned();
+            }
+            Err(err) => {
+                self.memory_panel.status = format!("AOB scan failed: {err}");
+            }
+        }
     }
 
     fn navigate_open_memory_view(&mut self, address: usize) -> bool {
@@ -14855,6 +15021,27 @@ fn resolve_memory_address(
         })?;
     }
     Ok(address)
+}
+
+fn format_aob_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn generate_aob_pattern(sample_1: &[u8], sample_2: &[u8]) -> String {
+    let len = sample_1.len().min(sample_2.len());
+    let mut parts = Vec::with_capacity(len);
+    for i in 0..len {
+        if sample_1[i] == sample_2[i] {
+            parts.push(format!("{:02X}", sample_1[i]));
+        } else {
+            parts.push("??".to_owned());
+        }
+    }
+    parts.join(" ")
 }
 
 #[cfg(test)]
