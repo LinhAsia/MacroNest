@@ -1252,39 +1252,59 @@ impl CrosshairApp {
         let pinned = !self.memory_panel.unpinned_memory_popups.contains(id);
         let mut open = true;
         let mut toggle_pin = false;
-        let mut builder = egui::ViewportBuilder::default()
-            .with_title(title)
-            .with_position(egui::pos2(40.0, 40.0))
-            .with_inner_size(vec2(860.0, 620.0))
-            .with_min_inner_size(vec2(480.0, 280.0))
-            .with_clamp_size_to_monitor_size(true)
-            .with_decorations(false)
-            .with_resizable(true);
         if pinned {
-            builder = builder.with_always_on_top();
-        }
-        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
-            Self::constrain_memory_popup_to_monitor(ctx);
-            if ctx.input(|input| input.viewport().close_requested()) {
-                open = false;
-            }
-            Self::render_memory_popup_titlebar(
-                ctx,
-                self.state.ui_language,
-                title,
-                pinned,
-                &mut toggle_pin,
-                &mut open,
-            );
-            render(self, ctx);
-            Self::render_memory_popup_resize_handles(ctx);
-        });
-        if toggle_pin {
-            if pinned {
+            let builder = egui::ViewportBuilder::default()
+                .with_title(title)
+                .with_position(egui::pos2(40.0, 40.0))
+                .with_inner_size(vec2(860.0, 620.0))
+                .with_min_inner_size(vec2(480.0, 280.0))
+                .with_clamp_size_to_monitor_size(true)
+                .with_decorations(false)
+                .with_resizable(true)
+                .with_always_on_top();
+            ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
+                Self::constrain_memory_popup_to_monitor(ctx);
+                if ctx.input(|input| input.viewport().close_requested()) {
+                    open = false;
+                }
+                Self::render_memory_popup_titlebar(
+                    ctx,
+                    self.state.ui_language,
+                    title,
+                    true,
+                    &mut toggle_pin,
+                    &mut open,
+                );
+                render(self, ctx);
+                Self::render_memory_popup_resize_handles(ctx);
+            });
+            if toggle_pin {
                 self.memory_panel.unpinned_memory_popups.insert(id);
-            } else {
-                self.memory_panel.unpinned_memory_popups.remove(id);
             }
+        } else {
+            egui::Window::new(title)
+                .id(egui::Id::new(id))
+                .default_size(vec2(860.0, 620.0))
+                .min_size(vec2(480.0, 280.0))
+                .collapsible(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        let pin_label = self.tr("Pin", "Ghim");
+                        if ui
+                            .button(pin_label)
+                            .on_hover_text(self.tr(
+                                "Detach as a separate floating window",
+                                "Tách thành cửa sổ nổi riêng biệt",
+                            ))
+                            .clicked()
+                        {
+                            self.memory_panel.unpinned_memory_popups.remove(id);
+                        }
+                    });
+                    ui.separator();
+                    render(self, ctx);
+                });
         }
         open
     }
@@ -1685,16 +1705,16 @@ impl CrosshairApp {
                         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                     }
                     let pin_label = if pinned {
-                        Self::tr_lang(language, "📌 On top", "📌 Ghim")
+                        Self::tr_lang(language, "Unpin", "Bỏ ghim")
                     } else {
-                        Self::tr_lang(language, "📌 Normal", "📌 Thường")
+                        Self::tr_lang(language, "Pin", "Ghim")
                     };
                     if ui
                         .add_sized([68.0, 28.0], Button::new(pin_label))
                         .on_hover_text(if pinned {
-                            Self::tr_lang(language, "Always on top is ON. Click to set Normal.", "Đang Ghim trên cùng. Bấm để chuyển về Bình thường.")
+                            Self::tr_lang(language, "Dock into main MacroNest window", "Thu gọn / nhúng vào cửa sổ chính MacroNest")
                         } else {
-                            Self::tr_lang(language, "Always on top is OFF. Click to set Always on top.", "Đang ở mức Bình thường. Bấm để Ghim luôn trên cùng.")
+                            Self::tr_lang(language, "Detach as a separate floating window", "Tách thành cửa sổ nổi riêng biệt")
                         })
                         .clicked()
                     {
@@ -8199,433 +8219,92 @@ impl CrosshairApp {
         let popup_id = "memory-deep-pointer-scan";
         let pinned = !self.memory_panel.unpinned_memory_popups.contains(popup_id);
         let mut toggle_pin = false;
-        let mut builder = egui::ViewportBuilder::default()
-            .with_title(title)
-            .with_position(egui::pos2(0.0, 0.0))
-            .with_inner_size(vec2(760.0, 520.0))
-            .with_min_inner_size(vec2(520.0, 300.0))
-            .with_clamp_size_to_monitor_size(true)
-            .with_decorations(false)
-            .with_resizable(true);
         if pinned {
-            builder = builder.with_always_on_top();
-        }
-        ctx.show_viewport_immediate(
-            egui::ViewportId::from_hash_of(popup_id),
-            builder,
-            |ctx, _| {
-                Self::constrain_memory_popup_to_monitor(ctx);
-                if ctx.input(|input| input.viewport().close_requested()) {
-                    open = false;
-                }
-                Self::render_memory_popup_titlebar(
-                    ctx,
-                    self.state.ui_language,
-                    title,
-                    pinned,
-                    &mut toggle_pin,
-                    &mut open,
-                );
-                egui::CentralPanel::default()
-                    .frame(Self::memory_popup_frame(ctx))
-                    .show(ctx, |ui| {
-                        ui.label(&dialog.status);
-                        if let Some(stats) = dialog.comparison_stats {
-                            let a_limited = if stats.paths_a >= stats.path_limit {
-                                " (limit reached)"
-                            } else {
-                                ""
-                            };
-                            let b_limited = if stats.paths_b >= stats.path_limit {
-                                " (limit reached)"
-                            } else {
-                                ""
-                            };
-                            ui.label(
-                                RichText::new(format!(
-                                    "Paths found — Map A: {}{}  |  Map B: {}{}  |  Identical: {}  |  Entity roots: {}",
-                                    stats.paths_a,
-                                    a_limited,
-                                    stats.paths_b,
-                                    b_limited,
-                                    stats.exact,
-                                    stats.entity_roots,
-                                ))
-                                .monospace()
-                                .strong(),
-                            );
-                        }
-                        if dialog.rx.is_some() {
-                            let read = dialog.progress.load(Ordering::Relaxed);
-                            ui.label(format!("Read {:.1} MB", read as f64 / 1_048_576.0));
-                            ui.spinner();
-                            return;
-                        }
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add_enabled(
-                                    !dialog.selected.is_empty(),
-                                    Button::new(format!(
-                                        "Add selected ({})",
-                                        dialog.selected.len()
-                                    )),
-                                )
-                                .clicked()
-                            {
-                                add = true;
-                            }
-                            if ui.button("Clear map A").clicked() {
-                                clear = true;
-                            }
-                            let filter_resp = ui.add(
-                                egui::TextEdit::singleline(&mut dialog.filter)
-                                    .desired_width(150.0)
-                                    .hint_text(RichText::new("Search module...").weak()),
-                            );
-                            Self::apply_vietnamese_input_if_changed(
-                                &filter_resp,
+            let builder = egui::ViewportBuilder::default()
+                .with_title(title)
+                .with_position(egui::pos2(0.0, 0.0))
+                .with_inner_size(vec2(760.0, 520.0))
+                .with_min_inner_size(vec2(520.0, 300.0))
+                .with_clamp_size_to_monitor_size(true)
+                .with_decorations(false)
+                .with_resizable(true)
+                .with_always_on_top();
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of(popup_id),
+                builder,
+                |ctx, _| {
+                    Self::constrain_memory_popup_to_monitor(ctx);
+                    if ctx.input(|input| input.viewport().close_requested()) {
+                        open = false;
+                    }
+                    Self::render_memory_popup_titlebar(
+                        ctx,
+                        self.state.ui_language,
+                        title,
+                        true,
+                        &mut toggle_pin,
+                        &mut open,
+                    );
+                    egui::CentralPanel::default()
+                        .frame(Self::memory_popup_frame(ctx))
+                        .show(ctx, |ui| {
+                            Self::render_pointer_compare_body(
+                                ui,
                                 self.state.vietnamese_input_enabled,
                                 self.state.vietnamese_input_mode,
-                                &mut dialog.filter,
-                            );
-                            ui.checkbox(&mut dialog.exe_only, "EXE only");
-                        });
-                        ui.group(|ui| {
-                            ui.horizontal(|ui| {
-                                ui.checkbox(
-                                    &mut dialog.entity_root_matching,
-                                    RichText::new("Entity-list root matching").strong(),
-                                );
-                                ui.add_enabled_ui(dialog.entity_root_matching, |ui| {
-                                    ui.label("Stride (bytes)");
-                                    ui.add(
-                                    egui::DragValue::new(&mut dialog.entity_stride)
-                                        .range(1..=0x10000),
-                                    );
-                                    ui.label("Slots each side");
-                                    ui.add(
-                                    egui::DragValue::new(&mut dialog.entity_count)
-                                        .range(1..=512),
-                                    );
-                                });
-                            });
-                            ui.label(
-                                RichText::new(if dialog.entity_root_matching {
-                                    "MacroNest searches nearby entity slots on both maps, then keeps their common stable root."
-                                } else {
-                                    "Off: compare map A and map B as a normal pointer scan; stride is ignored."
-                                })
-                                .weak()
-                                .small(),
+                                self.memory_panel.process_pid,
+                                &mut dialog,
+                                &mut clear,
+                                &mut add,
+                                &mut add_one,
+                                &mut use_entity_source,
+                                &self.state.esp_presets,
                             );
                         });
-                        if !dialog.candidates.is_empty() {
-                            ui.group(|ui| {
-                                let selected_name = dialog
-                                    .entity_preset_id
-                                    .and_then(|id| {
-                                        self.state
-                                            .esp_presets
-                                            .iter()
-                                            .find(|preset| preset.id == id)
-                                    })
-                                    .map_or("Select ESP preset", |preset| preset.name.as_str());
-                                ui.horizontal(|ui| {
-                                    ui.label(
-                                        RichText::new("Save found root as Entity List").strong(),
-                                    );
-                                    egui::ComboBox::from_id_salt("deep-pointer-entity-preset")
-                                        .selected_text(selected_name)
-                                        .width(150.0)
-                                        .show_ui(ui, |ui| {
-                                            for preset in &self.state.esp_presets {
-                                                ui.selectable_value(
-                                                    &mut dialog.entity_preset_id,
-                                                    Some(preset.id),
-                                                    &preset.name,
-                                                );
-                                            }
-                                        });
-                                    if ui
-                                        .add_enabled(
-                                            dialog.entity_preset_id.is_some()
-                                                && dialog.selected.len() == 1,
-                                            Button::new("Use selected root"),
-                                        )
-                                        .on_hover_text(
-                                            "Save the selected stable pointer as entity X.",
-                                        )
-                                        .clicked()
-                                    {
-                                        use_entity_source = dialog.selected.iter().next().copied();
-                                    }
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("Y offset");
-                                    ui.add(egui::DragValue::new(&mut dialog.entity_y_offset));
-                                    ui.label("Z offset");
-                                    ui.add(egui::DragValue::new(&mut dialog.entity_z_offset));
-                                    ui.label("Count");
-                                    ui.add(
-                                        egui::DragValue::new(&mut dialog.entity_count)
-                                            .range(1..=512),
-                                    );
-                                });
-                                ui.label(
-                                    RichText::new(
-                                        "Offsets and stride are bytes. Runtime reads stop at 512 slots.",
-                                    )
-                                    .weak()
-                                    .small(),
-                                );
-                            });
-                        }
-                        ui.separator();
-                        const ROOT_WIDTH: f32 = 250.0;
-                        const OFFSETS_WIDTH: f32 = 180.0;
-                        const ADDRESS_WIDTH: f32 = 150.0;
-                        const VALUE_WIDTH: f32 = 130.0;
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 0.0;
-                            Self::memory_label_cell(
-                                ui,
-                                ROOT_WIDTH,
-                                22.0,
-                                egui::Label::new(RichText::new("Root").strong()),
-                            );
-                            Self::memory_label_cell(
-                                ui,
-                                OFFSETS_WIDTH,
-                                22.0,
-                                egui::Label::new(RichText::new("Offsets").strong()),
-                            );
-                            Self::memory_label_cell(
-                                ui,
-                                ADDRESS_WIDTH,
-                                22.0,
-                                egui::Label::new(RichText::new("Address").strong()),
-                            );
-                            Self::memory_label_cell(
-                                ui,
-                                VALUE_WIDTH,
-                                22.0,
-                                egui::Label::new(RichText::new("Value").strong()),
-                            );
-                        });
-                        ui.separator();
-                        let filter = dialog.filter.trim().to_ascii_lowercase();
-                        if ctx.input(|input| {
-                            input.modifiers.command && input.key_pressed(egui::Key::A)
-                        }) {
-                            dialog.selected = dialog
-                                .candidates
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, path)| {
-                                    let module = path.module.to_ascii_lowercase();
-                                    (!dialog.exe_only || module.ends_with(".exe"))
-                                        && (filter.is_empty() || module.contains(&filter))
-                                })
-                                .map(|(index, _)| index)
-                                .collect();
-                        }
-                        egui::ScrollArea::both().show(ui, |ui| {
-                            for (index, path) in dialog.candidates.iter().enumerate() {
-                                let module_lower = path.module.to_ascii_lowercase();
-                                if (dialog.exe_only && !module_lower.ends_with(".exe"))
-                                    || (!filter.is_empty() && !module_lower.contains(&filter))
-                                {
-                                    continue;
-                                }
-                                let root = format!("{}+{:X}", path.module, path.module_offset);
-                                let offsets = path
-                                    .offsets
-                                    .iter()
-                                    .map(|offset| format!("{offset:X}"))
-                                    .collect::<Vec<_>>()
-                                    .join(" -> ");
-                                let row_rect = egui::Rect::from_min_size(
-                                    ui.next_widget_position(),
-                                    vec2(
-                                        (ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH)
-                                            .max(ui.available_width()),
-                                        24.0,
-                                    ),
-                                );
-                                let stale = dialog.resolved_rows.get(&index).is_none_or(|row| {
-                                    row.updated_at.elapsed() >= Duration::from_millis(750)
-                                });
-                                if ui.is_rect_visible(row_rect) && stale {
-                                    let resolved = self.memory_panel.process_pid.and_then(|pid| {
-                                        let base = resolve_module_offset(
-                                            pid,
-                                            &path.module,
-                                            path.module_offset,
-                                        )
-                                        .ok()?;
-                                        let pointer = PointerSpec {
-                                            base,
-                                            module: Some((path.module.clone(), path.module_offset)),
-                                            offsets: path.offsets.clone(),
-                                        };
-                                        resolve_memory_address(pid, base, Some(&pointer)).ok()
-                                    });
-                                    let value = self
-                                        .memory_panel
-                                        .process_pid
-                                        .zip(resolved)
-                                        .and_then(|(pid, address)| {
-                                            read_scan_value(pid, address, dialog.display_type).ok()
-                                        });
-                                    dialog.resolved_rows.insert(
-                                        index,
-                                        DeepPointerResolvedRow {
-                                            address: resolved,
-                                            value,
-                                            updated_at: Instant::now(),
-                                        },
-                                    );
-                                }
-                                let resolved =
-                                    dialog.resolved_rows.get(&index).and_then(|row| row.address);
-                                let address_text = resolved
-                                    .map_or_else(|| "-".to_owned(), format_prefixed_memory_address);
-                                let value_text = dialog
-                                    .resolved_rows
-                                    .get(&index)
-                                    .and_then(|row| row.value)
-                                    .map_or_else(
-                                        || "-".to_owned(),
-                                        |value| editable_scan_value(value, false),
-                                    );
-                                let response = ui
-                                    .interact(
-                                        row_rect,
-                                        ui.id().with(("deep-pointer-row", index)),
-                                        Sense::click(),
-                                    )
-                                    .on_hover_cursor(egui::CursorIcon::Default);
-                                if dialog.selected.contains(&index) {
-                                    ui.painter().rect_filled(
-                                        row_rect,
-                                        2.0,
-                                        ui.visuals().selection.bg_fill.gamma_multiply(0.55),
-                                    );
-                                }
-                                ui.allocate_ui_at_rect(row_rect, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 0.0;
-                                        Self::memory_label_cell(
-                                            ui,
-                                            ROOT_WIDTH,
-                                            24.0,
-                                            egui::Label::new(root).truncate(),
-                                        );
-                                        Self::memory_label_cell(
-                                            ui,
-                                            OFFSETS_WIDTH,
-                                            24.0,
-                                            egui::Label::new(offsets).truncate(),
-                                        );
-                                        Self::memory_label_cell(
-                                            ui,
-                                            ADDRESS_WIDTH,
-                                            24.0,
-                                            egui::Label::new(address_text).truncate(),
-                                        );
-                                        Self::memory_label_cell(
-                                            ui,
-                                            VALUE_WIDTH,
-                                            24.0,
-                                            egui::Label::new(value_text).truncate(),
-                                        );
-                                    });
-                                });
-                                if response.clicked() {
-                                    let (shift, additive) = ui.input(|input| {
-                                        (input.modifiers.shift, input.modifiers.command)
-                                    });
-                                    if shift && let Some(anchor) = dialog.selection_anchor {
-                                        if !additive {
-                                            dialog.selected.clear();
-                                        }
-                                        let (start, end) = if anchor <= index {
-                                            (anchor, index)
-                                        } else {
-                                            (index, anchor)
-                                        };
-                                        dialog.selected.extend(start..=end);
-                                    } else if additive {
-                                        if !dialog.selected.insert(index) {
-                                            dialog.selected.remove(&index);
-                                        }
-                                        dialog.selection_anchor = Some(index);
-                                    } else {
-                                        dialog.selected.clear();
-                                        dialog.selected.insert(index);
-                                        dialog.selection_anchor = Some(index);
-                                    }
-                                }
-                                response.context_menu(|ui| {
-                                    if ui.button("Copy pointer for Macro").clicked() {
-                                        ui.ctx().copy_text(format_pointer_expression(
-                                            &PointerSpec {
-                                                base: 0,
-                                                module: Some((
-                                                    path.module.clone(),
-                                                    path.module_offset,
-                                                )),
-                                                offsets: path.offsets.clone(),
-                                            },
-                                        ));
-                                        ui.close();
-                                    }
-                                    if ui
-                                        .add_enabled(
-                                            resolved.is_some(),
-                                            Button::new("Add to Address list"),
-                                        )
-                                        .clicked()
-                                    {
-                                        add_one = Some(index);
-                                        ui.close();
-                                    }
-                                    ui.separator();
-                                    ui.label(RichText::new("Display type").strong());
-                                    for value_type in [
-                                        ScanValueType::I8,
-                                        ScanValueType::I16,
-                                        ScanValueType::I32,
-                                        ScanValueType::F32,
-                                        ScanValueType::I64,
-                                        ScanValueType::F64,
-                                    ] {
-                                        if ui
-                                            .selectable_value(
-                                                &mut dialog.display_type,
-                                                value_type,
-                                                memory_type_label(value_type),
-                                            )
-                                            .clicked()
-                                        {
-                                            dialog.resolved_rows.clear();
-                                            ui.close();
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    });
-                Self::render_memory_popup_resize_handles(ctx);
-            },
-        );
-        if toggle_pin {
-            if pinned {
+                    Self::render_memory_popup_resize_handles(ctx);
+                },
+            );
+            if toggle_pin {
                 self.memory_panel.unpinned_memory_popups.insert(popup_id);
-                open = false;
-            } else {
-                self.memory_panel.unpinned_memory_popups.remove(popup_id);
             }
+        } else {
+            egui::Window::new(title)
+                .id(egui::Id::new(popup_id))
+                .default_size(vec2(760.0, 520.0))
+                .min_size(vec2(520.0, 300.0))
+                .collapsible(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        let pin_label = self.tr("Pin", "Ghim");
+                        if ui
+                            .button(pin_label)
+                            .on_hover_text(self.tr(
+                                "Detach as a separate floating window",
+                                "Tách thành cửa sổ nổi riêng biệt",
+                            ))
+                            .clicked()
+                        {
+                            self.memory_panel.unpinned_memory_popups.remove(popup_id);
+                        }
+                    });
+                    ui.separator();
+                    Self::render_pointer_compare_body(
+                        ui,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        self.memory_panel.process_pid,
+                        &mut dialog,
+                        &mut clear,
+                        &mut add,
+                        &mut add_one,
+                        &mut use_entity_source,
+                        &self.state.esp_presets,
+                    );
+                });
+        }
+        if toggle_pin && !pinned {
+            self.memory_panel.unpinned_memory_popups.remove(popup_id);
         }
         if let Some(index) = use_entity_source
             && let Some(path) = dialog.candidates.get(index)
@@ -8706,6 +8385,404 @@ impl CrosshairApp {
             }));
             self.memory_panel.deep_pointer_dialog = Some(dialog);
         }
+    }
+
+    #[cfg(windows)]
+    fn render_pointer_compare_body(
+        ui: &mut egui::Ui,
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: crate::model::VietnameseInputMode,
+        process_pid: Option<u32>,
+        dialog: &mut DeepPointerDialog,
+        clear: &mut bool,
+        add: &mut bool,
+        add_one: &mut Option<usize>,
+        use_entity_source: &mut Option<usize>,
+        esp_presets: &[EspPreset],
+    ) {
+        ui.label(&dialog.status);
+        if let Some(stats) = dialog.comparison_stats {
+            let a_limited = if stats.paths_a >= stats.path_limit {
+                " (limit reached)"
+            } else {
+                ""
+            };
+            let b_limited = if stats.paths_b >= stats.path_limit {
+                " (limit reached)"
+            } else {
+                ""
+            };
+            ui.label(
+                RichText::new(format!(
+                    "Paths found — Map A: {}{}  |  Map B: {}{}  |  Identical: {}  |  Entity roots: {}",
+                    stats.paths_a,
+                    a_limited,
+                    stats.paths_b,
+                    b_limited,
+                    stats.exact,
+                    stats.entity_roots,
+                ))
+                .monospace()
+                .strong(),
+            );
+        }
+        if dialog.rx.is_some() {
+            let read = dialog.progress.load(Ordering::Relaxed);
+            ui.label(format!("Read {:.1} MB", read as f64 / 1_048_576.0));
+            ui.spinner();
+            return;
+        }
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !dialog.selected.is_empty(),
+                    Button::new(format!(
+                        "Add selected ({})",
+                        dialog.selected.len()
+                    )),
+                )
+                .clicked()
+            {
+                *add = true;
+            }
+            if ui.button("Clear map A").clicked() {
+                *clear = true;
+            }
+            let filter_resp = ui.add(
+                egui::TextEdit::singleline(&mut dialog.filter)
+                    .desired_width(150.0)
+                    .hint_text(RichText::new("Search module...").weak()),
+            );
+            Self::apply_vietnamese_input_if_changed(
+                &filter_resp,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                &mut dialog.filter,
+            );
+            ui.checkbox(&mut dialog.exe_only, "EXE only");
+        });
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(
+                    &mut dialog.entity_root_matching,
+                    RichText::new("Entity-list root matching").strong(),
+                );
+                ui.add_enabled_ui(dialog.entity_root_matching, |ui| {
+                    ui.label("Stride (bytes)");
+                    ui.add(
+                        egui::DragValue::new(&mut dialog.entity_stride)
+                            .range(1..=0x10000),
+                    );
+                    ui.label("Slots each side");
+                    ui.add(
+                        egui::DragValue::new(&mut dialog.entity_count)
+                            .range(1..=512),
+                    );
+                });
+            });
+            ui.label(
+                RichText::new(if dialog.entity_root_matching {
+                    "MacroNest searches nearby entity slots on both maps, then keeps their common stable root."
+                } else {
+                    "Off: compare map A and map B as a normal pointer scan; stride is ignored."
+                })
+                .weak()
+                .small(),
+            );
+        });
+        if !dialog.candidates.is_empty() {
+            ui.group(|ui| {
+                let selected_name = dialog
+                    .entity_preset_id
+                    .and_then(|id| {
+                        esp_presets
+                            .iter()
+                            .find(|preset| preset.id == id)
+                    })
+                    .map_or("Select ESP preset", |preset| preset.name.as_str());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Save found root as Entity List").strong(),
+                    );
+                    egui::ComboBox::from_id_salt("deep-pointer-entity-preset")
+                        .selected_text(selected_name)
+                        .width(150.0)
+                        .show_ui(ui, |ui| {
+                            for preset in esp_presets {
+                                ui.selectable_value(
+                                    &mut dialog.entity_preset_id,
+                                    Some(preset.id),
+                                    &preset.name,
+                                );
+                            }
+                        });
+                    if ui
+                        .add_enabled(
+                            dialog.entity_preset_id.is_some()
+                                && dialog.selected.len() == 1,
+                            Button::new("Use selected root"),
+                        )
+                        .on_hover_text(
+                            "Save the selected stable pointer as entity X.",
+                        )
+                        .clicked()
+                    {
+                        *use_entity_source = dialog.selected.iter().next().copied();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Y offset");
+                    ui.add(egui::DragValue::new(&mut dialog.entity_y_offset));
+                    ui.label("Z offset");
+                    ui.add(egui::DragValue::new(&mut dialog.entity_z_offset));
+                    ui.label("Count");
+                    ui.add(
+                        egui::DragValue::new(&mut dialog.entity_count)
+                            .range(1..=512),
+                    );
+                });
+                ui.label(
+                    RichText::new(
+                        "Offsets and stride are bytes. Runtime reads stop at 512 slots.",
+                    )
+                    .weak()
+                    .small(),
+                );
+            });
+        }
+        ui.separator();
+        const ROOT_WIDTH: f32 = 250.0;
+        const OFFSETS_WIDTH: f32 = 180.0;
+        const ADDRESS_WIDTH: f32 = 150.0;
+        const VALUE_WIDTH: f32 = 130.0;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            Self::memory_label_cell(
+                ui,
+                ROOT_WIDTH,
+                22.0,
+                egui::Label::new(RichText::new("Root").strong()),
+            );
+            Self::memory_label_cell(
+                ui,
+                OFFSETS_WIDTH,
+                22.0,
+                egui::Label::new(RichText::new("Offsets").strong()),
+            );
+            Self::memory_label_cell(
+                ui,
+                ADDRESS_WIDTH,
+                22.0,
+                egui::Label::new(RichText::new("Address").strong()),
+            );
+            Self::memory_label_cell(
+                ui,
+                VALUE_WIDTH,
+                22.0,
+                egui::Label::new(RichText::new("Value").strong()),
+            );
+        });
+        ui.separator();
+        let filter = dialog.filter.trim().to_ascii_lowercase();
+        if ui.input(|input| {
+            input.modifiers.command && input.key_pressed(egui::Key::A)
+        }) {
+            dialog.selected = dialog
+                .candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, path)| {
+                    let module = path.module.to_ascii_lowercase();
+                    (!dialog.exe_only || module.ends_with(".exe"))
+                        && (filter.is_empty() || module.contains(&filter))
+                })
+                .map(|(index, _)| index)
+                .collect();
+        }
+        egui::ScrollArea::both().show(ui, |ui| {
+            for (index, path) in dialog.candidates.iter().enumerate() {
+                let module_lower = path.module.to_ascii_lowercase();
+                if (dialog.exe_only && !module_lower.ends_with(".exe"))
+                    || (!filter.is_empty() && !module_lower.contains(&filter))
+                {
+                    continue;
+                }
+                let root = format!("{}+{:X}", path.module, path.module_offset);
+                let offsets = path
+                    .offsets
+                    .iter()
+                    .map(|offset| format!("{offset:X}"))
+                    .collect::<Vec<_>>()
+                    .join(" -> ");
+                let row_rect = egui::Rect::from_min_size(
+                    ui.next_widget_position(),
+                    vec2(
+                        (ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH)
+                            .max(ui.available_width()),
+                        24.0,
+                    ),
+                );
+                let stale = dialog.resolved_rows.get(&index).is_none_or(|row| {
+                    row.updated_at.elapsed() >= Duration::from_millis(750)
+                });
+                if ui.is_rect_visible(row_rect) && stale {
+                    let resolved = process_pid.and_then(|pid| {
+                        let base = resolve_module_offset(
+                            pid,
+                            &path.module,
+                            path.module_offset,
+                        )
+                        .ok()?;
+                        let pointer = PointerSpec {
+                            base,
+                            module: Some((path.module.clone(), path.module_offset)),
+                            offsets: path.offsets.clone(),
+                        };
+                        resolve_memory_address(pid, base, Some(&pointer)).ok()
+                    });
+                    let value = process_pid
+                        .zip(resolved)
+                        .and_then(|(pid, address)| {
+                            read_scan_value(pid, address, dialog.display_type).ok()
+                        });
+                    dialog.resolved_rows.insert(
+                        index,
+                        DeepPointerResolvedRow {
+                            address: resolved,
+                            value,
+                            updated_at: Instant::now(),
+                        },
+                    );
+                }
+                let resolved =
+                    dialog.resolved_rows.get(&index).and_then(|row| row.address);
+                let address_text = resolved
+                    .map_or_else(|| "-".to_owned(), format_prefixed_memory_address);
+                let value_text = dialog
+                    .resolved_rows
+                    .get(&index)
+                    .and_then(|row| row.value)
+                    .map_or_else(
+                        || "-".to_owned(),
+                        |value| editable_scan_value(value, false),
+                    );
+                let response = ui
+                    .interact(
+                        row_rect,
+                        ui.id().with(("deep-pointer-row", index)),
+                        Sense::click(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::Default);
+                if dialog.selected.contains(&index) {
+                    ui.painter().rect_filled(
+                        row_rect,
+                        2.0,
+                        ui.visuals().selection.bg_fill.gamma_multiply(0.55),
+                    );
+                }
+                ui.allocate_ui_at_rect(row_rect, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        Self::memory_label_cell(
+                            ui,
+                            ROOT_WIDTH,
+                            24.0,
+                            egui::Label::new(root).truncate(),
+                        );
+                        Self::memory_label_cell(
+                            ui,
+                            OFFSETS_WIDTH,
+                            24.0,
+                            egui::Label::new(offsets).truncate(),
+                        );
+                        Self::memory_label_cell(
+                            ui,
+                            ADDRESS_WIDTH,
+                            24.0,
+                            egui::Label::new(address_text).truncate(),
+                        );
+                        Self::memory_label_cell(
+                            ui,
+                            VALUE_WIDTH,
+                            24.0,
+                            egui::Label::new(value_text).truncate(),
+                        );
+                    });
+                });
+                if response.clicked() {
+                    let (shift, additive) = ui.input(|input| {
+                        (input.modifiers.shift, input.modifiers.command)
+                    });
+                    if shift && let Some(anchor) = dialog.selection_anchor {
+                        if !additive {
+                            dialog.selected.clear();
+                        }
+                        let (start, end) = if anchor <= index {
+                            (anchor, index)
+                        } else {
+                            (index, anchor)
+                        };
+                        dialog.selected.extend(start..=end);
+                    } else if additive {
+                        if !dialog.selected.insert(index) {
+                            dialog.selected.remove(&index);
+                        }
+                        dialog.selection_anchor = Some(index);
+                    } else {
+                        dialog.selected.clear();
+                        dialog.selected.insert(index);
+                        dialog.selection_anchor = Some(index);
+                    }
+                }
+                response.context_menu(|ui| {
+                    if ui.button("Copy pointer for Macro").clicked() {
+                        ui.ctx().copy_text(format_pointer_expression(
+                            &PointerSpec {
+                                base: 0,
+                                module: Some((
+                                    path.module.clone(),
+                                    path.module_offset,
+                                )),
+                                offsets: path.offsets.clone(),
+                            },
+                        ));
+                        ui.close();
+                    }
+                    if ui
+                        .add_enabled(
+                            resolved.is_some(),
+                            Button::new("Add to Address list"),
+                        )
+                        .clicked()
+                    {
+                        *add_one = Some(index);
+                        ui.close();
+                    }
+                    ui.separator();
+                    ui.label(RichText::new("Display type").strong());
+                    for value_type in [
+                        ScanValueType::I8,
+                        ScanValueType::I16,
+                        ScanValueType::I32,
+                        ScanValueType::F32,
+                        ScanValueType::I64,
+                        ScanValueType::F64,
+                    ] {
+                        if ui
+                            .selectable_value(
+                                &mut dialog.display_type,
+                                value_type,
+                                memory_type_label(value_type),
+                            )
+                            .clicked()
+                        {
+                            dialog.resolved_rows.clear();
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        });
     }
 
     #[cfg(windows)]
@@ -9896,224 +9973,160 @@ impl CrosshairApp {
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
             .with_resizable(true);
+        let mut open_browse_addr = None;
+        let mut open_dissect_addr = None;
         if dialog.pinned {
-            builder = builder.with_always_on_top();
-        }
-        ctx.show_viewport_immediate(
-            egui::ViewportId::from_hash_of("memory-code-compare"),
-            builder,
-            |ctx, _| {
-                Self::constrain_memory_popup_to_monitor(ctx);
-                if ctx.input(|input| input.viewport().close_requested()) {
-                    open = false;
-                }
-                Self::render_memory_popup_titlebar(
-                    ctx,
-                    self.state.ui_language,
-                    title,
-                    dialog.pinned,
-                    &mut toggle_pin,
-                    &mut open,
-                );
-                egui::CentralPanel::default()
-                    .frame(Self::memory_popup_frame(ctx))
-                    .show(ctx, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::Label::new(&dialog.status).selectable(true));
-                            if dialog.active.is_some() && ui.button("Stop").clicked() {
-                                if let Some(mut active) = dialog.active.take() {
-                                    active.stop();
-                                    dialog.status = "Debugger stopped".to_owned();
-                                }
-                            }
-                            if dialog.nearby {
-                                ui.label("Max gap 0x");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut dialog.max_gap)
-                                        .desired_width(64.0),
-                                );
-                            }
-                            ui.label(format!("Batch: 4 / {}s", dialog.batch_seconds));
+            let builder = egui::ViewportBuilder::default()
+                .with_title(title)
+                .with_position(egui::pos2(0.0, 0.0))
+                .with_inner_size(vec2(1100.0, 520.0))
+                .with_min_inner_size(vec2(760.0, 300.0))
+                .with_clamp_size_to_monitor_size(true)
+                .with_decorations(false)
+                .with_resizable(true)
+                .with_always_on_top();
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("memory-code-compare"),
+                builder,
+                |ctx, _| {
+                    Self::constrain_memory_popup_to_monitor(ctx);
+                    if ctx.input(|input| input.viewport().close_requested()) {
+                        open = false;
+                    }
+                    Self::render_memory_popup_titlebar(
+                        ctx,
+                        self.state.ui_language,
+                        title,
+                        true,
+                        &mut toggle_pin,
+                        &mut open,
+                    );
+                    egui::CentralPanel::default()
+                        .frame(Self::memory_popup_frame(ctx))
+                        .show(ctx, |ui| {
+                            Self::render_code_compare_body(
+                                ui,
+                                self.state.ui_language,
+                                &mut dialog,
+                                &candidates,
+                                &mut open_browse_addr,
+                                &mut open_dissect_addr,
+                            );
                         });
-                        ui.label(
-                            dialog
-                                .instruction_addresses
-                                .iter()
-                                .map(|address| {
-                                    dialog.instruction_names.get(address).cloned().unwrap_or_else(|| {
-                                        format_prefixed_memory_address(*address)
-                                    })
-                                })
-                                .collect::<Vec<_>>()
-                                .join("  |  "),
-                        );
-                        if dialog.completed_batches >= dialog.total_batches {
-                            if candidates.is_empty() {
-                                ui.label(
-                                    "No address was captured by at least two selected instructions",
-                                );
-                            } else {
-                                ui.label(format!(
-                                    "{} candidate(s) — groups with the most matching instructions are first",
-                                    candidates.len()
-                                ));
-                            }
-                        }
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            Self::memory_view_cell(ui, 170.0, "Candidate");
-                            Self::memory_view_cell(ui, 80.0, "Span");
-                            Self::memory_view_cell(ui, 70.0, "Matches");
-                            Self::memory_view_cell(ui, 70.0, "Hits");
-                            Self::memory_view_cell(ui, 620.0, "Matched instructions");
-                        });
-                        let mut open_browse_addr = None;
-                        let mut open_dissect_addr = None;
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for candidate in &candidates {
-                                let instruction_list = candidate
-                                    .instructions
-                                    .iter()
-                                    .map(|address| {
-                                        let name = dialog
-                                            .instruction_names
-                                            .get(address)
-                                            .cloned()
-                                            .unwrap_or_else(|| "instruction".to_owned());
-                                        format!(
-                                            "{} @ {}",
-                                            name,
-                                            format_prefixed_memory_address(*address)
-                                        )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("  |  ");
-                                let candidate_addr = candidate.start;
-                                let candidate_addr_str = format_prefixed_memory_address(candidate.start);
-                                let row_response = ui.horizontal(|ui| {
-                                    let c1 = ui.add_sized(
-                                        [170.0, 18.0],
-                                        egui::Label::new(RichText::new(&candidate_addr_str).monospace()).selectable(true),
-                                    );
-                                    let c2 = ui.add_sized(
-                                        [80.0, 18.0],
-                                        egui::Label::new(RichText::new(format!("0x{:X}", candidate.end - candidate.start)).monospace()).selectable(true),
-                                    );
-                                    let c3 = ui.add_sized(
-                                        [70.0, 18.0],
-                                        egui::Label::new(RichText::new(candidate.instructions.len().to_string()).monospace()).selectable(true),
-                                    );
-                                    let c4 = ui.add_sized(
-                                        [70.0, 18.0],
-                                        egui::Label::new(RichText::new(candidate.hits.to_string()).monospace()).selectable(true),
-                                    );
-                                    let c5 = ui.add_sized(
-                                        [620.0, 18.0],
-                                        egui::Label::new(RichText::new(&instruction_list).monospace()).selectable(true).truncate(),
-                                    ).on_hover_text(&instruction_list);
-
-                                    c1.union(c2).union(c3).union(c4).union(c5)
-                                }).inner;
-
-                                row_response.context_menu(|ui| {
-                                    if ui.button(Self::tr_lang(self.state.ui_language, "Copy address", "Sao chép địa chỉ")).clicked() {
-                                        ui.ctx().copy_text(candidate_addr_str.clone());
-                                        ui.close_menu();
-                                    }
-                                    if ui.button(Self::tr_lang(self.state.ui_language, "Browse this memory region", "Duyệt vùng bộ nhớ này")).clicked() {
-                                        open_browse_addr = Some(candidate_addr);
-                                        ui.close_menu();
-                                    }
-                                    if ui.button(Self::tr_lang(self.state.ui_language, "Dissect data/structure", "Phân tích dữ liệu/cấu trúc")).clicked() {
-                                        open_dissect_addr = Some(candidate_addr);
-                                        ui.close_menu();
-                                    }
-                                });
-                            }
-                        });
-                        if let Some(addr) = open_browse_addr {
-                            let pid = self.memory_panel.process_pid;
-                            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
-                                address: addr,
-                                tracked_base: None,
-                                kind: MemoryViewKind::Bytes,
-                                display_type: MemoryDisplayType::ByteHex,
-                                relative_addresses: false,
-                                pinned: true,
-                                elements: Vec::new(),
-                                pending_add: None,
-                                pending_track: None,
-                                pointer_width: pid.and_then(|p| process_pointer_width(p).ok()).unwrap_or(8),
-                                previous_bytes: Vec::new(),
-                                previous_byte_map: HashMap::new(),
-                                track_changes: false,
-                                changed_addresses: HashSet::new(),
-                                classes: Vec::new(),
-                                selected_class: 0,
-                                history: Vec::new(),
-                                class_detection_attempted: false,
-                                class_detection_status: String::new(),
-                                auto_dissected: false,
-                                structure_back_step: "C".to_owned(),
-                                structure_forward_step: "C".to_owned(),
-                                selected_structure_address: None,
-                                scroll_offset: 0,
-                                reset_memory_scroll: true,
-                                memory_columns: 16,
-                                memory_scroll_override: None,
-                                memory_region_override: None,
-                                fit_memory_columns: true,
-                                stride_address_a: String::new(),
-                                stride_address_b: String::new(),
-                            });
-                        }
-                        if let Some(addr) = open_dissect_addr {
-                            let pid = self.memory_panel.process_pid;
-                            let elements = default_structure_elements();
-                            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
-                                address: addr,
-                                tracked_base: None,
-                                kind: MemoryViewKind::Structure,
-                                display_type: MemoryDisplayType::ByteHex,
-                                relative_addresses: true,
-                                pinned: true,
-                                elements: elements.clone(),
-                                pending_add: None,
-                                pending_track: None,
-                                pointer_width: pid.and_then(|p| process_pointer_width(p).ok()).unwrap_or(8),
-                                previous_bytes: Vec::new(),
-                                previous_byte_map: HashMap::new(),
-                                track_changes: false,
-                                changed_addresses: HashSet::new(),
-                                classes: vec![StructureClass {
-                                    name: "Class_0".to_owned(),
-                                    address: addr,
-                                    elements,
-                                }],
-                                selected_class: 0,
-                                history: Vec::new(),
-                                class_detection_attempted: false,
-                                class_detection_status: String::new(),
-                                auto_dissected: false,
-                                structure_back_step: "C".to_owned(),
-                                structure_forward_step: "C".to_owned(),
-                                selected_structure_address: None,
-                                scroll_offset: 0,
-                                reset_memory_scroll: true,
-                                memory_columns: 16,
-                                memory_scroll_override: None,
-                                memory_region_override: None,
-                                fit_memory_columns: true,
-                                stride_address_a: String::new(),
-                                stride_address_b: String::new(),
-                            });
+                    Self::render_memory_popup_resize_handles(ctx);
+                },
+            );
+            if toggle_pin {
+                dialog.pinned = false;
+            }
+        } else {
+            egui::Window::new(title)
+                .id(egui::Id::new("memory-code-compare"))
+                .default_size(vec2(1100.0, 520.0))
+                .min_size(vec2(760.0, 300.0))
+                .collapsible(false)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        let pin_label = self.tr("Pin", "Ghim");
+                        if ui
+                            .button(pin_label)
+                            .on_hover_text(self.tr(
+                                "Detach as a separate floating window",
+                                "Tách thành cửa sổ nổi riêng biệt",
+                            ))
+                            .clicked()
+                        {
+                            dialog.pinned = true;
                         }
                     });
-                Self::render_memory_popup_resize_handles(ctx);
-            },
-        );
-        if toggle_pin {
-            dialog.pinned = !dialog.pinned;
+                    ui.separator();
+                    Self::render_code_compare_body(
+                        ui,
+                        self.state.ui_language,
+                        &mut dialog,
+                        &candidates,
+                        &mut open_browse_addr,
+                        &mut open_dissect_addr,
+                    );
+                });
+        }
+        if let Some(addr) = open_browse_addr {
+            let pid = self.memory_panel.process_pid;
+            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                address: addr,
+                tracked_base: None,
+                kind: MemoryViewKind::Bytes,
+                display_type: MemoryDisplayType::ByteHex,
+                relative_addresses: false,
+                pinned: true,
+                elements: Vec::new(),
+                pending_add: None,
+                pending_track: None,
+                pointer_width: pid.and_then(|p| process_pointer_width(p).ok()).unwrap_or(8),
+                previous_bytes: Vec::new(),
+                previous_byte_map: HashMap::new(),
+                track_changes: false,
+                changed_addresses: HashSet::new(),
+                classes: Vec::new(),
+                selected_class: 0,
+                history: Vec::new(),
+                class_detection_attempted: false,
+                class_detection_status: String::new(),
+                auto_dissected: false,
+                structure_back_step: "C".to_owned(),
+                structure_forward_step: "C".to_owned(),
+                selected_structure_address: None,
+                scroll_offset: 0,
+                reset_memory_scroll: true,
+                memory_columns: 16,
+                memory_scroll_override: None,
+                memory_region_override: None,
+                fit_memory_columns: true,
+                stride_address_a: String::new(),
+                stride_address_b: String::new(),
+            });
+        }
+        if let Some(addr) = open_dissect_addr {
+            let pid = self.memory_panel.process_pid;
+            let elements = default_structure_elements();
+            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                address: addr,
+                tracked_base: None,
+                kind: MemoryViewKind::Structure,
+                display_type: MemoryDisplayType::ByteHex,
+                relative_addresses: true,
+                pinned: true,
+                elements: elements.clone(),
+                pending_add: None,
+                pending_track: None,
+                pointer_width: pid.and_then(|p| process_pointer_width(p).ok()).unwrap_or(8),
+                previous_bytes: Vec::new(),
+                previous_byte_map: HashMap::new(),
+                track_changes: false,
+                changed_addresses: HashSet::new(),
+                classes: vec![StructureClass {
+                    name: "Class_0".to_owned(),
+                    address: addr,
+                    elements,
+                }],
+                selected_class: 0,
+                history: Vec::new(),
+                class_detection_attempted: false,
+                class_detection_status: String::new(),
+                auto_dissected: false,
+                structure_back_step: "C".to_owned(),
+                structure_forward_step: "C".to_owned(),
+                selected_structure_address: None,
+                scroll_offset: 0,
+                reset_memory_scroll: true,
+                memory_columns: 16,
+                memory_scroll_override: None,
+                memory_region_override: None,
+                fit_memory_columns: true,
+                stride_address_a: String::new(),
+                stride_address_b: String::new(),
+            });
         }
         if open {
             self.memory_panel.code_compare_dialog = Some(dialog);
@@ -10121,6 +10134,128 @@ impl CrosshairApp {
         } else if let Some(mut active) = dialog.active {
             active.stop();
         }
+    }
+
+    #[cfg(windows)]
+    fn render_code_compare_body(
+        ui: &mut egui::Ui,
+        language: crate::model::UiLanguage,
+        dialog: &mut CodeCompareDialog,
+        candidates: &[CodeCompareCandidate],
+        open_browse_addr: &mut Option<usize>,
+        open_dissect_addr: &mut Option<usize>,
+    ) {
+        ui.horizontal(|ui| {
+            ui.add(egui::Label::new(&dialog.status).selectable(true));
+            if dialog.active.is_some() && ui.button("Stop").clicked() {
+                if let Some(mut active) = dialog.active.take() {
+                    active.stop();
+                    dialog.status = "Debugger stopped".to_owned();
+                }
+            }
+            if dialog.nearby {
+                ui.label("Max gap 0x");
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.max_gap)
+                        .desired_width(64.0),
+                );
+            }
+            ui.label(format!("Batch: 4 / {}s", dialog.batch_seconds));
+        });
+        ui.label(
+            dialog
+                .instruction_addresses
+                .iter()
+                .map(|address| {
+                    dialog.instruction_names.get(address).cloned().unwrap_or_else(|| {
+                        format_prefixed_memory_address(*address)
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("  |  "),
+        );
+        if dialog.completed_batches >= dialog.total_batches {
+            if candidates.is_empty() {
+                ui.label(
+                    "No address was captured by at least two selected instructions",
+                );
+            } else {
+                ui.label(format!(
+                    "{} candidate(s) — groups with the most matching instructions are first",
+                    candidates.len()
+                ));
+            }
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            Self::memory_view_cell(ui, 170.0, "Candidate");
+            Self::memory_view_cell(ui, 80.0, "Span");
+            Self::memory_view_cell(ui, 70.0, "Matches");
+            Self::memory_view_cell(ui, 70.0, "Hits");
+            Self::memory_view_cell(ui, 620.0, "Matched instructions");
+        });
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for candidate in candidates {
+                let instruction_list = candidate
+                    .instructions
+                    .iter()
+                    .map(|address| {
+                        let name = dialog
+                            .instruction_names
+                            .get(address)
+                            .cloned()
+                            .unwrap_or_else(|| "instruction".to_owned());
+                        format!(
+                            "{} @ {}",
+                            name,
+                            format_prefixed_memory_address(*address)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("  |  ");
+                let candidate_addr = candidate.start;
+                let candidate_addr_str = format_prefixed_memory_address(candidate.start);
+                let row_response = ui.horizontal(|ui| {
+                    let c1 = ui.add_sized(
+                        [170.0, 18.0],
+                        egui::Label::new(RichText::new(&candidate_addr_str).monospace()).selectable(true),
+                    );
+                    let c2 = ui.add_sized(
+                        [80.0, 18.0],
+                        egui::Label::new(RichText::new(format!("0x{:X}", candidate.end - candidate.start)).monospace()).selectable(true),
+                    );
+                    let c3 = ui.add_sized(
+                        [70.0, 18.0],
+                        egui::Label::new(RichText::new(candidate.instructions.len().to_string()).monospace()).selectable(true),
+                    );
+                    let c4 = ui.add_sized(
+                        [70.0, 18.0],
+                        egui::Label::new(RichText::new(candidate.hits.to_string()).monospace()).selectable(true),
+                    );
+                    let c5 = ui.add_sized(
+                        [620.0, 18.0],
+                        egui::Label::new(RichText::new(&instruction_list).monospace()).selectable(true).truncate(),
+                    ).on_hover_text(&instruction_list);
+
+                    c1.union(c2).union(c3).union(c4).union(c5)
+                }).inner;
+
+                row_response.context_menu(|ui| {
+                    if ui.button(Self::tr_lang(language, "Copy address", "Sao chép địa chỉ")).clicked() {
+                        ui.ctx().copy_text(candidate_addr_str.clone());
+                        ui.close_menu();
+                    }
+                    if ui.button(Self::tr_lang(language, "Browse this memory region", "Duyệt vùng bộ nhớ này")).clicked() {
+                        *open_browse_addr = Some(candidate_addr);
+                        ui.close_menu();
+                    }
+                    if ui.button(Self::tr_lang(language, "Dissect data/structure", "Phân tích dữ liệu/cấu trúc")).clicked() {
+                        *open_dissect_addr = Some(candidate_addr);
+                        ui.close_menu();
+                    }
+                });
+            }
+        });
     }
 
     #[cfg(windows)]
@@ -10313,7 +10448,12 @@ impl CrosshairApp {
             self.save_tracked_code_address(&mut dialog);
         }
         if let Some(address) = add {
-            self.add_code_access_address(address, dialog.value_type);
+            let newly_added = self.add_code_access_address(address, dialog.value_type);
+            dialog.status = if newly_added {
+                format!("✓ Address {} added to Address list", format_prefixed_memory_address(address))
+            } else {
+                format!("Address {} is already in Address list", format_prefixed_memory_address(address))
+            };
         }
         if let Some(address) = browse {
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
@@ -10420,7 +10560,11 @@ impl CrosshairApp {
         let mut refresh_values = false;
         let mut start_requested = false;
         let mut apply_esp = None;
-        ui.add(egui::Label::new(&dialog.status).selectable(true));
+        if dialog.status.starts_with('✓') || dialog.status.contains("added") || dialog.status.contains("Added") {
+            ui.label(RichText::new(&dialog.status).color(Color32::from_rgb(90, 215, 120)).strong());
+        } else {
+            ui.add(egui::Label::new(&dialog.status).selectable(true));
+        }
         ui.horizontal_wrapped(|ui| {
             if ui.button("Refresh values").clicked() {
                 refresh_values = true;
@@ -10752,14 +10896,18 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn add_code_access_address(&mut self, address: usize, value_type: ScanValueType) {
+    fn add_code_access_address(&mut self, address: usize, value_type: ScanValueType) -> bool {
         if self
             .memory_panel
             .saved
             .iter()
             .any(|saved| saved.address == address && saved.value_type == value_type)
         {
-            return;
+            self.memory_panel.status = format!(
+                "Address {} is already in Address list",
+                format_prefixed_memory_address(address)
+            );
+            return false;
         }
         let current = self
             .memory_panel
@@ -10782,7 +10930,8 @@ impl CrosshairApp {
             aob_pattern: None,
         });
         self.memory_panel.status =
-            format!("Address {} added", format_prefixed_memory_address(address));
+            format!("✓ Address {} added to Address list", format_prefixed_memory_address(address));
+        true
     }
 
     #[cfg(windows)]
