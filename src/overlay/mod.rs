@@ -10231,8 +10231,14 @@ mod windows_overlay {
                 }
 
                 OverlayCommand::UpdateEspPresets(presets) => {
+                    let any_enabled = presets.iter().any(|p| p.enabled);
                     HOOK_STATE.lock().esp_presets = presets;
                     ESP_PRESET_REVISION.fetch_add(1, Ordering::Release);
+                    if !any_enabled {
+                        if let Some(render_tx) = GPU_OVERLAY_RENDER_SENDER.lock().as_ref() {
+                            let _ = render_tx.try_send(Vec::new());
+                        }
+                    }
                     ensure_esp_worker();
                     if let Some(worker) = ESP_SAMPLER_THREAD.lock().as_ref() {
                         worker.unpark();
@@ -27182,7 +27188,7 @@ mod windows_overlay {
         *GPU_OVERLAY_RENDER_SENDER.lock() = Some(render_tx.clone());
         thread::spawn(move || {
             let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-            let mut renderer = None;
+            let mut renderer: Option<esp_gpu::EspGpuRenderer> = None;
             let mut visible = false;
             let mut animations = HashMap::<u32, EspShapeAnimation>::new();
             let mut last_frame = Instant::now();
@@ -27283,6 +27289,20 @@ mod windows_overlay {
                         continue;
                     }
                     last_shapes_empty = true;
+                    let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
+                    if hwnd_value != 0 {
+                        let hwnd = HWND(hwnd_value as _);
+                        if let Some(gpu) = renderer.as_mut() {
+                            let _ = gpu.paint(&[]);
+                        }
+                        if visible && !has_extra {
+                            unsafe {
+                                let _ = ShowWindow(hwnd, SW_HIDE);
+                            }
+                            visible = false;
+                        }
+                    }
+                    continue;
                 } else {
                     last_shapes_empty = false;
                 }
@@ -27364,15 +27384,10 @@ mod windows_overlay {
                     read_frame = EspReadFrame::default();
                     ESP_TARGET_SNAPSHOTS.lock().clear();
                     crate::audio::update_esp_spatial_audio(Vec::new());
-                    if had_shapes {
-                        had_shapes = false;
-                        if !send_latest(Vec::new()) {
-                            restart_esp_worker_if_current(generation);
-                            return;
-                        }
-                    }
+                    had_shapes = false;
+                    let _ = send_latest(Vec::new());
                     next_frame = Instant::now() + Duration::from_millis(16);
-                    thread::park_timeout(Duration::from_millis(16));
+                    thread::park_timeout(Duration::from_millis(50));
                     continue;
                 }
 

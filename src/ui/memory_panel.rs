@@ -215,6 +215,7 @@ struct StablePointerDialog {
     filter_value: String,
     filter_status: StablePointerStatusFilter,
     exe_only: bool,
+    show_resolved: bool,
     last_live_refresh: Instant,
     validation_rx: Option<Receiver<StablePointerValidationResult>>,
     filter_rx: Option<Receiver<StablePointerFilterResult>>,
@@ -1037,6 +1038,13 @@ impl CrosshairApp {
                 if ui.button(pin_label).clicked() {
                     self.memory_panel.pinned = !self.memory_panel.pinned;
                 }
+                if self.memory_panel.stable_pointer_dialog.is_some()
+                    && ui
+                        .button(RichText::new("🎯 Stable pointer").color(Color32::from_rgb(84, 178, 222)))
+                        .clicked()
+                {
+                    ui.ctx().request_repaint();
+                }
                 if ui
                     .button(self.tr("Memory settings", "Memory settings"))
                     .clicked()
@@ -1274,7 +1282,6 @@ impl CrosshairApp {
         if toggle_pin {
             if pinned {
                 self.memory_panel.unpinned_memory_popups.insert(id);
-                open = false;
             } else {
                 self.memory_panel.unpinned_memory_popups.remove(id);
             }
@@ -1678,12 +1685,17 @@ impl CrosshairApp {
                         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
                     }
                     let pin_label = if pinned {
-                        Self::tr_lang(language, "Unpin", "Bỏ ghim")
+                        Self::tr_lang(language, "📌 On top", "📌 Ghim")
                     } else {
-                        Self::tr_lang(language, "Pin", "Ghim")
+                        Self::tr_lang(language, "📌 Normal", "📌 Thường")
                     };
                     if ui
-                        .add_sized([58.0, 28.0], Button::new(pin_label))
+                        .add_sized([68.0, 28.0], Button::new(pin_label))
+                        .on_hover_text(if pinned {
+                            Self::tr_lang(language, "Always on top is ON. Click to set Normal.", "Đang Ghim trên cùng. Bấm để chuyển về Bình thường.")
+                        } else {
+                            Self::tr_lang(language, "Always on top is OFF. Click to set Always on top.", "Đang ở mức Bình thường. Bấm để Ghim luôn trên cùng.")
+                        })
                         .clicked()
                     {
                         *toggle_pin = true;
@@ -1693,7 +1705,7 @@ impl CrosshairApp {
                             [32.0, 28.0],
                             Button::new(Self::material_icon_text(0xe5cd, 17.0)),
                         )
-                        .on_hover_text("Close")
+                        .on_hover_text(Self::tr_lang(language, "Close", "Đóng"))
                         .clicked()
                     {
                         *open = false;
@@ -5768,6 +5780,7 @@ impl CrosshairApp {
                     filter_value: String::new(),
                     filter_status: StablePointerStatusFilter::All,
                     exe_only: false,
+                    show_resolved: false,
                     last_live_refresh: Instant::now(),
                     validation_rx: None,
                     filter_rx: None,
@@ -5809,6 +5822,7 @@ impl CrosshairApp {
             filter_value: String::new(),
             filter_status: StablePointerStatusFilter::All,
             exe_only: false,
+            show_resolved: false,
             last_live_refresh: Instant::now(),
             validation_rx: None,
             filter_rx: None,
@@ -7811,6 +7825,7 @@ impl CrosshairApp {
                             ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::BrokenOnly, "Broken");
                         });
                     ui.checkbox(&mut dialog.exe_only, "EXE only");
+                    ui.checkbox(&mut dialog.show_resolved, "Show resolved");
                 });
                 ui.separator();
                 const TARGET_WIDTH: f32 = 145.0;
@@ -7838,14 +7853,6 @@ impl CrosshairApp {
                 }
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    let columns = [
-                        (STATUS_WIDTH, "Status"),
-                        (ROOT_WIDTH, "Root"),
-                        (OFFSETS_WIDTH, "Offsets"),
-                        (ADDRESS_WIDTH, "Resolved"),
-                        (VALUE_WIDTH, "Value"),
-                        (CURRENT_WIDTH, "Current"),
-                    ];
                     if show_target_column {
                         Self::memory_label_cell(
                             ui,
@@ -7854,14 +7861,44 @@ impl CrosshairApp {
                             egui::Label::new(RichText::new("Target").strong()).truncate(),
                         );
                     }
-                    for (width, title) in columns {
+                    Self::memory_label_cell(
+                        ui,
+                        STATUS_WIDTH,
+                        20.0,
+                        egui::Label::new(RichText::new("Status").strong()).truncate(),
+                    );
+                    Self::memory_label_cell(
+                        ui,
+                        ROOT_WIDTH,
+                        20.0,
+                        egui::Label::new(RichText::new("Root").strong()).truncate(),
+                    );
+                    Self::memory_label_cell(
+                        ui,
+                        OFFSETS_WIDTH,
+                        20.0,
+                        egui::Label::new(RichText::new("Offsets").strong()).truncate(),
+                    );
+                    if dialog.show_resolved {
                         Self::memory_label_cell(
                             ui,
-                            width,
+                            ADDRESS_WIDTH,
                             20.0,
-                            egui::Label::new(RichText::new(title).strong()).truncate(),
+                            egui::Label::new(RichText::new("Resolved").strong()).truncate(),
                         );
                     }
+                    Self::memory_label_cell(
+                        ui,
+                        VALUE_WIDTH,
+                        20.0,
+                        egui::Label::new(RichText::new("Value").strong()).truncate(),
+                    );
+                    Self::memory_label_cell(
+                        ui,
+                        CURRENT_WIDTH,
+                        20.0,
+                        egui::Label::new(RichText::new("Current").strong()).truncate(),
+                    );
                 });
                 ui.separator();
                 let filter = dialog.filter.trim().to_ascii_lowercase();
@@ -7921,12 +7958,15 @@ impl CrosshairApp {
                                 editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
                                     || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
                             });
-                            let expected_match = editable_scan_value(candidate.expected_value, false)
-                                .to_ascii_lowercase()
-                                .contains(&filter_val)
+                            let has_evaluated = candidate.observed_value.is_some() || candidate.live_value.is_some();
+                            let expected_match = !has_evaluated && (
+                                editable_scan_value(candidate.expected_value, false)
+                                    .to_ascii_lowercase()
+                                    .contains(&filter_val)
                                 || format_scan_value(candidate.expected_value, true)
                                     .to_ascii_lowercase()
-                                    .contains(&filter_val);
+                                    .contains(&filter_val)
+                            );
                             if !(observed_match || live_match || expected_match) {
                                 return None;
                             }
@@ -7958,7 +7998,7 @@ impl CrosshairApp {
                             + STATUS_WIDTH
                             + ROOT_WIDTH
                             + OFFSETS_WIDTH
-                            + ADDRESS_WIDTH
+                            + if dialog.show_resolved { ADDRESS_WIDTH } else { 0.0 }
                             + VALUE_WIDTH
                             + CURRENT_WIDTH,
                     );
@@ -8030,7 +8070,23 @@ impl CrosshairApp {
                                     (STATUS_WIDTH, state.to_owned()),
                                     (ROOT_WIDTH, root),
                                     (OFFSETS_WIDTH, offsets),
-                                    (ADDRESS_WIDTH, address),
+                                ] {
+                                    Self::memory_label_cell(
+                                        ui,
+                                        width,
+                                        24.0,
+                                        egui::Label::new(text).truncate().selectable(false),
+                                    );
+                                }
+                                if dialog.show_resolved {
+                                    Self::memory_label_cell(
+                                        ui,
+                                        ADDRESS_WIDTH,
+                                        24.0,
+                                        egui::Label::new(address).truncate().selectable(false),
+                                    );
+                                }
+                                for (width, text) in [
                                     (VALUE_WIDTH, value),
                                     (CURRENT_WIDTH, current),
                                 ] {
