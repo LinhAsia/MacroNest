@@ -439,6 +439,7 @@ mod windows_overlay {
         Mutex<HashMap<(Arc<str>, u32, u32, u32, i32), RenderedSvgImage>>,
     > = Lazy::new(|| Mutex::new(HashMap::new()));
     static ESP_PRESET_REVISION: AtomicU64 = AtomicU64::new(0);
+    static ESP_SAMPLER_ALIVE: AtomicBool = AtomicBool::new(false);
     const ESP_WORKER_STALL_TIMEOUT: Duration = Duration::from_secs(2);
 
     const CUSTOM_MASCOT_PATH_DATA: &str = "M 526.55 511.33 C 533.449 472.819 547.791 437.811 560.45 401.734 C 584.928 331.975 635.592 167.22 730.04 275.788 C 764.585 315.498 803.073 372.595 828.251 418.766 C 853.351 410.875 879.474 405.301 905.057 400.499 C 986.262 385.255 1064.28 384.014 1144.42 406.406 C 1168.38 413.1 1189.3 419.185 1212.34 429.698 C 1236.36 395.459 1261.2 363.619 1288.36 328.831 C 1316.36 292.947 1374.77 218.123 1428.39 256.679 C 1458.02 277.988 1473.1 343.325 1482.31 379.241 C 1492.01 416.559 1500.79 454.111 1508.64 491.862 C 1522.9 502.548 1536.96 513.099 1550.36 524.724 C 1645.1 606.907 1708.79 718.43 1725.98 843.207 C 1730.89 878.882 1733.16 910.062 1732.47 946.193 C 1732.02 969.308 1733.45 996.289 1729.91 1019.4 C 1720.85 1078.48 1689.28 1140.13 1653.55 1187.88 C 1628.71 1221.09 1593.34 1255.32 1558.76 1278.73 C 1553.73 1281.96 1547.74 1281.74 1542.4 1284.28 C 1535.26 1287.67 1528.62 1294.26 1520.78 1295.91 C 1512.14 1297.74 1497.47 1285.49 1494.95 1277.47 C 1494.06 1274.63 1497.79 1271.75 1499.4 1269.97 C 1509.1 1261.08 1521.79 1254.9 1532.85 1247.6 C 1547.18 1238.09 1560.9 1227.71 1573.94 1216.51 C 1623.72 1173.9 1667.3 1099.25 1682.02 1035.39 C 1688.45 1007.48 1691.74 967.988 1692.88 939.87 C 1697.42 827.671 1654.45 710.135 1583.47 623.763 C 1575.3 613.828 1567.42 602.644 1558.61 593.157 C 1558.06 592.559 1557.5 591.965 1556.93 591.375 C 1547.34 598.871 1542.02 602.376 1530.97 607.455 C 1531.5 613.583 1531.53 618.267 1527.56 623.295 C 1516.07 637.843 1436.48 649.864 1415.62 652.42 C 1312.59 665.039 1208.92 648.651 1117.93 597.071 C 1082.62 577.057 1049.64 551.594 1017.75 526.62 C 991.044 546.095 973.98 574.384 942.697 592.481 C 851.798 645.063 750.655 676.138 646.162 647.711 C 611.158 638.189 553.024 619.826 526.936 592.941 C 519.07 584.834 530.963 574.629 537.422 571.028 C 533.632 566.749 532.625 565.697 530.031 560.67 C 351.004 701.538 266.702 999.608 416.823 1189.75 C 431.281 1207.99 447.882 1224.43 466.268 1238.71 C 483.245 1251.83 501.758 1263.22 519.868 1274.69 C 525.558 1278.29 537.291 1282.78 540.26 1288.83 C 541.091 1290.52 541.367 1292.42 541.049 1294.28 C 539.546 1303.27 526.274 1308.94 518.817 1311.59 C 510.884 1353.73 497.722 1458.29 539.999 1483.43 C 566.553 1467.32 572.931 1427.51 565.8 1399.51 C 564.37 1393.9 561.817 1385.47 561.793 1379.71 C 563.72 1368.49 579.798 1362.6 588.88 1360.08 C 594.046 1362.4 601.667 1365.52 603.368 1371.78 C 606.656 1383.89 605.155 1398.07 605.735 1410.48 C 607.101 1439.69 599.559 1456.85 585.184 1481.71 C 594.971 1489.59 600.783 1493.82 601.548 1507.43 C 604.249 1555.44 603.119 1603.96 612.029 1651.41 C 616.138 1673.29 626.22 1687.29 637.79 1705.34 C 630.627 1731.65 628.844 1760.75 633.89 1787.51 C 636.303 1800.31 639.399 1819.57 646.513 1830.13 C 685.064 1887.28 684.136 1754.17 682.084 1737.94 C 681.046 1729.74 674.911 1718.2 683.438 1709.99 C 706.985 1687.3 712.867 1712.23 727.466 1717.58 C 781.198 1737.27 839.731 1742.69 896.343 1747.64 C 1001.88 1758.59 1106.04 1755.95 1211.52 1746.43 C 1266.85 1741.44 1320.36 1736.74 1373.39 1717.81 C 1384.34 1720.6 1402.03 1727.45 1398.11 1742.13 C 1396.16 1749.45 1388.08 1755.73 1382.35 1760.51 C 1380.58 1784.89 1376.17 1827.48 1390.48 1850.11 C 1394.6 1856.64 1403.32 1852.58 1407.98 1848 C 1440.54 1816.03 1435.11 1763.01 1431.32 1721.59 C 1430.79 1715.85 1426.59 1706.04 1427.18 1700.62 C 1429.06 1683.14 1431.76 1665.82 1433.47 1648.27 C 1437.22 1607.08 1440.51 1565.84 1443.36 1524.58 C 1444.04 1514.54 1444.22 1483.73 1449.34 1476.71 C 1451.26 1474.08 1459.69 1471.21 1463.3 1469.88 C 1453.33 1440.67 1453.65 1383.08 1464.42 1353.71 C 1471.6 1334.15 1497.1 1346.07 1499.48 1364.98 C 1501.25 1379.12 1499.42 1390.48 1498.86 1404.71 C 1499.43 1428.62 1498.58 1464.68 1517.89 1482.14 C 1524.74 1488.35 1534.2 1475.27 1536.57 1469.53 C 1552.12 1431.77 1557.15 1381.4 1546.63 1341.83 C 1544.11 1333.34 1538.8 1322.38 1535.67 1314.46 C 1547.9 1284.37 1575.49 1289.31 1582.28 1317.54 C 1594.31 1367.61 1589.93 1433.58 1567.02 1479.45 C 1550.72 1512.06 1519.34 1520.91 1488.48 1502.93 C 1482.66 1561.33 1477.04 1618.99 1472.91 1677.71 C 1468.42 1741.59 1487.13 1821.22 1432.44 1868.32 C 1409.66 1887.94 1371.67 1886.87 1352.99 1862.72 C 1334.45 1838.73 1336.72 1795.96 1336.16 1766.69 C 1258.69 1776.09 1184.23 1788.12 1105.78 1791.01 C 1027.22 1793.91 953.211 1788.16 875.129 1781.75 C 819.058 1777.15 773.168 1776.72 719.127 1758.01 C 717.907 1788.4 718.257 1839.01 694.762 1860.96 C 673.378 1880.94 631.621 1876.01 613.897 1852.97 C 586.805 1819.89 591.357 1772.3 589.309 1732.05 C 589.005 1725.55 589.639 1708.77 588.429 1703.82 C 584.321 1687.02 575.864 1673.54 572.702 1655.45 C 564.359 1607.69 560.853 1556.98 557.889 1508.67 C 539.573 1512.73 526.356 1514.57 509.398 1503.56 C 489.537 1490.66 479.67 1467.98 475.101 1445.53 C 467.431 1406.99 468.344 1332.63 481.276 1296.8 C 351.455 1208.14 288.078 1093.76 299.968 934.48 C 307.991 827.003 331.682 730.459 394.208 640.611 C 423.629 597.874 480.474 536.142 526.55 511.33 z";
@@ -27146,13 +27147,14 @@ mod windows_overlay {
     }
 
     fn ensure_esp_worker() {
-        if ESP_WORKER_GENERATION
-            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
+        let current_gen = ESP_WORKER_GENERATION.load(Ordering::Acquire);
+        let sampler_alive = ESP_SAMPLER_ALIVE.load(Ordering::Acquire);
+        if current_gen != 0 && sampler_alive {
             return;
         }
-        start_esp_worker(1);
+        let next = if current_gen == 0 { 1 } else { next_esp_worker_generation(current_gen) };
+        ESP_WORKER_GENERATION.store(next, Ordering::Release);
+        start_esp_worker(next);
     }
 
     fn next_esp_worker_generation(generation: u64) -> u64 {
@@ -27339,6 +27341,14 @@ mod windows_overlay {
             }
         });
         thread::spawn(move || {
+            ESP_SAMPLER_ALIVE.store(true, Ordering::Release);
+            struct SamplerGuard;
+            impl Drop for SamplerGuard {
+                fn drop(&mut self) {
+                    ESP_SAMPLER_ALIVE.store(false, Ordering::Release);
+                }
+            }
+            let _guard = SamplerGuard;
             *ESP_SAMPLER_THREAD.lock() = Some(thread::current());
             // Keep a fixed frame deadline instead of sleeping after every read/render pass.
             // This prevents the read cost from accumulating on top of the requested interval.
@@ -27365,73 +27375,85 @@ mod windows_overlay {
                 if ESP_WORKER_GENERATION.load(Ordering::Acquire) != generation {
                     return;
                 }
-                let preset_revision = ESP_PRESET_REVISION.load(Ordering::Acquire);
-                // ponytail: the UI already publishes a revision only when a preset changes, so
-                // keep one immutable sampling snapshot instead of cloning inline SVG every tick.
-                if preset_revision != loaded_preset_revision {
-                    presets = HOOK_STATE
-                        .lock()
-                        .esp_presets
-                        .iter()
-                        .filter(|preset| preset.enabled)
-                        .cloned()
-                        .map(EspSamplingPreset::new)
-                        .collect::<Vec<_>>();
-                    loaded_preset_revision = preset_revision;
-                    read_frame = EspReadFrame::default();
-                }
-                if presets.is_empty() {
-                    read_frame = EspReadFrame::default();
-                    ESP_TARGET_SNAPSHOTS.lock().clear();
-                    crate::audio::update_esp_spatial_audio(Vec::new());
-                    had_shapes = false;
-                    let _ = send_latest(Vec::new());
-                    next_frame = Instant::now() + Duration::from_millis(16);
-                    thread::park_timeout(Duration::from_millis(50));
-                    continue;
-                }
-
-                let interval = presets
-                    .iter()
-                    .map(|sample| sample.preset.update_interval_ms.clamp(1, 1000))
-                    .min()
-                    .unwrap_or(33);
-                let mut frames = Vec::with_capacity(presets.len());
-                let mut snapshots = HashMap::with_capacity(presets.len());
-                let mut audio_updates = Vec::new();
-                read_frame.begin_sample();
-                for sample in &presets {
-                    let preset = &sample.preset;
-                    let (shapes, snapshot) = esp_shapes_for_preset(
-                        preset,
-                        sample.marker_asset.as_ref(),
-                        &mut read_frame,
-                        &mut audio_updates,
-                    );
-                    if let Some(snapshot) = snapshot {
-                        snapshots.insert(preset.id, snapshot);
+                let loop_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let preset_revision = ESP_PRESET_REVISION.load(Ordering::Acquire);
+                    // ponytail: the UI already publishes a revision only when a preset changes, so
+                    // keep one immutable sampling snapshot instead of cloning inline SVG every tick.
+                    if preset_revision != loaded_preset_revision {
+                        presets = HOOK_STATE
+                            .lock()
+                            .esp_presets
+                            .iter()
+                            .filter(|preset| preset.enabled)
+                            .cloned()
+                            .map(EspSamplingPreset::new)
+                            .collect::<Vec<_>>();
+                        loaded_preset_revision = preset_revision;
+                        read_frame = EspReadFrame::default();
                     }
-                    frames.push(EspRenderPreset {
-                        id: preset.id,
-                        smoothing_ms: preset.motion_smoothing_ms,
-                        shapes,
-                    });
-                }
-                *ESP_TARGET_SNAPSHOTS.lock() = snapshots;
-                had_shapes = frames.iter().any(|frame| !frame.shapes.is_empty());
-                crate::audio::update_esp_spatial_audio(audio_updates);
-                // Never queue behind presentation: only the newest sampled coordinates matter.
-                if !send_latest(frames) {
-                    restart_esp_worker_if_current(generation);
-                    return;
-                }
-                next_frame += Duration::from_millis(interval as u64);
-                let now = Instant::now();
-                if next_frame > now {
-                    thread::park_timeout(next_frame - now);
-                } else {
-                    // A slow frame must not make every following frame late.
-                    next_frame = now;
+                    if presets.is_empty() {
+                        read_frame = EspReadFrame::default();
+                        ESP_TARGET_SNAPSHOTS.lock().clear();
+                        crate::audio::update_esp_spatial_audio(Vec::new());
+                        had_shapes = false;
+                        let _ = send_latest(Vec::new());
+                        return Some(Duration::from_millis(50));
+                    }
+
+                    let interval = presets
+                        .iter()
+                        .map(|sample| sample.preset.update_interval_ms.clamp(1, 1000))
+                        .min()
+                        .unwrap_or(33);
+                    let mut frames = Vec::with_capacity(presets.len());
+                    let mut snapshots = HashMap::with_capacity(presets.len());
+                    let mut audio_updates = Vec::new();
+                    read_frame.begin_sample();
+                    for sample in &presets {
+                        let preset = &sample.preset;
+                        let (shapes, snapshot) = esp_shapes_for_preset(
+                            preset,
+                            sample.marker_asset.as_ref(),
+                            &mut read_frame,
+                            &mut audio_updates,
+                        );
+                        if let Some(snapshot) = snapshot {
+                            snapshots.insert(preset.id, snapshot);
+                        }
+                        frames.push(EspRenderPreset {
+                            id: preset.id,
+                            smoothing_ms: preset.motion_smoothing_ms,
+                            shapes,
+                        });
+                    }
+                    *ESP_TARGET_SNAPSHOTS.lock() = snapshots;
+                    had_shapes = frames.iter().any(|frame| !frame.shapes.is_empty());
+                    crate::audio::update_esp_spatial_audio(audio_updates);
+                    // Never queue behind presentation: only the newest sampled coordinates matter.
+                    if !send_latest(frames) {
+                        return None;
+                    }
+                    Some(Duration::from_millis(interval as u64))
+                }));
+
+                match loop_result {
+                    Ok(Some(frame_duration)) => {
+                        next_frame += frame_duration;
+                        let now = Instant::now();
+                        if next_frame > now {
+                            thread::park_timeout(next_frame - now);
+                        } else {
+                            next_frame = now;
+                        }
+                    }
+                    Ok(None) => {
+                        restart_esp_worker_if_current(generation);
+                        return;
+                    }
+                    Err(_panic) => {
+                        read_frame = EspReadFrame::default();
+                        thread::sleep(Duration::from_millis(50));
+                    }
                 }
             }
         });

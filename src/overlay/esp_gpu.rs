@@ -109,7 +109,10 @@ impl EspGpuRenderer {
                 factory.CreateSwapChainForComposition(&d3d, &desc, None::<&IDXGIOutput>)?;
 
             let composition: IDCompositionDevice = DCompositionCreateDevice(&dxgi_device)?;
-            let composition_target = composition.CreateTargetForHwnd(hwnd, true)?;
+            let composition_target = match composition.CreateTargetForHwnd(hwnd, true) {
+                Ok(target) => target,
+                Err(_) => composition.CreateTargetForHwnd(hwnd, false)?,
+            };
             let visual = composition.CreateVisual()?;
             visual.SetContent(&swap_chain)?;
             composition_target.SetRoot(&visual)?;
@@ -503,6 +506,15 @@ fn create_d3d_device() -> Result<ID3D11Device> {
             }
         }
         bail!("unable to create a Direct3D 11 device")
+    }
+}
+
+impl Drop for EspGpuRenderer {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = self._composition_target.SetRoot(None::<&IDCompositionVisual>);
+            let _ = self._composition.Commit();
+        }
     }
 }
 
