@@ -1284,8 +1284,8 @@ impl CrosshairApp {
         } else {
             egui::Window::new(title)
                 .id(egui::Id::new(id))
-                .default_size(vec2(860.0, 620.0))
-                .min_size(vec2(480.0, 280.0))
+                .default_size(vec2(580.0, 420.0))
+                .min_size(vec2(380.0, 240.0))
                 .collapsible(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
@@ -1454,27 +1454,29 @@ impl CrosshairApp {
                             .inner_margin(egui::Margin::symmetric(8, 4)),
                     )
                     .show(ctx, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(Self::material_icon_text(0xe30c, 17.0));
-                            ui.label(RichText::new("MacroNest").strong());
-                            ui.label(RichText::new("Scan results").weak());
-                            let drag = ui.allocate_response(
-                                vec2((ui.available_width() - 36.0).max(0.0), 28.0),
-                                Sense::click_and_drag(),
-                            );
-                            if drag.drag_started() {
-                                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                            }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
                                 .add_sized(
-                                    [32.0, 28.0],
-                                    Button::new(Self::material_icon_text(0xe5cd, 17.0)),
+                                    [30.0, 26.0],
+                                    Button::new(Self::material_icon_text(0xe5cd, 16.0)),
                                 )
                                 .on_hover_text("Unpin")
                                 .clicked()
                             {
                                 unpin = true;
                             }
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                ui.label(Self::material_icon_text(0xe30c, 17.0));
+                                ui.label(RichText::new("MacroNest").strong());
+                                ui.add(egui::Label::new(RichText::new("Scan results").weak().small()).truncate());
+                                let drag = ui.allocate_response(
+                                    ui.available_size(),
+                                    Sense::click_and_drag(),
+                                );
+                                if drag.drag_started() {
+                                    ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                                }
+                            });
                         });
                     });
                 egui::CentralPanel::default()
@@ -1575,7 +1577,7 @@ impl CrosshairApp {
         let rect = ctx.content_rect();
         // Keep resize hitboxes clear of egui scrollbars along the viewport edges.
         let edge = 3.0;
-        let corner = 18.0;
+        let corner = 10.0;
         let handles = [
             (
                 "n",
@@ -1652,6 +1654,14 @@ impl CrosshairApp {
                     }
                 });
         }
+        // Always paint an explicit crisp border around the entire viewport so the right and bottom borders are 100% visible
+        ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("memory-popup-viewport-border")))
+            .rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(1.0, Color32::from_rgb(50, 62, 80)),
+                egui::StrokeKind::Inside,
+            );
     }
 
     fn memory_popup_frame(ctx: &egui::Context) -> Frame {
@@ -1693,16 +1703,16 @@ impl CrosshairApp {
                     .inner_margin(egui::Margin::symmetric(8, 4)),
             )
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(Self::material_icon_text(0xe30c, 17.0));
-                    ui.label(RichText::new("MacroNest").strong());
-                    ui.label(RichText::new(title).weak().small());
-                    let drag = ui.allocate_response(
-                        vec2((ui.available_width() - 98.0).max(0.0), 28.0),
-                        Sense::click_and_drag(),
-                    );
-                    if drag.drag_started() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_sized(
+                            [30.0, 26.0],
+                            Button::new(Self::material_icon_text(0xe5cd, 16.0)),
+                        )
+                        .on_hover_text(Self::tr_lang(language, "Close", "Đóng"))
+                        .clicked()
+                    {
+                        *open = false;
                     }
                     let pin_label = if pinned {
                         Self::tr_lang(language, "Unpin", "Bỏ ghim")
@@ -1710,26 +1720,36 @@ impl CrosshairApp {
                         Self::tr_lang(language, "Pin", "Ghim")
                     };
                     if ui
-                        .add_sized([68.0, 28.0], Button::new(pin_label))
+                        .add_sized([64.0, 26.0], Button::new(pin_label))
                         .on_hover_text(if pinned {
-                            Self::tr_lang(language, "Dock into main MacroNest window", "Thu gọn / nhúng vào cửa sổ chính MacroNest")
+                            Self::tr_lang(
+                                language,
+                                "Dock into main MacroNest window",
+                                "Thu gọn / nhúng vào cửa sổ chính MacroNest",
+                            )
                         } else {
-                            Self::tr_lang(language, "Detach as a separate floating window", "Tách thành cửa sổ nổi riêng biệt")
+                            Self::tr_lang(
+                                language,
+                                "Detach as a separate floating window",
+                                "Tách thành cửa sổ nổi riêng biệt",
+                            )
                         })
                         .clicked()
                     {
                         *toggle_pin = true;
                     }
-                    if ui
-                        .add_sized(
-                            [32.0, 28.0],
-                            Button::new(Self::material_icon_text(0xe5cd, 17.0)),
-                        )
-                        .on_hover_text(Self::tr_lang(language, "Close", "Đóng"))
-                        .clicked()
-                    {
-                        *open = false;
-                    }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.label(Self::material_icon_text(0xe30c, 17.0));
+                        ui.label(RichText::new("MacroNest").strong());
+                        ui.add(egui::Label::new(RichText::new(title).weak().small()).truncate());
+                        let drag = ui.allocate_response(
+                            ui.available_size(),
+                            Sense::click_and_drag(),
+                        );
+                        if drag.drag_started() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                        }
+                    });
                 });
             });
     }
@@ -3092,8 +3112,10 @@ impl CrosshairApp {
                         self.begin_saved_memory_value_edit(index, position);
                     }
                 }
-                let stt_width = 36.0;
-                let header_column_width = ((ui.available_width() - stt_width - 21.0) / 4.0).max(70.0);
+                let stt_width = 32.0;
+                let available_table_width = (ui.available_width() - stt_width - 16.0).max(120.0);
+                let header_column_width = (available_table_width / 4.0).max(65.0);
+                let table_min_width = stt_width + header_column_width * 4.0;
                 let mut sort_address = false;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
@@ -3136,7 +3158,7 @@ impl CrosshairApp {
                 ui.separator();
                 let row_height = 26.0;
                 let count = self.memory_panel.saved.len();
-                egui::ScrollArea::vertical()
+                egui::ScrollArea::both()
                     .id_salt("saved-memory-addresses")
                     .auto_shrink([false, false])
                     .max_height(ui.available_height())
@@ -3166,8 +3188,8 @@ impl CrosshairApp {
                             let mut persist_pointer_changes = false;
                             let mut open_disassembler = None;
                             let mut row_hits = Vec::new();
-                            let row_width = ui.available_width();
-                            let column_width = ((row_width - stt_width - 21.0) / 4.0).max(70.0);
+                            let row_width = ui.available_width().max(table_min_width);
+                            let column_width = ((row_width - stt_width - 16.0) / 4.0).max(65.0);
                             let full_row_rect = egui::Rect::from_min_size(
                                 ui.next_widget_position(),
                                 vec2(row_width, row_height),
@@ -8270,8 +8292,8 @@ impl CrosshairApp {
         } else {
             egui::Window::new(title)
                 .id(egui::Id::new(popup_id))
-                .default_size(vec2(760.0, 520.0))
-                .min_size(vec2(520.0, 300.0))
+                .default_size(vec2(580.0, 420.0))
+                .min_size(vec2(380.0, 240.0))
                 .collapsible(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
@@ -9141,7 +9163,8 @@ impl CrosshairApp {
             }
         } else {
             egui::Window::new(title)
-                .default_size(vec2(760.0, 500.0))
+                .default_size(vec2(580.0, 400.0))
+                .min_size(vec2(360.0, 240.0))
                 .collapsible(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
@@ -10022,8 +10045,8 @@ impl CrosshairApp {
         } else {
             egui::Window::new(title)
                 .id(egui::Id::new("memory-code-compare"))
-                .default_size(vec2(1100.0, 520.0))
-                .min_size(vec2(760.0, 300.0))
+                .default_size(vec2(680.0, 440.0))
+                .min_size(vec2(420.0, 260.0))
                 .collapsible(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
@@ -10400,7 +10423,8 @@ impl CrosshairApp {
             }
         } else {
             egui::Window::new(&title)
-                .default_size(vec2(620.0, 440.0))
+                .default_size(vec2(560.0, 400.0))
+                .min_size(vec2(360.0, 240.0))
                 .collapsible(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
@@ -11205,8 +11229,8 @@ impl CrosshairApp {
         }
         egui::Window::new(&title)
             .id(egui::Id::new("memory-view-main"))
-            .default_size(vec2(three_column_width, 820.0))
-            .min_size(vec2(420.0, 360.0))
+            .default_size(vec2(580.0, 440.0))
+            .min_size(vec2(380.0, 240.0))
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
