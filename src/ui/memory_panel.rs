@@ -13975,7 +13975,7 @@ impl CrosshairApp {
                 }
             }
         }
-        if !self.memory_panel.hotkeys.is_empty() || self.memory_panel.scanning {
+        if self.memory_panel.scanning {
             ctx.request_repaint_after(Duration::from_millis(35));
         }
     }

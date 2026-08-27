@@ -6618,6 +6618,8 @@ mod windows_overlay {
             // ponytail: UI drains this every frame; cap protects against a stalled UI.
             if events.len() < 128 {
                 events.push(binding.clone());
+                drop(events);
+                request_ui_repaint();
             }
         }
 

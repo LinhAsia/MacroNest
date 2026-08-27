@@ -4,6 +4,7 @@ use crate::overlay::OverlayCommand;
 use crate::ui::{CrosshairApp, VisionCaptureTarget, ZoomPreviewView};
 use crate::window_list;
 use eframe::egui::{self, Button, Color32, DragValue, RichText, Sense, TextBuffer, TextEdit, vec2};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy)]
@@ -14,6 +15,63 @@ struct MonitorLayoutMetrics {
     work_top: f32,
     work_width: f32,
     work_height: f32,
+}
+
+enum WindowPreviewJobKind {
+    FullWindow,
+    ClientOnly,
+}
+
+struct WindowPreviewJob {
+    cache_id: u32,
+    target_title: Option<String>,
+    extra_titles: Vec<String>,
+    match_duplicate_window_titles: bool,
+    kind: WindowPreviewJobKind,
+    ui_tx: crossbeam_channel::Sender<crate::overlay::UiCommand>,
+}
+
+static WINDOW_PREVIEW_WORKER_TX: OnceLock<std::sync::mpsc::SyncSender<WindowPreviewJob>> =
+    OnceLock::new();
+
+fn dispatch_window_preview_job(job: WindowPreviewJob) {
+    let tx = WINDOW_PREVIEW_WORKER_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<WindowPreviewJob>(16);
+        std::thread::Builder::new()
+            .name("window-preview-worker".to_string())
+            .spawn(move || {
+                while let Ok(job) = rx.recv() {
+                    let frame = match job.kind {
+                        WindowPreviewJobKind::FullWindow => {
+                            crate::window_list::capture_window_preview_with_candidates(
+                                job.target_title.as_deref(),
+                                &job.extra_titles,
+                                job.match_duplicate_window_titles,
+                                720,
+                            )
+                        }
+                        WindowPreviewJobKind::ClientOnly => {
+                            crate::window_list::capture_window_client_preview_with_candidates(
+                                job.target_title.as_deref(),
+                                &job.extra_titles,
+                                job.match_duplicate_window_titles,
+                                720,
+                            )
+                        }
+                    };
+                    let _ = job.ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
+                        cache_id: job.cache_id,
+                        source_window_key: job.target_title,
+                        source_window_extra_keys: job.extra_titles,
+                        match_duplicate_window_titles: job.match_duplicate_window_titles,
+                        frame,
+                    });
+                }
+            })
+            .expect("failed to spawn window preview worker");
+        tx
+    });
+    let _ = tx.try_send(job);
 }
 
 impl CrosshairApp {
@@ -5021,24 +5079,13 @@ impl CrosshairApp {
                 .insert(cache_id, Instant::now());
             self.window_preview_loading.insert(cache_id);
 
-            let ui_tx = self.ui_tx.clone();
-            let target_title = target_window_title.cloned();
-            let extra_titles = extra_target_window_titles.to_vec();
-
-            std::thread::spawn(move || {
-                let frame = crate::window_list::capture_window_preview_with_candidates(
-                    target_title.as_deref(),
-                    &extra_titles,
-                    match_duplicate_window_titles,
-                    720,
-                );
-                let _ = ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
-                    cache_id,
-                    source_window_key: target_title,
-                    source_window_extra_keys: extra_titles,
-                    match_duplicate_window_titles,
-                    frame,
-                });
+            dispatch_window_preview_job(WindowPreviewJob {
+                cache_id,
+                target_title: target_window_title.cloned(),
+                extra_titles: extra_target_window_titles.to_vec(),
+                match_duplicate_window_titles,
+                kind: WindowPreviewJobKind::FullWindow,
+                ui_tx: self.ui_tx.clone(),
             });
         }
 
@@ -5076,24 +5123,13 @@ impl CrosshairApp {
                 .insert(cache_id, Instant::now());
             self.window_preview_loading.insert(cache_id);
 
-            let ui_tx = self.ui_tx.clone();
-            let target_title = target_window_title.cloned();
-            let extra_titles = extra_target_window_titles.to_vec();
-
-            std::thread::spawn(move || {
-                let frame = crate::window_list::capture_window_client_preview_with_candidates(
-                    target_title.as_deref(),
-                    &extra_titles,
-                    match_duplicate_window_titles,
-                    720,
-                );
-                let _ = ui_tx.send(crate::overlay::UiCommand::WindowPreviewLoaded {
-                    cache_id,
-                    source_window_key: target_title,
-                    source_window_extra_keys: extra_titles,
-                    match_duplicate_window_titles,
-                    frame,
-                });
+            dispatch_window_preview_job(WindowPreviewJob {
+                cache_id,
+                target_title: target_window_title.cloned(),
+                extra_titles: extra_target_window_titles.to_vec(),
+                match_duplicate_window_titles,
+                kind: WindowPreviewJobKind::ClientOnly,
+                ui_tx: self.ui_tx.clone(),
             });
         }
 

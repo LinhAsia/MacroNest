@@ -953,7 +953,6 @@ pub struct CrosshairApp {
     protractor_calibration_points: Option<Vec<(i32, i32)>>,
     distance_measurement_active: bool,
     native_capture_in_progress: bool,
-    last_working_set_trim_at: Instant,
 }
 
 impl CrosshairApp {
@@ -1316,7 +1315,6 @@ impl CrosshairApp {
             panel_warmup_target: Some(initial_active_panel),
             panel_warmup_frames_remaining: 1,
             warmed_panels: Vec::new(),
-            last_working_set_trim_at: Instant::now(),
         };
         app.state.ocr_language = crate::ocr::OCR_DEFAULT_CODE.to_owned();
         app.interception_installed = app.paths.interception_dll.exists();
@@ -15637,13 +15635,7 @@ impl eframe::App for CrosshairApp {
         }
         if self.startup_shell_frames_remaining > 0 {
             self.startup_shell_frames_remaining -= 1;
-            if self.startup_shell_frames_remaining == 0 {
-                crate::platform::trim_working_set();
-            }
             ctx.request_repaint();
-        } else if self.last_working_set_trim_at.elapsed() >= Duration::from_secs(20) {
-            self.last_working_set_trim_at = Instant::now();
-            crate::platform::trim_working_set();
         }
         if self.state.active_panel == AppPanel::Zoom {
             self.state.active_panel = AppPanel::Pin;
