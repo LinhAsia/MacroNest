@@ -1244,7 +1244,7 @@ impl CrosshairApp {
         id: &'static str,
         title: &'static str,
         active: bool,
-        render: fn(&mut Self, &egui::Context),
+        render: fn(&mut Self, &mut egui::Ui),
     ) -> bool {
         if !active {
             return true;
@@ -1275,7 +1275,11 @@ impl CrosshairApp {
                     &mut toggle_pin,
                     &mut open,
                 );
-                render(self, ctx);
+                egui::CentralPanel::default()
+                    .frame(Self::memory_popup_frame(ctx))
+                    .show(ctx, |ui| {
+                        render(self, ui);
+                    });
                 Self::render_memory_popup_resize_handles(ctx);
             });
             if toggle_pin {
@@ -1284,7 +1288,7 @@ impl CrosshairApp {
         } else {
             egui::Window::new(title)
                 .id(egui::Id::new(id))
-                .default_size(vec2(580.0, 420.0))
+                .default_size(vec2(640.0, 440.0))
                 .min_size(vec2(380.0, 240.0))
                 .collapsible(false)
                 .open(&mut open)
@@ -1303,7 +1307,7 @@ impl CrosshairApp {
                         }
                     });
                     ui.separator();
-                    render(self, ctx);
+                    render(self, ui);
                 });
         }
         open
@@ -4067,14 +4071,11 @@ impl CrosshairApp {
         self.render_saved_memory_value_editor(ui.ctx());
     }
 
-    fn render_memory_settings(&mut self, ctx: &egui::Context) {
+    fn render_memory_settings(&mut self, ui: &mut egui::Ui) {
         if !self.memory_panel.memory_settings_open {
             return;
         }
         let mut changed = false;
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
                 ui.label("Debugger method");
                 changed |= ui
                     .radio_value(
@@ -4164,7 +4165,6 @@ impl CrosshairApp {
                         )
                         .changed();
                 });
-            });
         if changed {
             self.persist();
         }
@@ -4585,15 +4585,12 @@ impl CrosshairApp {
         self.memory_panel.show_dll_studio = open;
     }
 
-    fn render_saved_address_library(&mut self, ctx: &egui::Context) {
+    fn render_saved_address_library(&mut self, ui: &mut egui::Ui) {
         if !self.memory_panel.saved_library_open {
             return;
         }
         let mut load = None;
         let mut delete = None;
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
                 let mut apps = self
                     .state
                     .memory_pointer_list
@@ -4674,7 +4671,6 @@ impl CrosshairApp {
                         ui.label(RichText::new("No saved addresses").weak())
                     });
                 }
-            });
         if let Some(index) = load
             && let Some(entry) = self.state.memory_pointer_list.get(index).cloned()
             && let Some(value_type) = memory_type_from_config(&entry.value_type)
@@ -4731,7 +4727,8 @@ impl CrosshairApp {
         }
     }
 
-    fn render_memory_code_list(&mut self, ctx: &egui::Context) {
+    fn render_memory_code_list(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
         if !self.memory_panel.code_list_open {
             return;
         }
@@ -4769,10 +4766,6 @@ impl CrosshairApp {
         }
 
         let mut pending_action = None;
-
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
                 if let Some(edit_idx) = self.memory_panel.edit_code_name_index {
                     if edit_idx < self.state.memory_code_list.len() {
                         ui.horizontal(|ui| {
@@ -5081,7 +5074,6 @@ impl CrosshairApp {
                         ui.label(RichText::new("No saved instructions").weak());
                     });
                 }
-            });
 
         match pending_action {
             Some(CodeAction::OpenDisassembler(index)) => {
@@ -5146,7 +5138,7 @@ impl CrosshairApp {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
         #[cfg(windows)]
-        self.render_code_relocate_choice_dialog(ctx);
+        self.render_code_relocate_choice_dialog(&ctx);
     }
 
     #[cfg(windows)]
@@ -6559,7 +6551,8 @@ impl CrosshairApp {
         dialog.status = "Candidate saved to MEMORY addresses and library.".to_owned();
     }
 
-    fn render_entity_list_dialog(&mut self, ctx: &egui::Context) {
+    fn render_entity_list_dialog(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
         self.poll_entity_list_jobs();
         let Some(mut dialog) = self.memory_panel.entity_list_dialog.take() else {
             return;
@@ -6570,10 +6563,7 @@ impl CrosshairApp {
         {
             self.refresh_entity_list_preview(&mut dialog, false);
         }
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
-            egui::ScrollArea::vertical().id_salt("entity-list-outer-scroll").show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("entity-list-outer-scroll").show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("Add selected addresses").clicked() {
                         self.add_selected_entity_addresses(&mut dialog);
@@ -6990,7 +6980,6 @@ impl CrosshairApp {
                     );
                 }
             });
-        });
         self.memory_panel.entity_list_dialog = Some(dialog);
     }
 
@@ -7343,7 +7332,8 @@ impl CrosshairApp {
         };
     }
 
-    fn render_camera_matrix_dialog(&mut self, ctx: &egui::Context) {
+    fn render_camera_matrix_dialog(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
         let Some(mut dialog) = self.memory_panel.camera_matrix_dialog.take() else {
             return;
         };
@@ -7423,10 +7413,7 @@ impl CrosshairApp {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
         let mut persist_camera_inputs = false;
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
+        ui.horizontal(|ui| {
                     ui.label("X");
                     persist_camera_inputs |= ui.add(
                         egui::TextEdit::singleline(&mut dialog.x)
@@ -7658,7 +7645,6 @@ impl CrosshairApp {
                         }
                     }
                 });
-            });
         if persist_camera_inputs {
             self.state.memory_camera_x.clone_from(&dialog.x);
             self.state.memory_camera_y.clone_from(&dialog.y);
@@ -7675,7 +7661,8 @@ impl CrosshairApp {
         self.memory_panel.camera_matrix_dialog = Some(dialog);
     }
 
-    fn render_stable_pointer_dialog(&mut self, ctx: &egui::Context) {
+    fn render_stable_pointer_dialog(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
         let Some(mut dialog) = self.memory_panel.stable_pointer_dialog.take() else {
             return;
         };
@@ -7790,10 +7777,7 @@ impl CrosshairApp {
 
         let mut validate = false;
         let mut add = None;
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
-                ui.label(&dialog.status);
+        ui.label(&dialog.status);
                 if dialog.rx.is_some() {
                     let scanned = dialog.progress.load(Ordering::Relaxed);
                     ui.label(format!("Read {:.1} MB", scanned as f64 / 1_048_576.0));
@@ -8156,7 +8140,6 @@ impl CrosshairApp {
                         });
                     }
                 });
-            });
 
         if validate {
             self.validate_stable_pointer_candidates(&mut dialog);
@@ -9577,7 +9560,7 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn render_disassembler_body(&mut self, ctx: &egui::Context) {
+    fn render_disassembler_body(&mut self, ui: &mut egui::Ui) {
         let Some(dialog) = self.memory_panel.disassembler_dialog.as_ref() else {
             return;
         };
@@ -9589,10 +9572,7 @@ impl CrosshairApp {
         let mut add_code = None;
         let mut navigation_step = dialog.navigation_step.clone();
         let mut search = dialog.search.clone();
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
+        ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(format_prefixed_memory_address(dialog.address))
                             .monospace()
@@ -9809,7 +9789,6 @@ impl CrosshairApp {
                         }
                     }
                 }
-            });
         if let Some(dialog) = self.memory_panel.disassembler_dialog.as_mut() {
             dialog.navigation_step = navigation_step;
             dialog.search = search;
@@ -11073,14 +11052,11 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn render_memory_module_list(&mut self, ctx: &egui::Context) {
+    fn render_memory_module_list(&mut self, ui: &mut egui::Ui) {
         let Some(dialog) = self.memory_panel.module_list_dialog.as_mut() else {
             return;
         };
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
-                if !dialog.status.is_empty() {
+        if !dialog.status.is_empty() {
                     ui.label(RichText::new(&dialog.status).color(Color32::LIGHT_RED));
                 }
                 ui.add(
@@ -11118,7 +11094,6 @@ impl CrosshairApp {
                         });
                     }
                 });
-            });
     }
 
 
@@ -12673,32 +12648,28 @@ impl CrosshairApp {
         }
     }
 
-    fn render_memory_address_group_dialog(&mut self, ctx: &egui::Context) {
+    fn render_memory_address_group_dialog(&mut self, ui: &mut egui::Ui) {
         let Some(mut dialog) = self.memory_panel.address_group_dialog.take() else {
             return;
         };
         let mut keep_open = true;
-        egui::CentralPanel::default()
-            .frame(Self::memory_popup_frame(ctx))
-            .show(ctx, |ui| {
-                ui.label("Group name");
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut dialog.name)
-                        .desired_width(ui.available_width()),
-                );
-                response.request_focus();
-                let submit = response.lost_focus()
-                    && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                ui.horizontal(|ui| {
-                    if (ui.button("Add").clicked() || submit) && !dialog.name.trim().is_empty() {
-                        self.add_saved_addresses_to_group(&dialog.indices, dialog.name.trim());
-                        keep_open = false;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        keep_open = false;
-                    }
-                });
-            });
+        ui.label("Group name");
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut dialog.name)
+                .desired_width(ui.available_width()),
+        );
+        response.request_focus();
+        let submit = response.lost_focus()
+            && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        ui.horizontal(|ui| {
+            if (ui.button("Add").clicked() || submit) && !dialog.name.trim().is_empty() {
+                self.add_saved_addresses_to_group(&dialog.indices, dialog.name.trim());
+                keep_open = false;
+            }
+            if ui.button("Cancel").clicked() {
+                keep_open = false;
+            }
+        });
         if keep_open {
             self.memory_panel.address_group_dialog = Some(dialog);
         }
