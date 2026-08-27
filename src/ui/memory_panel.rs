@@ -158,6 +158,7 @@ struct PointerSpec {
     offsets: Vec<usize>,
 }
 
+#[derive(Clone)]
 struct StablePointerCandidate {
     source_address: usize,
     expected_value: ScanValue,
@@ -182,6 +183,23 @@ struct StablePointerFilterResult {
     result: Result<Vec<ScanCandidate>, String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum StablePointerStatusFilter {
+    #[default]
+    All,
+    VerifiedOnly,
+    ValueChangedOnly,
+    BrokenOnly,
+}
+
+struct StablePointerValidationResult {
+    pid: u32,
+    candidates: Vec<StablePointerCandidate>,
+    verified: usize,
+    changed: usize,
+    broken: usize,
+}
+
 struct StablePointerDialog {
     source_addresses: Vec<usize>,
     source_pid: u32,
@@ -194,10 +212,11 @@ struct StablePointerDialog {
     progress: Arc<AtomicUsize>,
     limits: PointerScanLimits,
     filter: String,
+    filter_value: String,
+    filter_status: StablePointerStatusFilter,
     exe_only: bool,
     last_live_refresh: Instant,
-    validation_pid: Option<u32>,
-    validation_cursor: usize,
+    validation_rx: Option<Receiver<StablePointerValidationResult>>,
     filter_rx: Option<Receiver<StablePointerFilterResult>>,
 }
 
@@ -1255,6 +1274,7 @@ impl CrosshairApp {
         if toggle_pin {
             if pinned {
                 self.memory_panel.unpinned_memory_popups.insert(id);
+                open = false;
             } else {
                 self.memory_panel.unpinned_memory_popups.remove(id);
             }
@@ -2165,7 +2185,7 @@ impl CrosshairApp {
                 .is_some_and(|dialog| {
                     !dialog.candidates.is_empty()
                         && dialog.rx.is_none()
-                        && dialog.validation_pid.is_none()
+                        && dialog.validation_rx.is_none()
                         && dialog.filter_rx.is_none()
                 });
             let enabled = self.memory_panel.process_pid.is_some()
@@ -5745,10 +5765,11 @@ impl CrosshairApp {
                     progress,
                     limits,
                     filter: String::new(),
+                    filter_value: String::new(),
+                    filter_status: StablePointerStatusFilter::All,
                     exe_only: false,
                     last_live_refresh: Instant::now(),
-                    validation_pid: None,
-                    validation_cursor: 0,
+                    validation_rx: None,
                     filter_rx: None,
                 });
                 return;
@@ -5785,10 +5806,11 @@ impl CrosshairApp {
             progress,
             limits,
             filter: String::new(),
+            filter_value: String::new(),
+            filter_status: StablePointerStatusFilter::All,
             exe_only: false,
             last_live_refresh: Instant::now(),
-            validation_pid: None,
-            validation_cursor: 0,
+            validation_rx: None,
             filter_rx: None,
         });
     }
@@ -7694,6 +7716,21 @@ impl CrosshairApp {
                 }
             }
         }
+        if let Some(rx) = dialog.validation_rx.as_ref()
+            && let Ok(res) = rx.try_recv()
+        {
+            dialog.validation_rx = None;
+            dialog.candidates = res.candidates;
+            dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+            dialog.status = format!(
+                "PID {}: {} verified, {} resolved with a different value, {} broken across {} target(s).",
+                res.pid,
+                res.verified,
+                res.changed,
+                res.broken,
+                dialog.source_addresses.len()
+            );
+        }
 
         let mut validate = false;
         let mut add = None;
@@ -7716,7 +7753,7 @@ impl CrosshairApp {
                         .add_enabled(
                             new_process
                                 && !dialog.candidates.is_empty()
-                                && dialog.validation_pid.is_none()
+                                && dialog.validation_rx.is_none()
                                 && dialog.filter_rx.is_none(),
                             Button::new("Validate after restart"),
                         )
@@ -7724,22 +7761,23 @@ impl CrosshairApp {
                     {
                         validate = true;
                     }
-                    if dialog.validation_pid.is_some() || dialog.filter_rx.is_some() {
+                    if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
                         ui.spinner();
                     }
                     if ui
                         .add_enabled(
-                            dialog.selected.is_some() && dialog.filter_rx.is_none(),
+                            dialog.selected.is_some() && dialog.filter_rx.is_none() && dialog.validation_rx.is_none(),
                             Button::new("Save selected pointer"),
                         )
                         .clicked()
                     {
                         add = Some(true);
                     }
+                    ui.separator();
                     let filter_resp = ui.add(
                         egui::TextEdit::singleline(&mut dialog.filter)
-                            .desired_width(170.0)
-                            .hint_text(RichText::new("Filter module, value, address...").weak()),
+                            .desired_width(130.0)
+                            .hint_text(RichText::new("Filter module, path...").weak()),
                     );
                     Self::apply_vietnamese_input_if_changed(
                         &filter_resp,
@@ -7747,6 +7785,31 @@ impl CrosshairApp {
                         self.state.vietnamese_input_mode,
                         &mut dialog.filter,
                     );
+                    let val_filter_resp = ui.add(
+                        egui::TextEdit::singleline(&mut dialog.filter_value)
+                            .desired_width(105.0)
+                            .hint_text(RichText::new("Search value...").weak()),
+                    );
+                    Self::apply_vietnamese_input_if_changed(
+                        &val_filter_resp,
+                        self.state.vietnamese_input_enabled,
+                        self.state.vietnamese_input_mode,
+                        &mut dialog.filter_value,
+                    );
+                    egui::ComboBox::from_id_salt("stable-pointer-status-filter")
+                        .width(85.0)
+                        .selected_text(match dialog.filter_status {
+                            StablePointerStatusFilter::All => "All",
+                            StablePointerStatusFilter::VerifiedOnly => "Verified",
+                            StablePointerStatusFilter::ValueChangedOnly => "Changed",
+                            StablePointerStatusFilter::BrokenOnly => "Broken",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::All, "All");
+                            ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::VerifiedOnly, "Verified");
+                            ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::ValueChangedOnly, "Changed");
+                            ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::BrokenOnly, "Broken");
+                        });
                     ui.checkbox(&mut dialog.exe_only, "EXE only");
                 });
                 ui.separator();
@@ -7802,6 +7865,7 @@ impl CrosshairApp {
                 });
                 ui.separator();
                 let filter = dialog.filter.trim().to_ascii_lowercase();
+                let filter_val = dialog.filter_value.trim().to_ascii_lowercase();
                 let visible_indices = dialog
                     .candidates
                     .iter()
@@ -7811,91 +7875,77 @@ impl CrosshairApp {
                         if dialog.exe_only && !module.ends_with(".exe") {
                             return None;
                         }
-                        if filter.is_empty() {
-                            return Some(index);
+                        match dialog.filter_status {
+                            StablePointerStatusFilter::All => {}
+                            StablePointerStatusFilter::VerifiedOnly => {
+                                if candidate.valid != Some(true) {
+                                    return None;
+                                }
+                            }
+                            StablePointerStatusFilter::ValueChangedOnly => {
+                                if candidate.valid.is_some() || candidate.observed_value.is_none() {
+                                    return None;
+                                }
+                            }
+                            StablePointerStatusFilter::BrokenOnly => {
+                                if candidate.valid != Some(false) {
+                                    return None;
+                                }
+                            }
                         }
 
-                        let module_match = module.contains(&filter);
-                        let root_match = format!("{}+{:x}", module, candidate.path.module_offset).contains(&filter);
-                        let offsets_match = candidate
-                            .path
-                            .offsets
-                            .iter()
-                            .any(|offset| format!("{offset:x}").contains(&filter));
-                        let address_match = candidate.resolved_address.is_some_and(|addr| {
-                            format!("{addr:x}").contains(&filter) || format!("0x{addr:x}").contains(&filter)
-                        });
-                        let target_match = format!("{:x}", candidate.source_address).contains(&filter)
-                            || format!("0x{:x}", candidate.source_address).contains(&filter);
-                        let value_match = candidate.observed_value.is_some_and(|v| {
-                            editable_scan_value(v, false).to_ascii_lowercase().contains(&filter)
-                        });
-                        let live_match = candidate.live_value.is_some_and(|v| {
-                            editable_scan_value(v, false).to_ascii_lowercase().contains(&filter)
-                        });
-                        let expected_match =
-                            editable_scan_value(candidate.expected_value, false).to_ascii_lowercase().contains(&filter);
-                        let state_match = match candidate.valid {
-                            Some(true) => "verified",
-                            Some(false) => "broken",
-                            None if candidate.observed_value.is_some() => "value changed",
-                            None => "not checked",
+                        if !filter.is_empty() {
+                            let module_match = module.contains(&filter);
+                            let root_match = format!("{}+{:x}", module, candidate.path.module_offset).contains(&filter);
+                            let offsets_match = candidate
+                                .path
+                                .offsets
+                                .iter()
+                                .any(|offset| format!("{offset:x}").contains(&filter));
+                            let address_match = candidate.resolved_address.is_some_and(|addr| {
+                                format!("{addr:x}").contains(&filter) || format!("0x{addr:x}").contains(&filter)
+                            });
+                            let target_match = format!("{:x}", candidate.source_address).contains(&filter)
+                                || format!("0x{:x}", candidate.source_address).contains(&filter);
+                            if !(module_match || root_match || offsets_match || address_match || target_match) {
+                                return None;
+                            }
                         }
-                        .contains(&filter);
 
-                        (module_match
-                            || root_match
-                            || offsets_match
-                            || address_match
-                            || target_match
-                            || value_match
-                            || live_match
-                            || expected_match
-                            || state_match)
-                            .then_some(index)
+                        if !filter_val.is_empty() {
+                            let observed_match = candidate.observed_value.is_some_and(|v| {
+                                editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
+                                    || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
+                            });
+                            let live_match = candidate.live_value.is_some_and(|v| {
+                                editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
+                                    || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
+                            });
+                            let expected_match = editable_scan_value(candidate.expected_value, false)
+                                .to_ascii_lowercase()
+                                .contains(&filter_val)
+                                || format_scan_value(candidate.expected_value, true)
+                                    .to_ascii_lowercase()
+                                    .contains(&filter_val);
+                            if !(observed_match || live_match || expected_match) {
+                                return None;
+                            }
+                        }
+
+                        Some(index)
                     })
                     .collect::<Vec<_>>();
-                let refresh_visible_values = dialog.validation_pid.is_none()
+                let refresh_visible_values = dialog.validation_rx.is_none()
                     && dialog.filter_rx.is_none()
-                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(100);
+                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(200);
                 let refresh_pid = self.memory_panel.process_pid;
                 egui::ScrollArea::both().show_rows(ui, 24.0, visible_indices.len(), |ui, rows| {
                     if refresh_visible_values {
                         if let Some(pid) = refresh_pid {
-                            // ponytail: refresh only rendered rows; reading every pointer candidate
-                            // here makes large validation results stall the UI for seconds.
                             for visible_row in rows.clone() {
                                 let candidate =
                                     &mut dialog.candidates[visible_indices[visible_row]];
-                                let base = candidate.resolved_base.or_else(|| {
-                                    resolve_module_offset(
-                                        pid,
-                                        &candidate.path.module,
-                                        candidate.path.module_offset,
-                                    )
-                                    .ok()
-                                });
-                                candidate.resolved_base = base;
-                                if let Some(base) = base {
-                                    let pointer = PointerSpec {
-                                        base,
-                                        module: Some((
-                                            candidate.path.module.clone(),
-                                            candidate.path.module_offset,
-                                        )),
-                                        offsets: candidate.path.offsets.clone(),
-                                    };
-                                    if let Ok(address) =
-                                        resolve_memory_address(pid, base, Some(&pointer))
-                                    {
-                                        candidate.resolved_address = Some(address);
-                                        candidate.live_value =
-                                            read_scan_value(pid, address, dialog.value_type).ok();
-                                    } else {
-                                        candidate.resolved_address = None;
-                                        candidate.live_value = None;
-                                    }
-                                } else if let Some(address) = candidate.resolved_address {
+                                if let Some(address) = candidate.resolved_address {
                                     candidate.live_value =
                                         read_scan_value(pid, address, dialog.value_type).ok();
                                 }
@@ -8013,13 +8063,10 @@ impl CrosshairApp {
         if validate {
             self.validate_stable_pointer_candidates(&mut dialog);
         }
-        if dialog.validation_pid.is_some() {
-            self.advance_stable_pointer_validation(&mut dialog);
-        }
         if let Some(save_to_library) = add {
             self.add_stable_pointer_candidate(&mut dialog, save_to_library);
         }
-        if dialog.validation_pid.is_some() || dialog.filter_rx.is_some() {
+        if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if dialog.rx.is_some() || !dialog.candidates.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -8519,6 +8566,7 @@ impl CrosshairApp {
         if toggle_pin {
             if pinned {
                 self.memory_panel.unpinned_memory_popups.insert(popup_id);
+                open = false;
             } else {
                 self.memory_panel.unpinned_memory_popups.remove(popup_id);
             }
@@ -8609,113 +8657,92 @@ impl CrosshairApp {
         let Some(pid) = self.memory_panel.process_pid else {
             return;
         };
-        for candidate in &mut dialog.candidates {
-            candidate.valid = None;
-            candidate.resolved_base = None;
-            candidate.resolved_address = None;
-            candidate.observed_value = None;
-            candidate.live_value = None;
-            candidate.filter_value = None;
-        }
-        dialog.validation_pid = Some(pid);
-        dialog.validation_cursor = 0;
+        let mut candidates = dialog.candidates.clone();
+        let value_type = dialog.value_type;
+        let (tx, rx) = mpsc::channel();
+        dialog.validation_rx = Some(rx);
         dialog.status = format!(
-            "Validating 0/{} pointer path(s)...",
-            dialog.candidates.len()
+            "Validating {} pointer path(s)...",
+            candidates.len()
         );
-    }
+        thread::spawn(move || {
+            let modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, base, _)| (name.to_ascii_lowercase(), base))
+                .collect();
 
-    #[cfg(windows)]
-    fn advance_stable_pointer_validation(&mut self, dialog: &mut StablePointerDialog) {
-        let Some(pid) = dialog.validation_pid else {
-            return;
-        };
-        if self.memory_panel.process_pid != Some(pid) {
-            dialog.validation_pid = None;
-            dialog.status = "The selected process changed during validation".to_owned();
-            return;
-        }
-        const BATCH_SIZE: usize = 16;
-        let end = dialog
-            .validation_cursor
-            .saturating_add(BATCH_SIZE)
-            .min(dialog.candidates.len());
-        let modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(name, base, _)| (name.to_ascii_lowercase(), base))
-            .collect();
+            let mut verified = 0;
+            let mut changed = 0;
+            let mut broken = 0;
 
-        for candidate in &mut dialog.candidates[dialog.validation_cursor..end] {
-            let module_lower = candidate.path.module.to_ascii_lowercase();
-            let Some(&mod_base) = modules_map.get(&module_lower) else {
-                candidate.valid = Some(false);
-                continue;
-            };
-            let base = mod_base.wrapping_add(candidate.path.module_offset);
-            let spec = PointerSpec {
-                base,
-                module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
-                offsets: candidate.path.offsets.clone(),
-            };
-            candidate.resolved_base = Some(base);
-            let Ok(address) = resolve_memory_address(pid, base, Some(&spec)) else {
-                candidate.valid = Some(false);
-                continue;
-            };
-            candidate.resolved_address = Some(address);
-            let Ok(observed) = read_scan_value(pid, address, dialog.value_type) else {
-                candidate.valid = Some(false);
-                continue;
-            };
-            candidate.observed_value = Some(observed);
-            candidate.live_value = Some(observed);
-            candidate.filter_value = Some(observed);
-            if observed == candidate.expected_value {
-                candidate.valid = Some(true);
-            } else {
-                candidate.valid = None;
+            for candidate in &mut candidates {
+                let module_lower = candidate.path.module.to_ascii_lowercase();
+                let Some(&mod_base) = modules_map.get(&module_lower) else {
+                    candidate.valid = Some(false);
+                    candidate.resolved_base = None;
+                    candidate.resolved_address = None;
+                    candidate.observed_value = None;
+                    candidate.live_value = None;
+                    candidate.filter_value = None;
+                    broken += 1;
+                    continue;
+                };
+                let base = mod_base.wrapping_add(candidate.path.module_offset);
+                let spec = PointerSpec {
+                    base,
+                    module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
+                    offsets: candidate.path.offsets.clone(),
+                };
+                candidate.resolved_base = Some(base);
+                let Ok(address) = resolve_memory_address(pid, base, Some(&spec)) else {
+                    candidate.valid = Some(false);
+                    candidate.resolved_address = None;
+                    candidate.observed_value = None;
+                    candidate.live_value = None;
+                    candidate.filter_value = None;
+                    broken += 1;
+                    continue;
+                };
+                candidate.resolved_address = Some(address);
+                let Ok(observed) = read_scan_value(pid, address, value_type) else {
+                    candidate.valid = Some(false);
+                    candidate.observed_value = None;
+                    candidate.live_value = None;
+                    candidate.filter_value = None;
+                    broken += 1;
+                    continue;
+                };
+                candidate.observed_value = Some(observed);
+                candidate.live_value = Some(observed);
+                candidate.filter_value = Some(observed);
+                if observed == candidate.expected_value {
+                    candidate.valid = Some(true);
+                    verified += 1;
+                } else {
+                    candidate.valid = None;
+                    changed += 1;
+                }
             }
-        }
-        dialog.validation_cursor = end;
-        if end < dialog.candidates.len() {
-            dialog.status = format!(
-                "Validating {end}/{} pointer path(s)...",
-                dialog.candidates.len()
-            );
-            return;
-        }
-        let valid = dialog
-            .candidates
-            .iter()
-            .filter(|candidate| candidate.valid == Some(true))
-            .count();
-        let changed = dialog
-            .candidates
-            .iter()
-            .filter(|candidate| candidate.valid.is_none() && candidate.observed_value.is_some())
-            .count();
-        let broken = dialog.candidates.len().saturating_sub(valid + changed);
-        dialog.validation_pid = None;
-        dialog
-            .candidates
-            .sort_by_key(|candidate| match candidate.valid {
+
+            candidates.sort_by_key(|candidate| match candidate.valid {
                 Some(true) => 0,
                 None if candidate.observed_value.is_some() => 1,
                 _ => 2,
             });
-        dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
-        dialog.status = format!(
-            "PID {pid}: {valid} verified, {changed} resolved with a different value, {broken} broken across {} target(s).",
-            dialog.source_addresses.len()
-        );
+
+            let _ = tx.send(StablePointerValidationResult {
+                pid,
+                candidates,
+                verified,
+                changed,
+                broken,
+            });
+        });
     }
 
     #[cfg(not(windows))]
     fn validate_stable_pointer_candidates(&mut self, _dialog: &mut StablePointerDialog) {}
-
-    #[cfg(not(windows))]
-    fn advance_stable_pointer_validation(&mut self, _dialog: &mut StablePointerDialog) {}
 
     fn add_stable_pointer_candidate(
         &mut self,
@@ -12591,7 +12618,7 @@ impl CrosshairApp {
             self.memory_panel.stable_pointer_dialog = Some(dialog);
             return true;
         };
-        if dialog.validation_pid.is_some() || dialog.filter_rx.is_some() || dialog.rx.is_some() {
+        if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() || dialog.rx.is_some() {
             self.memory_panel.stable_pointer_dialog = Some(dialog);
             return true;
         }
