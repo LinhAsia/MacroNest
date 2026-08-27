@@ -11,14 +11,16 @@ use windows::{
             Direct2D::{
                 Common::{
                     D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
-                    D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, D2D1_FILL_MODE_WINDING,
-                    D2D1_PIXEL_FORMAT,
+                    D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_BEGIN_HOLLOW, D2D1_FIGURE_END_CLOSED,
+                    D2D1_FIGURE_END_OPEN, D2D1_FILL_MODE_WINDING, D2D1_PIXEL_FORMAT,
                 },
                 D2D1_BITMAP_OPTIONS_CANNOT_DRAW, D2D1_BITMAP_OPTIONS_NONE,
-                D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1,
-                D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE, D2D1_ELLIPSE,
-                D2D1_INTERPOLATION_MODE_LINEAR, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
+                D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_CAP_STYLE_ROUND,
+                D2D1_DASH_STYLE_SOLID, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
+                D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_LINEAR, D2D1_LINE_JOIN_ROUND,
+                D2D1_STROKE_STYLE_PROPERTIES, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
                 ID2D1Factory, ID2D1GeometrySink, ID2D1PathGeometry, ID2D1SolidColorBrush,
+                ID2D1StrokeStyle,
             },
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
             Direct3D11::{
@@ -58,6 +60,7 @@ pub(super) struct EspGpuRenderer {
     swap_chain: IDXGISwapChain1,
     d2d: ID2D1DeviceContext,
     _target_bitmap: ID2D1Bitmap1,
+    round_stroke_style: ID2D1StrokeStyle,
     dwrite: IDWriteFactory,
     _composition: IDCompositionDevice,
     _composition_target: IDCompositionTarget,
@@ -135,6 +138,18 @@ impl EspGpuRenderer {
                 d2d.CreateBitmapFromDxgiSurface(&surface, Some(&bitmap_properties))?;
             d2d.SetTarget(&target_bitmap);
 
+            let d2d_factory: ID2D1Factory = d2d.GetFactory()?;
+            let stroke_props = D2D1_STROKE_STYLE_PROPERTIES {
+                startCap: D2D1_CAP_STYLE_ROUND,
+                endCap: D2D1_CAP_STYLE_ROUND,
+                dashCap: D2D1_CAP_STYLE_ROUND,
+                lineJoin: D2D1_LINE_JOIN_ROUND,
+                miterLimit: 10.0,
+                dashStyle: D2D1_DASH_STYLE_SOLID,
+                dashOffset: 0.0,
+            };
+            let round_stroke_style = d2d_factory.CreateStrokeStyle(&stroke_props, None)?;
+
             Ok(Self {
                 hwnd,
                 origin: (left, top),
@@ -143,6 +158,7 @@ impl EspGpuRenderer {
                 swap_chain,
                 d2d,
                 _target_bitmap: target_bitmap,
+                round_stroke_style,
                 dwrite: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?,
                 _composition: composition,
                 _composition_target: composition_target,
@@ -210,7 +226,7 @@ impl EspGpuRenderer {
                     point(*x2 - ox, *y2 - oy),
                     &brush,
                     (*thickness).max(1) as f32,
-                    None,
+                    Some(&self.round_stroke_style),
                 );
             }
             GeometryRenderDraw::Circle {
@@ -247,7 +263,7 @@ impl EspGpuRenderer {
                 let p1 = point(*x1 - ox, *y1 - oy);
                 let p2 = point(*x2 - ox, *y2 - oy);
                 let thick = (*thickness).max(1) as f32;
-                self.d2d.DrawLine(p1, p2, &brush, thick, None);
+                self.d2d.DrawLine(p1, p2, &brush, thick, Some(&self.round_stroke_style));
 
                 let dx = (*x2 - *x1) as f32;
                 let dy = (*y2 - *y1) as f32;
@@ -267,7 +283,7 @@ impl EspGpuRenderer {
                         windows_numerics::Vector2 { X: hx, Y: hy },
                         &brush,
                         thick,
-                        None,
+                        Some(&self.round_stroke_style),
                     );
                 }
             }
@@ -279,10 +295,32 @@ impl EspGpuRenderer {
                 if points.len() >= 2 {
                     let brush = self.brush(*stroke)?;
                     let thick = (*thickness).max(1) as f32;
-                    for window in points.windows(2) {
-                        let p1 = point(window[0].0 - ox, window[0].1 - oy);
-                        let p2 = point(window[1].0 - ox, window[1].1 - oy);
-                        self.d2d.DrawLine(p1, p2, &brush, thick, None);
+                    let factory: ID2D1Factory = self.d2d.GetFactory()?;
+                    if let Ok(path_geometry) = factory.CreatePathGeometry()
+                        && let Ok(sink) = path_geometry.Open()
+                    {
+                        sink.SetFillMode(D2D1_FILL_MODE_WINDING);
+                        let p0 = point(points[0].0 - ox, points[0].1 - oy);
+                        sink.BeginFigure(p0, D2D1_FIGURE_BEGIN_HOLLOW);
+                        let d2d_pts: Vec<windows_numerics::Vector2> = points[1..]
+                            .iter()
+                            .map(|p| point(p.0 - ox, p.1 - oy))
+                            .collect();
+                        sink.AddLines(&d2d_pts);
+                        sink.EndFigure(D2D1_FIGURE_END_OPEN);
+                        let _ = sink.Close();
+                        self.d2d.DrawGeometry(
+                            &path_geometry,
+                            &brush,
+                            thick,
+                            Some(&self.round_stroke_style),
+                        );
+                    } else {
+                        for window in points.windows(2) {
+                            let p1 = point(window[0].0 - ox, window[0].1 - oy);
+                            let p2 = point(window[1].0 - ox, window[1].1 - oy);
+                            self.d2d.DrawLine(p1, p2, &brush, thick, Some(&self.round_stroke_style));
+                        }
                     }
                 }
             }

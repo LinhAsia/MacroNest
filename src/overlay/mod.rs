@@ -10897,7 +10897,17 @@ mod windows_overlay {
         match stroke.tool {
             ScreenDrawTool::Brush => {
                 if stroke.points.len() >= 2 {
-                    let pts: Vec<(i32, i32)> = stroke.points.iter().map(|p| (p.x, p.y)).collect();
+                    let pts: Vec<(i32, i32)> = if stroke.points.len() >= 3 {
+                        let passes = if stroke.smoothing {
+                            (1.0 + stroke.smoothing_amount.clamp(0.0, 1.0) * 2.0).round() as usize
+                        } else {
+                            1
+                        };
+                        let smoothed = chaikin_smooth_screen_draw_points(&stroke.points, passes);
+                        smoothed.into_iter().map(|p| (p.x, p.y)).collect()
+                    } else {
+                        stroke.points.iter().map(|p| (p.x, p.y)).collect()
+                    };
                     let min_x = pts.iter().map(|p| p.0).min().unwrap_or(0);
                     let max_x = pts.iter().map(|p| p.0).max().unwrap_or(0);
                     let min_y = pts.iter().map(|p| p.1).min().unwrap_or(0);
@@ -17076,67 +17086,76 @@ mod windows_overlay {
         match stroke.tool {
             ScreenDrawTool::Brush => {
                 let mut pb = tiny_skia::PathBuilder::new();
-                pb.move_to(first.x as f32, first.y as f32);
-                if stroke.smoothing && points.len() >= 3 {
-                    // 1. Filter out redundant subpixel jitter points (distance < 2.5px)
-                    let mut filtered: Vec<(f32, f32)> = Vec::with_capacity(points.len());
-                    for p in points.iter() {
-                        let pt = (p.x as f32, p.y as f32);
-                        if let Some(prev) = filtered.last() {
-                            let dx = pt.0 - prev.0;
-                            let dy = pt.1 - prev.1;
-                            if dx * dx + dy * dy >= 6.25 {
+                if points.len() == 2 {
+                    pb.move_to(points[0].x as f32, points[0].y as f32);
+                    pb.line_to(points[1].x as f32, points[1].y as f32);
+                } else if points.len() >= 3 {
+                    let smooth_pts: Vec<(f32, f32)> = if stroke.smoothing {
+                        let mut filtered: Vec<(f32, f32)> = Vec::with_capacity(points.len());
+                        for p in points.iter() {
+                            let pt = (p.x as f32, p.y as f32);
+                            if let Some(prev) = filtered.last() {
+                                let dx = pt.0 - prev.0;
+                                let dy = pt.1 - prev.1;
+                                if dx * dx + dy * dy >= 4.0 {
+                                    filtered.push(pt);
+                                }
+                            } else {
                                 filtered.push(pt);
                             }
+                        }
+                        if let Some(last_p) = points.last() {
+                            let last_pt = (last_p.x as f32, last_p.y as f32);
+                            if filtered.last() != Some(&last_pt) {
+                                filtered.push(last_pt);
+                            }
+                        }
+                        if filtered.len() < 3 {
+                            filtered
                         } else {
-                            filtered.push(pt);
+                            let passes = (1.0 + stroke.smoothing_amount.clamp(0.0, 1.0) * 2.0).round() as usize;
+                            let mut pts = filtered;
+                            for _ in 0..passes {
+                                if pts.len() < 3 {
+                                    break;
+                                }
+                                let mut next_pts = Vec::with_capacity(pts.len() * 2);
+                                next_pts.push(pts[0]);
+                                for i in 0..pts.len() - 1 {
+                                    let p0 = pts[i];
+                                    let p1 = pts[i + 1];
+                                    next_pts.push((p0.0 * 0.75 + p1.0 * 0.25, p0.1 * 0.75 + p1.1 * 0.25));
+                                    next_pts.push((p0.0 * 0.25 + p1.0 * 0.75, p0.1 * 0.25 + p1.1 * 0.75));
+                                }
+                                next_pts.push(*pts.last().unwrap());
+                                pts = next_pts;
+                            }
+                            pts
                         }
-                    }
-                    if let Some(last_p) = points.last() {
-                        let last_pt = (last_p.x as f32, last_p.y as f32);
-                        if filtered.last() != Some(&last_pt) {
-                            filtered.push(last_pt);
-                        }
-                    }
+                    } else {
+                        points.iter().map(|p| (p.x as f32, p.y as f32)).collect()
+                    };
 
-                    if filtered.len() < 3 {
-                        for pt in filtered.iter().skip(1) {
+                    if smooth_pts.len() < 3 {
+                        pb.move_to(smooth_pts[0].0, smooth_pts[0].1);
+                        for pt in smooth_pts.iter().skip(1) {
                             pb.line_to(pt.0, pt.1);
                         }
                     } else {
-                        // 2. Chaikin smoothing passes in pure f32 (never round to i32)
-                        let passes = (1.0 + stroke.smoothing_amount.clamp(0.0, 1.0) * 2.0).round() as usize;
-                        let mut smooth_pts = filtered;
-                        for _ in 0..passes {
-                            if smooth_pts.len() < 3 {
-                                break;
-                            }
-                            let mut next_pts = Vec::with_capacity(smooth_pts.len() * 2);
-                            next_pts.push(smooth_pts[0]);
-                            for i in 0..smooth_pts.len() - 1 {
-                                let p0 = smooth_pts[i];
-                                let p1 = smooth_pts[i + 1];
-                                next_pts.push((p0.0 * 0.75 + p1.0 * 0.25, p0.1 * 0.75 + p1.1 * 0.25));
-                                next_pts.push((p0.0 * 0.25 + p1.0 * 0.75, p0.1 * 0.25 + p1.1 * 0.75));
-                            }
-                            next_pts.push(*smooth_pts.last().unwrap());
-                            smooth_pts = next_pts;
-                        }
-
-                        // 3. Connect via midpoint Quadratic Bezier curves (C1 continuous, zero overshoot, perfectly smooth)
+                        pb.move_to(smooth_pts[0].0, smooth_pts[0].1);
+                        let mid_first = (
+                            (smooth_pts[0].0 + smooth_pts[1].0) * 0.5,
+                            (smooth_pts[0].1 + smooth_pts[1].1) * 0.5,
+                        );
+                        pb.line_to(mid_first.0, mid_first.1);
                         for i in 1..smooth_pts.len() - 1 {
                             let p_curr = smooth_pts[i];
                             let p_next = smooth_pts[i + 1];
                             let mid = ((p_curr.0 + p_next.0) * 0.5, (p_curr.1 + p_next.1) * 0.5);
                             pb.quad_to(p_curr.0, p_curr.1, mid.0, mid.1);
                         }
-                        if let Some(last_pt) = smooth_pts.last() {
-                            pb.line_to(last_pt.0, last_pt.1);
-                        }
-                    }
-                } else {
-                    for point in points.iter().skip(1) {
-                        pb.line_to(point.x as f32, point.y as f32);
+                        let last_pt = *smooth_pts.last().unwrap();
+                        pb.line_to(last_pt.0, last_pt.1);
                     }
                 }
                 if let Some(path) = pb.finish() {
@@ -17954,28 +17973,32 @@ mod windows_overlay {
         Ok(())
     }
 
-    fn smoothed_screen_draw_points(points: &[POINT], amount: f32) -> Vec<POINT> {
-        if points.len() < 3 {
+    fn chaikin_smooth_screen_draw_points(points: &[POINT], passes: usize) -> Vec<POINT> {
+        if points.len() < 3 || passes == 0 {
             return points.to_vec();
         }
-        let passes = (1.0 + amount.clamp(0.0, 1.0) * 2.0).round() as usize;
-        let mut cur = points.to_vec();
+        let mut cur: Vec<(f32, f32)> = points.iter().map(|p| (p.x as f32, p.y as f32)).collect();
         for _ in 0..passes {
-            let mut next = Vec::with_capacity(cur.len());
+            if cur.len() < 3 {
+                break;
+            }
+            let mut next = Vec::with_capacity(cur.len() * 2);
             next.push(cur[0]);
-            for i in 1..cur.len() - 1 {
-                let p_prev = cur[i - 1];
-                let p_cur = cur[i];
-                let p_next = cur[i + 1];
-                next.push(POINT {
-                    x: ((p_prev.x as f32 * 0.25) + (p_cur.x as f32 * 0.5) + (p_next.x as f32 * 0.25)).round() as i32,
-                    y: ((p_prev.y as f32 * 0.25) + (p_cur.y as f32 * 0.5) + (p_next.y as f32 * 0.25)).round() as i32,
-                });
+            for i in 0..cur.len() - 1 {
+                let p0 = cur[i];
+                let p1 = cur[i + 1];
+                next.push((p0.0 * 0.75 + p1.0 * 0.25, p0.1 * 0.75 + p1.1 * 0.25));
+                next.push((p0.0 * 0.25 + p1.0 * 0.75, p0.1 * 0.25 + p1.1 * 0.75));
             }
             next.push(*cur.last().unwrap());
             cur = next;
         }
-        cur
+        cur.into_iter()
+            .map(|(x, y)| POINT {
+                x: x.round() as i32,
+                y: y.round() as i32,
+            })
+            .collect()
     }
 
     fn draw_screen_draw_slider_skia(
