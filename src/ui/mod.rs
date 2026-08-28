@@ -110,6 +110,9 @@ static LIVE_WINDOW_TARGET_COMBO_WINDOWS: Lazy<Mutex<Option<Vec<WindowInfo>>>> =
     Lazy::new(|| Mutex::new(None));
 static PROCESS_ICON_TEXTURES: Lazy<Mutex<HashMap<String, Option<TextureHandle>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+static PENDING_ICON_LOADS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static LOADED_ICON_RGBAS: Lazy<Mutex<HashMap<String, Option<Vec<u8>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 static PROCESS_PATHS: Lazy<Mutex<HashMap<u32, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -9572,17 +9575,31 @@ impl CrosshairApp {
         if let Some(cached) = PROCESS_ICON_TEXTURES.lock().get(path).cloned() {
             return cached;
         }
-        let texture = window_list::process_icon_rgba(path).map(|rgba| {
-            ctx.load_texture(
-                format!("process-icon:{path}"),
-                ColorImage::from_rgba_unmultiplied([16, 16], &rgba),
-                TextureOptions::LINEAR,
-            )
-        });
-        PROCESS_ICON_TEXTURES
-            .lock()
-            .insert(path.to_owned(), texture.clone());
-        texture
+        if let Some(rgba_opt) = LOADED_ICON_RGBAS.lock().remove(path) {
+            let texture = rgba_opt.map(|rgba| {
+                ctx.load_texture(
+                    format!("process-icon:{path}"),
+                    ColorImage::from_rgba_unmultiplied([16, 16], &rgba),
+                    TextureOptions::LINEAR,
+                )
+            });
+            PROCESS_ICON_TEXTURES
+                .lock()
+                .insert(path.to_owned(), texture.clone());
+            return texture;
+        }
+        let mut pending = PENDING_ICON_LOADS.lock();
+        if pending.insert(path.to_owned()) {
+            let path_clone = path.to_owned();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                let rgba = window_list::process_icon_rgba(&path_clone);
+                LOADED_ICON_RGBAS.lock().insert(path_clone.clone(), rgba);
+                PENDING_ICON_LOADS.lock().remove(&path_clone);
+                ctx.request_repaint();
+            });
+        }
+        None
     }
 
     fn lazy_process_path(pid: u32, known_path: &str) -> String {
@@ -9919,8 +9936,12 @@ impl CrosshairApp {
                 }
             });
         if combo_response.response.clicked() {
-            *LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(window_list::list_open_windows());
-            ui.ctx().request_repaint();
+            let ctx = ui.ctx().clone();
+            std::thread::spawn(move || {
+                let windows = window_list::list_open_windows();
+                *LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
+                ctx.request_repaint();
+            });
         }
 
         ui.ctx().data_mut(|data| {
@@ -17000,6 +17021,10 @@ impl eframe::App for CrosshairApp {
             }
             if Self::active_panel_needs_audio_sense_devices(self.state.active_panel) {
                 self.ensure_audio_sense_devices_ready(false);
+            }
+            #[cfg(windows)]
+            if self.state.active_panel == AppPanel::Memory {
+                self.ensure_memory_process_choices_ready(ctx);
             }
 
             self.last_active_panel = self.state.active_panel;

@@ -736,7 +736,16 @@ impl CrosshairApp {
         self.open_windows_loading = true;
         let ui_tx = self.ui_tx.clone();
         std::thread::spawn(move || {
-            let windows = window_list::list_open_windows();
+            let mut windows = window_list::list_open_windows();
+            #[cfg(windows)]
+            for window in &mut windows {
+                if window.process_id != 0 {
+                    let path = crate::memory_debugger::debugger::process_path(window.process_id);
+                    if !path.is_empty() {
+                        window.process_path = path;
+                    }
+                }
+            }
             let _ = ui_tx.send(UiCommand::OpenWindowsLoaded { windows, status });
         });
     }
