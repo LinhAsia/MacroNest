@@ -598,6 +598,7 @@ struct CodeAccessDialog {
     value_filter_enabled: bool,
     value_filter_min: String,
     value_filter_max: String,
+    feedback_message: Option<(String, Instant)>,
 }
 
 #[cfg(windows)]
@@ -3116,10 +3117,8 @@ impl CrosshairApp {
                         self.begin_saved_memory_value_edit(index, position);
                     }
                 }
-                let stt_width = 32.0;
-                let available_table_width = (ui.available_width() - stt_width - 16.0).max(120.0);
-                let header_column_width = (available_table_width / 4.0).max(65.0);
-                let table_min_width = stt_width + header_column_width * 4.0;
+                let stt_width = 36.0;
+                let header_column_width = ((ui.available_width() - stt_width - 21.0) / 4.0).max(70.0);
                 let mut sort_address = false;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
@@ -3162,7 +3161,7 @@ impl CrosshairApp {
                 ui.separator();
                 let row_height = 26.0;
                 let count = self.memory_panel.saved.len();
-                egui::ScrollArea::both()
+                egui::ScrollArea::vertical()
                     .id_salt("saved-memory-addresses")
                     .auto_shrink([false, false])
                     .max_height(ui.available_height())
@@ -3192,8 +3191,8 @@ impl CrosshairApp {
                             let mut persist_pointer_changes = false;
                             let mut open_disassembler = None;
                             let mut row_hits = Vec::new();
-                            let row_width = ui.available_width().max(table_min_width);
-                            let column_width = ((row_width - stt_width - 16.0) / 4.0).max(65.0);
+                            let row_width = ui.available_width();
+                            let column_width = ((row_width - stt_width - 21.0) / 4.0).max(70.0);
                             let full_row_rect = egui::Rect::from_min_size(
                                 ui.next_widget_position(),
                                 vec2(row_width, row_height),
@@ -5713,6 +5712,7 @@ impl CrosshairApp {
                 value_filter_enabled: false,
                 value_filter_min: String::new(),
                 value_filter_max: String::new(),
+                feedback_message: None,
             });
             return;
         }
@@ -5751,13 +5751,37 @@ impl CrosshairApp {
             value_filter_enabled: false,
             value_filter_min: String::new(),
             value_filter_max: String::new(),
+            feedback_message: None,
         });
     }
 
     #[cfg(windows)]
     fn start_stable_pointer_scan(&mut self, saved: &SavedMemoryAddress) {
         let Some(pid) = self.memory_panel.process_pid else {
-            self.memory_panel.status = "Select a process".to_owned();
+            let status = self
+                .tr("Select a process first.", "Vui lòng chọn tiến trình trước.")
+                .to_owned();
+            self.memory_panel.status.clone_from(&status);
+            self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
+                source_addresses: vec![saved.address],
+                source_pid: 0,
+                value_type: saved.value_type,
+                expected_values: HashMap::new(),
+                status,
+                candidates: Vec::new(),
+                selected: None,
+                rx: None,
+                progress: Arc::new(AtomicUsize::new(0)),
+                limits: self.pointer_scan_limits(),
+                filter: String::new(),
+                filter_value: String::new(),
+                filter_status: StablePointerStatusFilter::All,
+                exe_only: false,
+                show_resolved: false,
+                last_live_refresh: Instant::now(),
+                validation_rx: None,
+                filter_rx: None,
+            });
             return;
         };
         let mut targets = if self.memory_panel.selected_saved.len() > 1 {
@@ -5768,24 +5792,23 @@ impl CrosshairApp {
                 .filter(|entry| {
                     entry.text_encoding.is_none() && entry.value_type == saved.value_type
                 })
-                .filter_map(|entry| entry.current.map(|value| (entry.address, value)))
+                .map(|entry| {
+                    let val = entry.current.or_else(|| {
+                        read_scan_value(pid, entry.address, entry.value_type).ok()
+                    }).unwrap_or(ScanValue::I64(0));
+                    (entry.address, val)
+                })
                 .collect::<Vec<_>>()
         } else {
-            saved
-                .current
-                .map(|value| vec![(saved.address, value)])
-                .unwrap_or_default()
+            let val = saved.current.or_else(|| {
+                read_scan_value(pid, saved.address, saved.value_type).ok()
+            }).unwrap_or(ScanValue::I64(0));
+            vec![(saved.address, val)]
         };
         targets.sort_unstable_by_key(|(address, _)| *address);
         targets.dedup_by_key(|(address, _)| *address);
         if targets.is_empty() {
-            self.memory_panel.status = self
-                .tr(
-                    "Unable to read the selected addresses",
-                    "Không thể đọc các địa chỉ đã chọn",
-                )
-                .to_owned();
-            return;
+            targets.push((saved.address, ScanValue::I64(0)));
         }
         let source_addresses = targets
             .iter()
@@ -7778,13 +7801,15 @@ impl CrosshairApp {
         let mut validate = false;
         let mut add = None;
         ui.label(&dialog.status);
-                if dialog.rx.is_some() {
-                    let scanned = dialog.progress.load(Ordering::Relaxed);
-                    ui.label(format!("Read {:.1} MB", scanned as f64 / 1_048_576.0));
-                    ui.spinner();
-                    return;
-                }
-                ui.horizontal(|ui| {
+        if dialog.rx.is_some() {
+            let scanned = dialog.progress.load(Ordering::Relaxed);
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(format!("Scanning memory... read {:.1} MB", scanned as f64 / 1_048_576.0));
+                ui.spinner();
+            });
+        } else {
+            ui.horizontal(|ui| {
                     let new_process = self
                         .memory_panel
                         .process_pid
@@ -8140,6 +8165,7 @@ impl CrosshairApp {
                         });
                     }
                 });
+        }
 
         if validate {
             self.validate_stable_pointer_candidates(&mut dialog);
@@ -10452,11 +10478,14 @@ impl CrosshairApp {
         }
         if let Some(address) = add {
             let newly_added = self.add_code_access_address(address, dialog.value_type);
-            dialog.status = if newly_added {
-                format!("✓ Address {} added to Address list", format_prefixed_memory_address(address))
-            } else {
-                format!("Address {} is already in Address list", format_prefixed_memory_address(address))
-            };
+            dialog.feedback_message = Some((
+                if newly_added {
+                    format!("✓ Address {} added to Address list", format_prefixed_memory_address(address))
+                } else {
+                    format!("Address {} is already in Address list", format_prefixed_memory_address(address))
+                },
+                Instant::now(),
+            ));
         }
         if let Some(address) = browse {
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
@@ -10563,11 +10592,15 @@ impl CrosshairApp {
         let mut refresh_values = false;
         let mut start_requested = false;
         let mut apply_esp = None;
-        if dialog.status.starts_with('✓') || dialog.status.contains("added") || dialog.status.contains("Added") {
-            ui.label(RichText::new(&dialog.status).color(Color32::from_rgb(90, 215, 120)).strong());
-        } else {
+        ui.horizontal(|ui| {
             ui.add(egui::Label::new(&dialog.status).selectable(true));
-        }
+            if let Some((msg, time)) = &dialog.feedback_message {
+                if time.elapsed() < Duration::from_secs(4) {
+                    ui.separator();
+                    ui.label(RichText::new(msg).color(Color32::from_rgb(90, 215, 120)).strong());
+                }
+            }
+        });
         ui.horizontal_wrapped(|ui| {
             if ui.button("Refresh values").clicked() {
                 refresh_values = true;
@@ -10598,7 +10631,10 @@ impl CrosshairApp {
                     text.push_str(&format!("{}\t0x{:X}\t{}\t{}\n", i + 1, address, hits, value));
                 }
                 ui.ctx().copy_text(text);
-                dialog.status = format!("Copied {} addresses to clipboard", dialog.addresses.len());
+                dialog.feedback_message = Some((
+                    format!("✓ Copied {} addresses to clipboard", dialog.addresses.len()),
+                    Instant::now(),
+                ));
             }
             if ui
                 .add_enabled(dialog.selected.is_some(), Button::new("Add selected"))
