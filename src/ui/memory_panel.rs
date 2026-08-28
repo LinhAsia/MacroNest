@@ -834,6 +834,7 @@ pub(crate) struct MemoryPanelState {
     pub(crate) show_dll_studio: bool,
     pub(crate) dll_status_msg: String,
     pub(crate) inject_dll_file_path: String,
+    global_aob_sample_1: Option<(Vec<u8>, usize)>,
 }
 
 impl Default for MemoryPanelState {
@@ -941,6 +942,7 @@ impl Default for MemoryPanelState {
             show_dll_studio: false,
             dll_status_msg: String::new(),
             inject_dll_file_path: String::new(),
+            global_aob_sample_1: None,
         }
     }
 }
@@ -3858,15 +3860,22 @@ impl CrosshairApp {
                                         if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
                                             let aob = format_aob_hex(&bytes);
                                             if let Some(entry) = self.memory_panel.saved.get_mut(index) {
-                                                entry.aob_sample_1 = Some(bytes);
+                                                entry.aob_sample_1 = Some(bytes.clone());
                                             }
+                                            self.memory_panel.global_aob_sample_1 = Some((bytes, saved.address));
                                             ui.ctx().copy_text(aob.clone());
                                             self.memory_panel.status = format!("Sample 1 captured (64 bytes): {aob}");
                                         }
                                     }
                                     ui.close();
                                 }
-                                let has_sample_1 = saved.aob_sample_1.is_some();
+                                let global_sample_1 = self.memory_panel.global_aob_sample_1.clone();
+                                let has_sample_1 = saved.aob_sample_1.is_some() || global_sample_1.is_some();
+                                let sample_1_hint = if let Some((_, src_addr)) = &global_sample_1 {
+                                    format!("Compare against Sample 1 (captured from 0x{:X}), insert '??' wildcards for changing bytes, and generate final AOB pattern", src_addr)
+                                } else {
+                                    "Compare against Sample 1, insert '??' wildcards for changing bytes, and generate final AOB pattern".to_string()
+                                };
                                 if ui
                                     .add_enabled(
                                         single_target && has_sample_1,
@@ -3875,13 +3884,15 @@ impl CrosshairApp {
                                             "AOB: So khớp Mẫu 2 -> Tạo mã (??)",
                                         )),
                                     )
-                                    .on_hover_text("Compare against Sample 1, insert '??' wildcards for changing bytes, and generate final AOB pattern")
+                                    .on_hover_text(sample_1_hint)
                                     .clicked()
                                 {
                                     if let Some(pid) = self.memory_panel.process_pid {
                                         if let Ok(sample_2) = read_memory_bytes(pid, saved.address, 64) {
-                                            if let Some(sample_1) = saved.aob_sample_1.as_ref() {
-                                                let pattern = generate_aob_pattern(sample_1, &sample_2);
+                                            let sample_1_bytes = saved.aob_sample_1.clone()
+                                                .or_else(|| global_sample_1.as_ref().map(|(b, _)| b.clone()));
+                                            if let Some(sample_1) = sample_1_bytes {
+                                                let pattern = generate_aob_pattern(&sample_1, &sample_2);
                                                 ui.ctx().copy_text(pattern.clone());
                                                 if let Some(entry) = self.memory_panel.saved.get_mut(index) {
                                                     entry.aob_pattern = Some(pattern.clone());
@@ -3891,6 +3902,19 @@ impl CrosshairApp {
                                         }
                                     }
                                     ui.close();
+                                }
+                                if let Some((_, src_addr)) = global_sample_1 {
+                                    if ui
+                                        .button(self.tr("AOB: Clear Sample 1", "AOB: Xóa Mẫu 1"))
+                                        .on_hover_text(format!("Clear captured Sample 1 from 0x{:X}", src_addr))
+                                        .clicked()
+                                    {
+                                        self.memory_panel.global_aob_sample_1 = None;
+                                        if let Some(entry) = self.memory_panel.saved.get_mut(index) {
+                                            entry.aob_sample_1 = None;
+                                        }
+                                        ui.close();
+                                    }
                                 }
                                 let has_pattern = saved.aob_pattern.is_some();
                                 if ui
