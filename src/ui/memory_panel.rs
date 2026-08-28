@@ -809,6 +809,7 @@ pub(crate) struct MemoryPanelState {
     pinned: bool,
     address_list_pinned: bool,
     show_scan_previous: bool,
+    highlight_changed_values: bool,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     pub(super) capturing_hotkey: Option<MemoryScanAction>,
     edit_value_index: Option<usize>,
@@ -923,6 +924,7 @@ impl Default for MemoryPanelState {
             pinned: false,
             address_list_pinned: false,
             show_scan_previous: false,
+            highlight_changed_values: false,
             hotkeys: HashMap::new(),
             capturing_hotkey: None,
             edit_value_index: None,
@@ -2603,10 +2605,23 @@ impl CrosshairApp {
                     pane_width * address_ratio,
                     RichText::new(format_memory_address(address_value)).monospace(),
                 );
-                Self::memory_table_cell(
+                let value_changed = current_value != previous_value;
+                let highlight_red = self.memory_panel.highlight_changed_values && value_changed;
+                Self::memory_table_cell_with_bg(
                     ui,
                     pane_width * value_ratio,
-                    RichText::new(&current_value).monospace(),
+                    RichText::new(&current_value)
+                        .monospace()
+                        .color(if highlight_red {
+                            Color32::from_rgb(255, 230, 230)
+                        } else {
+                            ui.visuals().text_color()
+                        }),
+                    if highlight_red {
+                        Some(Color32::from_rgba_unmultiplied(210, 48, 48, 130))
+                    } else {
+                        None
+                    },
                 );
                 if show_previous {
                     Self::memory_table_cell(
@@ -2714,7 +2729,11 @@ impl CrosshairApp {
                 });
             }
             let previous_label = self.tr("Previous", "Previous");
-            ui.checkbox(&mut self.memory_panel.show_scan_previous, previous_label);
+            let highlight_label = self.tr("Highlight changed", "Đỏ giá trị đổi");
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.memory_panel.show_scan_previous, previous_label);
+                ui.checkbox(&mut self.memory_panel.highlight_changed_values, highlight_label);
+            });
             if !pinned
                 && !self.memory_panel.saved_list_active
                 && ui.ctx().memory(|memory| memory.focused().is_none())
@@ -2977,10 +2996,23 @@ impl CrosshairApp {
                                         },
                                     ),
                                 );
-                                Self::memory_table_cell(
+                                let value_changed = current_value != previous_value;
+                                let highlight_red = self.memory_panel.highlight_changed_values && value_changed;
+                                Self::memory_table_cell_with_bg(
                                     ui,
                                     result_column_width,
-                                    RichText::new(&current_value).monospace(),
+                                    RichText::new(&current_value)
+                                        .monospace()
+                                        .color(if highlight_red {
+                                            Color32::from_rgb(255, 230, 230)
+                                        } else {
+                                            ui.visuals().text_color()
+                                        }),
+                                    if highlight_red {
+                                        Some(Color32::from_rgba_unmultiplied(210, 48, 48, 130))
+                                    } else {
+                                        None
+                                    },
                                 );
                                 Self::memory_table_cell(
                                     ui,
@@ -3081,13 +3113,27 @@ impl CrosshairApp {
     }
 
     fn memory_table_cell(ui: &mut egui::Ui, width: f32, text: RichText) {
-        Self::memory_label_cell(
-            ui,
-            width,
-            18.0,
-            egui::Label::new(text).selectable(false).truncate(),
-        )
-        .on_hover_cursor(egui::CursorIcon::Default);
+        Self::memory_table_cell_with_bg(ui, width, text, None);
+    }
+
+    fn memory_table_cell_with_bg(
+        ui: &mut egui::Ui,
+        width: f32,
+        text: RichText,
+        bg_color: Option<Color32>,
+    ) {
+        let (rect, cell_response) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
+        if let Some(bg) = bg_color {
+            ui.painter().rect_filled(rect.shrink2(vec2(1.0, 1.0)), 2.0, bg);
+        }
+        let mut cell = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        cell_response
+            .union(cell.add(egui::Label::new(text).selectable(false).truncate()))
+            .on_hover_cursor(egui::CursorIcon::Default);
     }
 
     fn memory_label_cell(
@@ -13790,9 +13836,15 @@ impl CrosshairApp {
             return;
         };
         let mut open = true;
+        let mut request_close = false;
+        let screen_rect = ctx.screen_rect();
+        let inset_bounds = screen_rect.shrink2(vec2(32.0, 32.0));
         let window = egui::Window::new(self.tr("AOB Multi-Address Comparison", "Bảng so sánh AOB đa địa chỉ"))
             .open(&mut open)
             .resizable(true)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(screen_rect.center())
+            .constrain_to(inset_bounds)
             .default_width(740.0)
             .default_height(560.0)
             .min_width(520.0)
@@ -13814,6 +13866,11 @@ impl CrosshairApp {
                     ))
                     .strong(),
                 );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(self.tr("✕ Close", "✕ Đóng")).clicked() {
+                        request_close = true;
+                    }
+                });
             });
             ui.add_space(4.0);
 
@@ -13929,7 +13986,7 @@ impl CrosshairApp {
                     }
                 });
         });
-        if open {
+        if open && !request_close {
             self.memory_panel.aob_compare_dialog = Some(dialog);
         }
     }
