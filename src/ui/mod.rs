@@ -9568,38 +9568,66 @@ impl CrosshairApp {
             .unwrap_or_else(|| Self::simplify_window_title(clean_target))
     }
 
-    fn process_icon_texture(ctx: &egui::Context, path: &str) -> Option<TextureHandle> {
-        if path.is_empty() {
+    fn window_or_process_icon_texture(
+        ctx: &egui::Context,
+        key: &str,
+        path: &str,
+        selector: Option<&str>,
+        pid: u32,
+    ) -> Option<TextureHandle> {
+        if key.is_empty() {
             return None;
         }
-        if let Some(cached) = PROCESS_ICON_TEXTURES.lock().get(path).cloned() {
-            return cached;
+        if let Some(cached) = PROCESS_ICON_TEXTURES.lock().get(key).cloned() {
+            if cached.is_some() {
+                return cached;
+            }
         }
-        if let Some(rgba_opt) = LOADED_ICON_RGBAS.lock().remove(path) {
+        if let Some(rgba_opt) = LOADED_ICON_RGBAS.lock().remove(key) {
             let texture = rgba_opt.map(|rgba| {
                 ctx.load_texture(
-                    format!("process-icon:{path}"),
+                    format!("process-icon:{key}"),
                     ColorImage::from_rgba_unmultiplied([16, 16], &rgba),
                     TextureOptions::LINEAR,
                 )
             });
-            PROCESS_ICON_TEXTURES
-                .lock()
-                .insert(path.to_owned(), texture.clone());
-            return texture;
+            if texture.is_some() {
+                PROCESS_ICON_TEXTURES
+                    .lock()
+                    .insert(key.to_owned(), texture.clone());
+                return texture;
+            }
         }
         let mut pending = PENDING_ICON_LOADS.lock();
-        if pending.insert(path.to_owned()) {
+        if pending.insert(key.to_owned()) {
+            let key_clone = key.to_owned();
             let path_clone = path.to_owned();
+            let selector_clone = selector.map(|s| s.to_owned());
             let ctx = ctx.clone();
             std::thread::spawn(move || {
-                let rgba = window_list::process_icon_rgba(&path_clone);
-                LOADED_ICON_RGBAS.lock().insert(path_clone.clone(), rgba);
-                PENDING_ICON_LOADS.lock().remove(&path_clone);
+                let rgba = window_list::window_or_process_icon_rgba(
+                    &path_clone,
+                    selector_clone.as_deref(),
+                )
+                .or_else(|| {
+                    if path_clone.is_empty() && pid != 0 {
+                        let p = crate::memory_debugger::debugger::process_path(pid);
+                        if !p.is_empty() {
+                            return window_list::process_icon_rgba(&p);
+                        }
+                    }
+                    None
+                });
+                LOADED_ICON_RGBAS.lock().insert(key_clone.clone(), rgba);
+                PENDING_ICON_LOADS.lock().remove(&key_clone);
                 ctx.request_repaint();
             });
         }
         None
+    }
+
+    fn process_icon_texture(ctx: &egui::Context, path: &str) -> Option<TextureHandle> {
+        Self::window_or_process_icon_texture(ctx, path, path, None, 0)
     }
 
     fn lazy_process_path(pid: u32, known_path: &str) -> String {
@@ -9610,7 +9638,9 @@ impl CrosshairApp {
             return path;
         }
         let path = crate::memory_debugger::debugger::process_path(pid);
-        PROCESS_PATHS.lock().insert(pid, path.clone());
+        if !path.is_empty() {
+            PROCESS_PATHS.lock().insert(pid, path.clone());
+        }
         path
     }
 
@@ -9620,6 +9650,17 @@ impl CrosshairApp {
         label: impl Into<egui::WidgetText>,
         pid: u32,
         path: &str,
+    ) -> egui::Response {
+        Self::selectable_process_row_with_selector(ui, selected, label, pid, path, None)
+    }
+
+    fn selectable_process_row_with_selector(
+        ui: &mut egui::Ui,
+        selected: bool,
+        label: impl Into<egui::WidgetText>,
+        pid: u32,
+        path: &str,
+        selector: Option<&str>,
     ) -> egui::Response {
         let width = ui.available_width();
         let (rect, slot) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
@@ -9632,13 +9673,20 @@ impl CrosshairApp {
             ui.painter().rect_filled(rect, 2.0, color);
         }
         let path = Self::lazy_process_path(pid, path);
+        let icon_key = if !path.is_empty() {
+            path.clone()
+        } else if let Some(sel) = selector {
+            sel.to_owned()
+        } else {
+            format!("pid:{pid}")
+        };
         let mut row = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         row.horizontal(|ui| {
-            if let Some(texture) = Self::process_icon_texture(ui.ctx(), &path) {
+            if let Some(texture) = Self::window_or_process_icon_texture(ui.ctx(), &icon_key, &path, selector, pid) {
                 ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
             } else {
                 ui.label(Self::material_icon_text(0xe30a, 16.0));
@@ -9671,8 +9719,13 @@ impl CrosshairApp {
                 .max_rect(rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
+        let icon_key = if !path.is_empty() {
+            path.to_owned()
+        } else {
+            format!("pid:{pid}")
+        };
         row.horizontal(|ui| {
-            if let Some(texture) = Self::process_icon_texture(ui.ctx(), path) {
+            if let Some(texture) = Self::window_or_process_icon_texture(ui.ctx(), &icon_key, path, None, pid) {
                 ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
             } else {
                 ui.label(Self::material_icon_text(0xe30a, 16.0));
@@ -9817,12 +9870,13 @@ impl CrosshairApp {
                         .find(|window| window.selector == first_selector)
                         .map(|window| window.process_id)
                         .unwrap_or_default();
-                    let row_response = Self::selectable_process_row(
+                    let row_response = Self::selectable_process_row_with_selector(
                         ui,
                         main_selected,
                         truncated_row_label,
                         process_id,
                         process_path,
+                        Some(&first_selector),
                     )
                     .on_hover_text(&title);
 

@@ -755,6 +755,7 @@ pub(crate) struct MemoryPanelState {
     process_choices_loading: bool,
     #[cfg(windows)]
     process_choices_rx: Option<Receiver<Vec<ProcessInfo>>>,
+    process_search: String,
     value_type: ScanValueType,
     text_encoding: Option<TextEncoding>,
     is_aob_scan: bool,
@@ -868,6 +869,7 @@ impl Default for MemoryPanelState {
             process_choices_loading: false,
             #[cfg(windows)]
             process_choices_rx: None,
+            process_search: String::new(),
             value_type: ScanValueType::I32,
             text_encoding: None,
             is_aob_scan: false,
@@ -1882,8 +1884,8 @@ impl CrosshairApp {
                                 ui.style_mut().visuals.widgets.hovered.bg_stroke = stroke;
                             }
                             egui::ComboBox::from_id_salt("memory-process")
-                                .width(ui.available_width())
-                                .height(720.0)
+                                .width(ui.available_width().max(680.0))
+                                .height(820.0)
                                 .selected_text(Self::truncate_window_title(&process_label, 52))
                                 .show_ui(ui, |ui| {
                                     if self.open_window_infos.is_empty() && !self.open_windows_loading {
@@ -1909,66 +1911,85 @@ impl CrosshairApp {
                                             ui.label(self.tr("No window processes found", "Không tìm thấy cửa sổ nào"));
                                         }
                                     } else {
-                                        for window in self.open_window_infos.clone() {
-                                            let selected =
-                                                window.selector == self.memory_panel.process_selector;
-                                            let title_with_pid = format!("{} (PID: {})", Self::simplify_window_title(&window.title), window.process_id);
-                                            ui.horizontal(|ui| {
-                                                if ui.small_button("Focus")
-                                                    .on_hover_text(self.tr("Bring this window to front to check", "Bật nổi cửa sổ này lên màn hình để kiểm tra"))
-                                                    .clicked()
-                                                {
-                                                    window_list::focus_window(&window.selector);
-                                                }
-                                                if Self::selectable_process_row(
-                                                        ui,
-                                                        selected,
-                                                        Self::truncate_window_title(
-                                                            &title_with_pid,
-                                                            60,
-                                                        ),
-                                                        window.process_id,
-                                                        &window.process_path,
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    let selector = window.selector;
-                                                    self.memory_panel.process_selector = selector.clone();
-                                                    let pid =
-                                                        window_list::process_id_for_window(Some(&selector));
-                                                    if self.memory_panel.process_pid != pid {
-                                                        self.reset_memory_scan("Process changed");
-                                                        for saved in &mut self.memory_panel.saved {
-                                                            saved.current = None;
-                                                            saved.frozen = None;
+                                        let win_count = self.open_window_infos.len();
+                                        let win_height = (win_count as f32 * 26.0).clamp(60.0, 180.0);
+                                        egui::ScrollArea::vertical()
+                                            .id_salt("memory-window-processes-scroll")
+                                            .max_height(win_height)
+                                            .show(ui, |ui| {
+                                                for window in self.open_window_infos.clone() {
+                                                    let selected =
+                                                        window.selector == self.memory_panel.process_selector;
+                                                    let title_with_pid = format!("{} (PID: {})", Self::simplify_window_title(&window.title), window.process_id);
+                                                    ui.horizontal(|ui| {
+                                                        if ui.small_button("Focus")
+                                                            .on_hover_text(self.tr("Bring this window to front to check", "Bật nổi cửa sổ này lên màn hình để kiểm tra"))
+                                                            .clicked()
+                                                        {
+                                                            window_list::focus_window(&window.selector);
                                                         }
-                                                        self.memory_panel.selected_saved.clear();
-                                                        self.memory_panel.saved_selection_anchor = None;
-                                                        self.memory_panel.edit_value_index = None;
-                                                        self.memory_panel.edit_description_index = None;
-                                                        self.memory_panel.address_dialog = None;
-                                                    }
-                                                    self.memory_panel.process_pid = pid;
-                                                    self.memory_panel.status = pid.map_or_else(
-                                                        || "Unable to open selected process".to_owned(),
-                                                        |pid| format!("Process selected — PID {pid}"),
-                                                    );
-                                                    ui.ctx().request_repaint();
+                                                        if Self::selectable_process_row_with_selector(
+                                                                ui,
+                                                                selected,
+                                                                Self::truncate_window_title(
+                                                                    &title_with_pid,
+                                                                    60,
+                                                                ),
+                                                                window.process_id,
+                                                                &window.process_path,
+                                                                Some(&window.selector),
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            let selector = window.selector;
+                                                            self.memory_panel.process_selector = selector.clone();
+                                                            let pid =
+                                                                window_list::process_id_for_window(Some(&selector));
+                                                            if self.memory_panel.process_pid != pid {
+                                                                self.reset_memory_scan("Process changed");
+                                                                for saved in &mut self.memory_panel.saved {
+                                                                    saved.current = None;
+                                                                    saved.frozen = None;
+                                                                }
+                                                                self.memory_panel.selected_saved.clear();
+                                                                self.memory_panel.saved_selection_anchor = None;
+                                                                self.memory_panel.edit_value_index = None;
+                                                                self.memory_panel.edit_description_index = None;
+                                                                self.memory_panel.address_dialog = None;
+                                                            }
+                                                            self.memory_panel.process_pid = pid;
+                                                            self.memory_panel.status = pid.map_or_else(
+                                                                || "Unable to open selected process".to_owned(),
+                                                                |pid| format!("Process selected — PID {pid}"),
+                                                            );
+                                                            ui.ctx().request_repaint();
+                                                        }
+                                                    });
                                                 }
                                             });
-                                        }
                                     }
                                     #[cfg(windows)]
                                     {
                                         ui.separator();
                                         ui.horizontal(|ui| {
-                                            ui.label(
-                                                RichText::new(self.tr("All processes (individual PID)", "All processes (individual PID)"))
-                                                    .strong(),
-                                            );
+                                            let total_count = self.memory_panel.process_choices.len();
+                                            let title = if total_count > 0 {
+                                                format!("{} ({})", self.tr("All processes (individual PID)", "All processes (individual PID)"), total_count)
+                                            } else {
+                                                self.tr("All processes (individual PID)", "All processes (individual PID)").to_owned()
+                                            };
+                                            ui.label(RichText::new(title).strong());
                                             if self.memory_panel.process_choices_loading {
                                                 ui.spinner();
                                             }
+                                            let search_hint = self.tr("Search PID / Name...", "Tìm PID / Tên...");
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                ui.add(
+                                                    egui::TextEdit::singleline(&mut self.memory_panel.process_search)
+                                                        .hint_text(search_hint)
+                                                        .desired_width(170.0),
+                                                );
+                                            });
                                         });
                                         if self.memory_panel.process_choices.is_empty() {
                                             if self.memory_panel.process_choices_loading {
@@ -1980,27 +2001,48 @@ impl CrosshairApp {
                                                 ui.label(self.tr("No processes found", "Không tìm thấy tiến trình nào"));
                                             }
                                         } else {
+                                            let filter = self.memory_panel.process_search.trim().to_lowercase();
+                                            let matching_indices: Vec<usize> = if filter.is_empty() {
+                                                (0..self.memory_panel.process_choices.len()).collect()
+                                            } else {
+                                                self.memory_panel
+                                                    .process_choices
+                                                    .iter()
+                                                    .enumerate()
+                                                    .filter(|(_, p)| {
+                                                        p.name.to_lowercase().contains(&filter)
+                                                            || p.pid.to_string().contains(&filter)
+                                                            || p.path.to_lowercase().contains(&filter)
+                                                    })
+                                                    .map(|(i, _)| i)
+                                                    .collect()
+                                            };
+
                                             ui.horizontal(|ui| {
                                                 ui.add_space(24.0);
                                                 ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new(self.tr("Name", "Name")).strong()));
                                                 ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new("PID").strong()));
                                                 ui.label(RichText::new(self.tr("Path", "Path")).strong());
                                             });
-                                            let count = self.memory_panel.process_choices.len();
-                                            egui::ScrollArea::vertical().max_height(620.0).show_rows(ui, 22.0, count, |ui, rows| {
-                                                for index in rows {
-                                                    let (selected, name, pid, path) = {
-                                                        let process = &mut self.memory_panel.process_choices[index];
-                                                        if process.path.is_empty() {
-                                                            process.path = crate::memory_debugger::debugger::process_path(process.pid);
+                                            let count = matching_indices.len();
+                                            egui::ScrollArea::vertical()
+                                                .id_salt("memory-all-proc-scroll")
+                                                .max_height(480.0)
+                                                .show_rows(ui, 22.0, count, |ui, rows| {
+                                                    for row_idx in rows {
+                                                        let index = matching_indices[row_idx];
+                                                        let (selected, name, pid, path) = {
+                                                            let process = &mut self.memory_panel.process_choices[index];
+                                                            if process.path.is_empty() {
+                                                                process.path = crate::memory_debugger::debugger::process_path(process.pid);
+                                                            }
+                                                            (self.memory_panel.process_pid == Some(process.pid), process.name.clone(), process.pid, process.path.clone())
+                                                        };
+                                                        if Self::selectable_process_detail_row(ui, selected, &name, pid, &path).clicked() {
+                                                            self.select_memory_process(format!("pid:{}:{}", pid, name), Some(pid), ui.ctx());
                                                         }
-                                                        (self.memory_panel.process_pid == Some(process.pid), process.name.clone(), process.pid, process.path.clone())
-                                                    };
-                                                    if Self::selectable_process_detail_row(ui, selected, &name, pid, &path).clicked() {
-                                                        self.select_memory_process(format!("pid:{}:{}", pid, name), Some(pid), ui.ctx());
                                                     }
-                                                }
-                                            });
+                                                });
                                         }
                                     }
                                 })

@@ -1481,12 +1481,13 @@ impl CrosshairApp {
                     for window in self.open_window_infos.clone() {
                         let Some(pid) = crate::window_list::process_id_for_window(Some(&window.selector)) else { continue };
                         if pid == std::process::id() { continue; }
-                        if Self::selectable_process_row(
+                        if Self::selectable_process_row_with_selector(
                             ui,
                             self.network_panel.frida_pid == Some(pid),
                             Self::truncate_window_title(&Self::simplify_window_title(&window.title), 70),
                             window.process_id,
                             &window.process_path,
+                            Some(&window.selector),
                         ).clicked() {
                             self.network_panel.frida_pid = Some(pid);
                         }

@@ -4,7 +4,7 @@
 mod windows_impl {
     use windows::{
         Win32::{
-            Foundation::{HMODULE, HWND, LPARAM, POINT, RECT},
+            Foundation::{HMODULE, HWND, LPARAM, POINT, RECT, WPARAM},
             Graphics::Gdi::{
                 BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleDC,
                 CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetWindowDC,
@@ -12,15 +12,19 @@ mod windows_impl {
             },
             Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
             Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
-            UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGetFileInfoW},
+            System::Com::{
+                CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE,
+            },
+            UI::Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGetFileInfoW},
             UI::WindowsAndMessaging::{
                 BringWindowToTop, DI_NORMAL, DestroyIcon, DrawIconEx, EnumWindows, GWL_EXSTYLE,
-                GetClientRect, GetForegroundWindow, GetSystemMetrics, GetWindowLongW,
-                GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
-                HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindow, IsWindowVisible,
-                PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-                SM_YVIRTUALSCREEN, SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
-                SetForegroundWindow, SetWindowPos, ShowWindow, WS_EX_TOPMOST,
+                GetClassLongPtrW, GET_CLASS_LONG_INDEX, GetClientRect, GetForegroundWindow,
+                GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
+                GetWindowTextW, GetWindowThreadProcessId, HICON, HWND_NOTOPMOST, HWND_TOPMOST,
+                IsIconic, IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN,
+                SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SMTO_ABORTIFHUNG,
+                SW_RESTORE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SendMessageTimeoutW,
+                SetForegroundWindow, SetWindowPos, ShowWindow, WM_GETICON, WS_EX_TOPMOST,
             },
         },
         core::{BOOL, PCWSTR},
@@ -126,6 +130,14 @@ mod windows_impl {
         if path.is_empty() {
             return None;
         }
+        let com_inited = unsafe {
+            CoInitializeEx(
+                None,
+                COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE,
+            )
+            .is_ok()
+        };
+
         let wide = path
             .encode_utf16()
             .chain(std::iter::once(0))
@@ -140,14 +152,106 @@ mod windows_impl {
                 SHGFI_ICON | SHGFI_SMALLICON,
             )
         };
-        if found == 0 || info.hIcon.0.is_null() {
-            return None;
+
+        let mut hicon = if found != 0 && !info.hIcon.0.is_null() {
+            Some(info.hIcon)
+        } else {
+            None
+        };
+
+        if hicon.is_none() {
+            let mut small_icon = HICON(std::ptr::null_mut());
+            let extracted = unsafe {
+                ExtractIconExW(
+                    PCWSTR(wide.as_ptr()),
+                    0,
+                    None,
+                    Some(&mut small_icon),
+                    1,
+                )
+            };
+            if extracted > 0 && !small_icon.0.is_null() {
+                hicon = Some(small_icon);
+            }
         }
-        let result = unsafe { hicon_rgba(info.hIcon) };
-        unsafe {
-            let _ = DestroyIcon(info.hIcon);
+
+        let result = hicon.and_then(|icon| unsafe {
+            let rgba = hicon_rgba(icon);
+            let _ = DestroyIcon(icon);
+            rgba
+        });
+
+        if com_inited {
+            unsafe { CoUninitialize() };
         }
+
         result
+    }
+
+    pub fn hwnd_from_selector(selector: &str) -> Option<HWND> {
+        if let Some(prefix) = selector.strip_suffix(')') {
+            if let Some((_, hex)) = prefix.rsplit_once(" (0x") {
+                if let Ok(val) = usize::from_str_radix(hex, 16) {
+                    let hwnd = HWND(val as *mut _);
+                    if unsafe { IsWindow(Some(hwnd)).as_bool() } {
+                        return Some(hwnd);
+                    }
+                }
+            }
+        }
+        find_window_handle(Some(selector))
+    }
+
+    pub fn window_icon_rgba(selector: &str) -> Option<Vec<u8>> {
+        let hwnd = hwnd_from_selector(selector)?;
+        unsafe {
+            let mut hicon = None;
+            for icon_type in [2usize, 0, 1] {
+                let mut res: usize = 0;
+                if SendMessageTimeoutW(
+                    hwnd,
+                    WM_GETICON,
+                    WPARAM(icon_type),
+                    LPARAM(0),
+                    SMTO_ABORTIFHUNG,
+                    50,
+                    Some(&mut res),
+                )
+                .0 != 0
+                    && res != 0
+                {
+                    hicon = Some(HICON(res as *mut _));
+                    break;
+                }
+            }
+            if hicon.is_none() {
+                for index in [-34i32, -14] {
+                    let res = GetClassLongPtrW(hwnd, GET_CLASS_LONG_INDEX(index));
+                    if res != 0 {
+                        hicon = Some(HICON(res as *mut _));
+                        break;
+                    }
+                }
+            }
+            if let Some(icon) = hicon {
+                return hicon_rgba(icon);
+            }
+        }
+        None
+    }
+
+    pub fn window_or_process_icon_rgba(path: &str, selector: Option<&str>) -> Option<Vec<u8>> {
+        if let Some(sel) = selector {
+            if let Some(rgba) = window_icon_rgba(sel) {
+                return Some(rgba);
+            }
+        }
+        if !path.is_empty() {
+            if let Some(rgba) = process_icon_rgba(path) {
+                return Some(rgba);
+            }
+        }
+        None
     }
 
     unsafe fn hicon_rgba(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Vec<u8>> {
