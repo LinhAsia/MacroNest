@@ -1884,10 +1884,11 @@ impl CrosshairApp {
                                 ui.style_mut().visuals.widgets.hovered.bg_stroke = stroke;
                             }
                             egui::ComboBox::from_id_salt("memory-process")
-                                .width(ui.available_width().max(680.0))
+                                .width(ui.available_width())
                                 .height(820.0)
                                 .selected_text(Self::truncate_window_title(&process_label, 52))
                                 .show_ui(ui, |ui| {
+                                    ui.set_min_height(520.0);
                                     if self.open_window_infos.is_empty() && !self.open_windows_loading {
                                         self.ensure_open_windows_ready(false);
                                     }
@@ -1912,7 +1913,7 @@ impl CrosshairApp {
                                         }
                                     } else {
                                         let win_count = self.open_window_infos.len();
-                                        let win_height = (win_count as f32 * 26.0).clamp(60.0, 180.0);
+                                        let win_height = (win_count as f32 * 26.0).clamp(50.0, 150.0);
                                         egui::ScrollArea::vertical()
                                             .id_salt("memory-window-processes-scroll")
                                             .max_height(win_height)
@@ -2027,7 +2028,9 @@ impl CrosshairApp {
                                             let count = matching_indices.len();
                                             egui::ScrollArea::vertical()
                                                 .id_salt("memory-all-proc-scroll")
-                                                .max_height(480.0)
+                                                .auto_shrink([false, false])
+                                                .min_scrolled_height(420.0)
+                                                .max_height(600.0)
                                                 .show_rows(ui, 22.0, count, |ui, rows| {
                                                     for row_idx in rows {
                                                         let index = matching_indices[row_idx];
