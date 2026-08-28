@@ -1110,13 +1110,6 @@ impl CrosshairApp {
                     .size(17.0),
             );
             ui.separator();
-            ui.label(RichText::new(&self.memory_panel.status).small().color(
-                if self.memory_panel.scanning {
-                    Color32::from_rgb(230, 170, 70)
-                } else {
-                    ui.visuals().weak_text_color()
-                },
-            ));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let pin_label = if self.memory_panel.pinned {
                     self.tr("Unpin results", "Unpin results")
@@ -1174,6 +1167,22 @@ impl CrosshairApp {
                 {
                     self.memory_panel.show_dll_studio = true;
                 }
+
+                // Status text in remaining middle space with truncate
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&self.memory_panel.status).small().color(
+                                if self.memory_panel.scanning {
+                                    Color32::from_rgb(230, 170, 70)
+                                } else {
+                                    ui.visuals().weak_text_color()
+                                },
+                            ),
+                        )
+                        .truncate(),
+                    );
+                });
             });
         });
         ui.add_space(6.0);
@@ -3130,8 +3139,8 @@ impl CrosshairApp {
                                 if let Some(pid) = self.memory_panel.process_pid {
                                     if let Ok(bytes) = read_memory_bytes(pid, address_value, 32) {
                                         let aob = format_aob_hex(&bytes);
-                                        ui.ctx().copy_text(aob.clone());
-                                        self.memory_panel.status = format!("Copied AOB (32 bytes): {aob}");
+                                        ui.ctx().copy_text(aob);
+                                        self.memory_panel.status = "Copied AOB (32 bytes) to clipboard".to_string();
                                     }
                                 }
                                 ui.close();
@@ -3140,8 +3149,8 @@ impl CrosshairApp {
                                 if let Some(pid) = self.memory_panel.process_pid {
                                     if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
                                         let aob = format_aob_hex(&bytes);
-                                        ui.ctx().copy_text(aob.clone());
-                                        self.memory_panel.status = format!("Copied AOB (64 bytes): {aob}");
+                                        ui.ctx().copy_text(aob);
+                                        self.memory_panel.status = "Copied AOB (64 bytes) to clipboard".to_string();
                                     }
                                 }
                                 ui.close();
@@ -3150,8 +3159,8 @@ impl CrosshairApp {
                                 if let Some(pid) = self.memory_panel.process_pid {
                                     if let Ok(bytes) = read_memory_bytes(pid, address_value, 128) {
                                         let aob = format_aob_hex(&bytes);
-                                        ui.ctx().copy_text(aob.clone());
-                                        self.memory_panel.status = format!("Copied AOB (128 bytes): {aob}");
+                                        ui.ctx().copy_text(aob);
+                                        self.memory_panel.status = "Copied AOB (128 bytes) to clipboard".to_string();
                                     }
                                 }
                                 ui.close();
@@ -4188,8 +4197,8 @@ impl CrosshairApp {
                                     if let Some(pid) = self.memory_panel.process_pid {
                                         if let Ok(bytes) = read_memory_bytes(pid, saved.address, 32) {
                                             let aob = format_aob_hex(&bytes);
-                                            ui.ctx().copy_text(aob.clone());
-                                            self.memory_panel.status = format!("Copied AOB (32 bytes): {aob}");
+                                            ui.ctx().copy_text(aob);
+                                            self.memory_panel.status = "Copied AOB (32 bytes) to clipboard".to_string();
                                         }
                                     }
                                     ui.close();
@@ -4205,8 +4214,8 @@ impl CrosshairApp {
                                     if let Some(pid) = self.memory_panel.process_pid {
                                         if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
                                             let aob = format_aob_hex(&bytes);
-                                            ui.ctx().copy_text(aob.clone());
-                                            self.memory_panel.status = format!("Copied AOB (64 bytes): {aob}");
+                                            ui.ctx().copy_text(aob);
+                                            self.memory_panel.status = "Copied AOB (64 bytes) to clipboard".to_string();
                                         }
                                     }
                                     ui.close();
@@ -4222,8 +4231,8 @@ impl CrosshairApp {
                                     if let Some(pid) = self.memory_panel.process_pid {
                                         if let Ok(bytes) = read_memory_bytes(pid, saved.address, 128) {
                                             let aob = format_aob_hex(&bytes);
-                                            ui.ctx().copy_text(aob.clone());
-                                            self.memory_panel.status = format!("Copied AOB (128 bytes): {aob}");
+                                            ui.ctx().copy_text(aob);
+                                            self.memory_panel.status = "Copied AOB (128 bytes) to clipboard".to_string();
                                         }
                                     }
                                     ui.close();
@@ -4279,7 +4288,7 @@ impl CrosshairApp {
                                             }
                                             self.memory_panel.global_aob_sample_1 = Some((bytes, saved.address));
                                             ui.ctx().copy_text(aob.clone());
-                                            self.memory_panel.status = format!("Sample 1 captured (64 bytes): {aob}");
+                                            self.memory_panel.status = "Sample 1 captured (64 bytes)".to_string();
                                         }
                                     }
                                     ui.close();
@@ -14098,10 +14107,9 @@ impl CrosshairApp {
         }
 
         self.memory_panel.status = format!(
-            "Generated AOB Pattern ({} samples, {} '??' wildcards): {}",
+            "Generated AOB Pattern ({} samples, {} '??' wildcards)",
             sample_slices.len(),
             wildcard_count,
-            pattern
         );
 
         self.memory_panel.aob_compare_dialog = Some(AobCompareDialog {
@@ -14171,7 +14179,7 @@ impl CrosshairApp {
                             self.tr("Copied pattern to clipboard!", "Đã sao chép mã AOB vào clipboard!").to_string(),
                             Instant::now(),
                         ));
-                        self.memory_panel.status = format!("Copied AOB Pattern: {}", dialog.pattern);
+                        self.memory_panel.status = "Copied AOB pattern to clipboard".to_string();
                     }
                     if ui
                         .button(self.tr("Apply to All Selected", "Lưu vào các địa chỉ đã chọn"))
