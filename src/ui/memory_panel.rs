@@ -586,6 +586,8 @@ struct CodeAccessDialog {
     active: Option<AccessWatch>,
     pinned: bool,
     selected: Option<usize>,
+    selected_indices: HashSet<usize>,
+    selection_anchor: Option<usize>,
     value_type: ScanValueType,
     values: HashMap<usize, String>,
     tracked_name: String,
@@ -613,6 +615,7 @@ struct AobCompareDialog {
     pattern: String,
     total_bytes: usize,
     wildcard_count: usize,
+    feedback_message: Option<(String, Instant)>,
 }
 
 #[cfg(windows)]
@@ -810,6 +813,7 @@ pub(crate) struct MemoryPanelState {
     address_list_pinned: bool,
     show_scan_previous: bool,
     highlight_changed_values: bool,
+    candidate_value_changes: HashMap<usize, (String, Instant)>,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     pub(super) capturing_hotkey: Option<MemoryScanAction>,
     edit_value_index: Option<usize>,
@@ -925,6 +929,7 @@ impl Default for MemoryPanelState {
             address_list_pinned: false,
             show_scan_previous: false,
             highlight_changed_values: false,
+            candidate_value_changes: HashMap::new(),
             hotkeys: HashMap::new(),
             capturing_hotkey: None,
             edit_value_index: None,
@@ -2605,23 +2610,56 @@ impl CrosshairApp {
                     pane_width * address_ratio,
                     RichText::new(format_memory_address(address_value)).monospace(),
                 );
-                let value_changed = current_value != previous_value;
-                let highlight_red = self.memory_panel.highlight_changed_values && value_changed;
+                let (cell_bg, text_color) = if self.memory_panel.highlight_changed_values {
+                    let now = Instant::now();
+                    let change_time = match self.memory_panel.candidate_value_changes.get_mut(&index) {
+                        Some((last_val, time)) => {
+                            if *last_val != current_value {
+                                *last_val = current_value.clone();
+                                *time = now;
+                                now
+                            } else {
+                                *time
+                            }
+                        }
+                        None => {
+                            let time = if current_value != previous_value {
+                                now
+                            } else {
+                                now.checked_sub(Duration::from_secs(10)).unwrap_or(now)
+                            };
+                            self.memory_panel
+                                .candidate_value_changes
+                                .insert(index, (current_value.clone(), time));
+                            time
+                        }
+                    };
+                    let elapsed = change_time.elapsed();
+                    const FADE_DURATION: Duration = Duration::from_millis(1500);
+                    if elapsed < FADE_DURATION {
+                        let progress = elapsed.as_secs_f32() / FADE_DURATION.as_secs_f32();
+                        let factor = (1.0 - progress).clamp(0.0, 1.0);
+                        let alpha = (factor * 155.0).round() as u8;
+                        ui.ctx().request_repaint();
+                        (
+                            Some(Color32::from_rgba_unmultiplied(225, 45, 45, alpha)),
+                            if factor > 0.35 {
+                                Color32::from_rgb(255, 230, 230)
+                            } else {
+                                ui.visuals().text_color()
+                            },
+                        )
+                    } else {
+                        (None, ui.visuals().text_color())
+                    }
+                } else {
+                    (None, ui.visuals().text_color())
+                };
                 Self::memory_table_cell_with_bg(
                     ui,
                     pane_width * value_ratio,
-                    RichText::new(&current_value)
-                        .monospace()
-                        .color(if highlight_red {
-                            Color32::from_rgb(255, 230, 230)
-                        } else {
-                            ui.visuals().text_color()
-                        }),
-                    if highlight_red {
-                        Some(Color32::from_rgba_unmultiplied(210, 48, 48, 130))
-                    } else {
-                        None
-                    },
+                    RichText::new(&current_value).monospace().color(text_color),
+                    cell_bg,
                 );
                 if show_previous {
                     Self::memory_table_cell(
@@ -2996,23 +3034,56 @@ impl CrosshairApp {
                                         },
                                     ),
                                 );
-                                let value_changed = current_value != previous_value;
-                                let highlight_red = self.memory_panel.highlight_changed_values && value_changed;
+                                let (cell_bg, text_color) = if self.memory_panel.highlight_changed_values {
+                                    let now = Instant::now();
+                                    let change_time = match self.memory_panel.candidate_value_changes.get_mut(&index) {
+                                        Some((last_val, time)) => {
+                                            if *last_val != current_value {
+                                                *last_val = current_value.clone();
+                                                *time = now;
+                                                now
+                                            } else {
+                                                *time
+                                            }
+                                        }
+                                        None => {
+                                            let time = if current_value != previous_value {
+                                                now
+                                            } else {
+                                                now.checked_sub(Duration::from_secs(10)).unwrap_or(now)
+                                            };
+                                            self.memory_panel
+                                                .candidate_value_changes
+                                                .insert(index, (current_value.clone(), time));
+                                            time
+                                        }
+                                    };
+                                    let elapsed = change_time.elapsed();
+                                    const FADE_DURATION: Duration = Duration::from_millis(1500);
+                                    if elapsed < FADE_DURATION {
+                                        let progress = elapsed.as_secs_f32() / FADE_DURATION.as_secs_f32();
+                                        let factor = (1.0 - progress).clamp(0.0, 1.0);
+                                        let alpha = (factor * 155.0).round() as u8;
+                                        ui.ctx().request_repaint();
+                                        (
+                                            Some(Color32::from_rgba_unmultiplied(225, 45, 45, alpha)),
+                                            if factor > 0.35 {
+                                                Color32::from_rgb(255, 230, 230)
+                                            } else {
+                                                ui.visuals().text_color()
+                                            },
+                                        )
+                                    } else {
+                                        (None, ui.visuals().text_color())
+                                    }
+                                } else {
+                                    (None, ui.visuals().text_color())
+                                };
                                 Self::memory_table_cell_with_bg(
                                     ui,
                                     result_column_width,
-                                    RichText::new(&current_value)
-                                        .monospace()
-                                        .color(if highlight_red {
-                                            Color32::from_rgb(255, 230, 230)
-                                        } else {
-                                            ui.visuals().text_color()
-                                        }),
-                                    if highlight_red {
-                                        Some(Color32::from_rgba_unmultiplied(210, 48, 48, 130))
-                                    } else {
-                                        None
-                                    },
+                                    RichText::new(&current_value).monospace().color(text_color),
+                                    cell_bg,
                                 );
                                 Self::memory_table_cell(
                                     ui,
@@ -5954,6 +6025,8 @@ impl CrosshairApp {
                 active: None,
                 pinned: true,
                 selected: None,
+                selected_indices: HashSet::new(),
+                selection_anchor: None,
                 value_type: self.memory_panel.value_type,
                 values: HashMap::new(),
                 tracked_name: String::new(),
@@ -5993,6 +6066,8 @@ impl CrosshairApp {
             active,
             pinned: true,
             selected: None,
+            selected_indices: HashSet::new(),
+            selection_anchor: None,
             value_type: self.memory_panel.value_type,
             values: HashMap::new(),
             tracked_name: String::new(),
@@ -10730,13 +10805,23 @@ impl CrosshairApp {
             dialog.save_tracked = false;
             self.save_tracked_code_address(&mut dialog);
         }
-        if let Some(address) = add {
-            let newly_added = self.add_code_access_address(address, dialog.value_type);
+        if let Some(addresses) = add {
+            let total_count = addresses.len();
+            let mut newly_added_count = 0;
+            for address in &addresses {
+                if self.add_code_access_address(*address, dialog.value_type) {
+                    newly_added_count += 1;
+                }
+            }
             dialog.feedback_message = Some((
-                if newly_added {
-                    format!("✓ Address {} added to Address list", format_prefixed_memory_address(address))
+                if total_count == 1 {
+                    if newly_added_count == 1 {
+                        format!("✓ Address {} added to Address list", format_prefixed_memory_address(addresses[0]))
+                    } else {
+                        format!("Address {} is already in Address list", format_prefixed_memory_address(addresses[0]))
+                    }
                 } else {
-                    format!("Address {} is already in Address list", format_prefixed_memory_address(address))
+                    format!("✓ Added {newly_added_count} of {total_count} address(es) to Address list")
                 },
                 Instant::now(),
             ));
@@ -10835,13 +10920,13 @@ impl CrosshairApp {
         dialog: &mut CodeAccessDialog,
         esp_presets: &[EspPreset],
     ) -> (
-        Option<usize>,
+        Option<Vec<usize>>,
         Option<usize>,
         bool,
         bool,
         Option<(usize, u32)>,
     ) {
-        let mut add = None;
+        let mut add: Option<Vec<usize>> = None;
         let mut browse = None;
         let mut refresh_values = false;
         let mut start_requested = false;
@@ -10890,14 +10975,25 @@ impl CrosshairApp {
                     Instant::now(),
                 ));
             }
+            let sel_count = dialog.selected_indices.len();
+            let add_btn_label = if sel_count > 1 {
+                format!("Add selected ({sel_count})")
+            } else {
+                "Add selected".to_owned()
+            };
             if ui
-                .add_enabled(dialog.selected.is_some(), Button::new("Add selected"))
+                .add_enabled(sel_count > 0, Button::new(add_btn_label))
                 .clicked()
             {
-                add = dialog
-                    .selected
-                    .and_then(|index| dialog.addresses.get(index))
-                    .map(|(address, _)| *address);
+                let mut addrs = Vec::new();
+                for &idx in &dialog.selected_indices {
+                    if let Some((address, _)) = dialog.addresses.get(idx) {
+                        addrs.push(*address);
+                    }
+                }
+                if !addrs.is_empty() {
+                    add = Some(addrs);
+                }
             }
             if ui
                 .add_enabled(dialog.selected.is_some(), Button::new("Browse selected"))
@@ -11030,7 +11126,7 @@ impl CrosshairApp {
                 dialog.hits_sort = 0;
             }
         });
-        let mut context_add = None;
+        let mut context_add: Option<Vec<usize>> = None;
         let mut display_addresses: Vec<(usize, &(usize, usize))> =
             dialog.addresses.iter().enumerate().collect();
         let search = dialog.value_search.trim();
@@ -11064,6 +11160,13 @@ impl CrosshairApp {
                 )
             });
         }
+        let display_orig_indices: Vec<usize> =
+            display_addresses.iter().map(|(orig, _)| *orig).collect();
+        if ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::A)) {
+            dialog.selected_indices = display_orig_indices.iter().copied().collect();
+            dialog.selected = display_orig_indices.first().copied();
+            dialog.selection_anchor = Some(0);
+        }
         let has_visible_addresses = !display_addresses.is_empty();
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (row_idx, (original_index, (address, count))) in
@@ -11094,7 +11197,8 @@ impl CrosshairApp {
                     .inner
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .on_hover_text("Click to select this address; double-click to add it");
-                if dialog.selected == Some(original_index) {
+                let is_selected = dialog.selected_indices.contains(&original_index);
+                if is_selected {
                     ui.painter().rect_filled(
                         response.rect,
                         2.0,
@@ -11114,12 +11218,51 @@ impl CrosshairApp {
                     );
                 }
                 if response.clicked() {
-                    dialog.selected = Some(original_index);
+                    let (shift, additive) = ui.input(|input| {
+                        (
+                            input.modifiers.shift,
+                            input.modifiers.ctrl || input.modifiers.command,
+                        )
+                    });
+                    if shift && let Some(anchor_row) = dialog.selection_anchor {
+                        if !additive {
+                            dialog.selected_indices.clear();
+                        }
+                        let (start, end) = if anchor_row <= row_idx {
+                            (anchor_row, row_idx)
+                        } else {
+                            (row_idx, anchor_row)
+                        };
+                        for r in start..=end {
+                            if let Some(&orig) = display_orig_indices.get(r) {
+                                dialog.selected_indices.insert(orig);
+                            }
+                        }
+                    } else {
+                        if !additive {
+                            dialog.selected_indices.clear();
+                        }
+                        if additive && dialog.selected_indices.contains(&original_index) {
+                            dialog.selected_indices.remove(&original_index);
+                        } else {
+                            dialog.selected_indices.insert(original_index);
+                        }
+                    }
+                    if !shift {
+                        dialog.selection_anchor = Some(row_idx);
+                    }
+                    dialog.selected = dialog.selected_indices.iter().copied().next();
                 }
                 if response.double_clicked() {
-                    add = Some(*address);
+                    add = Some(vec![*address]);
                 }
                 response.context_menu(|ui| {
+                    if !dialog.selected_indices.contains(&original_index) {
+                        dialog.selected_indices.clear();
+                        dialog.selected_indices.insert(original_index);
+                        dialog.selected = Some(original_index);
+                        dialog.selection_anchor = Some(row_idx);
+                    }
                     if ui.button("Copy address and value").clicked() {
                         ui.ctx().copy_text(format!(
                             "{}\t{}\t{}",
@@ -11129,8 +11272,23 @@ impl CrosshairApp {
                         ));
                         ui.close();
                     }
-                    if ui.button("Add to Address list").clicked() {
-                        context_add = Some(*address);
+                    let sel_count = dialog.selected_indices.len();
+                    let add_label = if sel_count > 1 {
+                        format!("Add all {} selected addresses to Address list", sel_count)
+                    } else {
+                        "Add to Address list".to_owned()
+                    };
+                    if ui.button(add_label).clicked() {
+                        let mut addrs = Vec::new();
+                        for &idx in &dialog.selected_indices {
+                            if let Some((addr, _)) = dialog.addresses.get(idx) {
+                                addrs.push(*addr);
+                            }
+                        }
+                        if addrs.is_empty() {
+                            addrs.push(*address);
+                        }
+                        context_add = Some(addrs);
                         ui.close();
                     }
                     if ui.button("Browse this memory region").clicked() {
@@ -13560,6 +13718,7 @@ impl CrosshairApp {
         self.memory_panel.candidates = Vec::new();
         self.memory_panel.raw_snapshot = None;
         self.memory_panel.live_candidate_values = HashMap::new();
+        self.memory_panel.candidate_value_changes.clear();
         self.memory_panel.text_candidates = Vec::new();
         self.memory_panel.selected_results = HashSet::new();
         self.memory_panel.marked_result_addresses = HashSet::new();
@@ -13827,6 +13986,7 @@ impl CrosshairApp {
             pattern,
             total_bytes,
             wildcard_count,
+            feedback_message: None,
         });
         ctx.request_repaint();
     }
@@ -13867,7 +14027,7 @@ impl CrosshairApp {
                     .strong(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(self.tr("✕ Close", "✕ Đóng")).clicked() {
+                    if ui.button(self.tr("Close", "Đóng")).clicked() {
                         request_close = true;
                     }
                 });
@@ -13877,17 +14037,46 @@ impl CrosshairApp {
             ui.group(|ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(self.tr("Generated Pattern:", "Mã AOB đã tạo:")).strong());
-                    if ui.button(self.tr("Copy Pattern", "Sao chép mã AOB")).clicked() {
+                    if ui
+                        .button(self.tr("Copy Pattern", "Sao chép mã AOB"))
+                        .on_hover_text(self.tr("Copy this generated wildcard pattern to clipboard", "Sao chép mã AOB có ký tự ?? này vào bộ nhớ tạm"))
+                        .clicked()
+                    {
                         ctx.copy_text(dialog.pattern.clone());
+                        dialog.feedback_message = Some((
+                            self.tr("Copied pattern to clipboard!", "Đã sao chép mã AOB vào clipboard!").to_string(),
+                            Instant::now(),
+                        ));
                         self.memory_panel.status = format!("Copied AOB Pattern: {}", dialog.pattern);
                     }
-                    if ui.button(self.tr("Apply to All Selected", "Lưu vào các địa chỉ đã chọn")).clicked() {
+                    if ui
+                        .button(self.tr("Apply to All Selected", "Lưu vào các địa chỉ đã chọn"))
+                        .on_hover_text(self.tr(
+                            "Save this AOB pattern to all selected items in your Saved Addresses list",
+                            "Gắn mã AOB này vào tất cả các dòng đang được chọn trong bảng địa chỉ đã lưu"
+                        ))
+                        .clicked()
+                    {
+                        let count = self.memory_panel.selected_saved.len();
                         for &sel_idx in &self.memory_panel.selected_saved {
                             if let Some(entry) = self.memory_panel.saved.get_mut(sel_idx) {
                                 entry.aob_pattern = Some(dialog.pattern.clone());
                             }
                         }
-                        self.memory_panel.status = format!("Applied AOB pattern to {} saved address(es)", self.memory_panel.selected_saved.len());
+                        dialog.feedback_message = Some((
+                            if count > 0 {
+                                format!("{} ({} {})", self.tr("Applied AOB pattern to", "Đã gắn mã AOB vào"), count, self.tr("addresses", "địa chỉ"))
+                            } else {
+                                self.tr("No saved addresses were selected in table", "Chưa có địa chỉ nào được chọn trong bảng").to_string()
+                            },
+                            Instant::now(),
+                        ));
+                        self.memory_panel.status = format!("Applied AOB pattern to {} saved address(es)", count);
+                    }
+                    if let Some((msg, time)) = &dialog.feedback_message {
+                        if time.elapsed() < Duration::from_secs(4) {
+                            ui.label(RichText::new(format!("✓ {msg}")).color(Color32::from_rgb(100, 220, 130)).strong());
+                        }
                     }
                 });
                 ui.add_space(2.0);
