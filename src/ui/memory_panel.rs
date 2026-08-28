@@ -3136,6 +3136,44 @@ impl CrosshairApp {
                                 }
                                 ui.close();
                             }
+                            if ui.button(self.tr("Copy AOB (64 bytes)", "Sao chép AOB (64 byte)")).clicked() {
+                                if let Some(pid) = self.memory_panel.process_pid {
+                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
+                                        let aob = format_aob_hex(&bytes);
+                                        ui.ctx().copy_text(aob.clone());
+                                        self.memory_panel.status = format!("Copied AOB (64 bytes): {aob}");
+                                    }
+                                }
+                                ui.close();
+                            }
+                            if ui.button(self.tr("Copy AOB (128 bytes)", "Sao chép AOB (128 byte)")).clicked() {
+                                if let Some(pid) = self.memory_panel.process_pid {
+                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 128) {
+                                        let aob = format_aob_hex(&bytes);
+                                        ui.ctx().copy_text(aob.clone());
+                                        self.memory_panel.status = format!("Copied AOB (128 bytes): {aob}");
+                                    }
+                                }
+                                ui.close();
+                            }
+                            if ui.button(self.tr("Send to Manual AOB (Sample 1)", "Gửi vào Mẫu AOB 1")).clicked() {
+                                if let Some(pid) = self.memory_panel.process_pid {
+                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
+                                        self.memory_panel.manual_aob_input_1 = format_aob_hex(&bytes);
+                                        self.memory_panel.show_manual_aob_compare = true;
+                                    }
+                                }
+                                ui.close();
+                            }
+                            if ui.button(self.tr("Send to Manual AOB (Sample 2)", "Gửi vào Mẫu AOB 2")).clicked() {
+                                if let Some(pid) = self.memory_panel.process_pid {
+                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
+                                        self.memory_panel.manual_aob_input_2 = format_aob_hex(&bytes);
+                                        self.memory_panel.show_manual_aob_compare = true;
+                                    }
+                                }
+                                ui.close();
+                            }
                             ui.separator();
                             let label = if marked {
                                 "Remove not-relevant mark"
@@ -4152,6 +4190,72 @@ impl CrosshairApp {
                                             let aob = format_aob_hex(&bytes);
                                             ui.ctx().copy_text(aob.clone());
                                             self.memory_panel.status = format!("Copied AOB (32 bytes): {aob}");
+                                        }
+                                    }
+                                    ui.close();
+                                }
+                                if ui
+                                    .add_enabled(
+                                        single_target,
+                                        Button::new(self.tr("Copy AOB (64 bytes)", "Sao chép AOB (64 byte)")),
+                                    )
+                                    .on_hover_text("Copy 64 raw bytes of memory at this address as an AOB string")
+                                    .clicked()
+                                {
+                                    if let Some(pid) = self.memory_panel.process_pid {
+                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                            let aob = format_aob_hex(&bytes);
+                                            ui.ctx().copy_text(aob.clone());
+                                            self.memory_panel.status = format!("Copied AOB (64 bytes): {aob}");
+                                        }
+                                    }
+                                    ui.close();
+                                }
+                                if ui
+                                    .add_enabled(
+                                        single_target,
+                                        Button::new(self.tr("Copy AOB (128 bytes)", "Sao chép AOB (128 byte)")),
+                                    )
+                                    .on_hover_text("Copy 128 raw bytes of memory at this address as an AOB string")
+                                    .clicked()
+                                {
+                                    if let Some(pid) = self.memory_panel.process_pid {
+                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 128) {
+                                            let aob = format_aob_hex(&bytes);
+                                            ui.ctx().copy_text(aob.clone());
+                                            self.memory_panel.status = format!("Copied AOB (128 bytes): {aob}");
+                                        }
+                                    }
+                                    ui.close();
+                                }
+                                if ui
+                                    .add_enabled(
+                                        single_target,
+                                        Button::new(self.tr("Send to Manual AOB (Sample 1)", "Gửi vào Mẫu AOB 1")),
+                                    )
+                                    .on_hover_text("Read 64 bytes and put into Sample 1 of Manual AOB compare tool")
+                                    .clicked()
+                                {
+                                    if let Some(pid) = self.memory_panel.process_pid {
+                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                            self.memory_panel.manual_aob_input_1 = format_aob_hex(&bytes);
+                                            self.memory_panel.show_manual_aob_compare = true;
+                                        }
+                                    }
+                                    ui.close();
+                                }
+                                if ui
+                                    .add_enabled(
+                                        single_target,
+                                        Button::new(self.tr("Send to Manual AOB (Sample 2)", "Gửi vào Mẫu AOB 2")),
+                                    )
+                                    .on_hover_text("Read 64 bytes and put into Sample 2 of Manual AOB compare tool")
+                                    .clicked()
+                                {
+                                    if let Some(pid) = self.memory_panel.process_pid {
+                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                            self.memory_panel.manual_aob_input_2 = format_aob_hex(&bytes);
+                                            self.memory_panel.show_manual_aob_compare = true;
                                         }
                                     }
                                     ui.close();
@@ -14232,7 +14336,7 @@ impl CrosshairApp {
                     if ui.button(self.tr("Close", "Đóng")).clicked() {
                         request_close = true;
                     }
-                    if ui.button(self.tr("Swap (1 ⇄ 2)", "Đảo vị trí (1 ⇄ 2)")).clicked() {
+                    if ui.button(self.tr("Swap (1 <-> 2)", "Đảo vị trí (1 <-> 2)")).clicked() {
                         std::mem::swap(
                             &mut self.memory_panel.manual_aob_input_1,
                             &mut self.memory_panel.manual_aob_input_2,
@@ -14381,7 +14485,7 @@ impl CrosshairApp {
                     if ui
                         .add_enabled(
                             !result_pattern.is_empty(),
-                            egui::Button::new(self.tr("Use as Sample 1 ⤤", "Lấy kết quả làm Mẫu 1 ⤤")),
+                            egui::Button::new(self.tr("Use as Sample 1 ->", "Lấy kết quả làm Mẫu 1 ->")),
                         )
                         .on_hover_text(self.tr(
                             "Put this result into Sample 1 so you can compare it with a 3rd sample in Sample 2",
@@ -14398,7 +14502,7 @@ impl CrosshairApp {
                     if ui
                         .add_enabled(
                             !result_pattern.is_empty(),
-                            egui::Button::new(self.tr("Use as Sample 2 ⤥", "Lấy kết quả làm Mẫu 2 ⤥")),
+                            egui::Button::new(self.tr("Use as Sample 2 ->", "Lấy kết quả làm Mẫu 2 ->")),
                         )
                         .on_hover_text(self.tr(
                             "Put this result into Sample 2",
