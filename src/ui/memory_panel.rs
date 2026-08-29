@@ -6382,7 +6382,11 @@ impl CrosshairApp {
             source_selector,
             value_type: saved.value_type,
             expected_values,
-            status: format!("Scanning pointer paths for {} target(s)…", targets.len()),
+            status: if targets.len() == 1 {
+                format!("Scanning pointer paths for target 0x{:X}…", targets[0].0)
+            } else {
+                format!("Scanning pointer paths for {} target(s)…", targets.len())
+            },
             candidates: Vec::new(),
             selected: None,
             rx: Some(rx),
@@ -8232,9 +8236,14 @@ impl CrosshairApp {
                             !candidate.path.module.to_ascii_lowercase().ends_with(".exe")
                         });
                         dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+                        let target_desc = if dialog.source_addresses.len() == 1 {
+                            format!("target 0x{:X}", dialog.source_addresses[0])
+                        } else {
+                            format!("{} target(s)", dialog.source_addresses.len())
+                        };
                         dialog.status = if dialog.candidates.is_empty() {
                             format!(
-                                "No module-based pointer paths found after reading {:.1} MB ({} levels, max offset 0x{:X})",
+                                "No module-based pointer paths found for {target_desc} after reading {:.1} MB ({} levels, max offset 0x{:X})",
                                 dialog.progress.load(Ordering::Relaxed) as f64 / 1_048_576.0,
                                 dialog.limits.max_depth,
                                 dialog.limits.max_offset,
@@ -8245,9 +8254,8 @@ impl CrosshairApp {
                                 .then_some(" (path limit reached)")
                                 .unwrap_or_default();
                             format!(
-                                "{} candidate(s) for {} target(s){limit_note}. Restart the game, restore the target values, select the new process, then Validate.",
+                                "{} candidate(s) for {target_desc}{limit_note}. Restart the game, restore the target values, select the new process, then Validate.",
                                 dialog.candidates.len(),
-                                dialog.source_addresses.len(),
                             )
                         };
                     }
@@ -8482,10 +8490,10 @@ impl CrosshairApp {
                 });
                 if !show_target_column {
                     if let Some(target) = single_target {
-                        ui.label(format!(
-                            "Target: {}",
-                            format_prefixed_memory_address(target)
-                        ));
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Target Address:").strong());
+                            ui.monospace(format_prefixed_memory_address(target));
+                        });
                     }
                 }
                 ui.horizontal(|ui| {
