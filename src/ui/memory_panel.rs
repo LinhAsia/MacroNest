@@ -203,6 +203,10 @@ struct StablePointerValidationResult {
 struct StablePointerDialog {
     source_addresses: Vec<usize>,
     source_pid: u32,
+    source_process_name: String,
+    source_process_path: String,
+    source_window_title: String,
+    source_selector: String,
     value_type: ScanValueType,
     expected_values: HashMap<usize, ScanValue>,
     status: String,
@@ -823,6 +827,7 @@ pub(crate) struct MemoryPanelState {
     edit_value_index: Option<usize>,
     edit_value_input: String,
     edit_value_position: Option<egui::Pos2>,
+    saved_address_list_rect: Option<egui::Rect>,
     edit_description_index: Option<usize>,
     edit_code_name_index: Option<usize>,
     edit_code_name_input: String,
@@ -943,6 +948,7 @@ impl Default for MemoryPanelState {
             edit_value_index: None,
             edit_value_input: String::new(),
             edit_value_position: None,
+            saved_address_list_rect: None,
             edit_description_index: None,
             edit_code_name_index: None,
             edit_code_name_input: String::new(),
@@ -3355,7 +3361,7 @@ impl CrosshairApp {
 
     fn render_saved_memory_addresses(&mut self, ui: &mut egui::Ui) {
         let size = ui.available_size();
-        Frame::group(ui.style())
+        let frame_response = Frame::group(ui.style())
             .inner_margin(egui::Margin::same(6))
             .show(ui, |ui| {
                 ui.set_min_size(size - vec2(14.0, 14.0));
@@ -4525,6 +4531,7 @@ impl CrosshairApp {
                     });
                 }
             });
+        self.memory_panel.saved_address_list_rect = Some(frame_response.response.rect);
         self.render_saved_memory_value_editor(ui.ctx());
     }
 
@@ -6227,6 +6234,10 @@ impl CrosshairApp {
             self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
                 source_addresses: vec![saved.address],
                 source_pid: 0,
+                source_process_name: String::new(),
+                source_process_path: String::new(),
+                source_window_title: String::new(),
+                source_selector: String::new(),
                 value_type: saved.value_type,
                 expected_values: HashMap::new(),
                 status,
@@ -6246,6 +6257,38 @@ impl CrosshairApp {
             });
             return;
         };
+        let source_selector = self.memory_panel.process_selector.clone();
+        let source_process_path = crate::memory_debugger::debugger::process_path(pid);
+        let source_process_name = if let Some(name) = source_selector
+            .strip_prefix("pid:")
+            .and_then(|s| s.split_once(':').map(|(_, n)| n.to_string()))
+        {
+            name
+        } else if let Some(win) = self
+            .open_window_infos
+            .iter()
+            .find(|w| w.process_id == pid || w.selector == source_selector)
+        {
+            std::path::Path::new(&win.process_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(&win.title)
+                .to_string()
+        } else if !source_process_path.is_empty() {
+            std::path::Path::new(&source_process_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            String::new()
+        };
+        let source_window_title = self
+            .open_window_infos
+            .iter()
+            .find(|w| w.process_id == pid || w.selector == source_selector)
+            .map(|w| w.title.clone())
+            .unwrap_or_default();
         let mut targets = if self.memory_panel.selected_saved.len() > 1 {
             self.memory_panel
                 .selected_saved
@@ -6287,6 +6330,10 @@ impl CrosshairApp {
                 self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
                     source_addresses,
                     source_pid: pid,
+                    source_process_name: source_process_name.clone(),
+                    source_process_path: source_process_path.clone(),
+                    source_window_title: source_window_title.clone(),
+                    source_selector: source_selector.clone(),
                     value_type: saved.value_type,
                     expected_values,
                     status,
@@ -6329,6 +6376,10 @@ impl CrosshairApp {
         self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
             source_addresses,
             source_pid: pid,
+            source_process_name,
+            source_process_path,
+            source_window_title,
+            source_selector,
             value_type: saved.value_type,
             expected_values,
             status: format!("Scanning pointer paths for {} target(s)…", targets.len()),
@@ -8258,6 +8309,7 @@ impl CrosshairApp {
                 res.broken,
                 dialog.source_addresses.len()
             );
+            dialog.source_pid = res.pid;
         }
 
         let mut validate = false;
@@ -8271,23 +8323,95 @@ impl CrosshairApp {
                 ui.spinner();
             });
         } else {
-            ui.horizontal(|ui| {
-                    let new_process = self
-                        .memory_panel
-                        .process_pid
-                        .is_some_and(|pid| pid != dialog.source_pid);
-                    if ui
-                        .add_enabled(
-                            new_process
-                                && !dialog.candidates.is_empty()
-                                && dialog.validation_rx.is_none()
-                                && dialog.filter_rx.is_none(),
-                            Button::new("Validate after restart"),
-                        )
-                        .clicked()
+            // Keep window list fresh to detect when game/app restarts
+            self.ensure_open_windows_ready(false);
+
+            // Detect if a restarted instance of the process exists
+            let mut restarted_instance: Option<(u32, String)> = None;
+            if let Some(current_pid) = self.memory_panel.process_pid {
+                if current_pid != dialog.source_pid && process_pointer_width(current_pid).is_ok() {
+                    restarted_instance =
+                        Some((current_pid, self.memory_panel.process_selector.clone()));
+                }
+            }
+            if restarted_instance.is_none() {
+                // Look for new instance in open_window_infos
+                for win in &self.open_window_infos {
+                    if win.process_id != dialog.source_pid
+                        && win.process_id != 0
+                        && process_pointer_width(win.process_id).is_ok()
                     {
-                        validate = true;
+                        let win_exe = std::path::Path::new(&win.process_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default();
+                        let matches_path = !dialog.source_process_path.is_empty()
+                            && win
+                                .process_path
+                                .eq_ignore_ascii_case(&dialog.source_process_path);
+                        let matches_exe = !dialog.source_process_name.is_empty()
+                            && win_exe.eq_ignore_ascii_case(&dialog.source_process_name);
+                        let matches_title = !dialog.source_window_title.is_empty()
+                            && win.title.eq_ignore_ascii_case(&dialog.source_window_title);
+                        let matches_selector = !dialog.source_selector.is_empty()
+                            && win.selector == dialog.source_selector;
+                        if matches_path || matches_exe || matches_title || matches_selector {
+                            restarted_instance = Some((win.process_id, win.selector.clone()));
+                            break;
+                        }
                     }
+                }
+            }
+            if restarted_instance.is_none() {
+                // Look in list_process_details
+                if let Ok(details) = list_process_details() {
+                    for proc in details {
+                        if proc.pid != dialog.source_pid
+                            && proc.pid != 0
+                            && process_pointer_width(proc.pid).is_ok()
+                        {
+                            let matches_name = !dialog.source_process_name.is_empty()
+                                && proc.name.eq_ignore_ascii_case(&dialog.source_process_name);
+                            let matches_path = !dialog.source_process_path.is_empty()
+                                && proc.path.eq_ignore_ascii_case(&dialog.source_process_path);
+                            if matches_name || matches_path {
+                                let selector = format!("pid:{}:{}", proc.pid, proc.name);
+                                restarted_instance = Some((proc.pid, selector));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            let new_process_ready = restarted_instance.is_some();
+
+            ui.horizontal(|ui| {
+                let btn = ui
+                    .add_enabled(
+                        new_process_ready
+                            && !dialog.candidates.is_empty()
+                            && dialog.validation_rx.is_none()
+                            && dialog.filter_rx.is_none(),
+                        Button::new("Validate after restart"),
+                    )
+                    .on_hover_text(if new_process_ready {
+                        self.tr(
+                            "Restarted target process detected! Click to set as active target window and validate pointer candidates.",
+                            "Đã phát hiện game/tiến trình mới được khởi động lại! Nhấn để tự động chọn làm target window và xác thực con trỏ.",
+                        )
+                    } else {
+                        self.tr(
+                            "Locked: Restart the game/app first. This button will automatically enable when the new game instance is running.",
+                            "Đang khóa: Hãy khởi động lại game/app trước. Nút này sẽ tự động sáng lên khi game mới chạy.",
+                        )
+                    });
+                if btn.clicked() {
+                    if let Some((new_pid, new_selector)) = &restarted_instance {
+                        self.select_memory_process(new_selector.clone(), Some(*new_pid), &ctx);
+                    }
+                    validate = true;
+                }
                     if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
                         ui.spinner();
                     }
@@ -14928,22 +15052,43 @@ impl CrosshairApp {
     }
 
     fn render_saved_memory_value_editor(&mut self, ctx: &egui::Context) {
-        let (Some(index), Some(position)) = (
-            self.memory_panel.edit_value_index,
-            self.memory_panel.edit_value_position,
-        ) else {
+        let Some(index) = self.memory_panel.edit_value_index else {
             return;
         };
         let mut commit = false;
         let mut cancel = false;
-        let area_response = egui::Area::new(egui::Id::new("saved-memory-value-editor"))
+        let mut open = true;
+
+        // Position: horizontally centered and placed right at the bottom edge of the Address list table
+        let target_pos = if let Some(rect) = self.memory_panel.saved_address_list_rect {
+            egui::pos2(rect.center().x, rect.bottom() - 14.0)
+        } else if let Some(position) = self.memory_panel.edit_value_position {
+            position
+        } else {
+            let screen_rect = ctx.input(|i| i.screen_rect());
+            egui::pos2(screen_rect.center().x, screen_rect.bottom() - 60.0)
+        };
+
+        let selected_count = self.memory_panel.selected_saved.len();
+        let title = if selected_count > 1 && self.memory_panel.selected_saved.contains(&index) {
+            format!("{} ({} {})", self.tr("Edit value", "Sửa giá trị"), selected_count, self.tr("selected", "mục chọn"))
+        } else {
+            self.tr("Edit value", "Sửa giá trị").to_string()
+        };
+
+        egui::Window::new(title)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
             .order(egui::Order::Foreground)
-            .fixed_pos(position)
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .fixed_pos(target_pos)
+            .min_width(280.0)
             .show(ctx, |ui| {
-                Frame::popup(ui.style()).inner_margin(8).show(ui, |ui| {
-                    ui.label(RichText::new("Edit selected value(s)").strong());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.tr("New value:", "Giá trị mới:")).strong());
                     let response = ui.add_sized(
-                        [190.0, 24.0],
+                        [180.0, 24.0],
                         egui::TextEdit::singleline(&mut self.memory_panel.edit_value_input),
                     );
                     Self::apply_vietnamese_input_if_changed(
@@ -14953,23 +15098,25 @@ impl CrosshairApp {
                         &mut self.memory_panel.edit_value_input,
                     );
                     response.request_focus();
-                    ui.horizontal(|ui| {
-                        commit = ui.button("Apply").clicked();
-                        cancel = ui.button("Cancel").clicked();
-                    });
                     commit |= response.has_focus()
                         && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                    cancel |= ui.input(|input| input.key_pressed(egui::Key::Escape));
                 });
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button(self.tr("Apply (Enter)", "Áp dụng (Enter)")).clicked() {
+                        commit = true;
+                    }
+                    if ui.button(self.tr("Cancel (Esc)", "Hủy (Esc)")).clicked() {
+                        cancel = true;
+                    }
+                });
+                cancel |= ui.input(|input| input.key_pressed(egui::Key::Escape));
             });
-        let popup_rect = area_response.response.rect.expand(4.0);
-        if ctx.input(|input| input.pointer.any_pressed()) {
-            if let Some(pointer) = ctx.pointer_latest_pos() {
-                if !popup_rect.contains(pointer) {
-                    cancel = true;
-                }
-            }
+
+        if !open {
+            cancel = true;
         }
+
         if commit {
             self.commit_saved_memory_value(index);
         } else if cancel {
@@ -16861,5 +17008,21 @@ mod tests {
         CrosshairApp::track_memory_changes(&mut previous, &mut changed, 0x1000, &[1, 9, 3]);
         CrosshairApp::track_memory_changes(&mut previous, &mut changed, 0x1000, &[1, 2, 3]);
         assert_eq!(changed, HashSet::from([0x1001]));
+    }
+
+    #[test]
+    fn test_memory_panel_state_value_edit() {
+        let mut state = MemoryPanelState::default();
+        assert!(state.saved_address_list_rect.is_none());
+        assert!(state.edit_value_index.is_none());
+
+        state.saved_address_list_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(100.0, 200.0),
+            egui::vec2(300.0, 400.0),
+        ));
+        assert!(state.saved_address_list_rect.is_some());
+        let rect = state.saved_address_list_rect.unwrap();
+        assert_eq!(rect.center().x, 250.0);
+        assert_eq!(rect.bottom(), 600.0);
     }
 }
