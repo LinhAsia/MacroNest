@@ -3532,20 +3532,25 @@ impl CrosshairApp {
                     .id_salt("saved-memory-addresses")
                     .auto_shrink([false, false])
                     .max_height(ui.available_height())
-                    .show(ui, |ui| {
+                    .show_rows(ui, row_height, count, |ui, rows| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        let mut previous_group = String::new();
-                        for index in 0..count {
+                        for index in rows {
                             if index >= self.memory_panel.saved.len() {
                                 continue;
                             }
                             let saved = self.memory_panel.saved[index].clone();
-                            if !saved.group.is_empty() && saved.group != previous_group {
-                                ui.add_space(3.0);
-                                ui.label(RichText::new(format!("▼ {}", saved.group)).strong());
-                                ui.separator();
+                            if !saved.group.is_empty() {
+                                let prev_group = index
+                                    .checked_sub(1)
+                                    .and_then(|i| self.memory_panel.saved.get(i))
+                                    .map(|s| s.group.as_str())
+                                    .unwrap_or("");
+                                if saved.group != prev_group {
+                                    ui.add_space(3.0);
+                                    ui.label(RichText::new(format!("▼ {}", saved.group)).strong());
+                                    ui.separator();
+                                }
                             }
-                            previous_group = saved.group.clone();
                             let selected = self.memory_panel.selected_saved.contains(&index);
                             let mut open_address = false;
                             let mut edit_value = false;
@@ -8974,12 +8979,27 @@ impl CrosshairApp {
                 || dialog.selected.iter().copied().collect::<Vec<_>>(),
                 |index| vec![index],
             );
-            for index in indices {
+            const MAX_BATCH_ADD: usize = 50;
+            let total_selected = indices.len();
+            let to_add_slice = if total_selected > MAX_BATCH_ADD {
+                &indices[..MAX_BATCH_ADD]
+            } else {
+                &indices[..]
+            };
+            let mut module_cache = HashMap::<String, usize>::new();
+            for &index in to_add_slice {
                 let Some(path) = dialog.candidates.get(index).cloned() else {
                     continue;
                 };
-                let Ok(base) = resolve_module_offset(pid, &path.module, path.module_offset) else {
-                    continue;
+                let base = match module_cache.get(&path.module) {
+                    Some(&b) => b,
+                    None => {
+                        let Ok(b) = resolve_module_offset(pid, &path.module, 0) else {
+                            continue;
+                        };
+                        module_cache.insert(path.module.clone(), b);
+                        b
+                    }
                 };
                 let pointer = PointerSpec {
                     base,
@@ -9006,7 +9026,13 @@ impl CrosshairApp {
                     added += 1;
                 }
             }
-            self.memory_panel.status = format!("Added {added} deep pointer(s) to Address list");
+            if total_selected > MAX_BATCH_ADD {
+                self.memory_panel.status = format!(
+                    "Added {added} deep pointer(s) (capped at {MAX_BATCH_ADD}). All candidates lead to the same address, so 1-2 pointers are enough!"
+                );
+            } else {
+                self.memory_panel.status = format!("Added {added} deep pointer(s) to Address list");
+            }
         }
         if clear {
             self.memory_panel.status = "Pointer map A cleared".to_owned();
@@ -15035,17 +15061,24 @@ impl CrosshairApp {
             return;
         };
         for saved in &mut self.memory_panel.saved {
-            if let Some(pointer) = saved.pointer.as_ref()
-                && let Ok(address) = resolve_memory_address(pid, pointer.base, Some(pointer))
-            {
-                saved.address = address;
-            }
             if let Some(encoding) = saved.text_encoding {
                 saved.current_text =
                     read_text_memory(pid, saved.address, saved.text_byte_len, encoding).ok();
                 saved.current = None;
             } else {
-                saved.current = read_scan_value(pid, saved.address, saved.value_type).ok();
+                let value = read_scan_value(pid, saved.address, saved.value_type).ok();
+                if value.is_none() && saved.pointer.is_some() {
+                    if let Some(pointer) = saved.pointer.as_ref()
+                        && let Ok(address) = resolve_memory_address(pid, pointer.base, Some(pointer))
+                    {
+                        saved.address = address;
+                        saved.current = read_scan_value(pid, address, saved.value_type).ok();
+                    } else {
+                        saved.current = None;
+                    }
+                } else {
+                    saved.current = value;
+                }
                 saved.current_text = None;
             }
         }
