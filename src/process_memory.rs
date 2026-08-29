@@ -621,11 +621,23 @@ fn capture_pointer_map_with_budget_cancel(
             .iter()
             .any(|(_, base, size)| (*base..base.saturating_add(*size)).contains(&region.base))
     });
-    let mut readable_ranges = regions
+    let mut raw_ranges = regions
         .iter()
         .map(|region| (region.base, region.base.saturating_add(region.size)))
         .collect::<Vec<_>>();
-    readable_ranges.sort_unstable_by_key(|(base, _)| *base);
+    raw_ranges.sort_unstable_by_key(|(base, _)| *base);
+    let mut readable_ranges: Vec<(usize, usize)> = Vec::with_capacity(raw_ranges.len());
+    for (base, end) in raw_ranges {
+        if let Some(last) = readable_ranges.last_mut() {
+            if base <= last.1 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        readable_ranges.push((base, end));
+    }
+    let min_readable = readable_ranges.first().map(|(base, _)| *base).unwrap_or(0);
+    let max_readable = readable_ranges.iter().map(|(_, end)| *end).max().unwrap_or(0);
     let mut pointers = Vec::new();
     pointers
         .try_reserve_exact(1_000_000)
@@ -661,6 +673,9 @@ fn capture_pointer_map_with_budget_cancel(
                     u64::from_le_bytes(buffer[byte_offset..byte_offset + 8].try_into().unwrap())
                         as usize
                 };
+                if value < min_readable || value >= max_readable {
+                    continue;
+                }
                 let range = readable_ranges.partition_point(|(base, _)| *base <= value);
                 if range > 0 && value < readable_ranges[range - 1].1 {
                     if pointers.len() == pointers.capacity() {

@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
         mpsc::{self, Receiver},
     },
     thread,
@@ -254,6 +254,7 @@ struct DeepPointerDialog {
     status: String,
     rx: Option<Receiver<DeepPointerJobResult>>,
     progress: Arc<AtomicUsize>,
+    stage: Arc<AtomicU8>,
     candidates: Vec<PointerPath>,
     selected: HashSet<usize>,
     selection_anchor: Option<usize>,
@@ -6440,6 +6441,7 @@ impl CrosshairApp {
                         status,
                         rx: None,
                         progress: Arc::new(AtomicUsize::new(0)),
+                        stage: Arc::new(AtomicU8::new(0)),
                         candidates: Vec::new(),
                         selected: HashSet::new(),
                         selection_anchor: None,
@@ -6461,9 +6463,11 @@ impl CrosshairApp {
             }
         };
         let progress = Arc::new(AtomicUsize::new(0));
+        let stage = Arc::new(AtomicU8::new(0));
         let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
         let limits = self.pointer_scan_limits();
         let worker_progress = Arc::clone(&progress);
+        let worker_stage = Arc::clone(&stage);
         let (tx, rx) = mpsc::channel();
         if let Some((map_a, targets_a, entity_stride, entity_slots, entity_root_matching)) = self
             .memory_panel
@@ -6500,11 +6504,11 @@ impl CrosshairApp {
                     worker_progress,
                 )
                 .map(|map_b| {
-                    // ponytail: search past the display limit before intersecting maps;
-                    // otherwise different traversal order can hide every common path.
-                    let comparison_limit = limits.result_limit.saturating_mul(64).clamp(
-                        PointerScanLimits::MAX_RESULT_LIMIT,
-                        PointerScanLimits::MAX_RESULT_LIMIT.saturating_mul(16),
+                    worker_stage.store(1, Ordering::Relaxed);
+                    // ponytail: search past the display limit without explosive BFS; clamp to 10k-100k
+                    let comparison_limit = limits.result_limit.saturating_mul(16).clamp(
+                        10_000,
+                        100_000,
                     );
                     // Entity instances can occupy a different slot after restart. Searching
                     // only the selected field address means the shared list root is never
@@ -6525,12 +6529,14 @@ impl CrosshairApp {
                         limits.max_depth,
                         comparison_limit,
                     );
+                    worker_stage.store(2, Ordering::Relaxed);
                     let paths_b = map_b.paths_to_any(
                         &targets_b,
                         limits.max_offset,
                         limits.max_depth,
                         comparison_limit,
                     );
+                    worker_stage.store(3, Ordering::Relaxed);
                     let paths_a_count = paths_a.len();
                     let paths_b_count = paths_b.len();
                     DeepPointerComparisonResult {
@@ -6554,6 +6560,7 @@ impl CrosshairApp {
                 format!("Capturing map B and comparing {target_count} address(es) with map A...");
             dialog.rx = Some(rx);
             dialog.progress = progress;
+            dialog.stage = stage;
             dialog.candidates.clear();
             dialog.resolved_rows.clear();
             dialog.selected.clear();
@@ -6580,6 +6587,7 @@ impl CrosshairApp {
                 status: "Capturing pointer map A...".to_owned(),
                 rx: Some(rx),
                 progress,
+                stage,
                 candidates: Vec::new(),
                 selected: HashSet::new(),
                 selection_anchor: None,
@@ -9052,9 +9060,20 @@ impl CrosshairApp {
             );
         }
         if dialog.rx.is_some() {
-            let read = dialog.progress.load(Ordering::Relaxed);
-            ui.label(format!("Read {:.1} MB", read as f64 / 1_048_576.0));
-            ui.spinner();
+            let stage_num = dialog.stage.load(Ordering::Relaxed);
+            let stage_text = match stage_num {
+                1 => "Tracing pointer paths in Map A...".to_owned(),
+                2 => "Tracing pointer paths in Map B...".to_owned(),
+                3 => "Comparing and intersecting pointer paths...".to_owned(),
+                _ => {
+                    let read = dialog.progress.load(Ordering::Relaxed);
+                    format!("Capturing memory map: {:.1} MB", read as f64 / 1_048_576.0)
+                }
+            };
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new(stage_text).strong());
+            });
             return;
         }
         ui.horizontal(|ui| {
@@ -9224,14 +9243,28 @@ impl CrosshairApp {
                 .map(|(index, _)| index)
                 .collect();
         }
-        egui::ScrollArea::both().show(ui, |ui| {
-            for (index, path) in dialog.candidates.iter().enumerate() {
+        let visible_indices: Vec<usize> = dialog
+            .candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(index, path)| {
                 let module_lower = path.module.to_ascii_lowercase();
                 if (dialog.exe_only && !module_lower.ends_with(".exe"))
                     || (!filter.is_empty() && !module_lower.contains(&filter))
                 {
-                    continue;
+                    None
+                } else {
+                    Some(index)
                 }
+            })
+            .collect();
+        let total_row_width = (ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH)
+            .max(ui.available_width());
+        egui::ScrollArea::both().show_rows(ui, 24.0, visible_indices.len(), |ui, rows| {
+            ui.set_min_width(total_row_width);
+            for row_idx in rows {
+                let index = visible_indices[row_idx];
+                let path = &dialog.candidates[index];
                 let root = format!("{}+{:X}", path.module, path.module_offset);
                 let offsets = path
                     .offsets
@@ -9241,30 +9274,30 @@ impl CrosshairApp {
                     .join(" -> ");
                 let row_rect = egui::Rect::from_min_size(
                     ui.next_widget_position(),
-                    vec2(
-                        (ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH)
-                            .max(ui.available_width()),
-                        24.0,
-                    ),
+                    vec2(total_row_width, 24.0),
                 );
                 let stale = dialog.resolved_rows.get(&index).is_none_or(|row| {
-                    row.updated_at.elapsed() >= Duration::from_millis(750)
+                    row.updated_at.elapsed() >= Duration::from_millis(500)
                 });
-                if ui.is_rect_visible(row_rect) && stale {
-                    let resolved = process_pid.and_then(|pid| {
-                        let base = resolve_module_offset(
-                            pid,
-                            &path.module,
-                            path.module_offset,
-                        )
-                        .ok()?;
-                        let pointer = PointerSpec {
-                            base,
-                            module: Some((path.module.clone(), path.module_offset)),
-                            offsets: path.offsets.clone(),
-                        };
-                        resolve_memory_address(pid, base, Some(&pointer)).ok()
-                    });
+                if stale {
+                    let existing_addr = dialog.resolved_rows.get(&index).and_then(|r| r.address);
+                    let resolved = match existing_addr {
+                        Some(addr) => Some(addr),
+                        None => process_pid.and_then(|pid| {
+                            let base = resolve_module_offset(
+                                pid,
+                                &path.module,
+                                path.module_offset,
+                            )
+                            .ok()?;
+                            let pointer = PointerSpec {
+                                base,
+                                module: Some((path.module.clone(), path.module_offset)),
+                                offsets: path.offsets.clone(),
+                            };
+                            resolve_memory_address(pid, base, Some(&pointer)).ok()
+                        }),
+                    };
                     let value = process_pid
                         .zip(resolved)
                         .and_then(|(pid, address)| {
