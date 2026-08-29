@@ -247,7 +247,7 @@ impl EspPreset {
             pitch_unit: EspAngleUnit::Radians,
             pitch_input: EspPitchInput::Angle,
             pitch_multiplier: 1.0,
-            horizontal_plane: EspHorizontalPlane::Xz,
+            horizontal_plane: EspHorizontalPlane::Xy,
             invert_camera_yaw: false,
             invert_camera_pitch: false,
             invert_vertical: false,

@@ -28269,8 +28269,8 @@ mod windows_overlay {
             test_preset.invert_vertical = perm.invert_vertical;
             test_preset.pitch_input = perm.pitch_input;
             test_preset.pitch_unit = perm.pitch_unit;
-            test_preset.invert_yaw = false;
-            test_preset.invert_pitch = false;
+            test_preset.invert_yaw = preset.invert_yaw;
+            test_preset.invert_pitch = preset.invert_pitch;
 
             let perm_orientation = match test_preset.orientation_source {
                 crate::model::EspOrientationSource::Angles => Some((raw_yaw, pitch)),

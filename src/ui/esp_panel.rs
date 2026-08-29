@@ -1311,25 +1311,7 @@ impl CrosshairApp {
                                             }
                                         });
 
-                                    ui.add_space(4.0);
-                                    ui.label("Height axis:");
-                                    ComboBox::from_id_salt(("esp_plane", preset.id))
-                                        .selected_text(match preset.horizontal_plane {
-                                            EspHorizontalPlane::Xz => "Y is Height (NeoX)",
-                                            EspHorizontalPlane::Xy => "Z is Height (Unreal)",
-                                        })
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut preset.horizontal_plane,
-                                                EspHorizontalPlane::Xz,
-                                                "Y is Height (NeoX)",
-                                            );
-                                            ui.selectable_value(
-                                                &mut preset.horizontal_plane,
-                                                EspHorizontalPlane::Xy,
-                                                "Z is Height (Unreal)",
-                                            );
-                                        });
+
 
                                     ui.add_space(4.0);
                                     ui.label("FOV:");
