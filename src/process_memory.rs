@@ -3684,7 +3684,30 @@ unsafe extern "system" {
         old_protect: *mut u32,
     ) -> i32;
     fn FlushInstructionCache(process: *mut c_void, address: *const c_void, size: usize) -> i32;
+    fn GetExitCodeProcess(process: *mut c_void, exit_code: *mut u32) -> i32;
     fn CloseHandle(handle: *mut c_void) -> i32;
+}
+
+#[cfg(windows)]
+pub fn is_process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        ok != 0 && exit_code == 259 // STILL_ACTIVE = 259
+    }
+}
+
+#[cfg(not(windows))]
+pub fn is_process_alive(_pid: u32) -> bool {
+    false
 }
 
 #[cfg(test)]

@@ -687,16 +687,13 @@ impl CrosshairApp {
                         {
                             preset.target_window = window.selector.clone();
                         }
+                        if !windows.is_empty() && matched_window.is_none() && !preset.target_window.is_empty() {
+                            preset.target_window.clear();
+                        }
                         let target_label = matched_window
                             .as_ref()
                             .map(|window| format!("{} [PID {}]", window.title, window.process_id))
-                            .unwrap_or_else(|| {
-                                if preset.target_window.trim().is_empty() {
-                                    "Select window".to_string()
-                                } else {
-                                    "Window is not running".to_string()
-                                }
-                            });
+                            .unwrap_or_else(|| "Select window".to_string());
                         ComboBox::from_id_salt(("esp_window", preset.id))
                             .selected_text(target_label)
                             .width(320.0)

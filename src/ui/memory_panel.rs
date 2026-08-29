@@ -1869,13 +1869,20 @@ impl CrosshairApp {
     fn render_memory_scan_controls(&mut self, ui: &mut egui::Ui) {
         #[cfg(windows)]
         self.poll_process_choices();
-        if self.memory_panel.last_process_liveness_check.elapsed() >= Duration::from_secs(1) {
+        if self.memory_panel.last_process_liveness_check.elapsed() >= Duration::from_millis(500) {
             self.memory_panel.last_process_liveness_check = Instant::now();
-            if self
+            let pid_dead = self
                 .memory_panel
                 .process_pid
-                .is_some_and(|pid| process_pointer_width(pid).is_err())
-            {
+                .is_some_and(|pid| !crate::process_memory::is_process_alive(pid));
+            let window_dead = !self.open_window_infos.is_empty()
+                && !self.memory_panel.process_selector.is_empty()
+                && !self.memory_panel.process_selector.starts_with("pid:")
+                && !self
+                    .open_window_infos
+                    .iter()
+                    .any(|w| w.selector == self.memory_panel.process_selector);
+            if pid_dead || window_dead {
                 self.select_memory_process(String::new(), None, ui.ctx());
                 self.memory_panel.status = "Target process exited".to_owned();
             }
