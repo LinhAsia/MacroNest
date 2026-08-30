@@ -8202,6 +8202,26 @@ impl CrosshairApp {
                                     candidates.len()
                                 );
                                 dialog.candidates = candidates;
+                                if let Some(world) = dialog.world {
+                                    let width = dialog.viewport_width.parse::<f32>().unwrap_or(1920.0).max(1.0);
+                                    let height = dialog.viewport_height.parse::<f32>().unwrap_or(1080.0).max(1.0);
+                                    let mut best_variant = dialog.projection_variant;
+                                    let mut max_on_screen = 0;
+                                    for (variant, ..) in PROJECTION_CONVENTIONS.iter().enumerate() {
+                                        let count = dialog.candidates.iter().take(300).filter(|c| {
+                                            project_world_single(&c.matrix, world, width, height, variant).is_some_and(|pt| {
+                                                pt[0] >= 0.0 && pt[0] <= width && pt[1] >= 0.0 && pt[1] <= height
+                                            })
+                                        }).count();
+                                        if count > max_on_screen {
+                                            max_on_screen = count;
+                                            best_variant = variant;
+                                        }
+                                    }
+                                    if max_on_screen > 0 {
+                                        dialog.projection_variant = best_variant;
+                                    }
+                                }
                             }
                             Err(error) => dialog.status = format!("Camera scan failed: {error}"),
                         }
@@ -8241,23 +8261,31 @@ impl CrosshairApp {
             );
             ctx.request_repaint_after(Duration::from_millis(50));
         }
-        if dialog.selected.is_some()
-            && dialog.last_preview_refresh.elapsed() >= Duration::from_millis(33)
-        {
-            if let (Some(pid), Some(candidate)) = (
-                self.memory_panel.process_pid,
-                dialog
-                    .selected
-                    .and_then(|index| dialog.candidates.get_mut(index)),
-            ) && let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64)
-                && let Some(matrix) = decode_f32_matrix(&bytes)
-            {
-                candidate.matrix = matrix;
-            }
+        if dialog.last_preview_refresh.elapsed() >= Duration::from_millis(40) {
             dialog.last_preview_refresh = Instant::now();
+            if let Some(pid) = self.memory_panel.process_pid {
+                if let Some(candidate) = dialog
+                    .selected
+                    .and_then(|index| dialog.candidates.get_mut(index))
+                {
+                    if let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64) {
+                        if let Some(matrix) = decode_f32_matrix(&bytes) {
+                            candidate.matrix = matrix;
+                        }
+                    }
+                }
+                // Actively re-read candidate matrices from game RAM so dots visibly move when rotating camera!
+                for candidate in dialog.candidates.iter_mut().take(150) {
+                    if let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64) {
+                        if let Some(matrix) = decode_f32_matrix(&bytes) {
+                            candidate.matrix = matrix;
+                        }
+                    }
+                }
+            }
         }
-        if dialog.selected.is_some() {
-            ctx.request_repaint_after(Duration::from_millis(16));
+        if !dialog.candidates.is_empty() && self.memory_panel.process_pid.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(33));
         }
         let mut persist_camera_inputs = false;
         ui.horizontal(|ui| {
