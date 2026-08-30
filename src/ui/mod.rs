@@ -11379,64 +11379,45 @@ impl CrosshairApp {
         }
     }
 
-    fn macro_recording_action_to_mouse_path_event(
-        action: MacroAction,
-        x: i32,
-        y: i32,
-        delay_ms: u64,
-    ) -> Option<MousePathEvent> {
-        let kind = match action {
-            MacroAction::MouseMoveAbsolute => MousePathEventKind::Move,
-            MacroAction::MouseLeftDown | MacroAction::MouseLeftClick => {
-                MousePathEventKind::LeftDown
-            }
-            MacroAction::MouseLeftUp => MousePathEventKind::LeftUp,
-            MacroAction::MouseRightDown | MacroAction::MouseRightClick => {
-                MousePathEventKind::RightDown
-            }
-            MacroAction::MouseRightUp => MousePathEventKind::RightUp,
-            MacroAction::MouseMiddleDown | MacroAction::MouseMiddleClick => {
-                MousePathEventKind::MiddleDown
-            }
-            MacroAction::MouseMiddleUp => MousePathEventKind::MiddleUp,
-            MacroAction::MouseWheelUp => MousePathEventKind::WheelUp,
-            MacroAction::MouseWheelDown => MousePathEventKind::WheelDown,
-            _ => return None,
-        };
-        Some(MousePathEvent {
-            kind,
-            x,
-            y,
-            delay_ms,
-        })
-    }
-
     fn build_macro_steps_from_recording(
         &mut self,
-        preset_name: &str,
+        _preset_name: &str,
         events: &[crate::overlay::MacroRecordingEvent],
     ) -> Vec<MacroStep> {
         let mut built_steps = Vec::new();
         let mut elapsed_ms = 0u64;
         let mut last_emitted_at = 0u64;
-        let mut first_mouse_at = None;
-        let mut first_mouse_insert_index = None;
-        let mut mouse_path_events = Vec::new();
+        let mut pending_move: Option<(i32, i32, u64)> = None;
 
         for event in events {
             elapsed_ms = elapsed_ms.saturating_add(event.delay_ms);
-            if let Some(path_event) = Self::macro_recording_action_to_mouse_path_event(
-                event.action,
-                event.x,
-                event.y,
-                event.delay_ms,
-            ) {
-                if first_mouse_at.is_none() {
-                    first_mouse_at = Some(elapsed_ms);
-                    first_mouse_insert_index = Some(built_steps.len());
+
+            if event.action == MacroAction::MouseMoveAbsolute {
+                // If there was a previous pending move and the pause between moves is >= 250ms, emit it
+                if let Some((px, py, p_elapsed)) = pending_move {
+                    if elapsed_ms.saturating_sub(p_elapsed) >= 250 {
+                        let mut step = MacroStep::default();
+                        step.action = MacroAction::MouseMoveAbsolute;
+                        step.delay_ms = p_elapsed.saturating_sub(last_emitted_at);
+                        step.x = px;
+                        step.y = py;
+                        built_steps.push(step);
+                        last_emitted_at = p_elapsed;
+                    }
                 }
-                mouse_path_events.push(path_event);
+                pending_move = Some((event.x, event.y, elapsed_ms));
                 continue;
+            }
+
+            // Before emitting a non-move event (e.g. click or key), emit the pending move if any
+            if let Some((px, py, p_elapsed)) = pending_move.take() {
+                let mut step = MacroStep::default();
+                step.action = MacroAction::MouseMoveAbsolute;
+                step.delay_ms = p_elapsed.saturating_sub(last_emitted_at);
+                step.x = px;
+                step.y = py;
+                built_steps.push(step);
+                last_emitted_at = p_elapsed;
             }
 
             let mut step = MacroStep::default();
@@ -11451,29 +11432,14 @@ impl CrosshairApp {
             last_emitted_at = elapsed_ms;
         }
 
-        if !mouse_path_events.is_empty() {
-            let path_name = format!("{preset_name} Recorded Path");
-            let path_preset_id =
-                self.add_mouse_path_preset_with_events(path_name, mouse_path_events, false);
-            let mut path_step = MacroStep::default();
-            path_step.action = MacroAction::PlayMousePathPreset;
-            path_step.key = path_preset_id.to_string();
-            path_step.delay_ms = first_mouse_at.unwrap_or_default().saturating_sub(
-                if let Some(insert_index) = first_mouse_insert_index {
-                    if insert_index == 0 {
-                        0
-                    } else {
-                        built_steps[..insert_index]
-                            .iter()
-                            .fold(0u64, |acc, step| acc.saturating_add(step.delay_ms))
-                    }
-                } else {
-                    0
-                },
-            );
-            path_step.wait_for_completion = false;
-            let insert_index = first_mouse_insert_index.unwrap_or(built_steps.len());
-            built_steps.insert(insert_index, path_step);
+        // Flush any trailing pending move at the end of recording
+        if let Some((px, py, p_elapsed)) = pending_move.take() {
+            let mut step = MacroStep::default();
+            step.action = MacroAction::MouseMoveAbsolute;
+            step.delay_ms = p_elapsed.saturating_sub(last_emitted_at);
+            step.x = px;
+            step.y = py;
+            built_steps.push(step);
         }
 
         built_steps
