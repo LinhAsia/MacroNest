@@ -15,6 +15,7 @@ pub struct MacroRecordingSession {
     pub last_event_at: std::time::Instant,
     pub events: Vec<MacroRecordingEvent>,
     pub pressed_key_vks: std::collections::HashSet<u32>,
+    pub last_mouse_pos: Option<(i32, i32)>,
 }
 
 #[cfg(windows)]
@@ -6141,12 +6142,8 @@ mod windows_overlay {
         let Some(session) = guard.as_mut() else {
             return;
         };
-        // 1. Identify the event kind first and return early if it's not a recorded macro mouse action.
-
-        // This avoids calling the heavy is_click_inside_ui() for every single pixel of WM_MOUSEMOVE!
 
         let kind = match message {
-            WM_MOUSEMOVE => Some(crate::model::MacroAction::MouseMoveAbsolute),
             WM_LBUTTONDOWN => Some(crate::model::MacroAction::MouseLeftClick),
             WM_RBUTTONDOWN => Some(crate::model::MacroAction::MouseRightClick),
             WM_MBUTTONDOWN => Some(crate::model::MacroAction::MouseMiddleClick),
@@ -6181,13 +6178,55 @@ mod windows_overlay {
             .as_millis()
             .min(u64::MAX as u128) as u64;
         session.last_event_at = now;
+
+        let cur_pos = (info.pt.x, info.pt.y);
+        let pos_changed = session.last_mouse_pos != Some(cur_pos);
+        session.last_mouse_pos = Some(cur_pos);
+
+        let ui_tx = HOOK_STATE.lock().ui_tx.clone();
+
+        if pos_changed {
+            session.events.push(MacroRecordingEvent {
+                key: None,
+                action: crate::model::MacroAction::MouseMoveAbsolute,
+                delay_ms,
+                x: info.pt.x,
+                y: info.pt.y,
+            });
+            if let Some(tx) = &ui_tx {
+                let mut step = crate::model::MacroStep::default();
+                step.action = crate::model::MacroAction::MouseMoveAbsolute;
+                step.delay_ms = delay_ms;
+                step.x = info.pt.x;
+                step.y = info.pt.y;
+                let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
+                    session.group_id,
+                    session.preset_id,
+                    step,
+                ));
+            }
+        }
+
+        let click_delay = if pos_changed { 10 } else { delay_ms };
         session.events.push(MacroRecordingEvent {
             key: None,
             action,
-            delay_ms,
+            delay_ms: click_delay,
             x: info.pt.x,
             y: info.pt.y,
         });
+        if let Some(tx) = &ui_tx {
+            let mut step = crate::model::MacroStep::default();
+            step.action = action;
+            step.delay_ms = click_delay;
+            step.x = info.pt.x;
+            step.y = info.pt.y;
+            let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
+                session.group_id,
+                session.preset_id,
+                step,
+            ));
+        }
     }
 
     fn toggle_macro_recording(group_id: u32, preset_id: u32, preset_name: String) {
@@ -6204,6 +6243,7 @@ mod windows_overlay {
                         last_event_at: std::time::Instant::now(),
                         events: Vec::new(),
                         pressed_key_vks: std::collections::HashSet::new(),
+                        last_mouse_pos: None,
                     });
                     Some((session.group_id, session.preset_id, session.events, false))
                 }
@@ -6214,6 +6254,7 @@ mod windows_overlay {
                     last_event_at: std::time::Instant::now(),
                     events: Vec::new(),
                     pressed_key_vks: std::collections::HashSet::new(),
+                    last_mouse_pos: None,
                 });
                 None
             }

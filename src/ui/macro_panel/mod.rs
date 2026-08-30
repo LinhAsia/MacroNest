@@ -12333,19 +12333,20 @@ if supports_move_mouse || show_detection_tuning {
                                             preset.press_stop_step = crate::model::LazyMacroStep::default();
                                             live_sync = true;
                                         }
-                                });
-                                    }
-                                    ui.scope(|ui| {
-                            Frame::new()
-                                .inner_margin(egui::Margin::symmetric(4, 2))
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = 2.0;
-                                        ui.spacing_mut().interact_size.y = 20.0;
-                                        let capture_target = CaptureRequest::MacroPresetRecordHotkey(group.id, preset.id);
-                                        let has_rec_hotkey = preset.record_hotkey.is_some();
-                                        let capture_active = self.capture_target.as_ref() == Some(&capture_target);
-                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(132.0, 20.0), egui::Sense::hover());
+                                    });
+                                }
+                                ui.scope(|ui| {
+                                    Frame::new()
+                                        .inner_margin(egui::Margin::symmetric(4, 2))
+                                        .show(ui, |ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.spacing_mut().item_spacing.x = 2.0;
+                                                ui.spacing_mut().interact_size.y = 20.0;
+                                                let capture_target = CaptureRequest::MacroPresetRecordHotkey(group.id, preset.id);
+                                                let has_rec_hotkey = preset.record_hotkey.is_some();
+                                                let capture_active = self.capture_target.as_ref() == Some(&capture_target);
+                                                let rec_bar_width = 18.0 + 2.0 + 70.0 + 2.0 + 18.0 + if has_rec_hotkey && !capture_active { 2.0 + 16.0 } else { 0.0 };
+                                                let (rect, _) = ui.allocate_exact_size(egui::vec2(rec_bar_width, 20.0), egui::Sense::hover());
                                          let mut child_ui = ui.new_child(
                                              egui::UiBuilder::new()
                                                  .max_rect(rect)
@@ -12438,8 +12439,8 @@ if supports_move_mouse || show_detection_tuning {
                                               let key_ui = Self::format_binding_ui(language, Some(binding));
                                               let fmt = Self::tr_lang(
                                                   language,
-                                                  "Bound trigger key: {} (Click to clear)",
-                                                 "Bound trigger key: {} (Click to clear)",
+                                                  "Bound trigger key: {} (Click to change)",
+                                                 "Bound trigger key: {} (Click to change)",
                                               );
                                               fmt.replace("{}", &key_ui)
                                           } else {
@@ -12452,21 +12453,28 @@ if supports_move_mouse || show_detection_tuning {
                                                       .color(text_color)
                                                       .strong()
                                                       .size(10.0)
-                                              )
-                                              .fill(capture_fill)
-                                              .min_size(egui::vec2(18.0, 20.0));
-                                              ui.add_sized([18.0, 20.0], kbd_btn)
-                                          }).inner.on_hover_text(hover_text).clicked();
-                                          if clicked {
-                                              if capture_active {
-                                                  cancel_active_capture = true;
-                                              } else if has_rec_hotkey {
-                                                  preset.record_hotkey = None;
-                                                  live_sync = true;
-                                              } else {
-                                                  next_capture_target = Some(capture_target.clone());
-                                              }
-                                          }
+                                             )
+                                             .fill(capture_fill)
+                                             .min_size(egui::vec2(18.0, 20.0));
+                                             ui.add_sized([18.0, 20.0], kbd_btn)
+                                         }).inner.on_hover_text(hover_text).clicked();
+                                         if clicked {
+                                             if capture_active {
+                                                 cancel_active_capture = true;
+                                             } else {
+                                                 next_capture_target = Some(capture_target.clone());
+                                             }
+                                         }
+                                         if has_rec_hotkey && !capture_active {
+                                             let clear_btn = Button::new(RichText::new(Self::material_icon_text(0xe14c, 10.0).text()).color(Color32::LIGHT_RED));
+                                             if child_ui.add_sized([16.0, 18.0], clear_btn)
+                                                 .on_hover_text(Self::tr_lang(language, "Clear hotkey", "Clear hotkey"))
+                                                 .clicked()
+                                             {
+                                                 preset.record_hotkey = None;
+                                                 live_sync = true;
+                                             }
+                                         }
                                          let is_recording_this = self.active_macro_record_preset_id == Some(preset.id);
                                          if is_recording_this {
                                              let (rect, _) = ui.allocate_exact_size(egui::vec2(54.0, 20.0), egui::Sense::hover());
@@ -12564,18 +12572,8 @@ if supports_move_mouse || show_detection_tuning {
                                                 }
                                             }
                                         });
-                                        if has_rec_hotkey && !capture_active {
-                                            let clear_btn = Button::new(RichText::new(Self::material_icon_text(0xe14c, 10.0).text()).color(Color32::LIGHT_RED));
-                                            if ui.add_sized([18.0, 18.0], clear_btn)
-                                                .on_hover_text(Self::tr_lang(language, "Clear hotkey", "Clear hotkey"))
-                                                .clicked()
-                                            {
-                                                preset.record_hotkey = None;
-                                                live_sync = true;
-                                            }
-                                        }
-                                        });
                                     });
+                                });
                             let steps_len = preset.steps.len();
                             let has_stop_vision = preset.steps.iter().any(|s| s.action == MacroAction::StopVision && s.enabled);
                             let drag_payload = egui::DragAndDrop::payload::<MacroStepDragPayload>(ui.ctx())

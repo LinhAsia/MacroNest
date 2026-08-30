@@ -11385,63 +11385,17 @@ impl CrosshairApp {
         events: &[crate::overlay::MacroRecordingEvent],
     ) -> Vec<MacroStep> {
         let mut built_steps = Vec::new();
-        let mut elapsed_ms = 0u64;
-        let mut last_emitted_at = 0u64;
-        let mut pending_move: Option<(i32, i32, u64)> = None;
-
         for event in events {
-            elapsed_ms = elapsed_ms.saturating_add(event.delay_ms);
-
-            if event.action == MacroAction::MouseMoveAbsolute {
-                // If there was a previous pending move and the pause between moves is >= 250ms, emit it
-                if let Some((px, py, p_elapsed)) = pending_move {
-                    if elapsed_ms.saturating_sub(p_elapsed) >= 250 {
-                        let mut step = MacroStep::default();
-                        step.action = MacroAction::MouseMoveAbsolute;
-                        step.delay_ms = p_elapsed.saturating_sub(last_emitted_at);
-                        step.x = px;
-                        step.y = py;
-                        built_steps.push(step);
-                        last_emitted_at = p_elapsed;
-                    }
-                }
-                pending_move = Some((event.x, event.y, elapsed_ms));
-                continue;
-            }
-
-            // Before emitting a non-move event (e.g. click or key), emit the pending move if any
-            if let Some((px, py, p_elapsed)) = pending_move.take() {
-                let mut step = MacroStep::default();
-                step.action = MacroAction::MouseMoveAbsolute;
-                step.delay_ms = p_elapsed.saturating_sub(last_emitted_at);
-                step.x = px;
-                step.y = py;
-                built_steps.push(step);
-                last_emitted_at = p_elapsed;
-            }
-
             let mut step = MacroStep::default();
             step.action = event.action;
-            step.delay_ms = elapsed_ms.saturating_sub(last_emitted_at);
+            step.delay_ms = event.delay_ms;
             step.x = event.x;
             step.y = event.y;
             if let Some(key) = &event.key {
                 step.key = key.clone();
             }
             built_steps.push(step);
-            last_emitted_at = elapsed_ms;
         }
-
-        // Flush any trailing pending move at the end of recording
-        if let Some((px, py, p_elapsed)) = pending_move.take() {
-            let mut step = MacroStep::default();
-            step.action = MacroAction::MouseMoveAbsolute;
-            step.delay_ms = p_elapsed.saturating_sub(last_emitted_at);
-            step.x = px;
-            step.y = py;
-            built_steps.push(step);
-        }
-
         built_steps
     }
 
