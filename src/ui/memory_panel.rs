@@ -333,6 +333,7 @@ struct CameraMatrixDialog {
     stability_sample: Option<(Instant, HashMap<usize, [f32; 16]>)>,
     auto_pick_started: Option<Instant>,
     custom_matrix_input: String,
+    show_all_conventions: bool,
 }
 
 struct EntityListJobResult {
@@ -7793,6 +7794,7 @@ impl CrosshairApp {
             stability_sample: None,
             auto_pick_started: None,
             custom_matrix_input: String::new(),
+            show_all_conventions: false,
         });
     }
 
@@ -8432,7 +8434,10 @@ impl CrosshairApp {
                                 ui.selectable_value(&mut dialog.projection_variant, index, *label);
                             }
                         });
-                    ui.label(RichText::new("Use Auto-match target; this menu is only a manual fallback.").small().weak());
+                    ui.checkbox(
+                        &mut dialog.show_all_conventions,
+                        RichText::new(self.tr("Show all 24 conventions", "Hiện tất cả 24 hệ quy chiếu")).strong(),
+                    );
                 });
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(self.tr("Test matrix address:", "Thử địa chỉ ma trận:")).strong());
@@ -8530,19 +8535,43 @@ impl CrosshairApp {
                         });
 
                     // Compute on-screen projections for candidates
-                    let mut on_screen_dots: Vec<(usize, [f32; 2], usize)> = Vec::new();
-                    for (idx, candidate) in dialog.candidates.iter().enumerate() {
-                        if let Some(pt) = project_world_single(
-                            &candidate.matrix,
-                            world,
-                            width,
-                            height,
-                            dialog.projection_variant,
-                        ) {
-                            if pt[0] >= 0.0 && pt[0] <= width && pt[1] >= 0.0 && pt[1] <= height {
-                                on_screen_dots.push((idx, pt, candidate.address));
-                                if on_screen_dots.len() >= 600 {
-                                    break;
+                    let mut on_screen_dots: Vec<(usize, [f32; 2], usize, usize)> = Vec::new();
+                    if dialog.show_all_conventions {
+                        for (idx, candidate) in dialog.candidates.iter().enumerate().take(300) {
+                            let projections = project_world_variants(
+                                &candidate.matrix,
+                                world,
+                                width,
+                                height,
+                            );
+                            for (variant_idx, pt_opt) in projections.into_iter().enumerate() {
+                                if let Some(pt) = pt_opt {
+                                    if pt[0] >= 0.0 && pt[0] <= width && pt[1] >= 0.0 && pt[1] <= height {
+                                        on_screen_dots.push((idx, pt, candidate.address, variant_idx));
+                                        if on_screen_dots.len() >= 800 {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if on_screen_dots.len() >= 800 {
+                                break;
+                            }
+                        }
+                    } else {
+                        for (idx, candidate) in dialog.candidates.iter().enumerate() {
+                            if let Some(pt) = project_world_single(
+                                &candidate.matrix,
+                                world,
+                                width,
+                                height,
+                                dialog.projection_variant,
+                            ) {
+                                if pt[0] >= 0.0 && pt[0] <= width && pt[1] >= 0.0 && pt[1] <= height {
+                                    on_screen_dots.push((idx, pt, candidate.address, dialog.projection_variant));
+                                    if on_screen_dots.len() >= 600 {
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -8584,26 +8613,26 @@ impl CrosshairApp {
 
                     let mouse_pos = response.hover_pos();
                     let clicked = response.clicked();
-                    let mut closest_candidate: Option<(usize, f32)> = None;
-                    let mut hovered_candidate: Option<(usize, usize, egui::Pos2)> = None;
+                    let mut closest_candidate: Option<(usize, usize, f32)> = None;
+                    let mut hovered_candidate: Option<(usize, usize, usize, egui::Pos2)> = None;
 
                     // Draw candidate dots
-                    for (idx, pt, addr) in &on_screen_dots {
+                    for (idx, pt, addr, variant_idx) in &on_screen_dots {
                         let position = egui::pos2(
                             rect.left() + rect.width() * pt[0] / width,
                             rect.top() + rect.height() * pt[1] / height,
                         );
-                        let is_selected = dialog.selected == Some(*idx);
+                        let is_selected = dialog.selected == Some(*idx) && (!dialog.show_all_conventions || dialog.projection_variant == *variant_idx);
 
                         if let Some(mpos) = mouse_pos {
                             let dist = position.distance(mpos);
                             if dist <= 14.0 {
-                                if closest_candidate.map_or(true, |(_, d)| dist < d) {
-                                    closest_candidate = Some((*idx, dist));
+                                if closest_candidate.map_or(true, |(_, _, d)| dist < d) {
+                                    closest_candidate = Some((*idx, *variant_idx, dist));
                                 }
                             }
                             if dist <= 8.0 && hovered_candidate.is_none() {
-                                hovered_candidate = Some((*idx, *addr, position));
+                                hovered_candidate = Some((*idx, *variant_idx, *addr, position));
                             }
                         }
 
@@ -8628,18 +8657,21 @@ impl CrosshairApp {
 
                     // Click on preview canvas selects closest dot
                     if clicked {
-                        if let Some((idx, _)) = closest_candidate {
+                        if let Some((idx, variant_idx, _)) = closest_candidate {
                             dialog.selected = Some(idx);
+                            dialog.projection_variant = variant_idx;
                         }
                     }
 
                     // Hover tooltip on dot
-                    if let Some((idx, addr, hpos)) = hovered_candidate {
+                    if let Some((idx, variant_idx, addr, hpos)) = hovered_candidate {
                         painter.circle_stroke(hpos, 7.0, egui::Stroke::new(1.5, Color32::YELLOW));
+                        let convention_name = PROJECTION_CONVENTIONS[variant_idx].0;
                         response.on_hover_text_at_pointer(format!(
-                            "Candidate #{} [0x{:X}]\nClick to select this matrix",
+                            "Candidate #{} [0x{:X}]\nConvention: {}\nClick to select this matrix & convention",
                             idx + 1,
-                            addr
+                            addr,
+                            convention_name
                         ));
                     }
                 });
