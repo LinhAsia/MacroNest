@@ -7155,7 +7155,7 @@ impl CrosshairApp {
         };
         if dialog.rx.is_none()
             && dialog.active_candidate.is_some()
-            && dialog.last_preview_refresh.elapsed() >= Duration::from_millis(500)
+            && dialog.last_preview_refresh.elapsed() >= Duration::from_millis(50)
         {
             self.refresh_entity_list_preview(&mut dialog, false);
         }
@@ -7289,7 +7289,7 @@ impl CrosshairApp {
                         "Stable-root scan: {} MiB",
                         dialog.root_progress.load(Ordering::Relaxed) / 1_048_576
                     ));
-                    ctx.request_repaint_after(Duration::from_millis(100));
+                    ctx.request_repaint_after(Duration::from_millis(50));
                 }
                 ui.label(
                     RichText::new(&dialog.status)
@@ -8253,7 +8253,7 @@ impl CrosshairApp {
                 .clone_from(&dialog.viewport_height);
             self.persist();
         }
-        ctx.request_repaint_after(Duration::from_millis(100));
+        ctx.request_repaint_after(Duration::from_millis(50));
         self.memory_panel.camera_matrix_dialog = Some(dialog);
     }
 
@@ -8698,7 +8698,7 @@ impl CrosshairApp {
                 }
                 let refresh_visible_values = dialog.validation_rx.is_none()
                     && dialog.filter_rx.is_none()
-                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(100);
+                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(50);
                 let refresh_pid = self.memory_panel.process_pid;
                 let mut module_cache = HashMap::<String, usize>::new();
                 egui::ScrollArea::both().show_rows(ui, 24.0, visible_indices.len(), |ui, rows| {
@@ -8903,7 +8903,7 @@ impl CrosshairApp {
         if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
         } else if dialog.rx.is_some() || !dialog.candidates.is_empty() {
-            ctx.request_repaint_after(Duration::from_millis(100));
+            ctx.request_repaint_after(Duration::from_millis(50));
         }
         self.memory_panel.stable_pointer_dialog = Some(dialog);
     }
@@ -9157,11 +9157,7 @@ impl CrosshairApp {
         if clear {
             self.memory_panel.status = "Pointer map A cleared".to_owned();
         } else if open {
-            ctx.request_repaint_after(Duration::from_millis(if dialog.rx.is_some() {
-                100
-            } else {
-                250
-            }));
+            ctx.request_repaint_after(Duration::from_millis(50));
             self.memory_panel.deep_pointer_dialog = Some(dialog);
         }
     }
@@ -9423,7 +9419,7 @@ impl CrosshairApp {
                     vec2(total_row_width, 24.0),
                 );
                 let stale = dialog.resolved_rows.get(&index).is_none_or(|row| {
-                    row.updated_at.elapsed() >= Duration::from_millis(500)
+                    row.updated_at.elapsed() >= Duration::from_millis(50)
                 });
                 if stale {
                     let existing_addr = dialog.resolved_rows.get(&index).and_then(|r| r.address);
@@ -13552,8 +13548,8 @@ impl CrosshairApp {
         }
         if open {
             self.memory_panel.address_dialog = Some(dialog);
-            // Refresh the chain display every ~100ms
-            ctx.request_repaint_after(Duration::from_millis(100));
+            // Refresh the chain display every ~50ms
+            ctx.request_repaint_after(Duration::from_millis(50));
         }
     }
 
