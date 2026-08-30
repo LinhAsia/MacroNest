@@ -332,6 +332,7 @@ struct CameraMatrixDialog {
     last_preview_refresh: Instant,
     stability_sample: Option<(Instant, HashMap<usize, [f32; 16]>)>,
     auto_pick_started: Option<Instant>,
+    custom_matrix_input: String,
 }
 
 struct EntityListJobResult {
@@ -7788,6 +7789,7 @@ impl CrosshairApp {
             last_preview_refresh: Instant::now() - Duration::from_secs(1),
             stability_sample: None,
             auto_pick_started: None,
+            custom_matrix_input: String::new(),
         });
     }
 
@@ -8115,6 +8117,68 @@ impl CrosshairApp {
         };
     }
 
+    fn test_custom_camera_matrix(&mut self, dialog: &mut CameraMatrixDialog) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select a process first.".to_owned();
+            return;
+        };
+        let input = dialog.custom_matrix_input.trim();
+        if input.is_empty() {
+            return;
+        }
+        let address = if let Some((module, module_offset, offsets)) = parse_pointer_expression(input) {
+            match resolve_module_offset(pid, &module, module_offset) {
+                Ok(base) => {
+                    let pointer = PointerSpec {
+                        base,
+                        module: Some((module, module_offset)),
+                        offsets,
+                    };
+                    match resolve_memory_address(pid, base, Some(&pointer)) {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            dialog.status = format!("Failed to resolve pointer: {e}");
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    dialog.status = format!("Failed to resolve module: {e}");
+                    return;
+                }
+            }
+        } else if let Some(addr) = parse_memory_address(input) {
+            addr
+        } else {
+            dialog.status = "Invalid address or pointer expression format.".to_owned();
+            return;
+        };
+
+        match read_memory_bytes(pid, address, 64) {
+            Ok(bytes) => {
+                if let Some(matrix) = decode_f32_matrix(&bytes) {
+                    dialog.status = format!("Loaded 16 floats from 0x{:X} into candidate list!", address);
+                    if let Some(pos) = dialog.candidates.iter().position(|c| c.address == address) {
+                        dialog.candidates[pos].matrix = matrix;
+                        dialog.selected = Some(pos);
+                    } else {
+                        dialog.candidates.insert(0, ViewProjectionCandidate {
+                            address,
+                            matrix,
+                            score: 1.0,
+                        });
+                        dialog.selected = Some(0);
+                    }
+                } else {
+                    dialog.status = format!("0x{:X} contains invalid or NaN floats.", address);
+                }
+            }
+            Err(e) => {
+                dialog.status = format!("Cannot read memory at 0x{:X}: {e}", address);
+            }
+        }
+    }
+
     fn render_camera_matrix_dialog(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let Some(mut dialog) = self.memory_panel.camera_matrix_dialog.take() else {
@@ -8339,104 +8403,213 @@ impl CrosshairApp {
                         });
                     ui.label(RichText::new("Use Auto-match target; this menu is only a manual fallback.").small().weak());
                 });
-                ui.columns(2, |columns| {
-                    egui::ScrollArea::vertical().show(&mut columns[0], |ui| {
-                        egui::Grid::new("camera-matrix-candidates")
-                            .striped(true)
-                            .num_columns(4)
-                            .show(ui, |ui| {
-                                ui.label("Address");
-                                ui.label("Layout");
-                                ui.label("Screen X");
-                                ui.label("Screen Y");
-                                ui.end_row();
-                                for (index, candidate) in dialog.candidates.iter().enumerate() {
-                                    let projections = project_world_variants(
-                                        &candidate.matrix,
-                                        world,
-                                        width,
-                                        height,
-                                    );
-                                    let (layout, point) = projections
-                                        .iter()
-                                        .enumerate()
-                                        .filter_map(|(index, point)| point.map(|point| (PROJECTION_CONVENTIONS[index].0, point)))
-                                        .find(|(_, point)| point[0] >= 0.0 && point[0] <= width && point[1] >= 0.0 && point[1] <= height)
-                                        .or_else(|| projections.iter().enumerate().find_map(|(index, point)| point.map(|point| (PROJECTION_CONVENTIONS[index].0, point))))
-                                        .unwrap_or(("—", [f32::NAN; 2]));
-                                    let selected = dialog.selected == Some(index);
-                                    let mut row_clicked = false;
-                                    if ui
-                                        .selectable_label(
-                                            selected,
-                                            format_prefixed_memory_address(candidate.address),
-                                        )
-                                        .clicked()
-                                    {
-                                        row_clicked = true;
-                                    }
-                                    if ui.selectable_label(selected, layout).clicked() {
-                                        row_clicked = true;
-                                    }
-                                    let sx_text = if point[0].is_finite() {
-                                        format!("{:.0}", point[0])
-                                    } else {
-                                        "—".to_owned()
-                                    };
-                                    if ui.selectable_label(selected, sx_text).clicked() {
-                                        row_clicked = true;
-                                    }
-                                    let sy_text = if point[1].is_finite() {
-                                        format!("{:.0}", point[1])
-                                    } else {
-                                        "—".to_owned()
-                                    };
-                                    if ui.selectable_label(selected, sy_text).clicked() {
-                                        row_clicked = true;
-                                    }
-                                    if row_clicked {
-                                        dialog.selected = Some(index);
-                                    }
-                                    ui.end_row();
-                                }
-                            });
-                    });
-                    columns[1].label("Projection preview");
-                    let (rect, _) = columns[1].allocate_exact_size(
-                        vec2(columns[1].available_width(), 260.0),
-                        Sense::hover(),
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.tr("Test matrix address:", "Thử địa chỉ ma trận:")).strong());
+                    let text_edit = ui.add(
+                        egui::TextEdit::singleline(&mut dialog.custom_matrix_input)
+                            .desired_width(180.0)
+                            .hint_text("0x... or module+offset"),
                     );
-                    columns[1]
-                        .painter()
-                        .rect_filled(rect, 2.0, Color32::from_rgb(12, 14, 17));
-                    if let Some(candidate) = dialog
-                        .selected
-                        .and_then(|index| dialog.candidates.get(index))
+                    let enter_pressed = text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if ui
+                        .button(self.tr("Test / Add to list", "Thử / Thêm vào danh sách"))
+                        .on_hover_text("Read 16 floats from this memory address, decode matrix and project to preview")
+                        .clicked()
+                        || enter_pressed
                     {
-                        if let Some(point) = project_world_variants(
+                        self.test_custom_camera_matrix(&mut dialog);
+                    }
+                    if !dialog.candidates.is_empty() {
+                        if ui.button(self.tr("Clear all", "Xóa danh sách")).clicked() {
+                            dialog.candidates.clear();
+                            dialog.selected = None;
+                        }
+                    }
+                });
+                ui.columns(2, |columns| {
+                    let total_candidates = dialog.candidates.len();
+                    columns[0].horizontal(|ui| {
+                        ui.label(RichText::new(format!("{} ({total_candidates})", self.tr("Candidates", "Ứng viên"))).strong());
+                    });
+                    let row_height = 20.0;
+                    egui::ScrollArea::vertical()
+                        .id_salt("camera-matrix-candidates-scroll")
+                        .max_height(280.0)
+                        .auto_shrink([false, false])
+                        .show_rows(&mut columns[0], row_height, total_candidates, |ui, row_range| {
+                            egui::Grid::new("camera-matrix-candidates-grid")
+                                .striped(true)
+                                .num_columns(4)
+                                .min_col_width(55.0)
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new(self.tr("Address", "Địa chỉ")).strong());
+                                    ui.label(RichText::new(self.tr("Layout", "Định dạng")).strong());
+                                    ui.label(RichText::new("Screen X").strong());
+                                    ui.label(RichText::new("Screen Y").strong());
+                                    ui.end_row();
+
+                                    for index in row_range {
+                                        let Some(candidate) = dialog.candidates.get(index) else {
+                                            continue;
+                                        };
+                                        let point = project_world_single(
+                                            &candidate.matrix,
+                                            world,
+                                            width,
+                                            height,
+                                            dialog.projection_variant,
+                                        );
+                                        let layout = PROJECTION_CONVENTIONS[dialog.projection_variant].0;
+                                        let selected = dialog.selected == Some(index);
+                                        let mut row_clicked = false;
+                                        if ui
+                                            .selectable_label(
+                                                selected,
+                                                format_prefixed_memory_address(candidate.address),
+                                            )
+                                            .clicked()
+                                        {
+                                            row_clicked = true;
+                                        }
+                                        if ui.selectable_label(selected, layout).clicked() {
+                                            row_clicked = true;
+                                        }
+                                        let sx_text = if let Some(pt) = point {
+                                            format!("{:.0}", pt[0])
+                                        } else {
+                                            "—".to_owned()
+                                        };
+                                        if ui.selectable_label(selected, sx_text).clicked() {
+                                            row_clicked = true;
+                                        }
+                                        let sy_text = if let Some(pt) = point {
+                                            format!("{:.0}", pt[1])
+                                        } else {
+                                            "—".to_owned()
+                                        };
+                                        if ui.selectable_label(selected, sy_text).clicked() {
+                                            row_clicked = true;
+                                        }
+                                        if row_clicked {
+                                            dialog.selected = Some(index);
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+
+                    // Compute on-screen projections for candidates
+                    let mut on_screen_dots: Vec<(usize, [f32; 2], usize)> = Vec::new();
+                    for (idx, candidate) in dialog.candidates.iter().enumerate() {
+                        if let Some(pt) = project_world_single(
                             &candidate.matrix,
                             world,
                             width,
                             height,
-                        )[dialog.projection_variant]
-                        {
-                            let position = egui::pos2(
-                                rect.left() + rect.width() * point[0] / width,
-                                rect.top() + rect.height() * point[1] / height,
-                            );
-                            if rect.contains(position) {
-                                columns[1].painter().circle_filled(
-                                    position,
-                                    5.0,
-                                    Color32::LIGHT_GREEN,
-                                );
-                                columns[1].painter().circle_stroke(
-                                    position,
-                                    9.0,
-                                    egui::Stroke::new(1.5, Color32::WHITE),
-                                );
+                            dialog.projection_variant,
+                        ) {
+                            if pt[0] >= 0.0 && pt[0] <= width && pt[1] >= 0.0 && pt[1] <= height {
+                                on_screen_dots.push((idx, pt, candidate.address));
+                                if on_screen_dots.len() >= 600 {
+                                    break;
+                                }
                             }
                         }
+                    }
+
+                    columns[1].horizontal(|ui| {
+                        ui.label(RichText::new(self.tr("Projection preview", "Xem trước phép chiếu")).strong());
+                        ui.label(
+                            RichText::new(format!(
+                                "({} {} — {})",
+                                on_screen_dots.len(),
+                                self.tr("dots on screen", "chấm trên màn hình"),
+                                self.tr("click dot to select", "click vào chấm để chọn"),
+                            ))
+                            .small()
+                            .weak(),
+                        );
+                    });
+
+                    let (rect, response) = columns[1].allocate_exact_size(
+                        vec2(columns[1].available_width(), 280.0),
+                        Sense::click(),
+                    );
+                    let painter = columns[1].painter_at(rect);
+                    painter.rect_filled(rect, 2.0, Color32::from_rgb(12, 14, 17));
+                    painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, Color32::from_rgb(38, 43, 53)), egui::StrokeKind::Inside);
+
+                    // Center crosshair
+                    let center_x = rect.left() + rect.width() * 0.5;
+                    let center_y = rect.top() + rect.height() * 0.5;
+                    painter.line_segment(
+                        [egui::pos2(rect.left(), center_y), egui::pos2(rect.right(), center_y)],
+                        egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 25)),
+                    );
+                    painter.line_segment(
+                        [egui::pos2(center_x, rect.top()), egui::pos2(center_x, rect.bottom())],
+                        egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 25)),
+                    );
+
+                    let mouse_pos = response.hover_pos();
+                    let clicked = response.clicked();
+                    let mut closest_candidate: Option<(usize, f32)> = None;
+                    let mut hovered_candidate: Option<(usize, usize, egui::Pos2)> = None;
+
+                    // Draw candidate dots
+                    for (idx, pt, addr) in &on_screen_dots {
+                        let position = egui::pos2(
+                            rect.left() + rect.width() * pt[0] / width,
+                            rect.top() + rect.height() * pt[1] / height,
+                        );
+                        let is_selected = dialog.selected == Some(*idx);
+
+                        if let Some(mpos) = mouse_pos {
+                            let dist = position.distance(mpos);
+                            if dist <= 14.0 {
+                                if closest_candidate.map_or(true, |(_, d)| dist < d) {
+                                    closest_candidate = Some((*idx, dist));
+                                }
+                            }
+                            if dist <= 8.0 && hovered_candidate.is_none() {
+                                hovered_candidate = Some((*idx, *addr, position));
+                            }
+                        }
+
+                        if is_selected {
+                            // Selected: prominent bright green with outer white pulse ring
+                            painter.circle_filled(position, 6.0, Color32::from_rgb(84, 214, 140));
+                            painter.circle_stroke(
+                                position,
+                                10.0,
+                                egui::Stroke::new(2.0, Color32::WHITE),
+                            );
+                        } else {
+                            // Candidate dot: distinct red / coral dot
+                            painter.circle_filled(position, 3.5, Color32::from_rgb(235, 75, 75));
+                            painter.circle_stroke(
+                                position,
+                                3.5,
+                                egui::Stroke::new(0.8, Color32::from_rgba_unmultiplied(255, 255, 255, 120)),
+                            );
+                        }
+                    }
+
+                    // Click on preview canvas selects closest dot
+                    if clicked {
+                        if let Some((idx, _)) = closest_candidate {
+                            dialog.selected = Some(idx);
+                        }
+                    }
+
+                    // Hover tooltip on dot
+                    if let Some((idx, addr, hpos)) = hovered_candidate {
+                        painter.circle_stroke(hpos, 7.0, egui::Stroke::new(1.5, Color32::YELLOW));
+                        response.on_hover_text_at_pointer(format!(
+                            "Candidate #{} [0x{:X}]\nClick to select this matrix",
+                            idx + 1,
+                            addr
+                        ));
                     }
                 });
         if persist_camera_inputs {
@@ -16700,6 +16873,46 @@ fn project_world_variants(
         }
     }
     results
+}
+
+fn project_world_single(
+    matrix: &[f32; 16],
+    world: [f32; 3],
+    width: f32,
+    height: f32,
+    variant: usize,
+) -> Option<[f32; 2]> {
+    let (_, order, column, flip_y) = PROJECTION_CONVENTIONS.get(variant)?;
+    let [x, y, z] = [world[order[0]], world[order[1]], world[order[2]]];
+    let (clip_x, clip_y, clip_w) = if *column {
+        (
+            x * matrix[0] + y * matrix[1] + z * matrix[2] + matrix[3],
+            x * matrix[4] + y * matrix[5] + z * matrix[6] + matrix[7],
+            x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
+        )
+    } else {
+        (
+            x * matrix[0] + y * matrix[4] + z * matrix[8] + matrix[12],
+            x * matrix[1] + y * matrix[5] + z * matrix[9] + matrix[13],
+            x * matrix[3] + y * matrix[7] + z * matrix[11] + matrix[15],
+        )
+    };
+    if !clip_w.is_finite() || clip_w.abs() <= 1.0e-4 {
+        return None;
+    }
+    let ndc_x = clip_x / clip_w;
+    let ndc_y = clip_y / clip_w;
+    let screen_x = (ndc_x + 1.0) * 0.5 * width;
+    let screen_y = if *flip_y {
+        (ndc_y + 1.0) * 0.5 * height
+    } else {
+        (1.0 - ndc_y) * 0.5 * height
+    };
+    if screen_x.is_finite() && screen_y.is_finite() {
+        Some([screen_x, screen_y])
+    } else {
+        None
+    }
 }
 
 fn best_camera_projection(
