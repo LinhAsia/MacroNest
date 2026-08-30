@@ -966,7 +966,10 @@ mod windows_platform {
     }
 
     pub fn trim_working_set() {
-        // ponytail: Emptying working set flushes RAM to pagefile and causes hard page faults on subsequent scans.
+        unsafe {
+            use windows::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+            let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+        }
     }
 }
 

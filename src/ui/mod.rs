@@ -956,6 +956,7 @@ pub struct CrosshairApp {
     protractor_calibration_points: Option<Vec<(i32, i32)>>,
     distance_measurement_active: bool,
     native_capture_in_progress: bool,
+    startup_ram_trimmed: bool,
 }
 
 impl CrosshairApp {
@@ -1123,6 +1124,7 @@ impl CrosshairApp {
             protractor_calibration_points: None,
             distance_measurement_active: false,
             native_capture_in_progress: false,
+            startup_ram_trimmed: false,
             vision_capture_anchor: None,
             vision_capture_current: None,
             vision_capture_screen_region_preview: None,
@@ -15156,6 +15158,9 @@ impl CrosshairApp {
             }
             self.background_panel_preload_index += 1;
             ctx.request_repaint_after(Duration::from_millis(16));
+        } else if !self.startup_ram_trimmed {
+            self.startup_ram_trimmed = true;
+            crate::platform::trim_working_set();
         }
     }
 
@@ -15168,6 +15173,7 @@ impl CrosshairApp {
             .send(OverlayCommand::SetTrayIconVisible(true));
         crate::overlay::wake_command_queue();
         self.persist();
+        crate::platform::trim_working_set();
     }
 
     fn begin_protractor_calibration(&mut self, ctx: &egui::Context, was_minimized: bool) {
