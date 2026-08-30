@@ -336,6 +336,14 @@ struct CameraMatrixDialog {
     show_all_conventions: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CameraDirectionFilter {
+    LookUp,
+    LookDown,
+    TurnLeft,
+    TurnRight,
+}
+
 struct EntityListJobResult {
     pid: u32,
     entity_bases: Vec<usize>,
@@ -7907,6 +7915,141 @@ impl CrosshairApp {
         dialog.status = "Camera matrix scanning is available on Windows.".to_owned();
     }
 
+    fn filter_by_camera_direction(
+        &mut self,
+        dialog: &mut CameraMatrixDialog,
+        direction: CameraDirectionFilter,
+    ) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            dialog.status = "Select a process first.".to_owned();
+            return;
+        };
+        let Some(world) = dialog.world else {
+            dialog.status = "Target X, Y, Z coordinates needed to check movement direction.".to_owned();
+            return;
+        };
+        let width = dialog
+            .viewport_width
+            .parse::<f32>()
+            .unwrap_or(1920.0)
+            .max(1.0);
+        let height = dialog
+            .viewport_height
+            .parse::<f32>()
+            .unwrap_or(1080.0)
+            .max(1.0);
+        let before = dialog.candidates.len();
+        let selected_address = dialog
+            .selected
+            .and_then(|index| dialog.candidates.get(index))
+            .map(|candidate| candidate.address);
+
+        let mut filtered = Vec::new();
+        let mut matched_variants = Vec::new();
+
+        for candidate in &dialog.candidates {
+            let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64) else {
+                continue;
+            };
+            let Some(new_matrix) = decode_f32_matrix(&bytes) else {
+                continue;
+            };
+            let old_matrix = dialog
+                .baseline
+                .get(&candidate.address)
+                .unwrap_or(&candidate.matrix);
+
+            let variants_to_test: Vec<usize> = if dialog.show_all_conventions {
+                (0..PROJECTION_CONVENTIONS.len()).collect()
+            } else {
+                vec![dialog.projection_variant]
+            };
+
+            let mut passed_variant = None;
+            let mut best_score = f32::MIN;
+            for &var in &variants_to_test {
+                let old_pt = project_world_single(old_matrix, world, width, height, var);
+                let new_pt = project_world_single(&new_matrix, world, width, height, var);
+
+                if let (Some(old_p), Some(new_p)) = (old_pt, new_pt) {
+                    let dx = new_p[0] - old_p[0];
+                    let dy = new_p[1] - old_p[1];
+                    let (matches, score) = match direction {
+                        // Looking UP tilts camera up -> Target sinks DOWN on screen (new_y > old_y)
+                        CameraDirectionFilter::LookUp => (
+                            dy > 3.0 && dy > dx.abs() * 0.6,
+                            dy - dx.abs() * 0.5,
+                        ),
+                        // Looking DOWN tilts camera down -> Target rises UP on screen (new_y < old_y)
+                        CameraDirectionFilter::LookDown => (
+                            dy < -3.0 && -dy > dx.abs() * 0.6,
+                            -dy - dx.abs() * 0.5,
+                        ),
+                        // Turning LEFT turns camera left -> Target moves RIGHT on screen (new_x > old_x)
+                        CameraDirectionFilter::TurnLeft => (
+                            dx > 3.0 && dx > dy.abs() * 0.6,
+                            dx - dy.abs() * 0.5,
+                        ),
+                        // Turning RIGHT turns camera right -> Target moves LEFT on screen (new_x < old_x)
+                        CameraDirectionFilter::TurnRight => (
+                            dx < -3.0 && -dx > dy.abs() * 0.6,
+                            -dx - dy.abs() * 0.5,
+                        ),
+                    };
+                    if matches && score > best_score {
+                        best_score = score;
+                        passed_variant = Some(var);
+                    }
+                }
+            }
+
+            if let Some(var) = passed_variant {
+                let mut c = candidate.clone();
+                c.matrix = new_matrix;
+                filtered.push(c);
+                matched_variants.push(var);
+            }
+        }
+
+        if filtered.is_empty() {
+            dialog.status = format!(
+                "No matrices moved in that direction ({before} kept). Rotate camera farther in game!"
+            );
+            return;
+        }
+
+        dialog.candidates = filtered;
+        let mut variant_counts = HashMap::new();
+        for &var in &matched_variants {
+            *variant_counts.entry(var).or_insert(0usize) += 1;
+        }
+        if let Some((&most_common_var, _)) = variant_counts.iter().max_by_key(|(_, count)| *count) {
+            dialog.projection_variant = most_common_var;
+        }
+        dialog.baseline = dialog
+            .candidates
+            .iter()
+            .map(|c| (c.address, c.matrix))
+            .collect();
+        dialog.selected = selected_address.and_then(|address| {
+            dialog
+                .candidates
+                .iter()
+                .position(|candidate| candidate.address == address)
+        });
+
+        let dir_label = match direction {
+            CameraDirectionFilter::LookUp => "Look UP (target moved down)",
+            CameraDirectionFilter::LookDown => "Look DOWN (target moved up)",
+            CameraDirectionFilter::TurnLeft => "Turn LEFT (target moved right)",
+            CameraDirectionFilter::TurnRight => "Turn RIGHT (target moved left)",
+        };
+        dialog.status = format!(
+            "Filtered by {dir_label}: Kept {} of {before} candidate(s).",
+            dialog.candidates.len()
+        );
+    }
+
     fn filter_rotated_camera_matrices(&mut self, dialog: &mut CameraMatrixDialog) {
         let Some(pid) = self.memory_panel.process_pid else {
             dialog.status = "Select the restarted/current process first.".to_owned();
@@ -8394,8 +8537,12 @@ impl CrosshairApp {
                             !dialog.candidates.is_empty()
                                 && dialog.rx.is_none()
                                 && dialog.stability_sample.is_none(),
-                            Button::new("Remove motion while still"),
+                            Button::new(self.tr("Remove motion while still", "Loại bỏ chuyển động khi đứng yên")),
                         )
+                        .on_hover_text(self.tr(
+                            "Keep camera & target still for 1s to filter out animations and ticking data",
+                            "Giữ yên camera và mục tiêu trong 1 giây để loại bỏ animation và dữ liệu đổi liên tục",
+                        ))
                         .clicked()
                     {
                         self.start_camera_stability_filter(&mut dialog);
@@ -8405,11 +8552,99 @@ impl CrosshairApp {
                             !dialog.candidates.is_empty()
                                 && dialog.rx.is_none()
                                 && dialog.stability_sample.is_none(),
-                            Button::new("Filter after rotation"),
+                            Button::new(self.tr("Filter after rotation", "Lọc sau khi xoay")),
                         )
+                        .on_hover_text(self.tr(
+                            "Keep matrices whose values changed after you rotated the camera in game",
+                            "Giữ lại các ma trận có giá trị thay đổi sau khi bạn xoay camera trong game",
+                        ))
                         .clicked()
                     {
                         self.filter_rotated_camera_matrices(&mut dialog);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let has_candidates = !dialog.candidates.is_empty()
+                        && dialog.rx.is_none()
+                        && dialog.stability_sample.is_none();
+                    ui.label(RichText::new(self.tr("Directional filter:", "Lọc theo hướng:")).strong());
+                    if ui
+                        .add_enabled(
+                            has_candidates,
+                            Button::new(self.tr("\u{e412} Set baseline", "\u{e412} Đặt mốc")),
+                        )
+                        .on_hover_text(self.tr(
+                            "Save current camera snapshot before rotating in game",
+                            "Lưu lại toạ độ/ma trận hiện tại trước khi xoay camera trong game",
+                        ))
+                        .clicked()
+                    {
+                        if let Some(pid) = self.memory_panel.process_pid {
+                            for c in &mut dialog.candidates {
+                                if let Ok(bytes) = read_memory_bytes(pid, c.address, 64) {
+                                    if let Some(m) = decode_f32_matrix(&bytes) {
+                                        c.matrix = m;
+                                    }
+                                }
+                            }
+                            dialog.baseline = dialog.candidates.iter().map(|c| (c.address, c.matrix)).collect();
+                            dialog.status = self.tr(
+                                "Baseline marked! Now rotate your camera in game, then click the matching direction button below.",
+                                "Đã đặt mốc! Hãy xoay camera trong game, sau đó nhấn nút hướng tương ứng bên dưới.",
+                            ).to_owned();
+                        }
+                    }
+                    if ui
+                        .add_enabled(
+                            has_candidates,
+                            Button::new(self.tr("\u{2191} Looked UP", "\u{2191} Nhìn lên")),
+                        )
+                        .on_hover_text(self.tr(
+                            "Keep candidates whose dot moved DOWN on screen as you looked UP in game",
+                            "Giữ lại ứng viên có chấm đỏ di chuyển XUỐNG khi bạn nhìn LÊN trong game",
+                        ))
+                        .clicked()
+                    {
+                        self.filter_by_camera_direction(&mut dialog, CameraDirectionFilter::LookUp);
+                    }
+                    if ui
+                        .add_enabled(
+                            has_candidates,
+                            Button::new(self.tr("\u{2193} Looked DOWN", "\u{2193} Nhìn xuống")),
+                        )
+                        .on_hover_text(self.tr(
+                            "Keep candidates whose dot moved UP on screen as you looked DOWN in game",
+                            "Giữ lại ứng viên có chấm đỏ di chuyển LÊN khi bạn nhìn XUỐNG trong game",
+                        ))
+                        .clicked()
+                    {
+                        self.filter_by_camera_direction(&mut dialog, CameraDirectionFilter::LookDown);
+                    }
+                    if ui
+                        .add_enabled(
+                            has_candidates,
+                            Button::new(self.tr("\u{2190} Turned LEFT", "\u{2190} Quay trái")),
+                        )
+                        .on_hover_text(self.tr(
+                            "Keep candidates whose dot moved RIGHT on screen as you turned LEFT in game",
+                            "Giữ lại ứng viên có chấm đỏ di chuyển SANG PHẢI khi bạn quay TRÁI trong game",
+                        ))
+                        .clicked()
+                    {
+                        self.filter_by_camera_direction(&mut dialog, CameraDirectionFilter::TurnLeft);
+                    }
+                    if ui
+                        .add_enabled(
+                            has_candidates,
+                            Button::new(self.tr("\u{2192} Turned RIGHT", "\u{2192} Quay phải")),
+                        )
+                        .on_hover_text(self.tr(
+                            "Keep candidates whose dot moved LEFT on screen as you turned RIGHT in game",
+                            "Giữ lại ứng viên có chấm đỏ di chuyển SANG TRÁI khi bạn quay PHẢI trong game",
+                        ))
+                        .clicked()
+                    {
+                        self.filter_by_camera_direction(&mut dialog, CameraDirectionFilter::TurnRight);
                     }
                 });
                 ui.label(RichText::new(&dialog.status).small().weak());
@@ -16920,7 +17155,7 @@ fn project_world_variants(
                 x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
             )
         };
-        if !clip_w.is_finite() || clip_w.abs() <= 1.0e-4 {
+        if !clip_w.is_finite() || clip_w <= 0.01 {
             continue;
         }
         let ndc_x = clip_x / clip_w;
@@ -16960,7 +17195,7 @@ fn project_world_single(
             x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
         )
     };
-    if !clip_w.is_finite() || clip_w.abs() <= 1.0e-4 {
+    if !clip_w.is_finite() || clip_w <= 0.01 {
         return None;
     }
     let ndc_x = clip_x / clip_w;
@@ -17724,5 +17959,27 @@ mod tests {
         let rect = state.saved_address_list_rect.unwrap();
         assert_eq!(rect.center().x, 250.0);
         assert_eq!(rect.bottom(), 600.0);
+    }
+
+    #[test]
+    fn test_camera_matrix_projection_behind_camera_and_conventions() {
+        // Identity-like standard perspective matrix (Column major)
+        // clip_x = x, clip_y = y, clip_w = z
+        let mut matrix = [0.0f32; 16];
+        matrix[0] = 1.0;  // m00
+        matrix[5] = 1.0;  // m11
+        matrix[10] = 1.0; // m22
+        matrix[11] = 1.0; // m32 -> clip_w = z in column convention (index 11 for z)
+
+        // Point in front (z = 10.0 > 0)
+        let pt_front = project_world_single(&matrix, [0.0, 0.0, 10.0], 1920.0, 1080.0, 2);
+        assert!(pt_front.is_some());
+        let p = pt_front.unwrap();
+        assert!((p[0] - 960.0).abs() < 1.0);
+        assert!((p[1] - 540.0).abs() < 1.0);
+
+        // Point behind camera (z = -10.0 < 0) -> must be None (not projected inverted on screen)
+        let pt_behind = project_world_single(&matrix, [0.0, 0.0, -10.0], 1920.0, 1080.0, 2);
+        assert!(pt_behind.is_none());
     }
 }
