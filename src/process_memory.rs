@@ -1105,6 +1105,41 @@ fn with_cached_read_process<T>(
     })
 }
 
+struct CachedWriteProcess {
+    pid: u32,
+    opened_at: Instant,
+    process: ScanProcess,
+}
+
+thread_local! {
+    static CACHED_WRITE_PROCESS: RefCell<Option<CachedWriteProcess>> = const { RefCell::new(None) };
+}
+
+fn with_cached_write_process<T>(
+    pid: u32,
+    write: impl FnOnce(&ScanProcess) -> io::Result<T>,
+) -> io::Result<T> {
+    CACHED_WRITE_PROCESS.with(|cached| {
+        let mut cached = cached.borrow_mut();
+        let should_reopen = cached.as_ref().is_none_or(|entry| {
+            entry.pid != pid || entry.opened_at.elapsed() >= Duration::from_secs(2)
+        });
+        if should_reopen {
+            *cached = Some(CachedWriteProcess {
+                pid,
+                opened_at: Instant::now(),
+                process: ScanProcess::open(pid, true)?,
+            });
+        }
+        write(
+            &cached
+                .as_ref()
+                .expect("cached process was just opened")
+                .process,
+        )
+    })
+}
+
 pub fn read_scan_value(
     pid: u32,
     address: usize,
@@ -1219,24 +1254,25 @@ pub fn read_text_memory(
 }
 
 pub fn write_scan_value(pid: u32, address: usize, value: ScanValue) -> io::Result<()> {
-    let process = ScanProcess::open(pid, true)?;
     let bytes = value.bytes();
     let width = value.value_type().width();
-    let mut written = 0;
-    let ok = unsafe {
-        WriteProcessMemory(
-            process.handle,
-            address as *mut c_void,
-            bytes.as_ptr().cast(),
-            width,
-            &mut written,
-        )
-    };
-    if ok == 0 || written != width {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+    with_cached_write_process(pid, |process| {
+        let mut written = 0;
+        let ok = unsafe {
+            WriteProcessMemory(
+                process.handle,
+                address as *mut c_void,
+                bytes.as_ptr().cast(),
+                width,
+                &mut written,
+            )
+        };
+        if ok == 0 || written != width {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    })
 }
 
 pub fn write_text_memory(
@@ -1259,24 +1295,25 @@ pub fn write_text_memory(
             ),
         ));
     }
-    let process = ScanProcess::open(pid, true)?;
     let mut bytes = vec![0; capacity];
     bytes[..encoded.len()].copy_from_slice(&encoded);
-    let mut written = 0;
-    let ok = unsafe {
-        WriteProcessMemory(
-            process.handle,
-            address as *mut c_void,
-            bytes.as_ptr().cast(),
-            bytes.len(),
-            &mut written,
-        )
-    };
-    if ok == 0 || written != bytes.len() {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
+    with_cached_write_process(pid, |process| {
+        let mut written = 0;
+        let ok = unsafe {
+            WriteProcessMemory(
+                process.handle,
+                address as *mut c_void,
+                bytes.as_ptr().cast(),
+                bytes.len(),
+                &mut written,
+            )
+        };
+        if ok == 0 || written != bytes.len() {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    })
 }
 
 pub fn write_code_bytes(pid: u32, address: usize, bytes: &[u8]) -> io::Result<()> {

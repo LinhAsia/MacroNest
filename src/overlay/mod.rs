@@ -33817,6 +33817,25 @@ mod windows_overlay {
             return resolve_memory_pointer_entry(pid, module.trim(), module_offset, &offsets)
                 .map(|address| (pid, address));
         }
+        if let Some((module, module_offset)) = text.rsplit_once('+') {
+            let module = module.trim();
+            if !module.is_empty() {
+                let offset_str = module_offset.trim();
+                let offset = usize::from_str_radix(
+                    offset_str
+                        .strip_prefix("0x")
+                        .or_else(|| offset_str.strip_prefix("0X"))
+                        .unwrap_or(offset_str),
+                    16,
+                )
+                .ok();
+                if let Some(offset) = offset {
+                    if let Some(address) = resolve_memory_pointer_entry(pid, module, offset, &[]) {
+                        return Some((pid, address));
+                    }
+                }
+            }
+        }
         parse_memory_address(text).map(|address| (pid, address))
     }
 
