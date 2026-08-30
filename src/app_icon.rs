@@ -114,13 +114,6 @@ pub fn ensure_disabled_ico_file(path: &Path, size: u32) -> Result<()> {
 }
 
 fn ensure_ico_file_variant(path: &Path, size: u32, disabled: bool) -> Result<()> {
-    if path.is_file()
-        && fs::metadata(path)
-            .map(|meta| meta.len() > 0)
-            .unwrap_or(false)
-    {
-        return Ok(());
-    }
     let pixmap = render_pixmap(size, disabled)?;
     let file = fs::File::create(path)
         .with_context(|| format!("Failed to create icon file {}", path.display()))?;

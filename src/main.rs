@@ -513,7 +513,10 @@ fn main() -> Result<()> {
         .with_visible(!start_hidden_to_tray)
         .with_decorations(false)
         .with_transparent(true);
-    if let Ok(icon) = app_icon::icon_data_from_ico_file(&paths.icon_file) {
+    let app_icon = app_icon::icon_data_from_ico_file(&paths.icon_file)
+        .or_else(|_| app_icon::icon_data(128))
+        .ok();
+    if let Some(icon) = app_icon {
         viewport_builder = viewport_builder.with_icon(std::sync::Arc::new(icon));
     }
 
