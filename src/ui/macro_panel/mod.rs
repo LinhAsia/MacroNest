@@ -16320,6 +16320,49 @@ if supports_move_mouse || show_detection_tuning {
                                 let mut hover_regions = Vec::new();
                                  let mut has_hover_support = false;
                                  match step.action {
+                                     MacroAction::MouseMoveAbsolute => {
+                                         has_hover_support = true;
+                                         let radius = 14;
+                                         hover_regions.push(crate::overlay::VisionRegion {
+                                             left: step.x - radius,
+                                             top: step.y - radius,
+                                             width: radius * 2,
+                                             height: radius * 2,
+                                             is_circle: true,
+                                             angle_offset_deg: None,
+                                             angle_span_deg: None,
+                                         });
+                                     }
+                                     MacroAction::IfStart => {
+                                         if step.if_condition_type == IfConditionType::PixelColor {
+                                             has_hover_support = true;
+                                             let radius = 14;
+                                             hover_regions.push(crate::overlay::VisionRegion {
+                                                 left: step.x - radius,
+                                                 top: step.y - radius,
+                                                 width: radius * 2,
+                                                 height: radius * 2,
+                                                 is_circle: true,
+                                                 angle_offset_deg: None,
+                                                 angle_span_deg: None,
+                                             });
+                                         }
+                                         for cond in &step.extra_conditions {
+                                             if cond.condition_type == IfConditionType::PixelColor {
+                                                 has_hover_support = true;
+                                                 let radius = 14;
+                                                 hover_regions.push(crate::overlay::VisionRegion {
+                                                     left: cond.x - radius,
+                                                     top: cond.y - radius,
+                                                     width: radius * 2,
+                                                     height: radius * 2,
+                                                     is_circle: true,
+                                                     angle_offset_deg: None,
+                                                     angle_span_deg: None,
+                                                 });
+                                             }
+                                         }
+                                     }
                                      MacroAction::OcrSearch => {
                                          has_hover_support = true;
                                          let is_custom = step.key.trim().is_empty() || step.key.trim() == "0";

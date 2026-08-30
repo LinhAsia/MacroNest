@@ -18815,44 +18815,136 @@ mod windows_overlay {
             }
         }
         for region in regions {
-            let p1 = (region.left, region.top);
-            let p2 = (region.left + region.width, region.top);
-            let p3 = (region.left + region.width, region.top + region.height);
-            let p4 = (region.left, region.top + region.height);
-            shapes.push(GeometryRenderShape {
-                bounds: (
-                    region.left - 2,
-                    region.top - 2,
-                    region.left + region.width + 2,
-                    region.top + region.height + 2,
-                ),
-                draw: GeometryRenderDraw::Polygon {
-                    points: vec![p1, p2, p3, p4],
-                    stroke: [96, 216, 255, 230],
-                    fill: None,
-                    thickness: 2,
-                },
-            });
+            if region.is_circle {
+                let center_x = region.left + region.width / 2;
+                let center_y = region.top + region.height / 2;
+                let radius = (region.width / 2).max(4);
+                let segments = 24;
+                let mut points = Vec::with_capacity(segments);
+                for i in 0..segments {
+                    let angle = (i as f32 / segments as f32) * std::f32::consts::TAU;
+                    let px = center_x + (angle.cos() * radius as f32).round() as i32;
+                    let py = center_y + (angle.sin() * radius as f32).round() as i32;
+                    points.push((px, py));
+                }
+                shapes.push(GeometryRenderShape {
+                    bounds: (
+                        center_x - radius - 2,
+                        center_y - radius - 2,
+                        center_x + radius + 2,
+                        center_y + radius + 2,
+                    ),
+                    draw: GeometryRenderDraw::Polygon {
+                        points,
+                        stroke: [96, 216, 255, 230],
+                        fill: Some([96, 216, 255, 30]),
+                        thickness: 2,
+                    },
+                });
+                shapes.push(GeometryRenderShape {
+                    bounds: (center_x - radius, center_y, center_x + radius, center_y),
+                    draw: GeometryRenderDraw::Polygon {
+                        points: vec![(center_x - radius, center_y), (center_x + radius, center_y)],
+                        stroke: [96, 216, 255, 200],
+                        fill: None,
+                        thickness: 1,
+                    },
+                });
+                shapes.push(GeometryRenderShape {
+                    bounds: (center_x, center_y - radius, center_x, center_y + radius),
+                    draw: GeometryRenderDraw::Polygon {
+                        points: vec![(center_x, center_y - radius), (center_x, center_y + radius)],
+                        stroke: [96, 216, 255, 200],
+                        fill: None,
+                        thickness: 1,
+                    },
+                });
+            } else {
+                let p1 = (region.left, region.top);
+                let p2 = (region.left + region.width, region.top);
+                let p3 = (region.left + region.width, region.top + region.height);
+                let p4 = (region.left, region.top + region.height);
+                shapes.push(GeometryRenderShape {
+                    bounds: (
+                        region.left - 2,
+                        region.top - 2,
+                        region.left + region.width + 2,
+                        region.top + region.height + 2,
+                    ),
+                    draw: GeometryRenderDraw::Polygon {
+                        points: vec![p1, p2, p3, p4],
+                        stroke: [96, 216, 255, 230],
+                        fill: None,
+                        thickness: 2,
+                    },
+                });
+            }
         }
         for region in preview_regions {
-            let p1 = (region.left, region.top);
-            let p2 = (region.left + region.width, region.top);
-            let p3 = (region.left + region.width, region.top + region.height);
-            let p4 = (region.left, region.top + region.height);
-            shapes.push(GeometryRenderShape {
-                bounds: (
-                    region.left - 2,
-                    region.top - 2,
-                    region.left + region.width + 2,
-                    region.top + region.height + 2,
-                ),
-                draw: GeometryRenderDraw::Polygon {
-                    points: vec![p1, p2, p3, p4],
-                    stroke: [255, 180, 0, 230],
-                    fill: None,
-                    thickness: 2,
-                },
-            });
+            if region.is_circle {
+                let center_x = region.left + region.width / 2;
+                let center_y = region.top + region.height / 2;
+                let radius = (region.width / 2).max(4);
+                let segments = 24;
+                let mut points = Vec::with_capacity(segments);
+                for i in 0..segments {
+                    let angle = (i as f32 / segments as f32) * std::f32::consts::TAU;
+                    let px = center_x + (angle.cos() * radius as f32).round() as i32;
+                    let py = center_y + (angle.sin() * radius as f32).round() as i32;
+                    points.push((px, py));
+                }
+                shapes.push(GeometryRenderShape {
+                    bounds: (
+                        center_x - radius - 2,
+                        center_y - radius - 2,
+                        center_x + radius + 2,
+                        center_y + radius + 2,
+                    ),
+                    draw: GeometryRenderDraw::Polygon {
+                        points,
+                        stroke: [255, 180, 0, 230],
+                        fill: Some([255, 180, 0, 35]),
+                        thickness: 2,
+                    },
+                });
+                shapes.push(GeometryRenderShape {
+                    bounds: (center_x - radius, center_y, center_x + radius, center_y),
+                    draw: GeometryRenderDraw::Polygon {
+                        points: vec![(center_x - radius, center_y), (center_x + radius, center_y)],
+                        stroke: [255, 180, 0, 220],
+                        fill: None,
+                        thickness: 1,
+                    },
+                });
+                shapes.push(GeometryRenderShape {
+                    bounds: (center_x, center_y - radius, center_x, center_y + radius),
+                    draw: GeometryRenderDraw::Polygon {
+                        points: vec![(center_x, center_y - radius), (center_x, center_y + radius)],
+                        stroke: [255, 180, 0, 220],
+                        fill: None,
+                        thickness: 1,
+                    },
+                });
+            } else {
+                let p1 = (region.left, region.top);
+                let p2 = (region.left + region.width, region.top);
+                let p3 = (region.left + region.width, region.top + region.height);
+                let p4 = (region.left, region.top + region.height);
+                shapes.push(GeometryRenderShape {
+                    bounds: (
+                        region.left - 2,
+                        region.top - 2,
+                        region.left + region.width + 2,
+                        region.top + region.height + 2,
+                    ),
+                    draw: GeometryRenderDraw::Polygon {
+                        points: vec![p1, p2, p3, p4],
+                        stroke: [255, 180, 0, 230],
+                        fill: None,
+                        thickness: 2,
+                    },
+                });
+            }
         }
         shapes
     }
