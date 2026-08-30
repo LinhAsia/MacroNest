@@ -211,7 +211,8 @@ struct StablePointerDialog {
     expected_values: HashMap<usize, ScanValue>,
     status: String,
     candidates: Vec<StablePointerCandidate>,
-    selected: Option<usize>,
+    selected: HashSet<usize>,
+    selection_anchor: Option<usize>,
     rx: Option<Receiver<StablePointerJobResult>>,
     progress: Arc<AtomicUsize>,
     limits: PointerScanLimits,
@@ -784,6 +785,7 @@ pub(crate) struct MemoryPanelState {
     scan_mem_image: bool,
     scan_mem_mapped: bool,
     scan_scope_all: bool,
+    scan_custom_snapshot: [bool; 7],
     fast_scan: bool,
     fast_scan_alignment: String,
     pause_while_scanning: bool,
@@ -905,6 +907,7 @@ impl Default for MemoryPanelState {
             scan_mem_image: false,
             scan_mem_mapped: false,
             scan_scope_all: false,
+            scan_custom_snapshot: [true, false, false, true, true, false, false],
             fast_scan: true,
             fast_scan_alignment: "4".to_owned(),
             pause_while_scanning: false,
@@ -2297,17 +2300,38 @@ impl CrosshairApp {
                         .selected_text(if self.memory_panel.scan_scope_all { "All" } else { "Custom" })
                         .show_ui(ui, |ui| {
                             if ui.selectable_label(self.memory_panel.scan_scope_all, "All").clicked() {
+                                if !self.memory_panel.scan_scope_all {
+                                    self.memory_panel.scan_custom_snapshot = [
+                                        self.memory_panel.scan_writable,
+                                        self.memory_panel.scan_executable,
+                                        self.memory_panel.scan_copy_on_write,
+                                        self.memory_panel.scan_active_memory_only,
+                                        self.memory_panel.scan_mem_private,
+                                        self.memory_panel.scan_mem_image,
+                                        self.memory_panel.scan_mem_mapped,
+                                    ];
+                                }
                                 self.memory_panel.scan_scope_all = true;
-                                self.memory_panel.scan_writable = false;
+                                self.memory_panel.scan_writable = true;
                                 self.memory_panel.scan_executable = true;
                                 self.memory_panel.scan_copy_on_write = true;
-                                self.memory_panel.scan_active_memory_only = false;
+                                self.memory_panel.scan_active_memory_only = true;
                                 self.memory_panel.scan_mem_private = true;
                                 self.memory_panel.scan_mem_image = true;
                                 self.memory_panel.scan_mem_mapped = true;
                             }
                             if ui.selectable_label(!self.memory_panel.scan_scope_all, "Custom").clicked() {
-                                self.memory_panel.scan_scope_all = false;
+                                if self.memory_panel.scan_scope_all {
+                                    self.memory_panel.scan_scope_all = false;
+                                    let [w, e, c, a, p, i, m] = self.memory_panel.scan_custom_snapshot;
+                                    self.memory_panel.scan_writable = w;
+                                    self.memory_panel.scan_executable = e;
+                                    self.memory_panel.scan_copy_on_write = c;
+                                    self.memory_panel.scan_active_memory_only = a;
+                                    self.memory_panel.scan_mem_private = p;
+                                    self.memory_panel.scan_mem_image = i;
+                                    self.memory_panel.scan_mem_mapped = m;
+                                }
                             }
                         });
                 });
@@ -2339,6 +2363,15 @@ impl CrosshairApp {
                 if scope_changed {
                     self.memory_panel.scan_scope_all = false;
                     self.memory_panel.scan_mem_mapped = self.memory_panel.scan_mem_image;
+                    self.memory_panel.scan_custom_snapshot = [
+                        self.memory_panel.scan_writable,
+                        self.memory_panel.scan_executable,
+                        self.memory_panel.scan_copy_on_write,
+                        self.memory_panel.scan_active_memory_only,
+                        self.memory_panel.scan_mem_private,
+                        self.memory_panel.scan_mem_image,
+                        self.memory_panel.scan_mem_mapped,
+                    ];
                 }
                 ui.horizontal(|ui| {
                     let fast_scan_label = self.tr("Fast scan", "Fast scan");
@@ -6255,7 +6288,8 @@ impl CrosshairApp {
                 expected_values: HashMap::new(),
                 status,
                 candidates: Vec::new(),
-                selected: None,
+                selected: HashSet::new(),
+                selection_anchor: None,
                 rx: None,
                 progress: Arc::new(AtomicUsize::new(0)),
                 limits: self.pointer_scan_limits(),
@@ -6351,7 +6385,8 @@ impl CrosshairApp {
                     expected_values,
                     status,
                     candidates: Vec::new(),
-                    selected: None,
+                    selected: HashSet::new(),
+                    selection_anchor: None,
                     rx: None,
                     progress,
                     limits,
@@ -6401,7 +6436,8 @@ impl CrosshairApp {
                 format!("Scanning pointer paths for {} target(s)…", targets.len())
             },
             candidates: Vec::new(),
-            selected: None,
+            selected: HashSet::new(),
+            selection_anchor: None,
             rx: Some(rx),
             progress,
             limits,
@@ -8255,7 +8291,8 @@ impl CrosshairApp {
                         dialog.candidates.sort_by_key(|candidate| {
                             !candidate.path.module.to_ascii_lowercase().ends_with(".exe")
                         });
-                        dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+                        dialog.selected = (!dialog.candidates.is_empty()).then(|| [0].into_iter().collect()).unwrap_or_default();
+                        dialog.selection_anchor = (!dialog.candidates.is_empty()).then_some(0);
                         let target_desc = if dialog.source_addresses.len() == 1 {
                             format!("target 0x{:X}", dialog.source_addresses[0])
                         } else {
@@ -8309,7 +8346,8 @@ impl CrosshairApp {
                             candidate.live_value = Some(value);
                             true
                         });
-                        dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+                        dialog.selected = (!dialog.candidates.is_empty()).then(|| [0].into_iter().collect()).unwrap_or_default();
+                        dialog.selection_anchor = (!dialog.candidates.is_empty()).then_some(0);
                         dialog.status = format!(
                             "{}: {} → {} candidate(s)",
                             outcome.action.label(),
@@ -8328,7 +8366,8 @@ impl CrosshairApp {
         {
             dialog.validation_rx = None;
             dialog.candidates = res.candidates;
-            dialog.selected = (!dialog.candidates.is_empty()).then_some(0);
+            dialog.selected = (!dialog.candidates.is_empty()).then(|| [0].into_iter().collect()).unwrap_or_default();
+            dialog.selection_anchor = (!dialog.candidates.is_empty()).then_some(0);
             dialog.status = format!(
                 "PID {}: {} verified, {} resolved with a different value, {} broken across {} target(s).",
                 res.pid,
@@ -8341,7 +8380,7 @@ impl CrosshairApp {
         }
 
         let mut validate = false;
-        let mut add = None;
+        let mut add: Option<Vec<usize>> = None;
         ui.label(&dialog.status);
         if dialog.rx.is_some() {
             let scanned = dialog.progress.load(Ordering::Relaxed);
@@ -8443,14 +8482,20 @@ impl CrosshairApp {
                     if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
                         ui.spinner();
                     }
+                    let sel_count = dialog.selected.len();
+                    let add_label = if sel_count > 1 {
+                        format!("Add all {sel_count} selected to Address list")
+                    } else {
+                        "Add selected pointer to Address list".to_owned()
+                    };
                     if ui
                         .add_enabled(
-                            dialog.selected.is_some() && dialog.filter_rx.is_none() && dialog.validation_rx.is_none(),
-                            Button::new("Save selected pointer"),
+                            !dialog.selected.is_empty() && dialog.filter_rx.is_none() && dialog.validation_rx.is_none(),
+                            Button::new(add_label),
                         )
                         .clicked()
                     {
-                        add = Some(true);
+                        add = Some(dialog.selected.iter().copied().collect());
                     }
                     ui.separator();
                     let filter_resp = ui.add(
@@ -8568,88 +8613,121 @@ impl CrosshairApp {
                 ui.separator();
                 let filter = dialog.filter.trim().to_ascii_lowercase();
                 let filter_val = dialog.filter_value.trim().to_ascii_lowercase();
-                let visible_indices = dialog
-                    .candidates
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, candidate)| {
-                        let module = candidate.path.module.to_ascii_lowercase();
-                        if dialog.exe_only && !module.ends_with(".exe") {
-                            return None;
-                        }
-                        match dialog.filter_status {
-                            StablePointerStatusFilter::All => {}
-                            StablePointerStatusFilter::VerifiedOnly => {
-                                if candidate.valid != Some(true) {
-                                    return None;
-                                }
-                            }
-                            StablePointerStatusFilter::ValueChangedOnly => {
-                                if candidate.valid.is_some() || candidate.observed_value.is_none() {
-                                    return None;
-                                }
-                            }
-                            StablePointerStatusFilter::BrokenOnly => {
-                                if candidate.valid != Some(false) {
-                                    return None;
-                                }
-                            }
-                        }
-
-                        if !filter.is_empty() {
-                            let module_match = module.contains(&filter);
-                            let root_match = format!("{}+{:x}", module, candidate.path.module_offset).contains(&filter);
-                            let offsets_match = candidate
-                                .path
-                                .offsets
-                                .iter()
-                                .any(|offset| format!("{offset:x}").contains(&filter));
-                            let address_match = candidate.resolved_address.is_some_and(|addr| {
-                                format!("{addr:x}").contains(&filter) || format!("0x{addr:x}").contains(&filter)
-                            });
-                            let target_match = format!("{:x}", candidate.source_address).contains(&filter)
-                                || format!("0x{:x}", candidate.source_address).contains(&filter);
-                            if !(module_match || root_match || offsets_match || address_match || target_match) {
+                let is_filtering = !filter.is_empty()
+                    || !filter_val.is_empty()
+                    || !matches!(dialog.filter_status, StablePointerStatusFilter::All)
+                    || dialog.exe_only;
+                let visible_indices: Vec<usize> = if !is_filtering {
+                    (0..dialog.candidates.len()).collect()
+                } else {
+                    dialog
+                        .candidates
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, candidate)| {
+                            let module = candidate.path.module.to_ascii_lowercase();
+                            if dialog.exe_only && !module.ends_with(".exe") {
                                 return None;
                             }
-                        }
-
-                        if !filter_val.is_empty() {
-                            let observed_match = candidate.observed_value.is_some_and(|v| {
-                                editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
-                                    || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
-                            });
-                            let live_match = candidate.live_value.is_some_and(|v| {
-                                editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
-                                    || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
-                            });
-                            let has_evaluated = candidate.observed_value.is_some() || candidate.live_value.is_some();
-                            let expected_match = !has_evaluated && (
-                                editable_scan_value(candidate.expected_value, false)
-                                    .to_ascii_lowercase()
-                                    .contains(&filter_val)
-                                || format_scan_value(candidate.expected_value, true)
-                                    .to_ascii_lowercase()
-                                    .contains(&filter_val)
-                            );
-                            if !(observed_match || live_match || expected_match) {
-                                return None;
+                            match dialog.filter_status {
+                                StablePointerStatusFilter::All => {}
+                                StablePointerStatusFilter::VerifiedOnly => {
+                                    if candidate.valid != Some(true) {
+                                        return None;
+                                    }
+                                }
+                                StablePointerStatusFilter::ValueChangedOnly => {
+                                    if candidate.valid.is_some() || candidate.observed_value.is_none() {
+                                        return None;
+                                    }
+                                }
+                                StablePointerStatusFilter::BrokenOnly => {
+                                    if candidate.valid != Some(false) {
+                                        return None;
+                                    }
+                                }
                             }
-                        }
 
-                        Some(index)
-                    })
-                    .collect::<Vec<_>>();
+                            if !filter.is_empty() {
+                                let module_match = module.contains(&filter);
+                                let root_match = format!("{}+{:x}", module, candidate.path.module_offset).contains(&filter);
+                                let offsets_match = candidate
+                                    .path
+                                    .offsets
+                                    .iter()
+                                    .any(|offset| format!("{offset:x}").contains(&filter));
+                                let address_match = candidate.resolved_address.is_some_and(|addr| {
+                                    format!("{addr:x}").contains(&filter) || format!("0x{addr:x}").contains(&filter)
+                                });
+                                let target_match = format!("{:x}", candidate.source_address).contains(&filter)
+                                    || format!("0x{:x}", candidate.source_address).contains(&filter);
+                                if !(module_match || root_match || offsets_match || address_match || target_match) {
+                                    return None;
+                                }
+                            }
+
+                            if !filter_val.is_empty() {
+                                let observed_match = candidate.observed_value.is_some_and(|v| {
+                                    editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
+                                        || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
+                                });
+                                let live_match = candidate.live_value.is_some_and(|v| {
+                                    editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
+                                        || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
+                                });
+                                let has_evaluated = candidate.observed_value.is_some() || candidate.live_value.is_some();
+                                let expected_match = !has_evaluated && (
+                                    editable_scan_value(candidate.expected_value, false)
+                                        .to_ascii_lowercase()
+                                        .contains(&filter_val)
+                                    || format_scan_value(candidate.expected_value, true)
+                                        .to_ascii_lowercase()
+                                        .contains(&filter_val)
+                                );
+                                if !(observed_match || live_match || expected_match) {
+                                    return None;
+                                }
+                            }
+
+                            Some(index)
+                        })
+                        .collect()
+                };
+                if ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A)) {
+                    dialog.selected = visible_indices.iter().copied().collect();
+                }
                 let refresh_visible_values = dialog.validation_rx.is_none()
                     && dialog.filter_rx.is_none()
-                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(200);
+                    && dialog.last_live_refresh.elapsed() >= Duration::from_millis(100);
                 let refresh_pid = self.memory_panel.process_pid;
+                let mut module_cache = HashMap::<String, usize>::new();
                 egui::ScrollArea::both().show_rows(ui, 24.0, visible_indices.len(), |ui, rows| {
                     if refresh_visible_values {
                         if let Some(pid) = refresh_pid {
                             for visible_row in rows.clone() {
                                 let candidate =
                                     &mut dialog.candidates[visible_indices[visible_row]];
+                                if candidate.resolved_address.is_none() {
+                                    let base = match module_cache.get(&candidate.path.module) {
+                                        Some(&b) => b,
+                                        None => {
+                                            if let Ok(b) = resolve_module_offset(pid, &candidate.path.module, 0) {
+                                                module_cache.insert(candidate.path.module.clone(), b);
+                                                b
+                                            } else {
+                                                0
+                                            }
+                                        }
+                                    };
+                                    if base != 0 {
+                                        let pointer = PointerSpec {
+                                            base,
+                                            module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
+                                            offsets: candidate.path.offsets.clone(),
+                                        };
+                                        candidate.resolved_address = resolve_memory_address(pid, base, Some(&pointer)).ok();
+                                    }
+                                }
                                 if let Some(address) = candidate.resolved_address {
                                     candidate.live_value =
                                         read_scan_value(pid, address, dialog.value_type).ok();
@@ -8707,7 +8785,7 @@ impl CrosshairApp {
                             ui.id().with(("stable-pointer-row", index)),
                             Sense::click(),
                         );
-                        if dialog.selected == Some(index) {
+                        if dialog.selected.contains(&index) {
                             ui.painter().rect_filled(
                                 row_rect,
                                 2.0,
@@ -8764,16 +8842,51 @@ impl CrosshairApp {
                                 }
                             },
                         );
+                        if response.clicked() {
+                            let (shift, additive) = ui.input(|input| {
+                                (input.modifiers.shift, input.modifiers.command)
+                            });
+                            if shift && let Some(anchor) = dialog.selection_anchor {
+                                if !additive {
+                                    dialog.selected.clear();
+                                }
+                                let (start, end) = if anchor <= index {
+                                    (anchor, index)
+                                } else {
+                                    (index, anchor)
+                                };
+                                dialog.selected.extend(start..=end);
+                            } else if additive {
+                                if !dialog.selected.insert(index) {
+                                    dialog.selected.remove(&index);
+                                }
+                                dialog.selection_anchor = Some(index);
+                            } else {
+                                dialog.selected.clear();
+                                dialog.selected.insert(index);
+                                dialog.selection_anchor = Some(index);
+                            }
+                        }
                         if response.double_clicked() {
-                            dialog.selected = Some(index);
-                            add = Some(true);
-                        } else if response.clicked() {
-                            dialog.selected = Some(index);
+                            dialog.selected.clear();
+                            dialog.selected.insert(index);
+                            dialog.selection_anchor = Some(index);
+                            add = Some(vec![index]);
                         }
                         response.context_menu(|ui| {
-                            if ui.button("Add resolved address to Address list").clicked() {
-                                dialog.selected = Some(index);
-                                add = Some(false);
+                            let count = dialog.selected.len();
+                            let text = if count > 1 && dialog.selected.contains(&index) {
+                                format!("Add all {count} selected pointers to Address list")
+                            } else {
+                                "Add pointer to Address list".to_owned()
+                            };
+                            if ui.button(text).clicked() {
+                                let to_add = if count > 1 && dialog.selected.contains(&index) {
+                                    dialog.selected.iter().copied().collect()
+                                } else {
+                                    vec![index]
+                                };
+                                add = Some(to_add);
                                 ui.close();
                             }
                         });
@@ -8784,8 +8897,8 @@ impl CrosshairApp {
         if validate {
             self.validate_stable_pointer_candidates(&mut dialog);
         }
-        if let Some(save_to_library) = add {
-            self.add_stable_pointer_candidate(&mut dialog, save_to_library);
+        if let Some(indices) = add {
+            self.add_stable_pointer_candidates(&mut dialog, indices);
         }
         if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
@@ -9568,71 +9681,88 @@ impl CrosshairApp {
     #[cfg(not(windows))]
     fn validate_stable_pointer_candidates(&mut self, _dialog: &mut StablePointerDialog) {}
 
-    fn add_stable_pointer_candidate(
+    fn add_stable_pointer_candidates(
         &mut self,
         dialog: &mut StablePointerDialog,
-        save_to_library: bool,
+        indices: Vec<usize>,
     ) {
         let Some(pid) = self.memory_panel.process_pid else {
             dialog.status = "Select a process first".to_owned();
             return;
         };
-        let Some(candidate) = dialog
-            .selected
-            .and_then(|index| dialog.candidates.get(index))
-        else {
-            dialog.status = "Please select a pointer candidate first!".to_owned();
+        if indices.is_empty() {
+            dialog.status = "Please select at least one pointer candidate!".to_owned();
             return;
+        }
+        const MAX_BATCH_ADD: usize = 200;
+        let total = indices.len();
+        let slice = if total > MAX_BATCH_ADD {
+            &indices[..MAX_BATCH_ADD]
+        } else {
+            &indices[..]
         };
-        #[cfg(windows)]
-        let Ok(base) =
-            resolve_module_offset(pid, &candidate.path.module, candidate.path.module_offset)
-        else {
-            let msg = "Pointer module is not loaded".to_owned();
-            self.memory_panel.status = msg.clone();
-            dialog.status = msg;
-            return;
+        let mut added = 0usize;
+        let mut module_cache = HashMap::<String, usize>::new();
+        for &index in slice {
+            let Some(candidate) = dialog.candidates.get(index) else {
+                continue;
+            };
+            #[cfg(windows)]
+            let base = match module_cache.get(&candidate.path.module) {
+                Some(&b) => b,
+                None => {
+                    let Ok(b) = resolve_module_offset(pid, &candidate.path.module, 0) else {
+                        continue;
+                    };
+                    module_cache.insert(candidate.path.module.clone(), b);
+                    b
+                }
+            };
+            #[cfg(not(windows))]
+            let base = candidate.resolved_base.unwrap_or_default();
+            let pointer = PointerSpec {
+                base,
+                module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
+                offsets: candidate.path.offsets.clone(),
+            };
+            let address = candidate
+                .resolved_address
+                .or_else(|| resolve_memory_address(pid, base, Some(&pointer)).ok())
+                .unwrap_or(candidate.source_address);
+            let current = candidate
+                .live_value
+                .or_else(|| read_scan_value(pid, address, dialog.value_type).ok());
+            let desc = format!(
+                "{}+{:X}",
+                candidate.path.module, candidate.path.module_offset
+            );
+            self.memory_panel.saved.push(SavedMemoryAddress {
+                address,
+                value_type: dialog.value_type,
+                current,
+                text_encoding: None,
+                text_byte_len: 0,
+                current_text: None,
+                description: desc,
+                group: String::new(),
+                hexadecimal: false,
+                pointer: Some(pointer),
+                frozen: None,
+                saved_to_library: true,
+                aob_sample_1: None,
+                aob_pattern: None,
+            });
+            added += 1;
+        }
+        self.sync_memory_freeze_targets();
+        self.persist_memory_pointers();
+        let msg = if total > MAX_BATCH_ADD {
+            format!("✔ Added {added} pointer(s) to Address list (capped at {MAX_BATCH_ADD} of {total} selected)!")
+        } else {
+            format!("✔ Added {added} pointer(s) to Address list!")
         };
-        #[cfg(not(windows))]
-        let base = candidate.resolved_base.unwrap_or_default();
-        let pointer = PointerSpec {
-            base,
-            module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
-            offsets: candidate.path.offsets.clone(),
-        };
-        let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) else {
-            let msg = "Unable to resolve pointer".to_owned();
-            self.memory_panel.status = msg.clone();
-            dialog.status = msg;
-            return;
-        };
-        let current = read_scan_value(pid, address, dialog.value_type).ok();
-        let desc = format!(
-            "{}+{:X}",
-            candidate.path.module, candidate.path.module_offset
-        );
-        self.memory_panel.saved.push(SavedMemoryAddress {
-            address,
-            value_type: dialog.value_type,
-            current,
-            text_encoding: None,
-            text_byte_len: 0,
-            current_text: None,
-            description: desc.clone(),
-            group: String::new(),
-            hexadecimal: false,
-            pointer: Some(pointer),
-            frozen: None,
-            saved_to_library: save_to_library,
-            aob_sample_1: None,
-            aob_pattern: None,
-        });
-        let msg = format!("✔ Pointer {desc} added to Address list!");
         self.memory_panel.status = msg.clone();
         dialog.status = msg;
-        if save_to_library {
-            self.persist_memory_pointers();
-        }
     }
 
     #[cfg(windows)]
@@ -13813,16 +13943,16 @@ impl CrosshairApp {
             .unwrap_or(value_type.width())
             .clamp(1, 4096);
         self.memory_panel.fast_scan_alignment = alignment.to_string();
-        let scan_options = if is_aob {
+        let scan_options = if is_aob || self.memory_panel.scan_scope_all {
             MemoryScanOptions {
                 writable: false,
                 executable: true,
-                copy_on_write: self.memory_panel.scan_copy_on_write,
+                copy_on_write: true,
                 active_memory_only: false,
                 mem_private: true,
                 mem_image: true,
                 mem_mapped: true,
-                alignment: None,
+                alignment: (!is_aob && self.memory_panel.fast_scan).then_some(alignment),
             }
         } else {
             MemoryScanOptions {
@@ -14186,21 +14316,40 @@ impl CrosshairApp {
     }
 
     fn find_saved_address_by_aob(&mut self, pid: u32, saved_idx: usize, pattern: &str) {
-        let scan_options = MemoryScanOptions {
-            writable: self.memory_panel.scan_writable,
-            executable: self.memory_panel.scan_executable,
-            copy_on_write: self.memory_panel.scan_copy_on_write,
-            active_memory_only: self.memory_panel.scan_active_memory_only,
-            mem_private: self.memory_panel.scan_mem_private,
-            mem_image: self.memory_panel.scan_mem_image,
-            mem_mapped: self.memory_panel.scan_mem_mapped,
-            alignment: self.memory_panel.fast_scan.then_some(
-                self.memory_panel
-                    .fast_scan_alignment
-                    .parse::<usize>()
-                    .unwrap_or(4)
-                    .max(1),
-            ),
+        let scan_options = if self.memory_panel.scan_scope_all {
+            MemoryScanOptions {
+                writable: false,
+                executable: true,
+                copy_on_write: true,
+                active_memory_only: false,
+                mem_private: true,
+                mem_image: true,
+                mem_mapped: true,
+                alignment: self.memory_panel.fast_scan.then_some(
+                    self.memory_panel
+                        .fast_scan_alignment
+                        .parse::<usize>()
+                        .unwrap_or(4)
+                        .max(1),
+                ),
+            }
+        } else {
+            MemoryScanOptions {
+                writable: self.memory_panel.scan_writable,
+                executable: self.memory_panel.scan_executable,
+                copy_on_write: self.memory_panel.scan_copy_on_write,
+                active_memory_only: self.memory_panel.scan_active_memory_only,
+                mem_private: self.memory_panel.scan_mem_private,
+                mem_image: self.memory_panel.scan_mem_image,
+                mem_mapped: self.memory_panel.scan_mem_mapped,
+                alignment: self.memory_panel.fast_scan.then_some(
+                    self.memory_panel
+                        .fast_scan_alignment
+                        .parse::<usize>()
+                        .unwrap_or(4)
+                        .max(1),
+                ),
+            }
         };
         let progress = Arc::clone(&self.memory_panel.scan_progress);
         progress.store(0, Ordering::Relaxed);
