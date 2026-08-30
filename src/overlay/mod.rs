@@ -149,7 +149,7 @@ mod windows_overlay {
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
                     WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
                     WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
-                    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+                    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE,
                     WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYDOWN,
                     WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION,
@@ -6144,15 +6144,28 @@ mod windows_overlay {
         };
 
         let kind = match message {
-            WM_LBUTTONDOWN => Some(crate::model::MacroAction::MouseLeftClick),
-            WM_RBUTTONDOWN => Some(crate::model::MacroAction::MouseRightClick),
-            WM_MBUTTONDOWN => Some(crate::model::MacroAction::MouseMiddleClick),
+            WM_LBUTTONDOWN => Some(crate::model::MacroAction::MouseLeftDown),
+            WM_LBUTTONUP => Some(crate::model::MacroAction::MouseLeftUp),
+            WM_RBUTTONDOWN => Some(crate::model::MacroAction::MouseRightDown),
+            WM_RBUTTONUP => Some(crate::model::MacroAction::MouseRightUp),
+            WM_MBUTTONDOWN => Some(crate::model::MacroAction::MouseMiddleDown),
+            WM_MBUTTONUP => Some(crate::model::MacroAction::MouseMiddleUp),
             WM_XBUTTONDOWN => {
                 let xbutton = ((info.mouseData >> 16) & 0xFFFF) as u16;
                 if (xbutton & XBUTTON2_DATA) != 0 {
-                    Some(crate::model::MacroAction::MouseX2Click)
+                    Some(crate::model::MacroAction::MouseX2Down)
                 } else if (xbutton & XBUTTON1_DATA) != 0 {
-                    Some(crate::model::MacroAction::MouseX1Click)
+                    Some(crate::model::MacroAction::MouseX1Down)
+                } else {
+                    None
+                }
+            }
+            WM_XBUTTONUP => {
+                let xbutton = ((info.mouseData >> 16) & 0xFFFF) as u16;
+                if (xbutton & XBUTTON2_DATA) != 0 {
+                    Some(crate::model::MacroAction::MouseX2Up)
+                } else if (xbutton & XBUTTON1_DATA) != 0 {
+                    Some(crate::model::MacroAction::MouseX1Up)
                 } else {
                     None
                 }
