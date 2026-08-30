@@ -2071,7 +2071,7 @@ impl CrosshairApp {
                     let missing_process = self.memory_panel.process_pid.is_none();
                     if missing_process {
                         if let Some(last) = self.memory_panel.last_selected_process.clone() {
-                            let label = format!("🔄 {}", last.name);
+                            let label = last.name;
                             if ui
                                 .button(
                                     RichText::new(label)
@@ -2113,7 +2113,7 @@ impl CrosshairApp {
                                             && (self.memory_panel.process_selector == last.selector
                                                 || self.memory_panel.process_pid == Some(last.last_pid));
                                         if !is_current {
-                                            let label = format!("🔄 {} {} (Last PID: {})", self.tr("Select last process:", "Chọn lại tiến trình:"), last.name, last.last_pid);
+                                            let label = format!("{} {} (Last PID: {})", self.tr("Select last process:", "Chọn lại tiến trình:"), last.name, last.last_pid);
                                             let btn = egui::Button::new(RichText::new(label).color(Color32::from_rgb(84, 214, 140)).strong())
                                                 .fill(Color32::from_rgba_premultiplied(32, 64, 48, 160));
                                             if ui.add(btn)
