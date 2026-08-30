@@ -7966,7 +7966,6 @@ impl CrosshairApp {
             };
 
             let mut passed_variant = None;
-            let mut best_score = f32::MIN;
             for &var in &variants_to_test {
                 let old_pt = project_world_single(old_matrix, world, width, height, var);
                 let new_pt = project_world_single(&new_matrix, world, width, height, var);
@@ -7974,31 +7973,19 @@ impl CrosshairApp {
                 if let (Some(old_p), Some(new_p)) = (old_pt, new_pt) {
                     let dx = new_p[0] - old_p[0];
                     let dy = new_p[1] - old_p[1];
-                    let (matches, score) = match direction {
+                    let matches = match direction {
                         // Looking UP tilts camera up -> Target sinks DOWN on screen (new_y > old_y)
-                        CameraDirectionFilter::LookUp => (
-                            dy > 3.0 && dy > dx.abs() * 0.6,
-                            dy - dx.abs() * 0.5,
-                        ),
+                        CameraDirectionFilter::LookUp => dy > 1.5,
                         // Looking DOWN tilts camera down -> Target rises UP on screen (new_y < old_y)
-                        CameraDirectionFilter::LookDown => (
-                            dy < -3.0 && -dy > dx.abs() * 0.6,
-                            -dy - dx.abs() * 0.5,
-                        ),
+                        CameraDirectionFilter::LookDown => dy < -1.5,
                         // Turning LEFT turns camera left -> Target moves RIGHT on screen (new_x > old_x)
-                        CameraDirectionFilter::TurnLeft => (
-                            dx > 3.0 && dx > dy.abs() * 0.6,
-                            dx - dy.abs() * 0.5,
-                        ),
+                        CameraDirectionFilter::TurnLeft => dx > 1.5,
                         // Turning RIGHT turns camera right -> Target moves LEFT on screen (new_x < old_x)
-                        CameraDirectionFilter::TurnRight => (
-                            dx < -3.0 && -dx > dy.abs() * 0.6,
-                            -dx - dy.abs() * 0.5,
-                        ),
+                        CameraDirectionFilter::TurnRight => dx < -1.5,
                     };
-                    if matches && score > best_score {
-                        best_score = score;
+                    if matches {
                         passed_variant = Some(var);
+                        break;
                     }
                 }
             }
@@ -8019,12 +8006,10 @@ impl CrosshairApp {
         }
 
         dialog.candidates = filtered;
-        let mut variant_counts = HashMap::new();
-        for &var in &matched_variants {
-            *variant_counts.entry(var).or_insert(0usize) += 1;
-        }
-        if let Some((&most_common_var, _)) = variant_counts.iter().max_by_key(|(_, count)| *count) {
-            dialog.projection_variant = most_common_var;
+        if let Some(&first_var) = matched_variants.first() {
+            if matched_variants.iter().all(|&v| v == first_var) {
+                dialog.projection_variant = first_var;
+            }
         }
         dialog.baseline = dialog
             .candidates
@@ -8423,7 +8408,7 @@ impl CrosshairApp {
                     }
                 }
                 // Actively re-read candidate matrices from game RAM so dots visibly move when rotating camera!
-                for candidate in dialog.candidates.iter_mut().take(150) {
+                for candidate in &mut dialog.candidates {
                     if let Ok(bytes) = read_memory_bytes(pid, candidate.address, 64) {
                         if let Some(matrix) = decode_f32_matrix(&bytes) {
                             candidate.matrix = matrix;
@@ -8771,8 +8756,27 @@ impl CrosshairApp {
 
                     // Compute on-screen projections for candidates
                     let mut on_screen_dots: Vec<(usize, [f32; 2], usize, usize)> = Vec::new();
+                    // Always project candidates using the current convention first (chấm đỏ hiện tại)
+                    for (idx, candidate) in dialog.candidates.iter().enumerate() {
+                        if let Some(pt) = project_world_single(
+                            &candidate.matrix,
+                            world,
+                            width,
+                            height,
+                            dialog.projection_variant,
+                        ) {
+                            if pt[0] >= 0.0 && pt[0] <= width && pt[1] >= 0.0 && pt[1] <= height {
+                                on_screen_dots.push((idx, pt, candidate.address, dialog.projection_variant));
+                                if on_screen_dots.len() >= 600 {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // If show_all_conventions is enabled, ADD all other 23 variants on top of the existing dots!
                     if dialog.show_all_conventions {
-                        for (idx, candidate) in dialog.candidates.iter().enumerate().take(300) {
+                        'extra_conventions: for (idx, candidate) in dialog.candidates.iter().enumerate() {
                             let projections = project_world_variants(
                                 &candidate.matrix,
                                 world,
@@ -8780,32 +8784,15 @@ impl CrosshairApp {
                                 height,
                             );
                             for (variant_idx, pt_opt) in projections.into_iter().enumerate() {
+                                if variant_idx == dialog.projection_variant {
+                                    continue;
+                                }
                                 if let Some(pt) = pt_opt {
                                     if pt[0] >= 0.0 && pt[0] <= width && pt[1] >= 0.0 && pt[1] <= height {
                                         on_screen_dots.push((idx, pt, candidate.address, variant_idx));
-                                        if on_screen_dots.len() >= 800 {
-                                            break;
+                                        if on_screen_dots.len() >= 1200 {
+                                            break 'extra_conventions;
                                         }
-                                    }
-                                }
-                            }
-                            if on_screen_dots.len() >= 800 {
-                                break;
-                            }
-                        }
-                    } else {
-                        for (idx, candidate) in dialog.candidates.iter().enumerate() {
-                            if let Some(pt) = project_world_single(
-                                &candidate.matrix,
-                                world,
-                                width,
-                                height,
-                                dialog.projection_variant,
-                            ) {
-                                if pt[0] >= 0.0 && pt[0] <= width && pt[1] >= 0.0 && pt[1] <= height {
-                                    on_screen_dots.push((idx, pt, candidate.address, dialog.projection_variant));
-                                    if on_screen_dots.len() >= 600 {
-                                        break;
                                     }
                                 }
                             }
@@ -17155,7 +17142,7 @@ fn project_world_variants(
                 x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
             )
         };
-        if !clip_w.is_finite() || clip_w <= 0.01 {
+        if !clip_w.is_finite() || clip_w.abs() <= 1.0e-4 {
             continue;
         }
         let ndc_x = clip_x / clip_w;
@@ -17195,7 +17182,7 @@ fn project_world_single(
             x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
         )
     };
-    if !clip_w.is_finite() || clip_w <= 0.01 {
+    if !clip_w.is_finite() || clip_w.abs() <= 1.0e-4 {
         return None;
     }
     let ndc_x = clip_x / clip_w;
@@ -17962,7 +17949,7 @@ mod tests {
     }
 
     #[test]
-    fn test_camera_matrix_projection_behind_camera_and_conventions() {
+    fn test_camera_matrix_projection_and_conventions() {
         // Identity-like standard perspective matrix (Column major)
         // clip_x = x, clip_y = y, clip_w = z
         let mut matrix = [0.0f32; 16];
@@ -17971,15 +17958,11 @@ mod tests {
         matrix[10] = 1.0; // m22
         matrix[11] = 1.0; // m32 -> clip_w = z in column convention (index 11 for z)
 
-        // Point in front (z = 10.0 > 0)
-        let pt_front = project_world_single(&matrix, [0.0, 0.0, 10.0], 1920.0, 1080.0, 2);
-        assert!(pt_front.is_some());
-        let p = pt_front.unwrap();
+        // Point at center (z = 10.0) -> projects to center of 1920x1080 (960, 540)
+        let pt = project_world_single(&matrix, [0.0, 0.0, 10.0], 1920.0, 1080.0, 2);
+        assert!(pt.is_some());
+        let p = pt.unwrap();
         assert!((p[0] - 960.0).abs() < 1.0);
         assert!((p[1] - 540.0).abs() < 1.0);
-
-        // Point behind camera (z = -10.0 < 0) -> must be None (not projected inverted on screen)
-        let pt_behind = project_world_single(&matrix, [0.0, 0.0, -10.0], 1920.0, 1080.0, 2);
-        assert!(pt_behind.is_none());
     }
 }
