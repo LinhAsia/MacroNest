@@ -5,9 +5,9 @@ use windows::Win32::{
     Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleBitmap,
         CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush,
-        DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
+        DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
         DrawTextW, EndPaint, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
-        FONT_QUALITY, FW_BOLD, FillRect, GetDC, HDC, HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT,
+        FONT_QUALITY, FW_BOLD, FW_NORMAL, FW_SEMIBOLD, FillRect, GetDC, HDC, HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT,
         PS_SOLID, Rectangle, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetTextColor,
         SetViewportOrgEx, StretchDIBits, TRANSPARENT, UpdateWindow,
     },
@@ -1676,47 +1676,336 @@ unsafe fn draw_capture_to_dc(
     let pill_x = (state.width - pill_w) / 2;
     let pill_y = 40;
 
-    let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
-    let pen = windows::Win32::Graphics::Gdi::CreatePen(
-        windows::Win32::Graphics::Gdi::PS_SOLID,
-        1,
-        rgb(110, 156, 210),
-    );
-    let old_brush = SelectObject(mem_dc, HGDIOBJ(brush.0));
-    let old_pen = SelectObject(mem_dc, HGDIOBJ(pen.0));
+    let cursor_near_pill = state.current_point.is_some_and(|(cx, cy)| {
+        let margin_x = 40;
+        let margin_y = 30;
+        cx >= pill_x - margin_x
+            && cx <= pill_x + pill_w + margin_x
+            && cy >= pill_y - margin_y
+            && cy <= pill_y + pill_h + margin_y
+    });
 
-    let _ = windows::Win32::Graphics::Gdi::RoundRect(
-        mem_dc,
-        pill_x,
-        pill_y,
-        pill_x + pill_w,
-        pill_y + pill_h,
-        18,
-        18,
-    );
+    if !cursor_near_pill {
+        let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
+        let pen = windows::Win32::Graphics::Gdi::CreatePen(
+            windows::Win32::Graphics::Gdi::PS_SOLID,
+            1,
+            rgb(110, 156, 210),
+        );
+        let old_brush = SelectObject(mem_dc, HGDIOBJ(brush.0));
+        let old_pen = SelectObject(mem_dc, HGDIOBJ(pen.0));
 
-    let mut text_rect = RECT {
-        left: pill_x,
-        top: pill_y,
-        right: pill_x + pill_w,
-        bottom: pill_y + pill_h,
-    };
-    let _ = DrawTextW(
-        mem_dc,
-        &mut text_u16,
-        &mut text_rect,
-        DT_CENTER | DT_SINGLELINE | DT_VCENTER,
-    );
+        let _ = windows::Win32::Graphics::Gdi::RoundRect(
+            mem_dc,
+            pill_x,
+            pill_y,
+            pill_x + pill_w,
+            pill_y + pill_h,
+            18,
+            18,
+        );
 
-    let _ = SelectObject(mem_dc, old_brush);
-    let _ = SelectObject(mem_dc, old_pen);
+        let mut text_rect = RECT {
+            left: pill_x,
+            top: pill_y,
+            right: pill_x + pill_w,
+            bottom: pill_y + pill_h,
+        };
+        let _ = DrawTextW(
+            mem_dc,
+            &mut text_u16,
+            &mut text_rect,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+
+        let _ = SelectObject(mem_dc, old_brush);
+        let _ = SelectObject(mem_dc, old_pen);
+        let _ = DeleteObject(HGDIOBJ(brush.0));
+        let _ = DeleteObject(HGDIOBJ(pen.0));
+    }
     let _ = SelectObject(mem_dc, old_font);
-    let _ = DeleteObject(HGDIOBJ(brush.0));
-    let _ = DeleteObject(HGDIOBJ(pen.0));
     let _ = DeleteObject(HGDIOBJ(font.0));
 
+    // Render coordinate & color magnifier preview panel for PointClick
+    if matches!(state.mode, NativeCaptureMode::PointClick { .. })
+        && let Some(curr) = state.current_point
+    {
+        let panel_w = 184i32;
+        let panel_h = 246i32;
+        let margin = 24i32;
+
+        let pointer_x = curr.0;
+        let pointer_y = curr.1;
+        let safe_r = 70i32;
+        let safe_left = pointer_x - safe_r;
+        let safe_right = pointer_x + safe_r;
+        let safe_top = pointer_y - safe_r;
+        let safe_bottom = pointer_y + safe_r;
+
+        let candidates = [
+            (state.width - panel_w - margin, margin),
+            (margin, margin),
+            (state.width - panel_w - margin, state.height - panel_h - margin),
+            (margin, state.height - panel_h - margin),
+        ];
+
+        let mut panel_x = candidates[0].0;
+        let mut panel_y = candidates[0].1;
+
+        for &(cx, cy) in &candidates {
+            let intersects = !(cx + panel_w < safe_left
+                || cx > safe_right
+                || cy + panel_h < safe_top
+                || cy > safe_bottom);
+            if !intersects {
+                panel_x = cx;
+                panel_y = cy;
+                break;
+            }
+        }
+
+        // Panel background and border
+        let p_brush = CreateSolidBrush(rgb(12, 18, 28));
+        let p_pen = CreatePen(PS_SOLID, 1, rgb(110, 156, 210));
+        let old_pb = SelectObject(mem_dc, HGDIOBJ(p_brush.0));
+        let old_pp = SelectObject(mem_dc, HGDIOBJ(p_pen.0));
+        let _ = windows::Win32::Graphics::Gdi::RoundRect(
+            mem_dc,
+            panel_x,
+            panel_y,
+            panel_x + panel_w,
+            panel_y + panel_h,
+            12,
+            12,
+        );
+        let _ = SelectObject(mem_dc, old_pb);
+        let _ = SelectObject(mem_dc, old_pp);
+        let _ = DeleteObject(HGDIOBJ(p_brush.0));
+        let _ = DeleteObject(HGDIOBJ(p_pen.0));
+
+        // Magnifier 17x17 grid
+        let sample_size = 17usize;
+        let cell_px = 8i32;
+        let grid_w = (sample_size as i32) * cell_px; // 136
+        let grid_h = (sample_size as i32) * cell_px; // 136
+        let grid_x = panel_x + (panel_w - grid_w) / 2;
+        let grid_y = panel_y + 14;
+
+        let mut center_color = (0u8, 0u8, 0u8);
+        let mut grid_bgra = [0u8; 17 * 17 * 4];
+
+        for dy in 0..sample_size {
+            let sy = curr.1 - 8 + dy as i32;
+            for dx in 0..sample_size {
+                let sx = curr.0 - 8 + dx as i32;
+                let mut r = 0u8;
+                let mut g = 0u8;
+                let mut b = 0u8;
+                if sx >= 0 && sx < state.width && sy >= 0 && sy < state.height {
+                    let idx = (sy as usize * state.width as usize + sx as usize) * 4;
+                    if idx + 3 < state.capture_frame.rgba.len() {
+                        r = state.capture_frame.rgba[idx];
+                        g = state.capture_frame.rgba[idx + 1];
+                        b = state.capture_frame.rgba[idx + 2];
+                    }
+                }
+                if dx == 8 && dy == 8 {
+                    center_color = (r, g, b);
+                }
+                let out_idx = (dy * sample_size + dx) * 4;
+                grid_bgra[out_idx] = b;
+                grid_bgra[out_idx + 1] = g;
+                grid_bgra[out_idx + 2] = r;
+                grid_bgra[out_idx + 3] = 255;
+            }
+        }
+
+        let mut grid_bmi = BITMAPINFO::default();
+        grid_bmi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: sample_size as i32,
+            biHeight: -(sample_size as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+
+        let _ = StretchDIBits(
+            mem_dc,
+            grid_x,
+            grid_y,
+            grid_w,
+            grid_h,
+            0,
+            0,
+            sample_size as i32,
+            sample_size as i32,
+            Some(grid_bgra.as_ptr() as *const std::ffi::c_void),
+            &grid_bmi,
+            DIB_RGB_COLORS,
+            SRCCOPY,
+        );
+
+        // Grid border
+        let g_pen = CreatePen(PS_SOLID, 1, rgb(65, 80, 105));
+        let null_brush = windows::Win32::Graphics::Gdi::GetStockObject(
+            windows::Win32::Graphics::Gdi::NULL_BRUSH,
+        );
+        let old_gp = SelectObject(mem_dc, HGDIOBJ(g_pen.0));
+        let old_gb = SelectObject(mem_dc, null_brush);
+        let _ = windows::Win32::Graphics::Gdi::Rectangle(
+            mem_dc,
+            grid_x - 1,
+            grid_y - 1,
+            grid_x + grid_w + 1,
+            grid_y + grid_h + 1,
+        );
+
+        // Center pixel highlight (box around 8th cell)
+        let center_box_x = grid_x + 8 * cell_px;
+        let center_box_y = grid_y + 8 * cell_px;
+        let c_pen = CreatePen(PS_SOLID, 1, rgb(255, 255, 255));
+        let _ = SelectObject(mem_dc, HGDIOBJ(c_pen.0));
+        let _ = windows::Win32::Graphics::Gdi::Rectangle(
+            mem_dc,
+            center_box_x,
+            center_box_y,
+            center_box_x + cell_px + 1,
+            center_box_y + cell_px + 1,
+        );
+
+        let _ = SelectObject(mem_dc, old_gp);
+        let _ = SelectObject(mem_dc, old_gb);
+        let _ = DeleteObject(HGDIOBJ(g_pen.0));
+        let _ = DeleteObject(HGDIOBJ(c_pen.0));
+
+        // Color swatch box
+        let swatch_x = grid_x;
+        let swatch_y = grid_y + grid_h + 10;
+        let swatch_size = 24i32;
+        let swatch_brush = CreateSolidBrush(rgb(center_color.0, center_color.1, center_color.2));
+        let swatch_pen = CreatePen(PS_SOLID, 1, rgb(255, 255, 255));
+        let old_sb = SelectObject(mem_dc, HGDIOBJ(swatch_brush.0));
+        let old_sp = SelectObject(mem_dc, HGDIOBJ(swatch_pen.0));
+        let _ = windows::Win32::Graphics::Gdi::RoundRect(
+            mem_dc,
+            swatch_x,
+            swatch_y,
+            swatch_x + swatch_size,
+            swatch_y + swatch_size,
+            4,
+            4,
+        );
+        let _ = SelectObject(mem_dc, old_sb);
+        let _ = SelectObject(mem_dc, old_sp);
+        let _ = DeleteObject(HGDIOBJ(swatch_brush.0));
+        let _ = DeleteObject(HGDIOBJ(swatch_pen.0));
+
+        // Hex Code text
+        let hex_font = CreateFontW(
+            17,
+            0,
+            0,
+            0,
+            FW_BOLD.0 as i32,
+            0,
+            0,
+            0,
+            FONT_CHARSET(0),
+            FONT_OUTPUT_PRECISION(0),
+            FONT_CLIP_PRECISION(0),
+            FONT_QUALITY(0),
+            0,
+            w!("Segoe UI"),
+        );
+        let old_hf = SelectObject(mem_dc, HGDIOBJ(hex_font.0));
+        let hex_str = format!(
+            "#{:02X}{:02X}{:02X}",
+            center_color.0, center_color.1, center_color.2
+        );
+        let mut hex_u16: Vec<u16> = hex_str.encode_utf16().collect();
+        let mut hex_rect = RECT {
+            left: swatch_x + swatch_size + 8,
+            top: swatch_y,
+            right: panel_x + panel_w - 10,
+            bottom: swatch_y + swatch_size,
+        };
+        let _ = SetTextColor(mem_dc, rgb(255, 255, 255));
+        let _ = DrawTextW(
+            mem_dc,
+            &mut hex_u16,
+            &mut hex_rect,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
+        let _ = SelectObject(mem_dc, old_hf);
+        let _ = DeleteObject(HGDIOBJ(hex_font.0));
+
+        // Coordinates & RGB text
+        let label_font = CreateFontW(
+            13,
+            0,
+            0,
+            0,
+            FW_SEMIBOLD.0 as i32,
+            0,
+            0,
+            0,
+            FONT_CHARSET(0),
+            FONT_OUTPUT_PRECISION(0),
+            FONT_CLIP_PRECISION(0),
+            FONT_QUALITY(0),
+            0,
+            w!("Segoe UI"),
+        );
+        let old_lf = SelectObject(mem_dc, HGDIOBJ(label_font.0));
+
+        let abs_x = curr.0 + state.left;
+        let abs_y = curr.1 + state.top;
+        let coords_str = format!("X: {abs_x}   Y: {abs_y}");
+        let mut coords_u16: Vec<u16> = coords_str.encode_utf16().collect();
+        let mut coords_rect = RECT {
+            left: grid_x,
+            top: swatch_y + swatch_size + 6,
+            right: panel_x + panel_w - 10,
+            bottom: swatch_y + swatch_size + 22,
+        };
+        let _ = SetTextColor(mem_dc, rgb(188, 206, 230));
+        let _ = DrawTextW(
+            mem_dc,
+            &mut coords_u16,
+            &mut coords_rect,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
+
+        let rgb_str = format!(
+            "RGB: ({}, {}, {})",
+            center_color.0, center_color.1, center_color.2
+        );
+        let mut rgb_u16: Vec<u16> = rgb_str.encode_utf16().collect();
+        let mut rgb_rect = RECT {
+            left: grid_x,
+            top: coords_rect.bottom + 2,
+            right: panel_x + panel_w - 10,
+            bottom: coords_rect.bottom + 18,
+        };
+        let _ = SetTextColor(mem_dc, rgb(140, 165, 195));
+        let _ = DrawTextW(
+            mem_dc,
+            &mut rgb_u16,
+            &mut rgb_rect,
+            DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+        );
+
+        let _ = SelectObject(mem_dc, old_lf);
+        let _ = DeleteObject(HGDIOBJ(label_font.0));
+    }
+
     // Render coordinates tooltip next to mouse cursor
-    let show_cursor_tooltip = !matches!(state.mode, NativeCaptureMode::RegionSelect { .. });
+    let show_cursor_tooltip = !matches!(
+        state.mode,
+        NativeCaptureMode::RegionSelect { .. } | NativeCaptureMode::PointClick { .. }
+    );
     if show_cursor_tooltip && let Some(curr) = state.current_point {
         let abs_x = curr.0 + state.left;
         let abs_y = curr.1 + state.top;

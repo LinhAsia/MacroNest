@@ -828,7 +828,25 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         }
     };
     let border_rect = match &source {
-        CaptureSource::Desktop { .. } | CaptureSource::WgcWindow { .. } => None,
+        CaptureSource::Desktop { .. } => {
+            let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
+            Some(RECT {
+                left,
+                top,
+                right: left + width,
+                bottom: top + height,
+            })
+        }
+        CaptureSource::WgcWindow { hwnd, .. } => {
+            let mut r = RECT::default();
+            unsafe {
+                if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
+                    Some(r)
+                } else {
+                    None
+                }
+            }
+        }
         CaptureSource::Region { region, .. } => Some(*region),
     };
     let (region_border, recording_active_signal) = match border_rect {
