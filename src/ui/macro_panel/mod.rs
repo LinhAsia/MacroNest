@@ -6176,6 +6176,7 @@ impl CrosshairApp {
                     let mut clear_step_selection = None;
                     let mut copy_selected_steps = None;
                     let mut delete_selected_steps = None;
+                    let mut delete_all_steps = None;
                     let mut paste_step_after: Option<(u32, u32, usize)> = None;
                     let mut paste_steps_at_start: Option<(u32, u32)> = None;
                     let mut copy_single_step: Option<(u32, u32, usize)> = None;
@@ -12518,6 +12519,24 @@ if supports_move_mouse || show_detection_tuning {
                                                 );
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
+                                            let has_meaningful_steps = !preset.steps.is_empty()
+                                                && !(preset.steps.len() == 1
+                                                    && preset.steps[0].action == MacroAction::KeyPress
+                                                    && preset.steps[0].key.is_empty()
+                                                    && preset.steps[0].delay_ms == 100);
+                                            let delete_all_btn = Button::new(Self::material_icon_text(0xe92b, 15.0))
+                                                .min_size(egui::vec2(28.0, 22.0));
+                                            if ui
+                                                .add_enabled(has_meaningful_steps, delete_all_btn)
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    "Delete all steps in this preset.",
+                                                    "Delete all steps in this preset.",
+                                                ))
+                                                .clicked()
+                                            {
+                                                delete_all_steps = Some((group.id, preset.id));
+                                            }
                                             if has_selected_steps {
                                                 let delete_btn = Button::new(Self::material_icon_text(0xe872, 15.0))
                                                     .min_size(egui::vec2(28.0, 22.0));
@@ -17031,6 +17050,20 @@ if supports_move_mouse || show_detection_tuning {
                     if let Some((group_id, preset_id)) = delete_selected_steps {
                         self.remove_selected_macro_steps_for_preset(group_id, preset_id);
                         live_sync = true;
+                    }
+                    if let Some((group_id, preset_id)) = delete_all_steps {
+                        if let Ok((g_idx, p_idx)) = self.macro_preset_indices(group_id, preset_id) {
+                            self.clear_macro_step_selection_for_preset(group_id, preset_id);
+                            self.state.macro_groups[g_idx].presets[p_idx].steps =
+                                vec![crate::model::MacroStep::default()];
+                            live_sync = true;
+                            self.status = Self::tr_lang(
+                                language,
+                                "Deleted all steps in preset.",
+                                "Deleted all steps in preset.",
+                            )
+                            .to_string();
+                        }
                     }
                     if let Some((group_id, preset_id, step_index)) = paste_step_after
                         && let Some(selection) =
