@@ -474,9 +474,9 @@ pub fn scan_view_projection_candidates(
         copy_on_write: false,
         active_memory_only: true,
         mem_private: true,
-        mem_image: false,
+        mem_image: true,
         mem_mapped: true,
-        alignment: Some(16),
+        alignment: Some(4),
     };
     let mut candidates = Vec::new();
     let mut remaining = max_bytes;
@@ -494,7 +494,7 @@ pub fn scan_view_projection_candidates(
                 continue;
             };
             if read >= 64 {
-                for byte_offset in (0..=read - 64).step_by(16) {
+                for byte_offset in (0..=read - 64).step_by(4) {
                     let mut matrix = [0.0f32; 16];
                     for (index, value) in matrix.iter_mut().enumerate() {
                         let start = byte_offset + index * 4;
@@ -533,13 +533,18 @@ fn view_projection_likelihood(matrix: &[f32; 16]) -> Option<f32> {
         return None;
     }
     let non_zero = matrix.iter().filter(|value| value.abs() > 1.0e-6).count();
-    if !(8..=16).contains(&non_zero) {
+    if !(6..=16).contains(&non_zero) {
         return None;
     }
-    let determinant = matrix[0] * (matrix[5] * matrix[10] - matrix[6] * matrix[9])
-        - matrix[1] * (matrix[4] * matrix[10] - matrix[6] * matrix[8])
-        + matrix[2] * (matrix[4] * matrix[9] - matrix[5] * matrix[8]);
-    if !determinant.is_finite() || determinant.abs() < 1.0e-8 {
+    // Must have a perspective / homogeneous divide component:
+    let has_w = matrix[3].abs() > 1.0e-4
+        || matrix[7].abs() > 1.0e-4
+        || matrix[11].abs() > 1.0e-4
+        || matrix[12].abs() > 1.0e-4
+        || matrix[13].abs() > 1.0e-4
+        || matrix[14].abs() > 1.0e-4
+        || matrix[15].abs() > 1.0e-4;
+    if !has_w {
         return None;
     }
     let moderate = matrix
@@ -547,7 +552,7 @@ fn view_projection_likelihood(matrix: &[f32; 16]) -> Option<f32> {
         .filter(|value| value.abs() >= 1.0e-5 && value.abs() <= 10_000.0)
         .count() as f32;
     let zeros = (16 - non_zero) as f32;
-    Some(moderate + zeros * 0.35 + determinant.abs().log10().abs().recip())
+    Some(moderate + zeros * 0.35)
 }
 
 /// Bounds for pointer scans. Keeping these explicit prevents a deep scan from

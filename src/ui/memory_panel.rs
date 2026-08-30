@@ -7750,27 +7750,30 @@ impl CrosshairApp {
     }
 
     fn open_camera_matrix_dialog(&mut self) {
-        let mut expressions = self
-            .memory_panel
-            .selected_saved
-            .iter()
-            .copied()
-            .filter_map(|index| self.memory_panel.saved.get(index))
-            .map(|saved| {
-                saved.pointer.as_ref().map_or_else(
-                    || format_prefixed_memory_address(saved.address),
-                    format_pointer_expression,
-                )
-            })
-            .take(3)
-            .collect::<Vec<_>>();
-        expressions.resize(3, String::new());
-        if expressions.iter().all(String::is_empty) {
-            expressions = vec![
-                self.state.memory_camera_x.clone(),
-                self.state.memory_camera_y.clone(),
-                self.state.memory_camera_z.clone(),
-            ];
+        // Preserve the user's typed X, Y, Z coordinates.
+        // Never overwrite them with a single address selected in the saved table.
+        let mut expressions = vec![
+            self.state.memory_camera_x.clone(),
+            self.state.memory_camera_y.clone(),
+            self.state.memory_camera_z.clone(),
+        ];
+        if expressions.iter().all(|s| s.trim().is_empty()) && self.memory_panel.selected_saved.len() == 3 {
+            let saved_expressions = self
+                .memory_panel
+                .selected_saved
+                .iter()
+                .copied()
+                .filter_map(|index| self.memory_panel.saved.get(index))
+                .map(|saved| {
+                    saved.pointer.as_ref().map_or_else(
+                        || format_prefixed_memory_address(saved.address),
+                        format_pointer_expression,
+                    )
+                })
+                .collect::<Vec<_>>();
+            if saved_expressions.len() == 3 {
+                expressions = saved_expressions;
+            }
         }
         self.memory_panel.camera_matrix_dialog = Some(CameraMatrixDialog {
             x: expressions[0].clone(),
@@ -16874,15 +16877,15 @@ fn project_world_variants(
         let [x, y, z] = [world[order[0]], world[order[1]], world[order[2]]];
         let (clip_x, clip_y, clip_w) = if *column {
             (
-                x * matrix[0] + y * matrix[1] + z * matrix[2] + matrix[3],
-                x * matrix[4] + y * matrix[5] + z * matrix[6] + matrix[7],
-                x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
-            )
-        } else {
-            (
                 x * matrix[0] + y * matrix[4] + z * matrix[8] + matrix[12],
                 x * matrix[1] + y * matrix[5] + z * matrix[9] + matrix[13],
                 x * matrix[3] + y * matrix[7] + z * matrix[11] + matrix[15],
+            )
+        } else {
+            (
+                x * matrix[0] + y * matrix[1] + z * matrix[2] + matrix[3],
+                x * matrix[4] + y * matrix[5] + z * matrix[6] + matrix[7],
+                x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
             )
         };
         if !clip_w.is_finite() || clip_w.abs() <= 1.0e-4 {
@@ -16914,15 +16917,15 @@ fn project_world_single(
     let [x, y, z] = [world[order[0]], world[order[1]], world[order[2]]];
     let (clip_x, clip_y, clip_w) = if *column {
         (
-            x * matrix[0] + y * matrix[1] + z * matrix[2] + matrix[3],
-            x * matrix[4] + y * matrix[5] + z * matrix[6] + matrix[7],
-            x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
-        )
-    } else {
-        (
             x * matrix[0] + y * matrix[4] + z * matrix[8] + matrix[12],
             x * matrix[1] + y * matrix[5] + z * matrix[9] + matrix[13],
             x * matrix[3] + y * matrix[7] + z * matrix[11] + matrix[15],
+        )
+    } else {
+        (
+            x * matrix[0] + y * matrix[1] + z * matrix[2] + matrix[3],
+            x * matrix[4] + y * matrix[5] + z * matrix[6] + matrix[7],
+            x * matrix[12] + y * matrix[13] + z * matrix[14] + matrix[15],
         )
     };
     if !clip_w.is_finite() || clip_w.abs() <= 1.0e-4 {
