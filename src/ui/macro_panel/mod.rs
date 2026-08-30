@@ -12345,7 +12345,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 let capture_target = CaptureRequest::MacroPresetRecordHotkey(group.id, preset.id);
                                                 let has_rec_hotkey = preset.record_hotkey.is_some();
                                                 let capture_active = self.capture_target.as_ref() == Some(&capture_target);
-                                                let rec_bar_width = 18.0 + 2.0 + 70.0 + 2.0 + 18.0 + if has_rec_hotkey && !capture_active { 2.0 + 16.0 } else { 0.0 };
+                                                let rec_bar_width = 18.0 + 2.0 + 70.0 + 2.0 + 18.0;
                                                 let (rect, _) = ui.allocate_exact_size(egui::vec2(rec_bar_width, 20.0), egui::Sense::hover());
                                          let mut child_ui = ui.new_child(
                                              egui::UiBuilder::new()
@@ -12439,8 +12439,8 @@ if supports_move_mouse || show_detection_tuning {
                                               let key_ui = Self::format_binding_ui(language, Some(binding));
                                               let fmt = Self::tr_lang(
                                                   language,
-                                                  "Bound trigger key: {} (Click to change)",
-                                                 "Bound trigger key: {} (Click to change)",
+                                                  "Bound trigger key: {} (Click to clear)",
+                                                 "Bound trigger key: {} (Click to clear)",
                                               );
                                               fmt.replace("{}", &key_ui)
                                           } else {
@@ -12461,18 +12461,11 @@ if supports_move_mouse || show_detection_tuning {
                                          if clicked {
                                              if capture_active {
                                                  cancel_active_capture = true;
-                                             } else {
-                                                 next_capture_target = Some(capture_target.clone());
-                                             }
-                                         }
-                                         if has_rec_hotkey && !capture_active {
-                                             let clear_btn = Button::new(RichText::new(Self::material_icon_text(0xe14c, 10.0).text()).color(Color32::LIGHT_RED));
-                                             if child_ui.add_sized([16.0, 18.0], clear_btn)
-                                                 .on_hover_text(Self::tr_lang(language, "Clear hotkey", "Clear hotkey"))
-                                                 .clicked()
-                                             {
+                                             } else if has_rec_hotkey {
                                                  preset.record_hotkey = None;
                                                  live_sync = true;
+                                             } else {
+                                                 next_capture_target = Some(capture_target.clone());
                                              }
                                          }
                                          let is_recording_this = self.active_macro_record_preset_id == Some(preset.id);

@@ -5108,33 +5108,56 @@ mod windows_overlay {
                     }
                     return LRESULT(1);
                 }
-                if is_key_down && !is_ui_in_foreground() {
+                if (is_key_down || is_key_up) && !is_ui_in_foreground() {
                     let mut rec_guard = MACRO_RECORDING.lock();
                     if let Some(session) = rec_guard.as_mut() {
-                        let now = std::time::Instant::now();
-                        let delay_ms = now
-                            .saturating_duration_since(session.last_event_at)
-                            .as_millis()
-                            .min(u64::MAX as u128) as u64;
                         if let Some(k_name) = key_name.clone() {
-                            session.last_event_at = now;
-                            session.events.push(MacroRecordingEvent {
-                                key: Some(k_name.clone()),
-                                action: crate::model::MacroAction::KeyPress,
-                                delay_ms,
-                                x: 0,
-                                y: 0,
-                            });
-                            if let Some(tx) = &HOOK_STATE.lock().ui_tx {
-                                let mut step = crate::model::MacroStep::default();
-                                step.action = crate::model::MacroAction::KeyPress;
-                                step.delay_ms = delay_ms;
-                                step.key = k_name;
-                                let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
-                                    session.group_id,
-                                    session.preset_id,
-                                    step,
-                                ));
+                            let is_modifier = hotkey::is_modifier_key_name(&k_name);
+                            let action = if is_modifier {
+                                if is_key_down {
+                                    if session.pressed_key_vks.insert(info.vkCode) {
+                                        Some(crate::model::MacroAction::KeyDown)
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    if session.pressed_key_vks.remove(&info.vkCode) {
+                                        Some(crate::model::MacroAction::KeyUp)
+                                    } else {
+                                        None
+                                    }
+                                }
+                            } else if is_key_down {
+                                Some(crate::model::MacroAction::KeyPress)
+                            } else {
+                                None
+                            };
+
+                            if let Some(action) = action {
+                                let now = std::time::Instant::now();
+                                let delay_ms = now
+                                    .saturating_duration_since(session.last_event_at)
+                                    .as_millis()
+                                    .min(u64::MAX as u128) as u64;
+                                session.last_event_at = now;
+                                session.events.push(MacroRecordingEvent {
+                                    key: Some(k_name.clone()),
+                                    action,
+                                    delay_ms,
+                                    x: 0,
+                                    y: 0,
+                                });
+                                if let Some(tx) = &HOOK_STATE.lock().ui_tx {
+                                    let mut step = crate::model::MacroStep::default();
+                                    step.action = action;
+                                    step.delay_ms = delay_ms;
+                                    step.key = k_name;
+                                    let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
+                                        session.group_id,
+                                        session.preset_id,
+                                        step,
+                                    ));
+                                }
                             }
                         }
                     }
@@ -6076,6 +6099,12 @@ mod windows_overlay {
                 let Some(key_name) = hotkey::vk_to_key_name(vk).map(str::to_owned) else {
                     continue;
                 };
+                let is_modifier = hotkey::is_modifier_key_name(&key_name);
+                let action = if is_modifier {
+                    crate::model::MacroAction::KeyDown
+                } else {
+                    crate::model::MacroAction::KeyPress
+                };
                 let delay_ms = now
                     .saturating_duration_since(session.last_event_at)
                     .as_millis()
@@ -6083,14 +6112,14 @@ mod windows_overlay {
                 session.last_event_at = now;
                 session.events.push(MacroRecordingEvent {
                     key: Some(key_name.clone()),
-                    action: crate::model::MacroAction::KeyPress,
+                    action,
                     delay_ms,
                     x: 0,
                     y: 0,
                 });
                 if let Some(tx) = &HOOK_STATE.lock().ui_tx {
                     let mut step = crate::model::MacroStep::default();
-                    step.action = crate::model::MacroAction::KeyPress;
+                    step.action = action;
                     step.delay_ms = delay_ms;
                     step.key = key_name;
                     let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
@@ -6099,8 +6128,34 @@ mod windows_overlay {
                         step,
                     ));
                 }
-            } else {
-                session.pressed_key_vks.remove(&vk);
+            } else if session.pressed_key_vks.remove(&vk) {
+                if let Some(key_name) = hotkey::vk_to_key_name(vk).map(str::to_owned) {
+                    if hotkey::is_modifier_key_name(&key_name) {
+                        let delay_ms = now
+                            .saturating_duration_since(session.last_event_at)
+                            .as_millis()
+                            .min(u64::MAX as u128) as u64;
+                        session.last_event_at = now;
+                        session.events.push(MacroRecordingEvent {
+                            key: Some(key_name.clone()),
+                            action: crate::model::MacroAction::KeyUp,
+                            delay_ms,
+                            x: 0,
+                            y: 0,
+                        });
+                        if let Some(tx) = &HOOK_STATE.lock().ui_tx {
+                            let mut step = crate::model::MacroStep::default();
+                            step.action = crate::model::MacroAction::KeyUp;
+                            step.delay_ms = delay_ms;
+                            step.key = key_name;
+                            let _ = tx.send(UiCommand::MacroRealtimeStepAdded(
+                                session.group_id,
+                                session.preset_id,
+                                step,
+                            ));
+                        }
+                    }
+                }
             }
         }
     }

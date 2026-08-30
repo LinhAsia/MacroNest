@@ -804,6 +804,7 @@ pub struct CrosshairApp {
     recording_icon_applied: bool,
     active_mouse_record_preset_id: Option<u32>,
     active_macro_record_preset_id: Option<u32>,
+    macro_record_insert_index: Option<(u32, u32, usize)>,
     active_hud_preview_preset_id: Option<u32>,
     active_timer_preview_preset_id: Option<u32>,
     quick_action_window_selector: String,
@@ -1181,6 +1182,7 @@ impl CrosshairApp {
             recording_icon_applied: false,
             active_mouse_record_preset_id: None,
             active_macro_record_preset_id: None,
+            macro_record_insert_index: None,
             active_hud_preview_preset_id: None,
             active_timer_preview_preset_id: None,
             quick_action_window_selector: String::new(),
@@ -15929,8 +15931,37 @@ impl eframe::App for CrosshairApp {
                             && preset.steps[0].delay_ms == 100
                         {
                             preset.steps.clear();
+                            self.macro_record_insert_index = Some((group_id, preset_id, 0));
                         }
-                        preset.steps.push(step);
+
+                        let mut insert_idx = match self.macro_record_insert_index {
+                            Some((g, p, idx)) if g == group_id && p == preset_id => idx,
+                            _ => {
+                                let selected_idx = self
+                                    .selected_macro_steps
+                                    .iter()
+                                    .filter(|(g, p, _)| *g == group_id && *p == preset_id)
+                                    .map(|(_, _, idx)| *idx)
+                                    .max();
+                                match selected_idx {
+                                    Some(sel) => (sel + 1).min(preset.steps.len()),
+                                    None => preset.steps.len(),
+                                }
+                            }
+                        };
+
+                        if insert_idx > preset.steps.len() {
+                            insert_idx = preset.steps.len();
+                        }
+                        preset.steps.insert(insert_idx, step);
+                        self.macro_record_insert_index =
+                            Some((group_id, preset_id, insert_idx + 1));
+
+                        self.selected_macro_steps.clear();
+                        self.selected_macro_steps
+                            .insert((group_id, preset_id, insert_idx));
+                        self.last_selected_macro_step =
+                            Some((group_id, preset_id, insert_idx));
                     }
                     ctx.request_repaint();
                 }
@@ -15938,13 +15969,22 @@ impl eframe::App for CrosshairApp {
                     if let Ok((group_index, preset_index)) =
                         self.macro_preset_indices(group_id, preset_id)
                     {
-                        self.state.macro_groups[group_index].presets[preset_index]
-                            .steps
-                            .pop();
+                        let preset =
+                            &mut self.state.macro_groups[group_index].presets[preset_index];
+                        if let Some((g, p, ref mut idx)) = self.macro_record_insert_index {
+                            if g == group_id && p == preset_id && *idx > 0 && *idx <= preset.steps.len() {
+                                *idx -= 1;
+                                preset.steps.remove(*idx);
+                            } else {
+                                preset.steps.pop();
+                            }
+                        } else {
+                            preset.steps.pop();
+                        }
                     }
                     ctx.request_repaint();
                 }
-                UiCommand::MacroRecordingFinished(group_id, preset_id, events, status) => {
+                UiCommand::MacroRecordingFinished(group_id, preset_id, _events, status) => {
                     if let Ok((group_index, preset_index)) =
                         self.macro_preset_indices(group_id, preset_id)
                     {
@@ -15952,38 +15992,45 @@ impl eframe::App for CrosshairApp {
                             [preset_index]
                             .record_hotkey
                             .clone();
-                        let mut filtered_events = events;
                         if let Some(record_hotkey) = &record_hotkey {
                             let hotkey_keys: Vec<String> =
                                 crate::hotkey::binding_key_names(record_hotkey)
                                     .into_iter()
                                     .map(|k| k.trim().to_ascii_lowercase())
                                     .collect();
-                            while let Some(last) = filtered_events.last() {
-                                if last.action == MacroAction::KeyPress
-                                    && last.key.as_ref().is_some_and(|k| {
-                                        hotkey_keys.contains(&k.trim().to_ascii_lowercase())
-                                    })
-                                {
-                                    filtered_events.pop();
-                                    continue;
+                            let preset =
+                                &mut self.state.macro_groups[group_index].presets[preset_index];
+                            if let Some((g, p, mut cur_idx)) = self.macro_record_insert_index {
+                                if g == group_id && p == preset_id {
+                                    while cur_idx > 0 && cur_idx <= preset.steps.len() {
+                                        let step = &preset.steps[cur_idx - 1];
+                                        if matches!(
+                                            step.action,
+                                            MacroAction::KeyPress
+                                                | MacroAction::KeyDown
+                                                | MacroAction::KeyUp
+                                        ) && hotkey_keys
+                                            .contains(&step.key.trim().to_ascii_lowercase())
+                                        {
+                                            cur_idx -= 1;
+                                            preset.steps.remove(cur_idx);
+                                            continue;
+                                        }
+                                        break;
+                                    }
                                 }
-                                break;
                             }
                         }
-                        let path_name = format!("Macro {}-{} Path", group_id, preset_id);
-                        let rebuilt_steps =
-                            self.build_macro_steps_from_recording(&path_name, &filtered_events);
-                        self.state.macro_groups[group_index].presets[preset_index].steps =
-                            if rebuilt_steps.is_empty() {
-                                vec![MacroStep::default()]
-                            } else {
-                                rebuilt_steps
-                            };
+                        let preset =
+                            &mut self.state.macro_groups[group_index].presets[preset_index];
+                        if preset.steps.is_empty() {
+                            preset.steps.push(MacroStep::default());
+                        }
                     }
                     self.active_macro_record_preset_id = None;
-                    self.persist();
+                    self.macro_record_insert_index = None;
                     self.status = status;
+                    self.persist();
                     ctx.request_repaint();
                 }
                 UiCommand::MousePathRecordingFinished(preset_id, events, status) => {
