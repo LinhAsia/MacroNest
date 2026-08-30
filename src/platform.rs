@@ -532,10 +532,23 @@ mod windows_platform {
     static MAIN_HWND: parking_lot::Mutex<Option<isize>> = parking_lot::Mutex::new(None);
     static RECORDING_HICON: parking_lot::Mutex<Option<isize>> = parking_lot::Mutex::new(None);
 
+    pub fn get_main_hwnd() -> Option<HWND> {
+        let raw = (*MAIN_HWND.lock())?;
+        if raw != 0 {
+            let hwnd = HWND(raw as *mut std::ffi::c_void);
+            if unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() } {
+                return Some(hwnd);
+            }
+        }
+        None
+    }
+
     pub fn cache_main_hwnd(frame: &Frame) {
         if let Ok(window_handle) = frame.window_handle() {
             if let RawWindowHandle::Win32(handle) = window_handle.as_raw() {
-                *MAIN_HWND.lock() = Some(handle.hwnd.get() as isize);
+                let hwnd_val = handle.hwnd.get() as isize;
+                *MAIN_HWND.lock() = Some(hwnd_val);
+                crate::overlay::set_cached_app_ui_hwnd(hwnd_val);
             }
         }
     }

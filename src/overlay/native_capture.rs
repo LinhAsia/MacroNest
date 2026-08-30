@@ -18,7 +18,7 @@ use windows::Win32::{
         HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE,
         IDC_SIZEWE, IMAGE_CURSOR, KillTimer, LR_SHARED, LoadCursorW, LoadImageW, MSG, PostMessageW,
         PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL, SWP_NOACTIVATE,
-        SWP_SHOWWINDOW, SetCursor, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
+        SWP_SHOWWINDOW, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
         WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
         WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT,
         WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
@@ -271,6 +271,7 @@ pub fn run_capture_overlay(
             height,
             SWP_SHOWWINDOW,
         );
+        let _ = SetForegroundWindow(hwnd);
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -400,9 +401,8 @@ unsafe extern "system" fn capture_wnd_proc(
         WM_SETCURSOR => {
             if let Some(state) = get_state(hwnd)
                 && matches!(state.mode, NativeCaptureMode::PointClick { .. })
-                && let Ok(cursor) = LoadCursorW(None, IDC_CROSS)
             {
-                SetCursor(Some(cursor));
+                SetCursor(None);
                 return LRESULT(1);
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)

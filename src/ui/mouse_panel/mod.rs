@@ -2774,6 +2774,16 @@ impl CrosshairApp {
         self.captured_freeze_texture = None;
         self.captured_freeze_frame = None;
         self.restore_mouse_move_absolute_viewport(ctx);
+        #[cfg(windows)]
+        unsafe {
+            if let Some(hwnd) = crate::overlay::find_app_ui_window_for_ui_thread() {
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SW_SHOWNORMAL, SetForegroundWindow, ShowWindow,
+                };
+                let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);

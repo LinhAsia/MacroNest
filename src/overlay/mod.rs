@@ -37810,7 +37810,11 @@ mod windows_overlay {
         internal_app_window_class(hwnd).is_some_and(|class_name| {
             matches!(
                 class_name.as_str(),
-                "CrosshairController" | "CrosshairOverlay" | "CrosshairToolbox" | "Magnifier"
+                "CrosshairController"
+                    | "CrosshairOverlay"
+                    | "CrosshairToolbox"
+                    | "Magnifier"
+                    | "MacroNestCaptureWindow"
             )
         }) || internal_app_window_title(hwnd).as_deref() == Some("Drawing Toolbar")
     }
@@ -37855,11 +37859,7 @@ mod windows_overlay {
                 return false;
             }
 
-            let style = windows::Win32::UI::WindowsAndMessaging::GetWindowLongW(
-                hwnd,
-                windows::Win32::UI::WindowsAndMessaging::GWL_STYLE,
-            ) as u32;
-            (style & WS_OVERLAPPEDWINDOW.0) != 0 || (style & WS_CAPTION.0) != 0
+            true
         }
     }
 
@@ -37869,7 +37869,15 @@ mod windows_overlay {
         hidden: Option<HWND>,
     }
 
+    pub fn set_cached_app_ui_hwnd(val: isize) {
+        CACHED_APP_UI_HWND.store(val, Ordering::Relaxed);
+    }
+
     unsafe fn find_app_ui_window() -> Option<HWND> {
+        if let Some(hwnd) = crate::platform::get_main_hwnd() {
+            return Some(hwnd);
+        }
+
         let cached = CACHED_APP_UI_HWND.load(Ordering::Relaxed);
         if cached != 0 {
             let hwnd = HWND(cached as *mut std::ffi::c_void);
