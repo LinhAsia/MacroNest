@@ -754,9 +754,18 @@ impl Drop for MemoryFreezeWorker {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LastSelectedProcessInfo {
+    pub selector: String,
+    pub name: String,
+    pub path: String,
+    pub last_pid: u32,
+}
+
 pub(crate) struct MemoryPanelState {
     process_selector: String,
     process_pid: Option<u32>,
+    last_selected_process: Option<LastSelectedProcessInfo>,
     last_process_liveness_check: Instant,
     #[cfg(windows)]
     process_choices: Vec<ProcessInfo>,
@@ -879,6 +888,7 @@ impl Default for MemoryPanelState {
         Self {
             process_selector: String::new(),
             process_pid: None,
+            last_selected_process: None,
             last_process_liveness_check: Instant::now() - Duration::from_secs(2),
             #[cfg(windows)]
             process_choices: Vec::new(),
@@ -1016,7 +1026,7 @@ impl MemoryPanelState {
 
 impl CrosshairApp {
     fn select_memory_process(&mut self, selector: String, pid: Option<u32>, ctx: &egui::Context) {
-        self.memory_panel.process_selector = selector;
+        self.memory_panel.process_selector = selector.clone();
         if self.memory_panel.process_pid != pid {
             self.reset_memory_scan("Process changed");
             for saved in &mut self.memory_panel.saved {
@@ -1035,6 +1045,40 @@ impl CrosshairApp {
             self.memory_panel.code_selection_anchor = None;
         }
         self.memory_panel.process_pid = pid;
+        if let Some(p) = pid {
+            let path = {
+                #[cfg(windows)]
+                {
+                    crate::memory_debugger::debugger::process_path(p)
+                }
+                #[cfg(not(windows))]
+                {
+                    String::new()
+                }
+            };
+            let name = if let Some(stripped) = selector.strip_prefix("pid:") {
+                stripped
+                    .split_once(':')
+                    .map(|(_, n)| n.to_owned())
+                    .unwrap_or_else(|| stripped.to_owned())
+            } else if let Some(w) = self.open_window_infos.iter().find(|w| w.selector == selector) {
+                Self::simplify_window_title(&w.title)
+            } else if !path.is_empty() {
+                std::path::Path::new(&path)
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .map(|f| f.to_owned())
+                    .unwrap_or_else(|| format!("PID {p}"))
+            } else {
+                format!("PID {p}")
+            };
+            self.memory_panel.last_selected_process = Some(LastSelectedProcessInfo {
+                selector: selector.clone(),
+                name,
+                path,
+                last_pid: p,
+            });
+        }
         #[cfg(windows)]
         {
             self.memory_panel.scan_modules = pid
@@ -1046,6 +1090,98 @@ impl CrosshairApp {
             |pid| format!("Process selected — PID {pid}"),
         );
         ctx.request_repaint();
+    }
+
+    fn reselect_last_process(&mut self, ctx: &egui::Context) {
+        let Some(last) = self.memory_panel.last_selected_process.clone() else {
+            return;
+        };
+        self.ensure_open_windows_ready(true);
+        #[cfg(windows)]
+        self.schedule_memory_process_choices_refresh(ctx);
+
+        // 1. First check if a window matches selector, name, or path
+        let matching_window = self.open_window_infos.iter().find(|w| {
+            if !last.path.is_empty() && w.process_path.eq_ignore_ascii_case(&last.path) {
+                return true;
+            }
+            if !last.name.is_empty() {
+                let simplified = Self::simplify_window_title(&w.title);
+                if simplified.eq_ignore_ascii_case(&last.name) || w.title.eq_ignore_ascii_case(&last.name) {
+                    return true;
+                }
+            }
+            if !last.selector.is_empty() && !last.selector.starts_with("pid:") && w.selector == last.selector {
+                return true;
+            }
+            false
+        }).cloned();
+
+        if let Some(w) = matching_window {
+            self.select_memory_process(w.selector, Some(w.process_id), ctx);
+            self.memory_panel.status = format!(
+                "Re-attached to {} — PID {}",
+                last.name, w.process_id
+            );
+            return;
+        }
+
+        // 2. Next check in process choices / running processes
+        #[cfg(windows)]
+        {
+            let mut choices = self.memory_panel.process_choices.clone();
+            if choices.is_empty() {
+                if let Ok(mut procs) = list_process_details() {
+                    for process in &mut procs {
+                        if process.path.is_empty() {
+                            let path = crate::memory_debugger::debugger::process_path(process.pid);
+                            if !path.is_empty() {
+                                process.path = path;
+                            }
+                        }
+                    }
+                    choices = procs;
+                }
+            }
+            let matching_process = choices.iter().find(|p| {
+                if !last.path.is_empty() && p.path.eq_ignore_ascii_case(&last.path) {
+                    return true;
+                }
+                if !last.name.is_empty() {
+                    let p_name = p.name.trim_end_matches(".exe");
+                    let last_name = last.name.trim_end_matches(".exe");
+                    if p.name.eq_ignore_ascii_case(&last.name) || p_name.eq_ignore_ascii_case(last_name) {
+                        return true;
+                    }
+                }
+                false
+            }).cloned();
+
+            if let Some(p) = matching_process {
+                self.select_memory_process(format!("pid:{}:{}", p.pid, p.name), Some(p.pid), ctx);
+                self.memory_panel.status = format!(
+                    "Re-attached to {} — PID {}",
+                    p.name, p.pid
+                );
+                return;
+            }
+
+            if !last.selector.is_empty() && !last.selector.starts_with("pid:") {
+                if let Some(pid) = window_list::process_id_for_window(Some(&last.selector)) {
+                    self.select_memory_process(last.selector.clone(), Some(pid), ctx);
+                    self.memory_panel.status = format!(
+                        "Re-attached to {} — PID {}",
+                        last.name, pid
+                    );
+                    return;
+                }
+            }
+        }
+
+        self.memory_panel.status = format!(
+            "Process '{}' is not running yet. Please start the game first.",
+            last.name
+        );
     }
 
     #[cfg(windows)]
@@ -1900,7 +2036,11 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     let select_process_str = self.tr("Select process", "Select process");
                     let process_label = if self.memory_panel.process_pid.is_none() {
-                        select_process_str.to_owned()
+                        if let Some(last) = &self.memory_panel.last_selected_process {
+                            format!("{} (Last: {})", select_process_str, last.name)
+                        } else {
+                            select_process_str.to_owned()
+                        }
                     } else if let Some(label) = self
                         .memory_panel
                         .process_selector
@@ -1919,6 +2059,25 @@ impl CrosshairApp {
                             .unwrap_or_else(|| select_process_str.to_owned())
                     };
                     let missing_process = self.memory_panel.process_pid.is_none();
+                    if missing_process {
+                        if let Some(last) = self.memory_panel.last_selected_process.clone() {
+                            let label = format!("🔄 {}", last.name);
+                            if ui
+                                .button(
+                                    RichText::new(label)
+                                        .color(Color32::from_rgb(84, 214, 140))
+                                        .strong(),
+                                )
+                                .on_hover_text(self.tr(
+                                    "Quickly re-attach to this process after restart",
+                                    "Gắn kết nhanh lại vào tiến trình này sau khi restart",
+                                ))
+                                .clicked()
+                            {
+                                self.reselect_last_process(ui.ctx());
+                            }
+                        }
+                    }
                     let process_combo = ui
                         .scope(|ui| {
                             if missing_process {
@@ -1938,6 +2097,27 @@ impl CrosshairApp {
                                     #[cfg(windows)]
                                     if self.memory_panel.process_choices.is_empty() && !self.memory_panel.process_choices_loading {
                                         self.schedule_memory_process_choices_refresh(ui.ctx());
+                                    }
+                                    if let Some(last) = self.memory_panel.last_selected_process.clone() {
+                                        let is_current = self.memory_panel.process_pid.is_some()
+                                            && (self.memory_panel.process_selector == last.selector
+                                                || self.memory_panel.process_pid == Some(last.last_pid));
+                                        if !is_current {
+                                            let label = format!("🔄 {} {} (Last PID: {})", self.tr("Select last process:", "Chọn lại tiến trình:"), last.name, last.last_pid);
+                                            let btn = egui::Button::new(RichText::new(label).color(Color32::from_rgb(84, 214, 140)).strong())
+                                                .fill(Color32::from_rgba_premultiplied(32, 64, 48, 160));
+                                            if ui.add(btn)
+                                                .on_hover_text(self.tr(
+                                                    "Quickly re-attach to the restarted process with the same name or window",
+                                                    "Chọn nhanh lại tiến trình vừa restart có cùng tên hoặc cửa sổ",
+                                                ))
+                                                .clicked()
+                                            {
+                                                self.reselect_last_process(ui.ctx());
+                                                ui.close();
+                                            }
+                                            ui.separator();
+                                        }
                                     }
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new(self.tr("Window processes (grouped)", "Window processes (grouped)")).strong());
@@ -1985,28 +2165,7 @@ impl CrosshairApp {
                                                             )
                                                             .clicked()
                                                         {
-                                                            let selector = window.selector;
-                                                            self.memory_panel.process_selector = selector.clone();
-                                                            let pid =
-                                                                window_list::process_id_for_window(Some(&selector));
-                                                            if self.memory_panel.process_pid != pid {
-                                                                self.reset_memory_scan("Process changed");
-                                                                for saved in &mut self.memory_panel.saved {
-                                                                    saved.current = None;
-                                                                    saved.frozen = None;
-                                                                }
-                                                                self.memory_panel.selected_saved.clear();
-                                                                self.memory_panel.saved_selection_anchor = None;
-                                                                self.memory_panel.edit_value_index = None;
-                                                                self.memory_panel.edit_description_index = None;
-                                                                self.memory_panel.address_dialog = None;
-                                                            }
-                                                            self.memory_panel.process_pid = pid;
-                                                            self.memory_panel.status = pid.map_or_else(
-                                                                || "Unable to open selected process".to_owned(),
-                                                                |pid| format!("Process selected — PID {pid}"),
-                                                            );
-                                                            ui.ctx().request_repaint();
+                                                            self.select_memory_process(window.selector, Some(window.process_id), ui.ctx());
                                                         }
                                                     });
                                                 }
@@ -3182,54 +3341,59 @@ impl CrosshairApp {
                                 ui.ctx().copy_text(format_prefixed_memory_address(address_value));
                                 ui.close();
                             }
-                            if ui.button(self.tr("Copy AOB (32 bytes)", "Sao chép AOB (32 byte)")).clicked() {
-                                if let Some(pid) = self.memory_panel.process_pid {
-                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 32) {
-                                        let aob = format_aob_hex(&bytes);
-                                        ui.ctx().copy_text(aob);
-                                        self.memory_panel.status = "Copied AOB (32 bytes) to clipboard".to_string();
+                            ui.menu_button(
+                                self.tr("AOB Actions ⏵", "Thao tác AOB ⏵"),
+                                |ui| {
+                                    if ui.button(self.tr("Copy AOB (32 bytes)", "Sao chép AOB (32 byte)")).clicked() {
+                                        if let Some(pid) = self.memory_panel.process_pid {
+                                            if let Ok(bytes) = read_memory_bytes(pid, address_value, 32) {
+                                                let aob = format_aob_hex(&bytes);
+                                                ui.ctx().copy_text(aob);
+                                                self.memory_panel.status = "Copied AOB (32 bytes) to clipboard".to_string();
+                                            }
+                                        }
+                                        ui.close();
                                     }
-                                }
-                                ui.close();
-                            }
-                            if ui.button(self.tr("Copy AOB (64 bytes)", "Sao chép AOB (64 byte)")).clicked() {
-                                if let Some(pid) = self.memory_panel.process_pid {
-                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
-                                        let aob = format_aob_hex(&bytes);
-                                        ui.ctx().copy_text(aob);
-                                        self.memory_panel.status = "Copied AOB (64 bytes) to clipboard".to_string();
+                                    if ui.button(self.tr("Copy AOB (64 bytes)", "Sao chép AOB (64 byte)")).clicked() {
+                                        if let Some(pid) = self.memory_panel.process_pid {
+                                            if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
+                                                let aob = format_aob_hex(&bytes);
+                                                ui.ctx().copy_text(aob);
+                                                self.memory_panel.status = "Copied AOB (64 bytes) to clipboard".to_string();
+                                            }
+                                        }
+                                        ui.close();
                                     }
-                                }
-                                ui.close();
-                            }
-                            if ui.button(self.tr("Copy AOB (128 bytes)", "Sao chép AOB (128 byte)")).clicked() {
-                                if let Some(pid) = self.memory_panel.process_pid {
-                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 128) {
-                                        let aob = format_aob_hex(&bytes);
-                                        ui.ctx().copy_text(aob);
-                                        self.memory_panel.status = "Copied AOB (128 bytes) to clipboard".to_string();
+                                    if ui.button(self.tr("Copy AOB (128 bytes)", "Sao chép AOB (128 byte)")).clicked() {
+                                        if let Some(pid) = self.memory_panel.process_pid {
+                                            if let Ok(bytes) = read_memory_bytes(pid, address_value, 128) {
+                                                let aob = format_aob_hex(&bytes);
+                                                ui.ctx().copy_text(aob);
+                                                self.memory_panel.status = "Copied AOB (128 bytes) to clipboard".to_string();
+                                            }
+                                        }
+                                        ui.close();
                                     }
-                                }
-                                ui.close();
-                            }
-                            if ui.button(self.tr("Send to Manual AOB (Sample 1)", "Gửi vào Mẫu AOB 1")).clicked() {
-                                if let Some(pid) = self.memory_panel.process_pid {
-                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
-                                        self.memory_panel.manual_aob_input_1 = format_aob_hex(&bytes);
-                                        self.memory_panel.show_manual_aob_compare = true;
+                                    if ui.button(self.tr("Send to Manual AOB (Sample 1)", "Gửi vào Mẫu AOB 1")).clicked() {
+                                        if let Some(pid) = self.memory_panel.process_pid {
+                                            if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
+                                                self.memory_panel.manual_aob_input_1 = format_aob_hex(&bytes);
+                                                self.memory_panel.show_manual_aob_compare = true;
+                                            }
+                                        }
+                                        ui.close();
                                     }
-                                }
-                                ui.close();
-                            }
-                            if ui.button(self.tr("Send to Manual AOB (Sample 2)", "Gửi vào Mẫu AOB 2")).clicked() {
-                                if let Some(pid) = self.memory_panel.process_pid {
-                                    if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
-                                        self.memory_panel.manual_aob_input_2 = format_aob_hex(&bytes);
-                                        self.memory_panel.show_manual_aob_compare = true;
+                                    if ui.button(self.tr("Send to Manual AOB (Sample 2)", "Gửi vào Mẫu AOB 2")).clicked() {
+                                        if let Some(pid) = self.memory_panel.process_pid {
+                                            if let Ok(bytes) = read_memory_bytes(pid, address_value, 64) {
+                                                self.memory_panel.manual_aob_input_2 = format_aob_hex(&bytes);
+                                                self.memory_panel.show_manual_aob_compare = true;
+                                            }
+                                        }
+                                        ui.close();
                                     }
-                                }
-                                ui.close();
-                            }
+                                },
+                            );
                             ui.separator();
                             let label = if marked {
                                 "Remove not-relevant mark"
@@ -4238,189 +4402,194 @@ impl CrosshairApp {
                                     ui.close();
                                 }
                                 ui.separator();
-                                if ui
-                                    .add_enabled(
-                                        single_target,
-                                        Button::new(self.tr("Copy AOB (32 bytes)", "Sao chép AOB (32 byte)")),
-                                    )
-                                    .on_hover_text("Copy 32 raw bytes of memory at this address as an AOB string")
-                                    .clicked()
-                                {
-                                    if let Some(pid) = self.memory_panel.process_pid {
-                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 32) {
-                                            let aob = format_aob_hex(&bytes);
-                                            ui.ctx().copy_text(aob);
-                                            self.memory_panel.status = "Copied AOB (32 bytes) to clipboard".to_string();
-                                        }
-                                    }
-                                    ui.close();
-                                }
-                                if ui
-                                    .add_enabled(
-                                        single_target,
-                                        Button::new(self.tr("Copy AOB (64 bytes)", "Sao chép AOB (64 byte)")),
-                                    )
-                                    .on_hover_text("Copy 64 raw bytes of memory at this address as an AOB string")
-                                    .clicked()
-                                {
-                                    if let Some(pid) = self.memory_panel.process_pid {
-                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
-                                            let aob = format_aob_hex(&bytes);
-                                            ui.ctx().copy_text(aob);
-                                            self.memory_panel.status = "Copied AOB (64 bytes) to clipboard".to_string();
-                                        }
-                                    }
-                                    ui.close();
-                                }
-                                if ui
-                                    .add_enabled(
-                                        single_target,
-                                        Button::new(self.tr("Copy AOB (128 bytes)", "Sao chép AOB (128 byte)")),
-                                    )
-                                    .on_hover_text("Copy 128 raw bytes of memory at this address as an AOB string")
-                                    .clicked()
-                                {
-                                    if let Some(pid) = self.memory_panel.process_pid {
-                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 128) {
-                                            let aob = format_aob_hex(&bytes);
-                                            ui.ctx().copy_text(aob);
-                                            self.memory_panel.status = "Copied AOB (128 bytes) to clipboard".to_string();
-                                        }
-                                    }
-                                    ui.close();
-                                }
-                                if ui
-                                    .add_enabled(
-                                        single_target,
-                                        Button::new(self.tr("Send to Manual AOB (Sample 1)", "Gửi vào Mẫu AOB 1")),
-                                    )
-                                    .on_hover_text("Read 64 bytes and put into Sample 1 of Manual AOB compare tool")
-                                    .clicked()
-                                {
-                                    if let Some(pid) = self.memory_panel.process_pid {
-                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
-                                            self.memory_panel.manual_aob_input_1 = format_aob_hex(&bytes);
-                                            self.memory_panel.show_manual_aob_compare = true;
-                                        }
-                                    }
-                                    ui.close();
-                                }
-                                if ui
-                                    .add_enabled(
-                                        single_target,
-                                        Button::new(self.tr("Send to Manual AOB (Sample 2)", "Gửi vào Mẫu AOB 2")),
-                                    )
-                                    .on_hover_text("Read 64 bytes and put into Sample 2 of Manual AOB compare tool")
-                                    .clicked()
-                                {
-                                    if let Some(pid) = self.memory_panel.process_pid {
-                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
-                                            self.memory_panel.manual_aob_input_2 = format_aob_hex(&bytes);
-                                            self.memory_panel.show_manual_aob_compare = true;
-                                        }
-                                    }
-                                    ui.close();
-                                }
-                                if ui
-                                    .add_enabled(
-                                        single_target,
-                                        Button::new(self.tr(
-                                            "AOB: Capture Sample 1 (64 bytes)",
-                                            "AOB: Chụp Mẫu 1 (64 byte)",
-                                        )),
-                                    )
-                                    .on_hover_text("Capture 64 bytes in current session as Sample 1 for wildcard comparison")
-                                    .clicked()
-                                {
-                                    if let Some(pid) = self.memory_panel.process_pid {
-                                        if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
-                                            let aob = format_aob_hex(&bytes);
-                                            if let Some(entry) = self.memory_panel.saved.get_mut(index) {
-                                                entry.aob_sample_1 = Some(bytes.clone());
+                                ui.menu_button(
+                                    self.tr("AOB Actions ⏵", "Thao tác AOB ⏵"),
+                                    |ui| {
+                                        if ui
+                                            .add_enabled(
+                                                single_target,
+                                                Button::new(self.tr("Copy AOB (32 bytes)", "Sao chép AOB (32 byte)")),
+                                            )
+                                            .on_hover_text("Copy 32 raw bytes of memory at this address as an AOB string")
+                                            .clicked()
+                                        {
+                                            if let Some(pid) = self.memory_panel.process_pid {
+                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 32) {
+                                                    let aob = format_aob_hex(&bytes);
+                                                    ui.ctx().copy_text(aob);
+                                                    self.memory_panel.status = "Copied AOB (32 bytes) to clipboard".to_string();
+                                                }
                                             }
-                                            self.memory_panel.global_aob_sample_1 = Some((bytes, saved.address));
-                                            ui.ctx().copy_text(aob.clone());
-                                            self.memory_panel.status = "Sample 1 captured (64 bytes)".to_string();
+                                            ui.close();
                                         }
-                                    }
-                                    ui.close();
-                                }
-                                let global_sample_1 = self.memory_panel.global_aob_sample_1.clone();
-                                let has_sample_1 = saved.aob_sample_1.is_some() || global_sample_1.is_some();
-                                let sample_1_hint = if let Some((_, src_addr)) = &global_sample_1 {
-                                    format!("Compare against Sample 1 (captured from 0x{:X}), insert '??' wildcards for changing bytes, and generate final AOB pattern", src_addr)
-                                } else {
-                                    "Compare against Sample 1, insert '??' wildcards for changing bytes, and generate final AOB pattern".to_string()
-                                };
-                                if selected_count > 1 {
-                                    if ui
-                                        .button(self.tr(
-                                            "AOB: Compare Selected Addresses (Multi-Match)",
-                                            "AOB: So sánh các địa chỉ đã chọn (Tạo mã chung)",
-                                        ))
-                                        .on_hover_text(format!(
-                                            "Compare 64 bytes across all {} selected addresses and generate a unified pattern with '??' wildcards",
-                                            selected_count
-                                        ))
-                                        .clicked()
-                                    {
-                                        self.compare_aob_for_saved_selection(ui.ctx(), false);
-                                        ui.close();
-                                    }
-                                }
-                                if has_sample_1 {
-                                    let compare_sample_1_label = if selected_count > 1 {
-                                        self.tr(
-                                            "AOB: Compare Selected with Sample 1",
-                                            "AOB: So sánh các địa chỉ đã chọn với Mẫu 1",
-                                        )
-                                    } else {
-                                        self.tr(
-                                            "AOB: Match Sample 2 -> Generate Pattern (??)",
-                                            "AOB: So khớp Mẫu 2 -> Tạo mã (??)",
-                                        )
-                                    };
-                                    if ui
-                                        .button(compare_sample_1_label)
-                                        .on_hover_text(sample_1_hint)
-                                        .clicked()
-                                    {
-                                        self.compare_aob_for_saved_selection(ui.ctx(), true);
-                                        ui.close();
-                                    }
-                                }
-                                if let Some((_, src_addr)) = global_sample_1 {
-                                    if ui
-                                        .button(self.tr("AOB: Clear Sample 1", "AOB: Xóa Mẫu 1"))
-                                        .on_hover_text(format!("Clear captured Sample 1 from 0x{:X}", src_addr))
-                                        .clicked()
-                                    {
-                                        self.memory_panel.global_aob_sample_1 = None;
-                                        if let Some(entry) = self.memory_panel.saved.get_mut(index) {
-                                            entry.aob_sample_1 = None;
+                                        if ui
+                                            .add_enabled(
+                                                single_target,
+                                                Button::new(self.tr("Copy AOB (64 bytes)", "Sao chép AOB (64 byte)")),
+                                            )
+                                            .on_hover_text("Copy 64 raw bytes of memory at this address as an AOB string")
+                                            .clicked()
+                                        {
+                                            if let Some(pid) = self.memory_panel.process_pid {
+                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                                    let aob = format_aob_hex(&bytes);
+                                                    ui.ctx().copy_text(aob);
+                                                    self.memory_panel.status = "Copied AOB (64 bytes) to clipboard".to_string();
+                                                }
+                                            }
+                                            ui.close();
                                         }
-                                        ui.close();
-                                    }
-                                }
-                                let has_pattern = saved.aob_pattern.is_some();
-                                if ui
-                                    .add_enabled(
-                                        single_target && has_pattern,
-                                        Button::new(self.tr(
-                                            "AOB: Auto-find address by pattern",
-                                            "AOB: Tự động tìm lại địa chỉ bằng mã AOB",
-                                        )),
-                                    )
-                                    .on_hover_text("Scan target process for generated AOB pattern and update address automatically")
-                                    .clicked()
-                                {
-                                    if let (Some(pid), Some(pattern)) = (self.memory_panel.process_pid, saved.aob_pattern.as_ref()) {
-                                        let pattern_clone = pattern.clone();
-                                        let saved_idx = index;
-                                        self.find_saved_address_by_aob(pid, saved_idx, &pattern_clone);
-                                    }
-                                    ui.close();
-                                }
+                                        if ui
+                                            .add_enabled(
+                                                single_target,
+                                                Button::new(self.tr("Copy AOB (128 bytes)", "Sao chép AOB (128 byte)")),
+                                            )
+                                            .on_hover_text("Copy 128 raw bytes of memory at this address as an AOB string")
+                                            .clicked()
+                                        {
+                                            if let Some(pid) = self.memory_panel.process_pid {
+                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 128) {
+                                                    let aob = format_aob_hex(&bytes);
+                                                    ui.ctx().copy_text(aob);
+                                                    self.memory_panel.status = "Copied AOB (128 bytes) to clipboard".to_string();
+                                                }
+                                            }
+                                            ui.close();
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                single_target,
+                                                Button::new(self.tr("Send to Manual AOB (Sample 1)", "Gửi vào Mẫu AOB 1")),
+                                            )
+                                            .on_hover_text("Read 64 bytes and put into Sample 1 of Manual AOB compare tool")
+                                            .clicked()
+                                        {
+                                            if let Some(pid) = self.memory_panel.process_pid {
+                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                                    self.memory_panel.manual_aob_input_1 = format_aob_hex(&bytes);
+                                                    self.memory_panel.show_manual_aob_compare = true;
+                                                }
+                                            }
+                                            ui.close();
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                single_target,
+                                                Button::new(self.tr("Send to Manual AOB (Sample 2)", "Gửi vào Mẫu AOB 2")),
+                                            )
+                                            .on_hover_text("Read 64 bytes and put into Sample 2 of Manual AOB compare tool")
+                                            .clicked()
+                                        {
+                                            if let Some(pid) = self.memory_panel.process_pid {
+                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                                    self.memory_panel.manual_aob_input_2 = format_aob_hex(&bytes);
+                                                    self.memory_panel.show_manual_aob_compare = true;
+                                                }
+                                            }
+                                            ui.close();
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                single_target,
+                                                Button::new(self.tr(
+                                                    "AOB: Capture Sample 1 (64 bytes)",
+                                                    "AOB: Chụp Mẫu 1 (64 byte)",
+                                                )),
+                                            )
+                                            .on_hover_text("Capture 64 bytes in current session as Sample 1 for wildcard comparison")
+                                            .clicked()
+                                        {
+                                            if let Some(pid) = self.memory_panel.process_pid {
+                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                                    let aob = format_aob_hex(&bytes);
+                                                    if let Some(entry) = self.memory_panel.saved.get_mut(index) {
+                                                        entry.aob_sample_1 = Some(bytes.clone());
+                                                    }
+                                                    self.memory_panel.global_aob_sample_1 = Some((bytes, saved.address));
+                                                    ui.ctx().copy_text(aob.clone());
+                                                    self.memory_panel.status = "Sample 1 captured (64 bytes)".to_string();
+                                                }
+                                            }
+                                            ui.close();
+                                        }
+                                        let global_sample_1 = self.memory_panel.global_aob_sample_1.clone();
+                                        let has_sample_1 = saved.aob_sample_1.is_some() || global_sample_1.is_some();
+                                        let sample_1_hint = if let Some((_, src_addr)) = &global_sample_1 {
+                                            format!("Compare against Sample 1 (captured from 0x{:X}), insert '??' wildcards for changing bytes, and generate final AOB pattern", src_addr)
+                                        } else {
+                                            "Compare against Sample 1, insert '??' wildcards for changing bytes, and generate final AOB pattern".to_string()
+                                        };
+                                        if selected_count > 1 {
+                                            if ui
+                                                .button(self.tr(
+                                                    "AOB: Compare Selected Addresses (Multi-Match)",
+                                                    "AOB: So sánh các địa chỉ đã chọn (Tạo mã chung)",
+                                                ))
+                                                .on_hover_text(format!(
+                                                    "Compare 64 bytes across all {} selected addresses and generate a unified pattern with '??' wildcards",
+                                                    selected_count
+                                                ))
+                                                .clicked()
+                                            {
+                                                self.compare_aob_for_saved_selection(ui.ctx(), false);
+                                                ui.close();
+                                            }
+                                        }
+                                        if has_sample_1 {
+                                            let compare_sample_1_label = if selected_count > 1 {
+                                                self.tr(
+                                                    "AOB: Compare Selected with Sample 1",
+                                                    "AOB: So sánh các địa chỉ đã chọn với Mẫu 1",
+                                                )
+                                            } else {
+                                                self.tr(
+                                                    "AOB: Match Sample 2 -> Generate Pattern (??)",
+                                                    "AOB: So khớp Mẫu 2 -> Tạo mã (??)",
+                                                )
+                                            };
+                                            if ui
+                                                .button(compare_sample_1_label)
+                                                .on_hover_text(sample_1_hint)
+                                                .clicked()
+                                            {
+                                                self.compare_aob_for_saved_selection(ui.ctx(), true);
+                                                ui.close();
+                                            }
+                                        }
+                                        if let Some((_, src_addr)) = global_sample_1 {
+                                            if ui
+                                                .button(self.tr("AOB: Clear Sample 1", "AOB: Xóa Mẫu 1"))
+                                                .on_hover_text(format!("Clear captured Sample 1 from 0x{:X}", src_addr))
+                                                .clicked()
+                                            {
+                                                self.memory_panel.global_aob_sample_1 = None;
+                                                if let Some(entry) = self.memory_panel.saved.get_mut(index) {
+                                                    entry.aob_sample_1 = None;
+                                                }
+                                                ui.close();
+                                            }
+                                        }
+                                        let has_pattern = saved.aob_pattern.is_some();
+                                        if ui
+                                            .add_enabled(
+                                                single_target && has_pattern,
+                                                Button::new(self.tr(
+                                                    "AOB: Auto-find address by pattern",
+                                                    "AOB: Tự động tìm lại địa chỉ bằng mã AOB",
+                                                )),
+                                            )
+                                            .on_hover_text("Scan target process for generated AOB pattern and update address automatically")
+                                            .clicked()
+                                        {
+                                            if let (Some(pid), Some(pattern)) = (self.memory_panel.process_pid, saved.aob_pattern.as_ref()) {
+                                                let pattern_clone = pattern.clone();
+                                                let saved_idx = index;
+                                                self.find_saved_address_by_aob(pid, saved_idx, &pattern_clone);
+                                            }
+                                            ui.close();
+                                        }
+                                    },
+                                );
                                 ui.separator();
                                 if ui
                                     .add_enabled(
@@ -7622,35 +7791,53 @@ impl CrosshairApp {
         });
     }
 
-    #[cfg(windows)]
-    fn read_camera_world_component(pid: u32, expression: &str) -> Result<f32, String> {
+    fn read_camera_world_component(pid: Option<u32>, expression: &str) -> Result<f32, String> {
         let expression = expression.trim();
+        if expression.is_empty() {
+            return Err("Value cannot be empty".to_owned());
+        }
         if let Some(literal) = expression.strip_prefix('=') {
             return literal
                 .trim()
                 .parse::<f32>()
                 .map_err(|_| "Invalid literal value".to_owned());
         }
-        let address = if let Some((module, module_offset, offsets)) =
-            parse_pointer_expression(expression)
-        {
-            let base = resolve_module_offset(pid, &module, module_offset)
-                .map_err(|error| error.to_string())?;
-            let pointer = PointerSpec {
-                base,
-                module: Some((module, module_offset)),
-                offsets,
-            };
-            resolve_memory_address(pid, base, Some(&pointer)).map_err(|error| error.to_string())?
-        } else {
-            parse_memory_address(expression)
-                .ok_or_else(|| "Use an address, pointer expression, or =number".to_owned())?
+        // Support direct numbers (e.g. -201.68, 595.69, 1.95, 100)
+        if let Ok(val) = expression.parse::<f32>() {
+            if expression.contains('.') || expression.starts_with('-') || val.abs() < 65536.0 {
+                return Ok(val);
+            }
+        }
+        let Some(pid) = pid else {
+            return Err("Select a process to read memory addresses".to_owned());
         };
-        match read_scan_value(pid, address, ScanValueType::F32)
-            .map_err(|error| error.to_string())?
+        #[cfg(windows)]
         {
-            ScanValue::F32(value) => Ok(value),
-            _ => unreachable!(),
+            let address = if let Some((module, module_offset, offsets)) =
+                parse_pointer_expression(expression)
+            {
+                let base = resolve_module_offset(pid, &module, module_offset)
+                    .map_err(|error| error.to_string())?;
+                let pointer = PointerSpec {
+                    base,
+                    module: Some((module, module_offset)),
+                    offsets,
+                };
+                resolve_memory_address(pid, base, Some(&pointer)).map_err(|error| error.to_string())?
+            } else {
+                parse_memory_address(expression)
+                    .ok_or_else(|| "Use a number (e.g. -201.68), address, or pointer expression".to_owned())?
+            };
+            match read_scan_value(pid, address, ScanValueType::F32)
+                .map_err(|error| error.to_string())?
+            {
+                ScanValue::F32(value) => Ok(value),
+                _ => unreachable!(),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Err("Memory reading is only available on Windows".to_owned())
         }
     }
 
@@ -7661,9 +7848,9 @@ impl CrosshairApp {
             return;
         };
         let world = match [
-            Self::read_camera_world_component(pid, &dialog.x),
-            Self::read_camera_world_component(pid, &dialog.y),
-            Self::read_camera_world_component(pid, &dialog.z),
+            Self::read_camera_world_component(Some(pid), &dialog.x),
+            Self::read_camera_world_component(Some(pid), &dialog.y),
+            Self::read_camera_world_component(Some(pid), &dialog.z),
         ] {
             [Ok(x), Ok(y), Ok(z)] => [x, y, z],
             values => {
@@ -8029,21 +8216,20 @@ impl CrosshairApp {
                             .hint_text("module+offset [offsets]"),
                     ).changed();
                 });
-                let readings = self.memory_panel.process_pid.map(|pid| [
-                    Self::read_camera_world_component(pid, &dialog.x),
-                    Self::read_camera_world_component(pid, &dialog.y),
-                    Self::read_camera_world_component(pid, &dialog.z),
-                ]);
-                if let Some([Ok(x), Ok(y), Ok(z)]) = readings.as_ref() {
+                let readings = [
+                    Self::read_camera_world_component(self.memory_panel.process_pid, &dialog.x),
+                    Self::read_camera_world_component(self.memory_panel.process_pid, &dialog.y),
+                    Self::read_camera_world_component(self.memory_panel.process_pid, &dialog.z),
+                ];
+                if let [Ok(x), Ok(y), Ok(z)] = &readings {
                     dialog.world = Some([*x, *y, *z]);
                 }
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Live target values").strong());
                     for (index, axis) in ['X', 'Y', 'Z'].into_iter().enumerate() {
-                        let (text, color) = match readings.as_ref().map(|values| &values[index]) {
-                            Some(Ok(value)) => (format!("{axis}: {value:.6}"), Color32::LIGHT_GREEN),
-                            Some(Err(error)) => (format!("{axis}: {error}"), Color32::LIGHT_RED),
-                            None => (format!("{axis}: select a process"), ui.visuals().weak_text_color()),
+                        let (text, color) = match &readings[index] {
+                            Ok(value) => (format!("{axis}: {value:.6}"), Color32::LIGHT_GREEN),
+                            Err(error) => (format!("{axis}: {error}"), Color32::LIGHT_RED),
                         };
                         ui.label(RichText::new(text).color(color).monospace());
                     }
@@ -8179,6 +8365,7 @@ impl CrosshairApp {
                                         .or_else(|| projections.iter().enumerate().find_map(|(index, point)| point.map(|point| (PROJECTION_CONVENTIONS[index].0, point))))
                                         .unwrap_or(("—", [f32::NAN; 2]));
                                     let selected = dialog.selected == Some(index);
+                                    let mut row_clicked = false;
                                     if ui
                                         .selectable_label(
                                             selected,
@@ -8186,19 +8373,30 @@ impl CrosshairApp {
                                         )
                                         .clicked()
                                     {
-                                        dialog.selected = Some(index);
+                                        row_clicked = true;
                                     }
-                                    ui.label(layout);
-                                    ui.label(if point[0].is_finite() {
+                                    if ui.selectable_label(selected, layout).clicked() {
+                                        row_clicked = true;
+                                    }
+                                    let sx_text = if point[0].is_finite() {
                                         format!("{:.0}", point[0])
                                     } else {
                                         "—".to_owned()
-                                    });
-                                    ui.label(if point[1].is_finite() {
+                                    };
+                                    if ui.selectable_label(selected, sx_text).clicked() {
+                                        row_clicked = true;
+                                    }
+                                    let sy_text = if point[1].is_finite() {
                                         format!("{:.0}", point[1])
                                     } else {
                                         "—".to_owned()
-                                    });
+                                    };
+                                    if ui.selectable_label(selected, sy_text).clicked() {
+                                        row_clicked = true;
+                                    }
+                                    if row_clicked {
+                                        dialog.selected = Some(index);
+                                    }
                                     ui.end_row();
                                 }
                             });
