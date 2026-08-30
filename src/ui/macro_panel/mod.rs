@@ -12646,6 +12646,7 @@ if supports_move_mouse || show_detection_tuning {
                             let mut next_compact_preview_index = steps_len;
                             let mut compact_cursor = 0usize;
                             let mut hovered_region = None;
+                            let mut sync_delay_to_selected: Option<(String, u64, String)> = None;
                             for (display_index, step_index) in
                                 visual_step_order.iter().copied().enumerate()
                             {
@@ -13114,6 +13115,9 @@ if supports_move_mouse || show_detection_tuning {
                                                     } else {
                                                         step.delay_ms = 0;
                                                     }
+                                                    if is_selected {
+                                                        sync_delay_to_selected = Some((step.delay_expr.clone(), step.delay_ms, step.wait_time_unit.clone()));
+                                                    }
                                                 }
                                                 let commit_edit =
                                                     response.lost_focus()
@@ -13163,6 +13167,9 @@ if supports_move_mouse || show_detection_tuning {
                                                                 step.delay_ms = val;
                                                             } else {
                                                                 step.delay_ms = 0;
+                                                            }
+                                                            if is_selected {
+                                                                sync_delay_to_selected = Some((step.delay_expr.clone(), step.delay_ms, step.wait_time_unit.clone()));
                                                             }
                                                         }
                                                     }
@@ -13219,6 +13226,9 @@ if supports_move_mouse || show_detection_tuning {
                                                         if ui.selectable_label(step.wait_time_unit == val, label).clicked() {
                                                             step.wait_time_unit = val.to_string();
                                                             live_sync = true;
+                                                            if is_selected {
+                                                                sync_delay_to_selected = Some((step.delay_expr.clone(), step.delay_ms, step.wait_time_unit.clone()));
+                                                            }
                                                         }
                                                     }
                                                 });
@@ -16503,6 +16513,17 @@ if supports_move_mouse || show_detection_tuning {
                                 if !step_is_being_dragged {
                                     compact_cursor += 1;
                                 }
+                            }
+                            if let Some((sync_expr, sync_ms, sync_unit)) = sync_delay_to_selected {
+                                for (s_idx, s) in preset.steps.iter_mut().enumerate() {
+                                    if selected_steps_snapshot.contains(&(group.id, preset.id, s_idx)) {
+                                        s.delay_expr = sync_expr.clone();
+                                        s.delay_ms = sync_ms;
+                                        s.wait_time_unit = sync_unit.clone();
+                                    }
+                                }
+                                live_sync = true;
+                                macro_presets_persist_requested = true;
                             }
                             {
                                 let mut hook_state = crate::overlay::HOOK_STATE.lock();
