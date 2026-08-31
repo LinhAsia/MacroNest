@@ -10260,22 +10260,21 @@ mod windows_overlay {
 
                 OverlayCommand::PreviewMousePath(preview) => {
                     let mut preview_guard = MOUSE_PATH_PREVIEW.lock();
-                    *preview_guard =
-                        preview.map(|(_, events, playback_from_ms)| MousePathPreviewSession {
-                            points: events
-                                .iter()
-                                .filter(|event| matches!(event.kind, MousePathEventKind::Move))
-                                .map(|event| POINT {
-                                    x: event.x,
-                                    y: event.y,
-                                })
-                                .collect(),
-                            events,
-                            playback_started_at: Some(Instant::now()),
-                            playback_from_ms: playback_from_ms.unwrap_or(0),
-                            playback_marker: None,
-                            dirty: true,
-                        });
+                    *preview_guard = preview.map(|(_, events, _)| MousePathPreviewSession {
+                        points: events
+                            .iter()
+                            .filter(|event| matches!(event.kind, MousePathEventKind::Move))
+                            .map(|event| POINT {
+                                x: event.x,
+                                y: event.y,
+                            })
+                            .collect(),
+                        events,
+                        playback_started_at: None,
+                        playback_from_ms: 0,
+                        playback_marker: None,
+                        dirty: true,
+                    });
                     drop(preview_guard);
                     let _ = refresh_mouse_record_trail(runtime);
                 }
@@ -18860,7 +18859,6 @@ mod windows_overlay {
 
     fn mouse_trail_to_shapes(
         points: &[POINT],
-        marker: Option<POINT>,
     ) -> Vec<GeometryRenderShape> {
         if points.is_empty() {
             return Vec::new();
@@ -18957,30 +18955,6 @@ mod windows_overlay {
                     }),
                 });
             }
-        }
-
-        // Playback marker if active
-        if let Some(m) = marker {
-            shapes.push(GeometryRenderShape {
-                bounds: (m.x - 14, m.y - 14, m.x + 14, m.y + 14),
-                draw: GeometryRenderDraw::Circle {
-                    cx: m.x,
-                    cy: m.y,
-                    radius: 8,
-                    stroke: [255, 230, 50, 255],
-                    fill: Some([255, 230, 50, 180]),
-                    thickness: 2,
-                },
-            });
-            shapes.push(GeometryRenderShape {
-                bounds: (m.x - 4, m.y - 4, m.x + 4, m.y + 4),
-                draw: GeometryRenderDraw::Point {
-                    x: m.x,
-                    y: m.y,
-                    radius: 3,
-                    fill: [255, 255, 255, 255],
-                },
-            });
         }
         shapes
     }
@@ -19151,7 +19125,7 @@ mod windows_overlay {
     }
 
     fn refresh_mouse_record_trail(_runtime: &mut Runtime) -> Result<()> {
-        let (points, marker) = {
+        let points = {
             let mut recording_guard = MOUSE_RECORDING.lock();
             if let Some(session) = recording_guard.as_mut() {
                 if !session.dirty {
@@ -19159,18 +19133,15 @@ mod windows_overlay {
                 }
 
                 session.dirty = false;
-                (
-                    session
-                        .events
-                        .iter()
-                        .filter(|event| matches!(event.kind, MousePathEventKind::Move))
-                        .map(|event| POINT {
-                            x: event.x,
-                            y: event.y,
-                        })
-                        .collect::<Vec<_>>(),
-                    None,
-                )
+                session
+                    .events
+                    .iter()
+                    .filter(|event| matches!(event.kind, MousePathEventKind::Move))
+                    .map(|event| POINT {
+                        x: event.x,
+                        y: event.y,
+                    })
+                    .collect::<Vec<_>>()
             } else {
                 drop(recording_guard);
                 let mut preview_guard = MOUSE_PATH_PREVIEW.lock();
@@ -19178,39 +19149,20 @@ mod windows_overlay {
                     set_gpu_overlay_layer_shapes(OverlayLayer::MouseTrail, Vec::new());
                     return Ok(());
                 };
-                if let Some(started_at) = session.playback_started_at {
-                    let elapsed_ms = started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
-                    let target_ms = session.playback_from_ms.saturating_add(elapsed_ms);
-                    let mut accumulated_ms = 0u64;
-                    let mut marker = None;
-                    let mut all_points = Vec::new();
-                    for event in &session.events {
-                        accumulated_ms = accumulated_ms.saturating_add(event.delay_ms);
-                        if matches!(event.kind, MousePathEventKind::Move) {
-                            let point = POINT {
-                                x: event.x,
-                                y: event.y,
-                            };
-                            all_points.push(point);
-                            if accumulated_ms >= target_ms && marker.is_none() {
-                                marker = Some(point);
-                            }
-                        }
-                    }
-                    if marker.is_none() {
-                        marker = all_points.last().copied();
-                        session.playback_started_at = None;
-                    }
-                    session.playback_marker = marker;
-                    session.points = all_points;
-                    session.dirty = true;
-                }
                 if !session.dirty {
                     return Ok(());
                 }
 
                 session.dirty = false;
-                (session.points.clone(), session.playback_marker)
+                session
+                    .events
+                    .iter()
+                    .filter(|event| matches!(event.kind, MousePathEventKind::Move))
+                    .map(|event| POINT {
+                        x: event.x,
+                        y: event.y,
+                    })
+                    .collect::<Vec<_>>()
             }
         };
         if points.is_empty() {
@@ -19218,7 +19170,7 @@ mod windows_overlay {
             return Ok(());
         }
 
-        let shapes = mouse_trail_to_shapes(&points, marker);
+        let shapes = mouse_trail_to_shapes(&points);
         set_gpu_overlay_layer_shapes(OverlayLayer::MouseTrail, shapes);
         Ok(())
     }
