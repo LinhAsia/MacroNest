@@ -5237,6 +5237,7 @@ impl CrosshairApp {
         let mut add_mouse_path_preset_request: Option<(u32, u32, usize, Option<u32>)> = None;
         let mut add_hold_stop_mouse_path_preset_request: Option<(u32, u32, Option<u32>)> = None;
         let mut preview_mouse_path_step_request: Option<Option<u32>> = None;
+        let mut hovered_mouse_path_step: Option<u32> = None;
         let mut cancel_mouse_move_absolute_capture = false;
         let mut cancel_mouse_path_draw_capture = false;
         let capture_target_snapshot = self.capture_target.clone();
@@ -16498,6 +16499,14 @@ if supports_move_mouse || show_detection_tuning {
                                              });
                                          }
                                      }
+                                     MacroAction::PlayMousePathPreset => {
+                                         has_hover_support = true;
+                                         if is_row_hovered {
+                                             if let Ok(path_id) = step.key.trim().parse::<u32>() {
+                                                 hovered_mouse_path_step = Some(path_id);
+                                             }
+                                         }
+                                     }
                                      _ => {}
                                  }
                                  if has_hover_support {
@@ -16870,6 +16879,7 @@ if supports_move_mouse || show_detection_tuning {
                         self.cancel_mouse_path_draw_capture(ui.ctx());
                     }
                     if let Some(path_preset_id) = preview_mouse_path_step_request.take() {
+                        self.mouse_path_hover_preview_active = false;
                         let preview_events = path_preset_id.and_then(|active_id| {
                             self.state
                                 .mouse_path_presets
@@ -16878,6 +16888,20 @@ if supports_move_mouse || show_detection_tuning {
                                 .map(|preset| preset.events.clone())
                         });
                         self.sync_mouse_path_preview(path_preset_id, preview_events, None);
+                    } else if let Some(path_id) = hovered_mouse_path_step {
+                        if self.mouse_path_step_preview_preset_id != Some(path_id) {
+                            let preview_events = self
+                                .state
+                                .mouse_path_presets
+                                .iter()
+                                .find(|preset| preset.id == path_id)
+                                .map(|preset| preset.events.clone());
+                            self.sync_mouse_path_preview(Some(path_id), preview_events, None);
+                            self.mouse_path_hover_preview_active = true;
+                        }
+                    } else if self.mouse_path_hover_preview_active {
+                        self.clear_mouse_path_preview();
+                        self.mouse_path_hover_preview_active = false;
                     }
                     if let Some((group_id, preset_id, step_index, selected_id)) =
                         add_mouse_path_preset_request.take()

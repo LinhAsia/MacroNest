@@ -5992,6 +5992,7 @@ mod windows_overlay {
         }
 
         *MOUSE_RECORDING.lock() = None;
+        set_gpu_overlay_layer_shapes(OverlayLayer::MouseTrail, Vec::new());
         show_ui_window_native();
         if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
             let _ = tx.send(UiCommand::ShowWindow);
@@ -6043,6 +6044,7 @@ mod windows_overlay {
             .lock()
             .take()
             .map(|session| (session.preset_id, session.events));
+        set_gpu_overlay_layer_shapes(OverlayLayer::MouseTrail, Vec::new());
         show_ui_window_native();
         if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
             let _ = tx.send(UiCommand::ShowWindow);
@@ -18864,29 +18866,119 @@ mod windows_overlay {
             return Vec::new();
         }
         let mut shapes = Vec::new();
+        let pts: Vec<(i32, i32)> = points.iter().map(|p| (p.x, p.y)).collect();
+        let min_x = pts.iter().map(|p| p.0).min().unwrap_or(0);
+        let max_x = pts.iter().map(|p| p.0).max().unwrap_or(0);
+        let min_y = pts.iter().map(|p| p.1).min().unwrap_or(0);
+        let max_y = pts.iter().map(|p| p.1).max().unwrap_or(0);
+
         if points.len() >= 2 {
-            let pts: Vec<(i32, i32)> = points.iter().map(|p| (p.x, p.y)).collect();
-            let min_x = pts.iter().map(|p| p.0).min().unwrap_or(0);
-            let max_x = pts.iter().map(|p| p.0).max().unwrap_or(0);
-            let min_y = pts.iter().map(|p| p.1).min().unwrap_or(0);
-            let max_y = pts.iter().map(|p| p.1).max().unwrap_or(0);
             shapes.push(GeometryRenderShape {
-                bounds: (min_x - 4, min_y - 4, max_x + 4, max_y + 4),
+                bounds: (min_x - 40, min_y - 40, max_x + 60, max_y + 40),
                 draw: GeometryRenderDraw::Polyline {
                     points: pts,
-                    stroke: [0, 220, 255, 220],
-                    thickness: 2,
+                    stroke: [0, 220, 255, 230],
+                    thickness: 3,
                 },
             });
         }
+
+        // Start point (Green marker + label)
+        if let Some(first) = points.first() {
+            shapes.push(GeometryRenderShape {
+                bounds: (first.x - 14, first.y - 14, first.x + 14, first.y + 14),
+                draw: GeometryRenderDraw::Circle {
+                    cx: first.x,
+                    cy: first.y,
+                    radius: 7,
+                    stroke: [50, 255, 120, 255],
+                    fill: Some([50, 255, 120, 180]),
+                    thickness: 2,
+                },
+            });
+            shapes.push(GeometryRenderShape {
+                bounds: (first.x - 5, first.y - 5, first.x + 5, first.y + 5),
+                draw: GeometryRenderDraw::Point {
+                    x: first.x,
+                    y: first.y,
+                    radius: 3,
+                    fill: [255, 255, 255, 255],
+                },
+            });
+            let label_text = "Start";
+            let bounds = geometry_label_bounds(first.x + 10, first.y - 8, 12, label_text, 0.0);
+            shapes.push(GeometryRenderShape {
+                bounds,
+                draw: GeometryRenderDraw::Label(GeometryRenderText {
+                    x: first.x + 10,
+                    y: first.y - 8,
+                    font_size: 12,
+                    color: [50, 255, 120, 255],
+                    rotation_deg: 0.0,
+                    text: label_text.to_string(),
+                }),
+            });
+        }
+
+        // End point (Red marker + label)
+        if points.len() >= 2 {
+            if let Some(last) = points.last() {
+                shapes.push(GeometryRenderShape {
+                    bounds: (last.x - 14, last.y - 14, last.x + 14, last.y + 14),
+                    draw: GeometryRenderDraw::Circle {
+                        cx: last.x,
+                        cy: last.y,
+                        radius: 7,
+                        stroke: [255, 70, 70, 255],
+                        fill: Some([255, 70, 70, 180]),
+                        thickness: 2,
+                    },
+                });
+                shapes.push(GeometryRenderShape {
+                    bounds: (last.x - 5, last.y - 5, last.x + 5, last.y + 5),
+                    draw: GeometryRenderDraw::Point {
+                        x: last.x,
+                        y: last.y,
+                        radius: 3,
+                        fill: [255, 255, 255, 255],
+                    },
+                });
+                let label_text = "End";
+                let bounds = geometry_label_bounds(last.x + 10, last.y - 8, 12, label_text, 0.0);
+                shapes.push(GeometryRenderShape {
+                    bounds,
+                    draw: GeometryRenderDraw::Label(GeometryRenderText {
+                        x: last.x + 10,
+                        y: last.y - 8,
+                        font_size: 12,
+                        color: [255, 90, 90, 255],
+                        rotation_deg: 0.0,
+                        text: label_text.to_string(),
+                    }),
+                });
+            }
+        }
+
+        // Playback marker if active
         if let Some(m) = marker {
             shapes.push(GeometryRenderShape {
-                bounds: (m.x - 8, m.y - 8, m.x + 8, m.y + 8),
+                bounds: (m.x - 14, m.y - 14, m.x + 14, m.y + 14),
+                draw: GeometryRenderDraw::Circle {
+                    cx: m.x,
+                    cy: m.y,
+                    radius: 8,
+                    stroke: [255, 230, 50, 255],
+                    fill: Some([255, 230, 50, 180]),
+                    thickness: 2,
+                },
+            });
+            shapes.push(GeometryRenderShape {
+                bounds: (m.x - 4, m.y - 4, m.x + 4, m.y + 4),
                 draw: GeometryRenderDraw::Point {
                     x: m.x,
                     y: m.y,
-                    radius: 5,
-                    fill: [255, 70, 70, 240],
+                    radius: 3,
+                    fill: [255, 255, 255, 255],
                 },
             });
         }
