@@ -2040,8 +2040,22 @@ impl CrosshairApp {
         Frame::group(ui.style())
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
-                ui.set_min_size(size - vec2(18.0, 18.0));
-                ui.label(RichText::new(self.tr("Scan", "Scan")).strong());
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(self.tr("Scan", "Scan")).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let focus_label = self.tr("Only hotkey when target focused", "Chỉ hotkey khi focus target window");
+                        if ui
+                            .checkbox(&mut self.state.memory_hotkey_require_target_focus, focus_label)
+                            .on_hover_text(self.tr(
+                                "When enabled, memory scan hotkeys only trigger when the target window is focused. When disabled, hotkeys work globally from any window.",
+                                "Khi bật, các phím tắt scan bộ nhớ chỉ kích hoạt khi đang focus cửa sổ target. Khi tắt, phím tắt hoạt động từ bất kỳ cửa sổ nào."
+                            ))
+                            .changed()
+                        {
+                            self.persist();
+                        }
+                    });
+                });
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let select_process_str = self.tr("Select process", "Select process");
@@ -4854,6 +4868,19 @@ impl CrosshairApp {
                         )
                         .changed();
                 });
+                ui.separator();
+                ui.label(self.tr("Scan Hotkeys", "Scan Hotkeys"));
+                let focus_label = self.tr(
+                    "Only trigger hotkeys when target window is focused",
+                    "Chỉ kích hoạt hotkey khi focus vào target window",
+                );
+                changed |= ui
+                    .checkbox(&mut self.state.memory_hotkey_require_target_focus, focus_label)
+                    .on_hover_text(self.tr(
+                        "When enabled, memory scan hotkeys only work when the target window is in foreground. When disabled, hotkeys work globally from any window.",
+                        "Khi bật, phím tắt scan bộ nhớ chỉ hoạt động khi đang focus vào cửa sổ target. Khi tắt, phím tắt hoạt động từ bất kỳ cửa sổ nào.",
+                    ))
+                    .changed();
         if changed {
             self.persist();
         }
@@ -16154,12 +16181,13 @@ impl CrosshairApp {
 
     fn poll_memory_hotkeys(&mut self, ctx: &egui::Context) {
         let events = crate::overlay::take_memory_trigger_events();
-        let target_is_foreground = !events.is_empty()
-            && Self::memory_hotkey_target_matches_foreground(
+        let target_matches = !events.is_empty()
+            && Self::memory_hotkey_should_trigger(
+                self.state.memory_hotkey_require_target_focus,
                 self.memory_panel.process_pid,
                 window_list::process_id_for_window(None),
             );
-        if target_is_foreground {
+        if target_matches {
             let bindings = self
                 .memory_panel
                 .hotkeys
@@ -16177,6 +16205,14 @@ impl CrosshairApp {
         if self.memory_panel.scanning {
             ctx.request_repaint_after(Duration::from_millis(35));
         }
+    }
+
+    fn memory_hotkey_should_trigger(
+        require_target_focus: bool,
+        target_pid: Option<u32>,
+        foreground_pid: Option<u32>,
+    ) -> bool {
+        !require_target_focus || Self::memory_hotkey_target_matches_foreground(target_pid, foreground_pid)
     }
 
     fn memory_hotkey_target_matches_foreground(
@@ -17906,17 +17942,30 @@ mod tests {
 
     #[test]
     fn memory_scan_hotkeys_only_match_the_selected_foreground_process() {
-        assert!(CrosshairApp::memory_hotkey_target_matches_foreground(
+        assert!(CrosshairApp::memory_hotkey_should_trigger(
+            true,
             Some(123),
             Some(123)
         ));
-        assert!(!CrosshairApp::memory_hotkey_target_matches_foreground(
+        assert!(!CrosshairApp::memory_hotkey_should_trigger(
+            true,
             Some(123),
             Some(456)
         ));
-        assert!(!CrosshairApp::memory_hotkey_target_matches_foreground(
+        assert!(!CrosshairApp::memory_hotkey_should_trigger(
+            true,
             None,
             Some(123)
+        ));
+        assert!(CrosshairApp::memory_hotkey_should_trigger(
+            false,
+            Some(123),
+            Some(456)
+        ));
+        assert!(CrosshairApp::memory_hotkey_should_trigger(
+            false,
+            None,
+            None
         ));
     }
 

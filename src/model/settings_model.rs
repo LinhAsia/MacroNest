@@ -520,6 +520,8 @@ pub struct AppState {
     pub show_window: bool,
     pub active_panel: AppPanel,
     pub memory_scan_hotkeys: Vec<(String, HotkeyBinding)>,
+    #[serde(default)]
+    pub memory_hotkey_require_target_focus: bool,
     pub memory_debugger_method: MemoryDebuggerMethod,
     pub memory_debugger_architecture: MemoryDebuggerArchitecture,
     pub memory_pointer_scan_depth: usize,
@@ -961,6 +963,7 @@ impl Default for AppState {
             show_window: true,
             active_panel: AppPanel::Macros,
             memory_scan_hotkeys: Vec::new(),
+            memory_hotkey_require_target_focus: false,
             memory_debugger_method: MemoryDebuggerMethod::Windows,
             memory_debugger_architecture: MemoryDebuggerArchitecture::Auto,
             memory_pointer_scan_depth: 5,
