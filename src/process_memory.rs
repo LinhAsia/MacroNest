@@ -314,7 +314,7 @@ impl ScanCandidate {
             .expect("stored scan value width")
     }
 
-    fn set_current(&mut self, current: ScanValue) {
+    pub fn set_current(&mut self, current: ScanValue) {
         self.current = u64::from_le_bytes(current.bytes());
     }
 }

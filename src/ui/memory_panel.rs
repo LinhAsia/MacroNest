@@ -2427,11 +2427,68 @@ impl CrosshairApp {
                         Some(MemoryScanAction::Unchanged),
                         Some(MemoryScanAction::Less),
                     ],
-                    [Some(MemoryScanAction::Greater), None, None],
                 ] {
                     self.memory_action_row(ui, actions, false);
                     ui.add_space(5.0);
                 }
+                const GAP: f32 = 5.0;
+                let cell_width = ((ui.available_width() - GAP * 2.0) / 3.0).floor();
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = GAP;
+                    ui.allocate_ui_with_layout(
+                        vec2(cell_width, 26.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_width(cell_width);
+                            self.memory_action_button(ui, MemoryScanAction::Greater, true);
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        vec2(cell_width, 26.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_width(cell_width);
+                            let has_candidates = !self.memory_panel.candidates.is_empty()
+                                || self.memory_panel.raw_snapshot.is_some();
+                            let set_base_btn = ui.add_enabled(
+                                has_candidates && !self.memory_panel.scanning,
+                                Button::new(
+                                    RichText::new(self.tr("Set as base", "Lấy mốc"))
+                                        .color(Color32::from_rgb(84, 214, 140))
+                                        .strong(),
+                                )
+                                .min_size(vec2(ui.available_width(), 26.0)),
+                            );
+                            if set_base_btn
+                                .on_hover_text(self.tr(
+                                    "Capture current memory values as the new baseline for subsequent Increased / Decreased / Changed / Unchanged scans.",
+                                    "Ghi nhớ giá trị hiện tại của bộ nhớ làm mốc mới để so sánh Tăng / Giảm / Thay đổi / Không đổi ở các lần scan tiếp theo."
+                                ))
+                                .clicked()
+                            {
+                                self.set_current_scan_as_base();
+                            }
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        vec2(cell_width, 26.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_width(cell_width);
+                            if ui
+                                .add_enabled(
+                                    !self.memory_panel.scanning,
+                                    Button::new(self.tr("Reset", "Reset"))
+                                        .min_size(vec2(ui.available_width(), 26.0)),
+                                )
+                                .clicked()
+                            {
+                                self.reset_memory_scan("New scan");
+                            }
+                        },
+                    );
+                });
+                ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     if ui.button(self.tr("Between", "Between")).clicked() {
                         self.memory_panel.between_open = !self.memory_panel.between_open;
@@ -9200,6 +9257,35 @@ impl CrosshairApp {
                         dialog.status = format!("Kept {} verified pointer candidate(s).", dialog.candidates.len());
                     }
                 }
+                let can_set_base = !dialog.candidates.is_empty()
+                    && dialog.candidates.iter().any(|c| c.live_value.is_some() || c.observed_value.is_some());
+                if ui
+                    .add_enabled(
+                        can_set_base && dialog.validation_rx.is_none() && dialog.filter_rx.is_none(),
+                        Button::new(RichText::new(self.tr("Set current as base", "Lấy mốc hiện tại")).color(Color32::from_rgb(105, 211, 255))),
+                    )
+                    .on_hover_text(self.tr(
+                        "Update the expected baseline values of candidates to their current live values in game.",
+                        "Cập nhật giá trị mốc kỳ vọng của các con trỏ thành giá trị hiện tại trong game để quan sát sự thay đổi."
+                    ))
+                    .clicked()
+                {
+                    let mut updated = 0;
+                    for candidate in &mut dialog.candidates {
+                        if let Some(live) = candidate.live_value.or(candidate.observed_value) {
+                            candidate.expected_value = live;
+                            updated += 1;
+                        }
+                    }
+                    if let Some(pid) = self.memory_panel.process_pid {
+                        for (addr, expected) in &mut dialog.expected_values {
+                            if let Ok(live) = read_scan_value(pid, *addr, dialog.value_type) {
+                                *expected = live;
+                            }
+                        }
+                    }
+                    dialog.status = format!("Updated baseline expected value for {updated} candidate(s).");
+                }
                 if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
                     ui.spinner();
                 }
@@ -9955,6 +10041,13 @@ impl CrosshairApp {
             if ui.button("Clear map A").clicked() {
                 *clear = true;
             }
+            if ui
+                .button(RichText::new("Refresh live values").color(Color32::from_rgb(105, 211, 255)))
+                .on_hover_text("Refresh all candidate pointers and re-read their current values from live memory")
+                .clicked()
+            {
+                dialog.resolved_rows.clear();
+            }
             let filter_resp = ui.add(
                 egui::TextEdit::singleline(&mut dialog.filter)
                     .desired_width(150.0)
@@ -10326,6 +10419,13 @@ impl CrosshairApp {
                 .map(|(name, base, _)| (name.to_ascii_lowercase(), base))
                 .collect();
 
+            let pointer_width = process_pointer_width(pid).unwrap_or(8);
+            let value_scan_type = if pointer_width == 4 {
+                ScanValueType::I32
+            } else {
+                ScanValueType::I64
+            };
+
             let mut verified = 0;
             let mut changed = 0;
             let mut broken = 0;
@@ -10343,13 +10443,25 @@ impl CrosshairApp {
                     continue;
                 };
                 let base = mod_base.wrapping_add(candidate.path.module_offset);
-                let spec = PointerSpec {
-                    base,
-                    module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
-                    offsets: candidate.path.offsets.clone(),
-                };
                 candidate.resolved_base = Some(base);
-                let Ok(address) = resolve_memory_address(pid, base, Some(&spec)) else {
+                let mut curr_addr = base;
+                let mut broken_path = false;
+                for &offset in &candidate.path.offsets {
+                    let next_ptr = match read_scan_value(pid, curr_addr, value_scan_type) {
+                        Ok(ScanValue::I32(val)) => val as u32 as usize,
+                        Ok(ScanValue::I64(val)) => val as usize,
+                        _ => {
+                            broken_path = true;
+                            break;
+                        }
+                    };
+                    if next_ptr == 0 {
+                        broken_path = true;
+                        break;
+                    }
+                    curr_addr = next_ptr.wrapping_add(offset);
+                }
+                if broken_path {
                     candidate.valid = Some(false);
                     candidate.resolved_address = None;
                     candidate.observed_value = None;
@@ -10357,9 +10469,9 @@ impl CrosshairApp {
                     candidate.filter_value = None;
                     broken += 1;
                     continue;
-                };
-                candidate.resolved_address = Some(address);
-                let Ok(observed) = read_scan_value(pid, address, value_type) else {
+                }
+                candidate.resolved_address = Some(curr_addr);
+                let Ok(observed) = read_scan_value(pid, curr_addr, value_type) else {
                     candidate.valid = Some(false);
                     candidate.observed_value = None;
                     candidate.live_value = None;
@@ -14906,6 +15018,58 @@ impl CrosshairApp {
         self.memory_panel.has_scan_session = false;
         self.memory_panel.status = status.to_owned();
         self.memory_panel.last_action = status.to_owned();
+    }
+
+    fn set_current_scan_as_base(&mut self) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            return;
+        };
+        let value_type = self.memory_panel.value_type;
+        let mut updated = 0;
+        for candidate in &mut self.memory_panel.candidates {
+            if let Ok(live) = read_scan_value(pid, candidate.address, value_type) {
+                candidate.set_current(live);
+                self.memory_panel.live_candidate_values.insert(candidate.address, live);
+                updated += 1;
+            }
+        }
+        if self.memory_panel.raw_snapshot.is_some() {
+            let scan_options = if self.memory_panel.is_aob_scan || self.memory_panel.scan_scope_all {
+                MemoryScanOptions {
+                    writable: false,
+                    executable: true,
+                    copy_on_write: true,
+                    active_memory_only: false,
+                    mem_private: true,
+                    mem_image: true,
+                    mem_mapped: true,
+                    alignment: (!self.memory_panel.is_aob_scan && self.memory_panel.fast_scan)
+                        .then_some(self.memory_panel.fast_scan_alignment.trim().parse::<usize>().unwrap_or(value_type.width()).clamp(1, 4096)),
+                }
+            } else {
+                MemoryScanOptions {
+                    writable: self.memory_panel.scan_writable,
+                    executable: self.memory_panel.scan_executable,
+                    copy_on_write: self.memory_panel.scan_copy_on_write,
+                    active_memory_only: self.memory_panel.scan_active_memory_only,
+                    mem_private: self.memory_panel.scan_mem_private,
+                    mem_image: self.memory_panel.scan_mem_image,
+                    mem_mapped: self.memory_panel.scan_mem_mapped,
+                    alignment: self.memory_panel.fast_scan
+                        .then_some(self.memory_panel.fast_scan_alignment.trim().parse::<usize>().unwrap_or(value_type.width()).clamp(1, 4096)),
+                }
+            };
+            if let Ok(snap) = crate::process_memory::capture_memory_snapshot(pid, value_type, scan_options, Arc::new(AtomicUsize::new(0))) {
+                self.memory_panel.raw_snapshot = Some(Arc::new(snap));
+            }
+        }
+        self.memory_panel.candidate_value_changes.clear();
+        let msg = if self.state.ui_language == crate::model::UiLanguage::Vietnamese {
+            format!("Đã ghi nhớ giá trị hiện tại của {updated} địa chỉ làm mốc so sánh mới")
+        } else {
+            format!("Set {updated} candidate(s) current values as new baseline")
+        };
+        self.memory_panel.status = msg;
     }
 
     fn add_selected_memory_results(&mut self) {
