@@ -69,6 +69,7 @@ pub(crate) enum MemoryScanAction {
     Less,
     Greater,
     Between,
+    SetBase,
 }
 
 impl MemoryScanAction {
@@ -84,6 +85,7 @@ impl MemoryScanAction {
             Self::Less => "Less than",
             Self::Greater => "Greater than",
             Self::Between => "Between",
+            Self::SetBase => "Set as base",
         }
     }
 
@@ -97,7 +99,7 @@ impl MemoryScanAction {
             Self::Less => ScanComparison::Less,
             Self::Greater => ScanComparison::Greater,
             Self::Between => ScanComparison::Between,
-            Self::FirstScan | Self::Unknown => return None,
+            Self::FirstScan | Self::Unknown | Self::SetBase => return None,
         })
     }
 
@@ -113,6 +115,7 @@ impl MemoryScanAction {
             Self::Less => "less",
             Self::Greater => "greater",
             Self::Between => "between",
+            Self::SetBase => "set_base",
         }
     }
 
@@ -128,6 +131,7 @@ impl MemoryScanAction {
             "less" => Self::Less,
             "greater" => Self::Greater,
             "between" => Self::Between,
+            "set_base" => Self::SetBase,
             _ => return None,
         })
     }
@@ -2425,70 +2429,17 @@ impl CrosshairApp {
                     [
                         Some(MemoryScanAction::Changed),
                         Some(MemoryScanAction::Unchanged),
+                        Some(MemoryScanAction::SetBase),
+                    ],
+                    [
                         Some(MemoryScanAction::Less),
+                        Some(MemoryScanAction::Greater),
+                        None,
                     ],
                 ] {
                     self.memory_action_row(ui, actions, false);
                     ui.add_space(5.0);
                 }
-                const GAP: f32 = 5.0;
-                let cell_width = ((ui.available_width() - GAP * 2.0) / 3.0).floor();
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = GAP;
-                    ui.allocate_ui_with_layout(
-                        vec2(cell_width, 26.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.set_width(cell_width);
-                            self.memory_action_button(ui, MemoryScanAction::Greater, true);
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        vec2(cell_width, 26.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.set_width(cell_width);
-                            let has_candidates = !self.memory_panel.candidates.is_empty()
-                                || self.memory_panel.raw_snapshot.is_some();
-                            let set_base_btn = ui.add_enabled(
-                                has_candidates && !self.memory_panel.scanning,
-                                Button::new(
-                                    RichText::new(self.tr("Set as base", "Lấy mốc"))
-                                        .color(Color32::from_rgb(84, 214, 140))
-                                        .strong(),
-                                )
-                                .min_size(vec2(ui.available_width(), 26.0)),
-                            );
-                            if set_base_btn
-                                .on_hover_text(self.tr(
-                                    "Capture current memory values as the new baseline for subsequent Increased / Decreased / Changed / Unchanged scans.",
-                                    "Ghi nhớ giá trị hiện tại của bộ nhớ làm mốc mới để so sánh Tăng / Giảm / Thay đổi / Không đổi ở các lần scan tiếp theo."
-                                ))
-                                .clicked()
-                            {
-                                self.set_current_scan_as_base();
-                            }
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        vec2(cell_width, 26.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.set_width(cell_width);
-                            if ui
-                                .add_enabled(
-                                    !self.memory_panel.scanning,
-                                    Button::new(self.tr("Reset", "Reset"))
-                                        .min_size(vec2(ui.available_width(), 26.0)),
-                                )
-                                .clicked()
-                            {
-                                self.reset_memory_scan("New scan");
-                            }
-                        },
-                    );
-                });
-                ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     if ui.button(self.tr("Between", "Between")).clicked() {
                         self.memory_panel.between_open = !self.memory_panel.between_open;
@@ -2705,7 +2656,11 @@ impl CrosshairApp {
 
     fn memory_action_button(&mut self, ui: &mut egui::Ui, action: MemoryScanAction, hotkey: bool) {
         let width = ui.available_width();
-        let action_btn_text = self.tr(action.label(), action.label());
+        let action_btn_text = if action == MemoryScanAction::SetBase {
+            RichText::new(self.tr("Set as base", "Set as base")).color(Color32::from_rgb(84, 214, 140)).strong()
+        } else {
+            RichText::new(self.tr(action.label(), action.label()))
+        };
         ui.horizontal(|ui| {
             let stable_filter_enabled = self
                 .memory_panel
@@ -2731,16 +2686,24 @@ impl CrosshairApp {
                         ) || !self.memory_panel.candidates.is_empty()
                             || !self.memory_panel.text_candidates.is_empty()
                             || self.memory_panel.raw_snapshot.is_some())));
-            if ui
+            let mut btn = Button::new(action_btn_text);
+            let btn_resp = ui
                 .add_enabled_ui(enabled, |ui| {
-                    ui.add_sized(
+                    let resp = ui.add_sized(
                         [(width - if hotkey { 34.0 } else { 0.0 }).max(52.0), 26.0],
-                        Button::new(action_btn_text),
-                    )
+                        btn,
+                    );
+                    if action == MemoryScanAction::SetBase {
+                        resp.on_hover_text(self.tr(
+                            "Capture current memory values as the new baseline for subsequent Increased / Decreased / Changed / Unchanged scans or pointer validation.",
+                            "Ghi nhớ giá trị hiện tại của bộ nhớ làm mốc mới để so sánh Tăng / Giảm / Đổi / Không đổi hoặc validate pointer."
+                        ))
+                    } else {
+                        resp
+                    }
                 })
-                .inner
-                .clicked()
-            {
+                .inner;
+            if btn_resp.clicked() {
                 self.start_memory_action(action);
             }
             if hotkey {
@@ -14560,6 +14523,32 @@ impl CrosshairApp {
             self.memory_panel.stable_pointer_dialog = Some(dialog);
             return true;
         }
+        if action == MemoryScanAction::SetBase {
+            let mut updated = 0;
+            for candidate in &mut dialog.candidates {
+                if let Some(live) = candidate.live_value.or(candidate.observed_value) {
+                    candidate.expected_value = live;
+                    candidate.filter_value = Some(live);
+                    updated += 1;
+                }
+            }
+            if let Some(pid) = self.memory_panel.process_pid {
+                for (addr, expected) in &mut dialog.expected_values {
+                    if let Ok(live) = read_scan_value(pid, *addr, dialog.value_type) {
+                        *expected = live;
+                    }
+                }
+            }
+            let msg = if self.state.ui_language == crate::model::UiLanguage::Vietnamese {
+                format!("Đã ghi nhớ giá trị hiện tại của {updated} con trỏ làm mốc so sánh mới")
+            } else {
+                format!("Updated baseline expected value for {updated} pointer candidate(s)")
+            };
+            dialog.status = msg;
+            self.memory_panel.last_action = action.label().to_owned();
+            self.memory_panel.stable_pointer_dialog = Some(dialog);
+            return true;
+        }
         let range = if action == MemoryScanAction::Between {
             let Some(min) = parse_scan_value(
                 &self.memory_panel.between_min_input,
@@ -14662,6 +14651,10 @@ impl CrosshairApp {
 
     fn start_memory_action(&mut self, action: MemoryScanAction) {
         if self.start_stable_pointer_filter(action) {
+            return;
+        }
+        if action == MemoryScanAction::SetBase {
+            self.set_current_scan_as_base();
             return;
         }
         #[cfg(windows)]
