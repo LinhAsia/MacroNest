@@ -224,6 +224,7 @@ struct StablePointerDialog {
     last_live_refresh: Instant,
     validation_rx: Option<Receiver<StablePointerValidationResult>>,
     filter_rx: Option<Receiver<StablePointerFilterResult>>,
+    validation_rounds: usize,
 }
 
 enum DeepPointerJobResult {
@@ -6507,6 +6508,7 @@ impl CrosshairApp {
                 last_live_refresh: Instant::now(),
                 validation_rx: None,
                 filter_rx: None,
+                validation_rounds: 0,
             });
             return;
         };
@@ -6604,6 +6606,7 @@ impl CrosshairApp {
                     last_live_refresh: Instant::now(),
                     validation_rx: None,
                     filter_rx: None,
+                    validation_rounds: 0,
                 });
                 return;
             }
@@ -6655,6 +6658,7 @@ impl CrosshairApp {
             last_live_refresh: Instant::now(),
             validation_rx: None,
             filter_rx: None,
+            validation_rounds: 0,
         });
     }
 
@@ -9048,11 +9052,13 @@ impl CrosshairApp {
             && let Ok(res) = rx.try_recv()
         {
             dialog.validation_rx = None;
+            dialog.validation_rounds += 1;
             dialog.candidates = res.candidates;
             dialog.selected = (!dialog.candidates.is_empty()).then(|| [0].into_iter().collect()).unwrap_or_default();
             dialog.selection_anchor = (!dialog.candidates.is_empty()).then_some(0);
             dialog.status = format!(
-                "PID {}: {} verified, {} resolved with a different value, {} broken across {} target(s).",
+                "Validation #{}: PID {}: {} verified, {} resolved with a different value, {} broken across {} target(s).",
+                dialog.validation_rounds,
                 res.pid,
                 res.verified,
                 res.changed,
@@ -9134,26 +9140,39 @@ impl CrosshairApp {
                 }
             }
 
-            let new_process_ready = restarted_instance.is_some();
+            let can_validate = (restarted_instance.is_some() || self.memory_panel.process_pid.is_some())
+                && !dialog.candidates.is_empty()
+                && dialog.validation_rx.is_none()
+                && dialog.filter_rx.is_none();
+
+            let validate_btn_label = if restarted_instance.is_some() {
+                self.tr("Validate after restart", "Xác thực sau restart")
+            } else if dialog.validation_rounds > 0 {
+                self.tr("Re-validate", "Xác thực lại")
+            } else {
+                self.tr("Validate", "Xác thực")
+            };
 
             ui.horizontal(|ui| {
                 let btn = ui
                     .add_enabled(
-                        new_process_ready
-                            && !dialog.candidates.is_empty()
-                            && dialog.validation_rx.is_none()
-                            && dialog.filter_rx.is_none(),
-                        Button::new("Validate after restart"),
+                        can_validate,
+                        Button::new(validate_btn_label),
                     )
-                    .on_hover_text(if new_process_ready {
+                    .on_hover_text(if restarted_instance.is_some() {
                         self.tr(
                             "Restarted target process detected! Click to set as active target window and validate pointer candidates.",
                             "Đã phát hiện game/tiến trình mới được khởi động lại! Nhấn để tự động chọn làm target window và xác thực con trỏ.",
                         )
+                    } else if self.memory_panel.process_pid.is_some() {
+                        self.tr(
+                            "Validate pointer candidates against currently selected process.",
+                            "Xác thực lại danh sách con trỏ với tiến trình đang chọn.",
+                        )
                     } else {
                         self.tr(
-                            "Locked: Restart the game/app first. This button will automatically enable when the new game instance is running.",
-                            "Đang khóa: Hãy khởi động lại game/app trước. Nút này sẽ tự động sáng lên khi game mới chạy.",
+                            "Locked: Select a process or restart the game to validate pointer candidates.",
+                            "Đang khóa: Hãy chọn tiến trình hoặc khởi động lại game để xác thực con trỏ.",
                         )
                     });
                 if btn.clicked() {
@@ -9162,24 +9181,43 @@ impl CrosshairApp {
                     }
                     validate = true;
                 }
-                    if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
-                        ui.spinner();
-                    }
-                    let sel_count = dialog.selected.len();
-                    let add_label = if sel_count > 1 {
-                        format!("Add all {sel_count} selected to Address list")
-                    } else {
-                        "Add selected pointer to Address list".to_owned()
-                    };
-                    if ui
+                let verified_count = dialog.candidates.iter().filter(|c| c.valid == Some(true)).count();
+                if verified_count > 0 && verified_count < dialog.candidates.len() {
+                    let prune_label = format!("Keep verified only ({verified_count})");
+                    let prune_btn = ui
                         .add_enabled(
-                            !dialog.selected.is_empty() && dialog.filter_rx.is_none() && dialog.validation_rx.is_none(),
-                            Button::new(add_label),
+                            dialog.validation_rx.is_none() && dialog.filter_rx.is_none(),
+                            Button::new(RichText::new(prune_label).color(Color32::from_rgb(84, 214, 140)).strong()),
                         )
-                        .clicked()
-                    {
-                        add = Some(dialog.selected.iter().copied().collect());
+                        .on_hover_text(self.tr(
+                            "Remove all broken and unverified candidates, keeping only the surviving verified pointers to validate across further restarts.",
+                            "Xóa bỏ các con trỏ bị lỗi/sai giá trị, chỉ giữ lại những con trỏ đã verified thành công để tiếp tục validate các lần restart tiếp theo.",
+                        ));
+                    if prune_btn.clicked() {
+                        dialog.candidates.retain(|c| c.valid == Some(true));
+                        dialog.selected = (!dialog.candidates.is_empty()).then(|| [0].into_iter().collect()).unwrap_or_default();
+                        dialog.selection_anchor = (!dialog.candidates.is_empty()).then_some(0);
+                        dialog.status = format!("Kept {} verified pointer candidate(s).", dialog.candidates.len());
                     }
+                }
+                if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
+                    ui.spinner();
+                }
+                let sel_count = dialog.selected.len();
+                let add_label = if sel_count > 1 {
+                    format!("Add all {sel_count} selected to Address list")
+                } else {
+                    "Add selected pointer to Address list".to_owned()
+                };
+                if ui
+                    .add_enabled(
+                        !dialog.selected.is_empty() && dialog.filter_rx.is_none() && dialog.validation_rx.is_none(),
+                        Button::new(add_label),
+                    )
+                    .clicked()
+                {
+                    add = Some(dialog.selected.iter().copied().collect());
+                }
                     ui.separator();
                     let filter_resp = ui.add(
                         egui::TextEdit::singleline(&mut dialog.filter)
