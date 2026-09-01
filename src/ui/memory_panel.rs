@@ -6801,19 +6801,25 @@ impl CrosshairApp {
                     } else {
                         targets
                     };
-                    let paths_a = map_a.paths_to_any(
-                        &targets_a,
-                        limits.max_offset,
-                        limits.max_depth,
-                        comparison_limit,
-                    );
-                    worker_stage.store(2, Ordering::Relaxed);
-                    let paths_b = map_b.paths_to_any(
-                        &targets_b,
-                        limits.max_offset,
-                        limits.max_depth,
-                        comparison_limit,
-                    );
+                    let (paths_a, paths_b) = std::thread::scope(|s| {
+                        let handle_a = s.spawn(|| {
+                            map_a.paths_to_any(
+                                &targets_a,
+                                limits.max_offset,
+                                limits.max_depth,
+                                comparison_limit,
+                            )
+                        });
+                        let handle_b = s.spawn(|| {
+                            map_b.paths_to_any(
+                                &targets_b,
+                                limits.max_offset,
+                                limits.max_depth,
+                                comparison_limit,
+                            )
+                        });
+                        (handle_a.join().unwrap(), handle_b.join().unwrap())
+                    });
                     worker_stage.store(3, Ordering::Relaxed);
                     let paths_a_count = paths_a.len();
                     let paths_b_count = paths_b.len();
@@ -10383,76 +10389,92 @@ impl CrosshairApp {
                 .collect();
 
             let pointer_width = process_pointer_width(pid).unwrap_or(8);
-            let value_scan_type = if pointer_width == 4 {
-                ScanValueType::I32
-            } else {
-                ScanValueType::I64
-            };
+            let val_width = value_type.width();
 
             let mut verified = 0;
             let mut changed = 0;
             let mut broken = 0;
 
-            for candidate in &mut candidates {
-                let module_lower = candidate.path.module.to_ascii_lowercase();
-                let Some(&mod_base) = modules_map.get(&module_lower) else {
-                    candidate.valid = Some(false);
-                    candidate.resolved_base = None;
-                    candidate.resolved_address = None;
-                    candidate.observed_value = None;
-                    candidate.live_value = None;
-                    candidate.filter_value = None;
-                    broken += 1;
-                    continue;
-                };
-                let base = mod_base.wrapping_add(candidate.path.module_offset);
-                candidate.resolved_base = Some(base);
-                let mut curr_addr = base;
-                let mut broken_path = false;
-                for &offset in &candidate.path.offsets {
-                    let next_ptr = match read_scan_value(pid, curr_addr, value_scan_type) {
-                        Ok(ScanValue::I32(val)) => val as u32 as usize,
-                        Ok(ScanValue::I64(val)) => val as usize,
-                        _ => {
+            let _ = crate::process_memory::with_cached_read_process(pid, |process| {
+                let mut ptr_buf = [0u8; 8];
+                let mut val_buf = [0u8; 8];
+
+                for candidate in &mut candidates {
+                    let module_lower = candidate.path.module.to_ascii_lowercase();
+                    let Some(&mod_base) = modules_map.get(&module_lower) else {
+                        candidate.valid = Some(false);
+                        candidate.resolved_base = None;
+                        candidate.resolved_address = None;
+                        candidate.observed_value = None;
+                        candidate.live_value = None;
+                        candidate.filter_value = None;
+                        broken += 1;
+                        continue;
+                    };
+                    let base = mod_base.wrapping_add(candidate.path.module_offset);
+                    candidate.resolved_base = Some(base);
+                    let mut curr_addr = base;
+                    let mut broken_path = false;
+                    for &offset in &candidate.path.offsets {
+                        let read_res = if pointer_width == 4 {
+                            process.read(curr_addr, &mut ptr_buf[..4])
+                        } else {
+                            process.read(curr_addr, &mut ptr_buf[..8])
+                        };
+                        if read_res.is_err() {
                             broken_path = true;
                             break;
                         }
-                    };
-                    if next_ptr == 0 {
-                        broken_path = true;
-                        break;
+                        let next_ptr = if pointer_width == 4 {
+                            u32::from_le_bytes(ptr_buf[..4].try_into().unwrap()) as usize
+                        } else {
+                            u64::from_le_bytes(ptr_buf[..8].try_into().unwrap()) as usize
+                        };
+                        if next_ptr == 0 {
+                            broken_path = true;
+                            break;
+                        }
+                        curr_addr = next_ptr.wrapping_add(offset);
                     }
-                    curr_addr = next_ptr.wrapping_add(offset);
+                    if broken_path {
+                        candidate.valid = Some(false);
+                        candidate.resolved_address = None;
+                        candidate.observed_value = None;
+                        candidate.live_value = None;
+                        candidate.filter_value = None;
+                        broken += 1;
+                        continue;
+                    }
+                    candidate.resolved_address = Some(curr_addr);
+                    if process.read(curr_addr, &mut val_buf[..val_width]).is_err() {
+                        candidate.valid = Some(false);
+                        candidate.observed_value = None;
+                        candidate.live_value = None;
+                        candidate.filter_value = None;
+                        broken += 1;
+                        continue;
+                    }
+                    let Some(observed) = value_type.decode(&val_buf[..val_width]) else {
+                        candidate.valid = Some(false);
+                        candidate.observed_value = None;
+                        candidate.live_value = None;
+                        candidate.filter_value = None;
+                        broken += 1;
+                        continue;
+                    };
+                    candidate.observed_value = Some(observed);
+                    candidate.live_value = Some(observed);
+                    candidate.filter_value = Some(observed);
+                    if observed == candidate.expected_value {
+                        candidate.valid = Some(true);
+                        verified += 1;
+                    } else {
+                        candidate.valid = None;
+                        changed += 1;
+                    }
                 }
-                if broken_path {
-                    candidate.valid = Some(false);
-                    candidate.resolved_address = None;
-                    candidate.observed_value = None;
-                    candidate.live_value = None;
-                    candidate.filter_value = None;
-                    broken += 1;
-                    continue;
-                }
-                candidate.resolved_address = Some(curr_addr);
-                let Ok(observed) = read_scan_value(pid, curr_addr, value_type) else {
-                    candidate.valid = Some(false);
-                    candidate.observed_value = None;
-                    candidate.live_value = None;
-                    candidate.filter_value = None;
-                    broken += 1;
-                    continue;
-                };
-                candidate.observed_value = Some(observed);
-                candidate.live_value = Some(observed);
-                candidate.filter_value = Some(observed);
-                if observed == candidate.expected_value {
-                    candidate.valid = Some(true);
-                    verified += 1;
-                } else {
-                    candidate.valid = None;
-                    changed += 1;
-                }
-            }
+                Ok(())
+            });
 
             candidates.sort_by_key(|candidate| match candidate.valid {
                 Some(true) => 0,

@@ -123,7 +123,7 @@ impl ScanValueType {
         }
     }
 
-    fn decode(self, bytes: &[u8]) -> Option<ScanValue> {
+    pub fn decode(self, bytes: &[u8]) -> Option<ScanValue> {
         Some(match self {
             Self::I8 => ScanValue::I8(i8::from_le_bytes(bytes.get(..1)?.try_into().ok()?)),
             Self::I16 => ScanValue::I16(i16::from_le_bytes(bytes.get(..2)?.try_into().ok()?)),
@@ -649,6 +649,9 @@ fn capture_pointer_map_with_budget_cancel(
         .map_err(|_| io::Error::other("not enough memory to start pointer map"))?;
     let mut buffer = vec![0u8; SCAN_CHUNK_BYTES];
     let mut remaining = max_bytes;
+    let mut last_hit_base = 0usize;
+    let mut last_hit_end = 0usize;
+
     'regions: for region in regions {
         if cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire)) {
             break;
@@ -670,28 +673,55 @@ fn capture_pointer_map_with_budget_cancel(
             if read < pointer_width {
                 continue;
             }
-            for byte_offset in (0..=read - pointer_width).step_by(pointer_width) {
-                let value = if pointer_width == 4 {
-                    u32::from_le_bytes(buffer[byte_offset..byte_offset + 4].try_into().unwrap())
-                        as usize
-                } else {
-                    u64::from_le_bytes(buffer[byte_offset..byte_offset + 8].try_into().unwrap())
-                        as usize
-                };
-                if value < min_readable || value >= max_readable {
-                    continue;
-                }
-                let range = readable_ranges.partition_point(|(base, _)| *base <= value);
-                if range > 0 && value < readable_ranges[range - 1].1 {
-                    if pointers.len() == pointers.capacity() {
-                        pointers.try_reserve_exact(1_000_000).map_err(|_| {
-                            io::Error::other(format!(
-                                "not enough memory after capturing {} pointers",
-                                pointers.len()
-                            ))
-                        })?;
+            if pointer_width == 8 {
+                let chunks = read / 8;
+                let slice = unsafe { std::slice::from_raw_parts(buffer.as_ptr() as *const u64, chunks) };
+                for (i, &word_le) in slice.iter().enumerate() {
+                    let value = u64::from_le(word_le) as usize;
+                    if value < min_readable || value >= max_readable {
+                        continue;
                     }
-                    pointers.push((value, address + byte_offset));
+                    if value >= last_hit_base && value < last_hit_end {
+                        if pointers.len() == pointers.capacity() {
+                            let _ = pointers.try_reserve_exact(1_000_000);
+                        }
+                        pointers.push((value, address + i * 8));
+                        continue;
+                    }
+                    let range = readable_ranges.partition_point(|(base, _)| *base <= value);
+                    if range > 0 && value < readable_ranges[range - 1].1 {
+                        last_hit_base = readable_ranges[range - 1].0;
+                        last_hit_end = readable_ranges[range - 1].1;
+                        if pointers.len() == pointers.capacity() {
+                            let _ = pointers.try_reserve_exact(1_000_000);
+                        }
+                        pointers.push((value, address + i * 8));
+                    }
+                }
+            } else {
+                let chunks = read / 4;
+                let slice = unsafe { std::slice::from_raw_parts(buffer.as_ptr() as *const u32, chunks) };
+                for (i, &word_le) in slice.iter().enumerate() {
+                    let value = u32::from_le(word_le) as usize;
+                    if value < min_readable || value >= max_readable {
+                        continue;
+                    }
+                    if value >= last_hit_base && value < last_hit_end {
+                        if pointers.len() == pointers.capacity() {
+                            let _ = pointers.try_reserve_exact(1_000_000);
+                        }
+                        pointers.push((value, address + i * 4));
+                        continue;
+                    }
+                    let range = readable_ranges.partition_point(|(base, _)| *base <= value);
+                    if range > 0 && value < readable_ranges[range - 1].1 {
+                        last_hit_base = readable_ranges[range - 1].0;
+                        last_hit_end = readable_ranges[range - 1].1;
+                        if pointers.len() == pointers.capacity() {
+                            let _ = pointers.try_reserve_exact(1_000_000);
+                        }
+                        pointers.push((value, address + i * 4));
+                    }
                 }
             }
             progress.fetch_add(read, Ordering::Relaxed);
@@ -866,6 +896,14 @@ fn find_pointer_paths(
     )
 }
 
+#[derive(Clone, Debug)]
+struct FastModuleInfo {
+    name: String,
+    base: usize,
+    end: usize,
+    is_system: bool,
+}
+
 fn find_pointer_paths_to_any(
     pointers: &[(usize, usize)],
     targets: &[usize],
@@ -877,6 +915,33 @@ fn find_pointer_paths_to_any(
 ) -> Vec<PointerPath> {
     let max_frontier = result_limit.saturating_mul(16).clamp(50_000, 1_000_000);
     let mut results = Vec::new();
+
+    let mut fast_modules: Vec<FastModuleInfo> = modules
+        .iter()
+        .map(|(module, base, size)| {
+            let lower = module.to_ascii_lowercase();
+            let is_system = lower.contains("ntdll")
+                || lower.contains("kernel32")
+                || lower.contains("kernelbase")
+                || lower.contains("user32")
+                || lower.contains("gdi32")
+                || lower.contains("msvcp")
+                || lower.contains("msvcrt")
+                || lower.contains("ucrtbase")
+                || lower.contains("vcruntime")
+                || lower.contains("comctl32")
+                || lower.contains("imm32")
+                || lower.contains("shell32");
+            FastModuleInfo {
+                name: module.clone(),
+                base: *base,
+                end: base.saturating_add(*size),
+                is_system,
+            }
+        })
+        .collect();
+    fast_modules.sort_unstable_by_key(|m| m.base);
+
     let mut seen_targets = HashSet::new();
     let mut frontier = targets
         .iter()
@@ -884,6 +949,7 @@ fn find_pointer_paths_to_any(
         .filter(|target| seen_targets.insert(*target))
         .map(|target| (target, Vec::<usize>::new()))
         .collect::<Vec<_>>();
+
     for _ in 0..max_depth.max(1) {
         let mut next = Vec::new();
         for (node, suffix) in frontier {
@@ -891,33 +957,20 @@ fn find_pointer_paths_to_any(
             let start = pointers.partition_point(|(value, _)| *value < minimum);
             let end = pointers.partition_point(|(value, _)| *value <= node);
             for &(value, location) in &pointers[start..end] {
-                let mut reverse_offsets = suffix.clone();
-                reverse_offsets.push(node - value);
-                if let Some((module, base, _)) = modules
-                    .iter()
-                    .find(|(_, base, size)| (*base..base.saturating_add(*size)).contains(&location))
-                {
-                    let is_sys = {
-                        let lower = module.to_lowercase();
-                        lower.contains("ntdll")
-                            || lower.contains("kernel32")
-                            || lower.contains("kernelbase")
-                            || lower.contains("user32")
-                            || lower.contains("gdi32")
-                            || lower.contains("msvcp")
-                            || lower.contains("msvcrt")
-                            || lower.contains("ucrtbase")
-                            || lower.contains("vcruntime")
-                            || lower.contains("comctl32")
-                            || lower.contains("imm32")
-                            || lower.contains("shell32")
-                    };
-                    if include_system_modules || !is_sys {
+                let offset = node - value;
+                let mut reverse_offsets = Vec::with_capacity(suffix.len() + 1);
+                reverse_offsets.extend_from_slice(&suffix);
+                reverse_offsets.push(offset);
+
+                let mod_idx = fast_modules.partition_point(|m| m.base <= location);
+                if mod_idx > 0 {
+                    let m = &fast_modules[mod_idx - 1];
+                    if location < m.end && (include_system_modules || !m.is_system) {
                         let mut offsets = reverse_offsets.clone();
                         offsets.reverse();
                         results.push(PointerPath {
-                            module: module.clone(),
-                            module_offset: location - *base,
+                            module: m.name.clone(),
+                            module_offset: location - m.base,
                             offsets,
                         });
                         if results.len() >= result_limit.max(1) {
@@ -958,7 +1011,7 @@ struct ScanRegion {
     size: usize,
 }
 
-struct ScanProcess {
+pub(crate) struct ScanProcess {
     handle: *mut c_void,
 }
 
@@ -1058,7 +1111,7 @@ impl ScanProcess {
         }
     }
 
-    fn read(&self, address: usize, buffer: &mut [u8]) -> io::Result<usize> {
+    pub(crate) fn read(&self, address: usize, buffer: &mut [u8]) -> io::Result<usize> {
         let mut read = 0;
         let ok = unsafe {
             ReadProcessMemory(
@@ -1085,7 +1138,7 @@ thread_local! {
     static CACHED_READ_PROCESS: RefCell<Option<CachedReadProcess>> = const { RefCell::new(None) };
 }
 
-fn with_cached_read_process<T>(
+pub(crate) fn with_cached_read_process<T>(
     pid: u32,
     read: impl FnOnce(&ScanProcess) -> io::Result<T>,
 ) -> io::Result<T> {
