@@ -14709,7 +14709,8 @@ impl CrosshairApp {
         } else {
             None
         };
-        let is_aob = self.memory_panel.is_aob_scan || is_aob_pattern_input(&self.memory_panel.value_input);
+        let is_aob = (self.memory_panel.is_aob_scan || is_aob_pattern_input(&self.memory_panel.value_input))
+            && (action == MemoryScanAction::FirstScan || action == MemoryScanAction::Exact);
         let exact = if matches!(
             action,
             MemoryScanAction::Unknown | MemoryScanAction::Between

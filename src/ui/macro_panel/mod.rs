@@ -4731,6 +4731,14 @@ impl CrosshairApp {
                         }
                     }
                 });
+            let is_in_folder_list = self.macro_folders_panel_open && active_folder_for_controls.is_none();
+            let add_tooltip = if is_in_folder_list {
+                Self::tr_lang(language, "Add folder", "Add folder")
+            } else if active_folder_for_controls.is_some() {
+                Self::tr_lang(language, "Add macro group to folder", "Add macro group to folder")
+            } else {
+                Self::tr_lang(language, "Add macro group", "Add macro group")
+            };
             if Self::with_emphasized_button_hover(ui, |ui| {
                 ui.add_sized(
                     [28.0, 28.0],
@@ -4742,15 +4750,14 @@ impl CrosshairApp {
                         )),
                 )
             })
-            .on_hover_text(Self::tr_lang(
-                language,
-                "Add macro group",
-                "Add macro group",
-            ))
+            .on_hover_text(add_tooltip)
             .clicked()
             {
                 if let Some(folder_id) = active_folder_for_controls {
                     self.add_macro_group_to_folder(folder_id);
+                } else if is_in_folder_list {
+                    self.add_macro_folder();
+                    self.open_macro_folder_mode();
                 } else {
                     self.add_macro_group();
                 }
