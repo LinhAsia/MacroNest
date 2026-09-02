@@ -28501,6 +28501,7 @@ mod windows_overlay {
         let mut shapes = Vec::new();
         let aspect = width as f32 / height as f32;
         let perms = crate::model::esp_debug_permutations();
+        let mut drawn_positions: Vec<(i32, i32)> = Vec::new();
 
         for perm in perms {
             let mut test_preset = preset.clone();
@@ -28556,6 +28557,14 @@ mod windows_overlay {
                     + preset.screen_offset_y
                     + preset.marker_offset_y)
                     .round() as i32;
+
+            if drawn_positions
+                .iter()
+                .any(|&(ox, oy)| (ox - px).abs() <= 8 && (oy - py).abs() <= 8)
+            {
+                continue;
+            }
+            drawn_positions.push((px, py));
 
             let color = perm.color;
             let half_w = 10;
