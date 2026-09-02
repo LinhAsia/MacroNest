@@ -268,9 +268,6 @@ struct DeepPointerDialog {
     exe_only: bool,
     display_type: ScanValueType,
     resolved_rows: HashMap<usize, DeepPointerResolvedRow>,
-    entity_preset_id: Option<u32>,
-    entity_y_offset: i64,
-    entity_z_offset: i64,
     entity_stride: u32,
     entity_count: u32,
     entity_root_matching: bool,
@@ -1116,11 +1113,16 @@ impl CrosshairApp {
         let Some(last) = self.memory_panel.last_selected_process.clone() else {
             return;
         };
-        self.ensure_open_windows_ready(true);
-        #[cfg(windows)]
-        self.schedule_memory_process_choices_refresh(ctx);
 
-        // 1. First check if a window matches selector, name, or path
+        // Synchronously enumerate live windows immediately so newly restarted windows are visible on the first click
+        let live_windows = window_list::list_open_windows();
+        if !live_windows.is_empty() {
+            self.open_window_infos = live_windows;
+            self.open_windows_loaded_once = true;
+            self.last_window_refresh_at = Instant::now();
+        }
+
+        // 1. First check if an active window matches path, title, or selector
         let matching_window = self.open_window_infos.iter().find(|w| {
             if !last.path.is_empty() && w.process_path.eq_ignore_ascii_case(&last.path) {
                 return true;
@@ -1146,44 +1148,41 @@ impl CrosshairApp {
             return;
         }
 
-        // 2. Next check in process choices / running processes
+        // 2. Next check in live running processes directly (avoid stale cached choices)
         #[cfg(windows)]
         {
-            let mut choices = self.memory_panel.process_choices.clone();
-            if choices.is_empty() {
-                if let Ok(mut procs) = list_process_details() {
-                    for process in &mut procs {
-                        if process.path.is_empty() {
-                            let path = crate::memory_debugger::debugger::process_path(process.pid);
-                            if !path.is_empty() {
-                                process.path = path;
-                            }
+            if let Ok(mut procs) = list_process_details() {
+                for process in &mut procs {
+                    if process.path.is_empty() {
+                        let path = crate::memory_debugger::debugger::process_path(process.pid);
+                        if !path.is_empty() {
+                            process.path = path;
                         }
                     }
-                    choices = procs;
                 }
-            }
-            let matching_process = choices.iter().find(|p| {
-                if !last.path.is_empty() && p.path.eq_ignore_ascii_case(&last.path) {
-                    return true;
-                }
-                if !last.name.is_empty() {
-                    let p_name = p.name.trim_end_matches(".exe");
-                    let last_name = last.name.trim_end_matches(".exe");
-                    if p.name.eq_ignore_ascii_case(&last.name) || p_name.eq_ignore_ascii_case(last_name) {
+                self.memory_panel.process_choices = procs.clone();
+                let matching_process = procs.iter().find(|p| {
+                    if !last.path.is_empty() && p.path.eq_ignore_ascii_case(&last.path) {
                         return true;
                     }
-                }
-                false
-            }).cloned();
+                    if !last.name.is_empty() {
+                        let p_name = p.name.trim_end_matches(".exe");
+                        let last_name = last.name.trim_end_matches(".exe");
+                        if p.name.eq_ignore_ascii_case(&last.name) || p_name.eq_ignore_ascii_case(last_name) {
+                            return true;
+                        }
+                    }
+                    false
+                }).cloned();
 
-            if let Some(p) = matching_process {
-                self.select_memory_process(format!("pid:{}:{}", p.pid, p.name), Some(p.pid), ctx);
-                self.memory_panel.status = format!(
-                    "Re-attached to {} — PID {}",
-                    p.name, p.pid
-                );
-                return;
+                if let Some(p) = matching_process {
+                    self.select_memory_process(format!("pid:{}:{}", p.pid, p.name), Some(p.pid), ctx);
+                    self.memory_panel.status = format!(
+                        "Re-attached to {} — PID {}",
+                        p.name, p.pid
+                    );
+                    return;
+                }
             }
 
             if !last.selector.is_empty() && !last.selector.starts_with("pid:") {
@@ -6760,9 +6759,6 @@ impl CrosshairApp {
                         exe_only: false,
                         display_type: saved.value_type,
                         resolved_rows: HashMap::new(),
-                        entity_preset_id: self.state.esp_presets.first().map(|preset| preset.id),
-                        entity_y_offset: 4,
-                        entity_z_offset: 8,
                         entity_stride: 0x48,
                         entity_count: 32,
                         entity_root_matching: false,
@@ -6912,9 +6908,6 @@ impl CrosshairApp {
                 exe_only: false,
                 display_type: saved.value_type,
                 resolved_rows: HashMap::new(),
-                entity_preset_id: self.state.esp_presets.first().map(|preset| preset.id),
-                entity_y_offset: 4,
-                entity_z_offset: 8,
                 entity_stride: 0x48,
                 entity_count: 32,
                 entity_root_matching: false,
@@ -9781,7 +9774,6 @@ impl CrosshairApp {
         let mut clear = false;
         let mut add = false;
         let mut add_one = None;
-        let mut use_entity_source = None;
         let title = "Deep pointer scan - map comparison";
         let popup_id = "memory-deep-pointer-scan";
         let pinned = !self.memory_panel.unpinned_memory_popups.contains(popup_id);
@@ -9824,8 +9816,6 @@ impl CrosshairApp {
                                 &mut clear,
                                 &mut add,
                                 &mut add_one,
-                                &mut use_entity_source,
-                                &self.state.esp_presets,
                             );
                         });
                     Self::render_memory_popup_resize_handles(ctx);
@@ -9865,40 +9855,11 @@ impl CrosshairApp {
                         &mut clear,
                         &mut add,
                         &mut add_one,
-                        &mut use_entity_source,
-                        &self.state.esp_presets,
                     );
                 });
         }
         if toggle_pin && !pinned {
             self.memory_panel.unpinned_memory_popups.remove(popup_id);
-        }
-        if let Some(index) = use_entity_source
-            && let Some(path) = dialog.candidates.get(index)
-            && let Some(preset_id) = dialog.entity_preset_id
-            && let Some(preset) = self
-                .state
-                .esp_presets
-                .iter_mut()
-                .find(|preset| preset.id == preset_id)
-        {
-            preset.entity_list_enabled = true;
-            preset.entity_root = format_pointer_expression(&PointerSpec {
-                base: 0,
-                module: Some((path.module.clone(), path.module_offset)),
-                offsets: path.offsets.clone(),
-            });
-            preset.entity_x_offset = 0;
-            preset.entity_y_offset = dialog.entity_y_offset;
-            preset.entity_z_offset = dialog.entity_z_offset;
-            preset.entity_stride = dialog.entity_stride.max(1);
-            preset.entity_count = dialog.entity_count.clamp(1, 512);
-            let preset_name = preset.name.clone();
-            self.persist_esp_presets();
-            dialog.map_a = None;
-            dialog.status = format!(
-                "Saved Entity List source to {preset_name}. Pointer map memory was released."
-            );
         }
         if (add || add_one.is_some())
             && let Some(pid) = self.memory_panel.process_pid
@@ -9981,8 +9942,6 @@ impl CrosshairApp {
         clear: &mut bool,
         add: &mut bool,
         add_one: &mut Option<usize>,
-        use_entity_source: &mut Option<usize>,
-        esp_presets: &[EspPreset],
     ) {
         ui.label(&dialog.status);
         if let Some(stats) = dialog.comparison_stats {
@@ -10092,66 +10051,7 @@ impl CrosshairApp {
                 .small(),
             );
         });
-        if !dialog.candidates.is_empty() {
-            ui.group(|ui| {
-                let selected_name = dialog
-                    .entity_preset_id
-                    .and_then(|id| {
-                        esp_presets
-                            .iter()
-                            .find(|preset| preset.id == id)
-                    })
-                    .map_or("Select ESP preset", |preset| preset.name.as_str());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Save found root as Entity List").strong(),
-                    );
-                    egui::ComboBox::from_id_salt("deep-pointer-entity-preset")
-                        .selected_text(selected_name)
-                        .width(150.0)
-                        .show_ui(ui, |ui| {
-                            for preset in esp_presets {
-                                ui.selectable_value(
-                                    &mut dialog.entity_preset_id,
-                                    Some(preset.id),
-                                    &preset.name,
-                                );
-                            }
-                        });
-                    if ui
-                        .add_enabled(
-                            dialog.entity_preset_id.is_some()
-                                && dialog.selected.len() == 1,
-                            Button::new("Use selected root"),
-                        )
-                        .on_hover_text(
-                            "Save the selected stable pointer as entity X.",
-                        )
-                        .clicked()
-                    {
-                        *use_entity_source = dialog.selected.iter().next().copied();
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Y offset");
-                    ui.add(egui::DragValue::new(&mut dialog.entity_y_offset));
-                    ui.label("Z offset");
-                    ui.add(egui::DragValue::new(&mut dialog.entity_z_offset));
-                    ui.label("Count");
-                    ui.add(
-                        egui::DragValue::new(&mut dialog.entity_count)
-                            .range(1..=512),
-                    );
-                });
-                ui.label(
-                    RichText::new(
-                        "Offsets and stride are bytes. Runtime reads stop at 512 slots.",
-                    )
-                    .weak()
-                    .small(),
-                );
-            });
-        }
+
         ui.separator();
         const ROOT_WIDTH: f32 = 250.0;
         const OFFSETS_WIDTH: f32 = 180.0;
