@@ -1,7 +1,7 @@
 use eframe::egui::{self, Button, Color32, ComboBox, DragValue, Frame, Grid, RichText, TextEdit};
 
 use crate::model::{
-    EspAngleUnit, EspHorizontalPlane, EspMarkerKind, EspMarkerSource, EspOrientationSource,
+    EspAngleUnit, EspMarkerKind, EspMarkerSource, EspOrientationSource,
     EspPitchInput, EspPreset, MemoryValueType, RgbaColor,
 };
 
@@ -1343,6 +1343,12 @@ impl CrosshairApp {
                                         .on_hover_text("Reverse only camera rotation.");
                                     ui.checkbox(&mut preset.invert_camera_pitch, "Reverse pitch")
                                         .on_hover_text("Reverse only camera pitch angle.");
+                                    ui.checkbox(&mut preset.invert_direction_a, "Invert A (X)")
+                                        .on_hover_text("Invert horizontal axis A (X). Use this when 2 opposite directions show ESP but 2 perpendicular directions disappear.");
+                                    ui.checkbox(&mut preset.invert_direction_b, "Invert B (Y)")
+                                        .on_hover_text("Invert horizontal axis B (Y).");
+                                    ui.checkbox(&mut preset.swap_direction_pair, "Swap A/B")
+                                        .on_hover_text("Swap horizontal axes A and B.");
                                     ui.checkbox(&mut preset.invert_vertical, "Invert height (Z)")
                                         .on_hover_text("Invert target elevation difference.");
                                     ui.checkbox(&mut preset.invert_yaw, "Mirror X")
@@ -1497,7 +1503,6 @@ impl CrosshairApp {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Auto Calib:");
                                     if ui.small_button("Apply suggested start").on_hover_text("Suggested: XY + vertical Z, yaw Degrees, pitch Radians, FOV 90. If sideways try ±90; if behind try 180.").clicked() {
-                                        preset.horizontal_plane = EspHorizontalPlane::Xy;
                                         preset.yaw_unit = EspAngleUnit::Degrees;
                                         preset.pitch_unit = EspAngleUnit::Radians;
                                         preset.pitch_input = EspPitchInput::Angle;
@@ -1577,7 +1582,6 @@ impl CrosshairApp {
                                                 .button(format!("Apply #{}", target_cfg.index))
                                                 .clicked()
                                             {
-                                                preset.horizontal_plane = target_cfg.horizontal_plane;
                                                 preset.swap_direction_pair = target_cfg.swap_direction_pair;
                                                 preset.invert_direction_a = target_cfg.invert_direction_a;
                                                 preset.invert_direction_b = target_cfg.invert_direction_b;

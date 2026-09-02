@@ -28504,7 +28504,6 @@ mod windows_overlay {
 
         for perm in perms {
             let mut test_preset = preset.clone();
-            test_preset.horizontal_plane = perm.horizontal_plane;
             test_preset.swap_direction_pair = perm.swap_direction_pair;
             test_preset.invert_direction_a = perm.invert_direction_a;
             test_preset.invert_direction_b = perm.invert_direction_b;
@@ -28577,16 +28576,17 @@ mod windows_overlay {
                 },
             });
 
-            let text_y = py - 18;
+            let text_y = py - 14;
+            let label = format!("#{}", perm.index);
             shapes.push(GeometryRenderShape {
-                bounds: geometry_label_bounds(px, text_y, 11, &perm.label, 0.0),
+                bounds: geometry_label_bounds(px, text_y, 12, &label, 0.0),
                 draw: GeometryRenderDraw::Label(GeometryRenderText {
                     x: px,
                     y: text_y,
-                    font_size: 11,
+                    font_size: 12,
                     color,
                     rotation_deg: 0.0,
-                    text: perm.label,
+                    text: label,
                 }),
             });
         }

@@ -36,12 +36,6 @@ pub enum EspPitchInput {
     TangentComponent,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum EspHorizontalPlane {
-    #[default]
-    Xy,
-    Xz,
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum EspOrientationSource {
@@ -133,7 +127,6 @@ pub struct EspPreset {
     pub pitch_unit: EspAngleUnit,
     pub pitch_input: EspPitchInput,
     pub pitch_multiplier: f32,
-    pub horizontal_plane: EspHorizontalPlane,
     pub invert_camera_yaw: bool,
     pub invert_camera_pitch: bool,
     pub invert_vertical: bool,
@@ -247,7 +240,6 @@ impl EspPreset {
             pitch_unit: EspAngleUnit::Radians,
             pitch_input: EspPitchInput::Angle,
             pitch_multiplier: 1.0,
-            horizontal_plane: EspHorizontalPlane::Xy,
             invert_camera_yaw: false,
             invert_camera_pitch: false,
             invert_vertical: false,
@@ -734,10 +726,16 @@ pub(crate) fn esp_spatial_audio_pan(
         target[1] - camera[1],
         target[2] - camera[2],
     ];
-    let (forward_a, forward_b) = match preset.horizontal_plane {
-        EspHorizontalPlane::Xy => (delta[0], delta[1]),
-        EspHorizontalPlane::Xz => (delta[0], delta[2]),
-    };
+    let (mut forward_a, mut forward_b) = (delta[0], delta[1]);
+    if preset.swap_direction_pair {
+        std::mem::swap(&mut forward_a, &mut forward_b);
+    }
+    if preset.invert_direction_a {
+        forward_a = -forward_a;
+    }
+    if preset.invert_direction_b {
+        forward_b = -forward_b;
+    }
     if forward_a.hypot(forward_b) <= f32::EPSILON {
         return 0.0;
     }
@@ -837,7 +835,6 @@ pub struct EspPermutationConfig {
     pub index: usize,
     pub short_desc: String,
     pub label: String,
-    pub horizontal_plane: EspHorizontalPlane,
     pub swap_direction_pair: bool,
     pub invert_direction_a: bool,
     pub invert_direction_b: bool,
@@ -851,7 +848,6 @@ pub struct EspPermutationConfig {
 }
 
 pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
-    let planes = [EspHorizontalPlane::Xz, EspHorizontalPlane::Xy];
     let swaps = [false, true];
     let inv_as = [false, true];
     let inv_bs = [false, true];
@@ -877,54 +873,47 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
         [200, 255, 200, 255], // Mint Green
     ];
 
-    let mut configs = Vec::with_capacity(2048);
+    let mut configs = Vec::with_capacity(1024);
     let mut idx = 1;
-    for &plane in &planes {
-        for &swap in &swaps {
-            for &inv_a in &inv_as {
-                for &inv_b in &inv_bs {
-                    for &rev_yaw in &rev_yaws {
-                        for &yaw_off in &yaw_offsets {
-                            for &rev_pitch in &rev_pitches {
-                                for &inv_elev in &inv_elevations {
-                                    for &(p_in, p_unit, p_tag) in &pitch_modes {
-                                        let plane_str = match plane {
-                                            EspHorizontalPlane::Xz => "XZ",
-                                            EspHorizontalPlane::Xy => "XY",
-                                        };
-                                        let swap_str = if swap { "Swap" } else { "Norm" };
-                                        let inv_str = match (inv_a, inv_b) {
-                                            (false, false) => "+A+B",
-                                            (true, false) => "-A+B",
-                                            (false, true) => "+A-B",
-                                            (true, true) => "-A-B",
-                                        };
-                                        let rev_y_str = if rev_yaw { "RevY" } else { "NormY" };
-                                        let yaw_str = format!("{yaw_off:+.0}°");
-                                        let rev_p_str = if rev_pitch { "RevP" } else { "NormP" };
-                                        let elev_str = if inv_elev { "InvElev" } else { "NormElev" };
+    for &swap in &swaps {
+        for &inv_a in &inv_as {
+            for &inv_b in &inv_bs {
+                for &rev_yaw in &rev_yaws {
+                    for &yaw_off in &yaw_offsets {
+                        for &rev_pitch in &rev_pitches {
+                            for &inv_elev in &inv_elevations {
+                                for &(p_in, p_unit, p_tag) in &pitch_modes {
+                                    let swap_str = if swap { "Swap" } else { "Norm" };
+                                    let inv_str = match (inv_a, inv_b) {
+                                        (false, false) => "+A+B",
+                                        (true, false) => "-A+B",
+                                        (false, true) => "+A-B",
+                                        (true, true) => "-A-B",
+                                    };
+                                    let rev_y_str = if rev_yaw { "RevY" } else { "NormY" };
+                                    let yaw_str = format!("{yaw_off:+.0}°");
+                                    let rev_p_str = if rev_pitch { "RevP" } else { "NormP" };
+                                    let elev_str = if inv_elev { "InvElev" } else { "NormElev" };
 
-                                        let short_desc = format!("[{plane_str}] {swap_str} {inv_str} {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {p_tag}");
-                                        let label = format!("#{idx}: [{plane_str}] {swap_str} {inv_str} {rev_y_str} {yaw_str} {rev_p_str} {elev_str} {p_tag}");
+                                    let short_desc = format!("{swap_str} {inv_str} {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {p_tag}");
+                                    let label = format!("#{idx}: {swap_str} {inv_str} {rev_y_str} {yaw_str} {rev_p_str} {elev_str} {p_tag}");
 
-                                        configs.push(EspPermutationConfig {
-                                            index: idx,
-                                            short_desc,
-                                            label,
-                                            horizontal_plane: plane,
-                                            swap_direction_pair: swap,
-                                            invert_direction_a: inv_a,
-                                            invert_direction_b: inv_b,
-                                            invert_camera_yaw: rev_yaw,
-                                            yaw_offset_degrees: yaw_off,
-                                            invert_camera_pitch: rev_pitch,
-                                            invert_vertical: inv_elev,
-                                            pitch_input: p_in,
-                                            pitch_unit: p_unit,
-                                            color: colors[(idx - 1) % colors.len()],
-                                        });
-                                        idx += 1;
-                                    }
+                                    configs.push(EspPermutationConfig {
+                                        index: idx,
+                                        short_desc,
+                                        label,
+                                        swap_direction_pair: swap,
+                                        invert_direction_a: inv_a,
+                                        invert_direction_b: inv_b,
+                                        invert_camera_yaw: rev_yaw,
+                                        yaw_offset_degrees: yaw_off,
+                                        invert_camera_pitch: rev_pitch,
+                                        invert_vertical: inv_elev,
+                                        pitch_input: p_in,
+                                        pitch_unit: p_unit,
+                                        color: colors[(idx - 1) % colors.len()],
+                                    });
+                                    idx += 1;
                                 }
                             }
                         }
@@ -955,10 +944,16 @@ pub(crate) fn esp_calibration_sample(
     } else {
         1.0
     };
-    let (forward_a, forward_b, mut vertical) = match preset.horizontal_plane {
-        EspHorizontalPlane::Xy => (dx, dy, (dz + preset.target_vertical_offset) * h_mult),
-        EspHorizontalPlane::Xz => (dx, dz, (dy + preset.target_vertical_offset) * h_mult),
-    };
+    let (mut forward_a, mut forward_b, mut vertical) = (dx, dy, (dz + preset.target_vertical_offset) * h_mult);
+    if preset.swap_direction_pair {
+        std::mem::swap(&mut forward_a, &mut forward_b);
+    }
+    if preset.invert_direction_a {
+        forward_a = -forward_a;
+    }
+    if preset.invert_direction_b {
+        forward_b = -forward_b;
+    }
     if preset.invert_vertical {
         vertical = -vertical;
     }
@@ -1079,10 +1074,16 @@ pub(crate) fn project_esp(
     } else {
         1.0
     };
-    let (forward_a, forward_b, mut vertical) = match preset.horizontal_plane {
-        EspHorizontalPlane::Xy => (dx, dy, (dz + preset.target_vertical_offset) * h_mult),
-        EspHorizontalPlane::Xz => (dx, dz, (dy + preset.target_vertical_offset) * h_mult),
-    };
+    let (mut forward_a, mut forward_b, mut vertical) = (dx, dy, (dz + preset.target_vertical_offset) * h_mult);
+    if preset.swap_direction_pair {
+        std::mem::swap(&mut forward_a, &mut forward_b);
+    }
+    if preset.invert_direction_a {
+        forward_a = -forward_a;
+    }
+    if preset.invert_direction_b {
+        forward_b = -forward_b;
+    }
     if preset.invert_vertical {
         vertical = -vertical;
     }
@@ -1251,8 +1252,7 @@ mod tests {
 
     #[test]
     fn spatial_audio_pan_tracks_target_side_outside_the_visible_fov() {
-        let mut preset = EspPreset::default();
-        preset.horizontal_plane = EspHorizontalPlane::Xy;
+        let preset = EspPreset::default();
         assert!(esp_spatial_audio_pan(&preset, [0.0, 1.0, 0.0], [0.0; 3], 0.0) > 0.9);
         assert!(esp_spatial_audio_pan(&preset, [0.0, -1.0, 0.0], [0.0; 3], 0.0) < -0.9);
     }
@@ -1287,7 +1287,6 @@ mod tests {
     #[test]
     fn horizontal_camera_strafe_does_not_move_target_vertically() {
         let mut preset = EspPreset::default();
-        preset.horizontal_plane = EspHorizontalPlane::Xy;
         let stationary = project_esp_normalized(
             &preset,
             [10.0, 0.0, 2.0],
@@ -1313,7 +1312,6 @@ mod tests {
     #[test]
     fn yaw_offset_calibrates_a_different_game_zero_direction() {
         let mut preset = EspPreset::default();
-        preset.horizontal_plane = EspHorizontalPlane::Xy;
         preset.yaw_offset_degrees = 90.0;
         let projected = project_esp_normalized(
             &preset,
@@ -1330,7 +1328,6 @@ mod tests {
     #[test]
     fn inverted_yaw_flips_screen_side_without_moving_the_center() {
         let mut preset = EspPreset::default();
-        preset.horizontal_plane = EspHorizontalPlane::Xy;
         let normal_side = project_esp_normalized(
             &preset,
             [10.0, 5.0, 0.0],
@@ -1367,7 +1364,6 @@ mod tests {
     #[test]
     fn inverted_camera_yaw_only_changes_rotation_direction() {
         let mut preset = EspPreset::default();
-        preset.horizontal_plane = EspHorizontalPlane::Xy;
         preset.invert_camera_yaw = true;
         let projected = project_esp_normalized(
             &preset,
