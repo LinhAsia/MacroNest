@@ -5472,19 +5472,48 @@ impl CrosshairApp {
         #[cfg(windows)]
         self.poll_code_entry_relocate();
         let mut corrected_actions = false;
-        if !self.memory_panel.code_list_actions_validated
+        #[cfg(windows)]
+        let debugger_active = self
+            .memory_panel
+            .instruction_watch_dialog
+            .as_ref()
+            .is_some_and(|d| d.active.is_some())
+            || self
+                .memory_panel
+                .code_access_dialog
+                .as_ref()
+                .is_some_and(|d| d.active.is_some())
+            || self
+                .memory_panel
+                .code_compare_dialog
+                .as_ref()
+                .is_some_and(|d| d.active.is_some());
+        #[cfg(not(windows))]
+        let debugger_active = false;
+
+        if !debugger_active
+            && !self.memory_panel.code_list_actions_validated
             && let Some(pid) = self.memory_panel.process_pid
         {
-            for entry in &mut self.state.memory_code_list {
-                if let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset)
-                    && let Ok(writes) = instruction_writes_memory(pid, address)
-                    && entry.writes != writes
-                {
-                    entry.writes = writes;
-                    corrected_actions = true;
+            if let Ok(modules) = process_modules(pid) {
+                for entry in &mut self.state.memory_code_list {
+                    if let Some((_, base, size)) = modules
+                        .iter()
+                        .find(|(name, _, _)| name.eq_ignore_ascii_case(&entry.module))
+                    {
+                        if entry.offset < *size {
+                            let address = base + entry.offset;
+                            if let Ok(writes) = instruction_writes_memory(pid, address)
+                                && entry.writes != writes
+                            {
+                                entry.writes = writes;
+                                corrected_actions = true;
+                            }
+                        }
+                    }
                 }
+                self.memory_panel.code_list_actions_validated = true;
             }
-            self.memory_panel.code_list_actions_validated = true;
         }
         if corrected_actions {
             self.persist();
@@ -10650,7 +10679,15 @@ impl CrosshairApp {
         let Some(mut dialog) = self.memory_panel.instruction_watch_dialog.take() else {
             return;
         };
-        while let Ok(event) = dialog.rx.try_recv() {
+        let mut events_processed = 0;
+        let mut hits_updated = false;
+        let selected_address = dialog
+            .selected
+            .and_then(|index| dialog.hits.get(index))
+            .map(|hit| hit.address);
+
+        while events_processed < 500 && let Ok(event) = dialog.rx.try_recv() {
+            events_processed += 1;
             match event {
                 WatchEvent::Started {
                     armed_threads,
@@ -10666,10 +10703,7 @@ impl CrosshairApp {
                     details,
                     ..
                 } => {
-                    let selected_address = dialog
-                        .selected
-                        .and_then(|index| dialog.hits.get(index))
-                        .map(|hit| hit.address);
+                    hits_updated = true;
                     if let Some(hit) = dialog
                         .hits
                         .iter_mut()
@@ -10685,13 +10719,7 @@ impl CrosshairApp {
                             details,
                             count: 1,
                         });
-                        dialog.hits.sort_unstable_by_key(|hit| hit.address);
                     }
-                    dialog.selected = selected_address.and_then(|address| {
-                        dialog.hits.iter().position(|hit| hit.address == address)
-                    });
-                    let total: usize = dialog.hits.iter().map(|hit| hit.count).sum();
-                    dialog.status = format!("{total} hit(s), {} instruction(s)", dialog.hits.len());
                     if dialog.auto_stop_on_hit
                         && let Some(mut active) = dialog.active.take()
                     {
@@ -10719,6 +10747,16 @@ impl CrosshairApp {
                     }
                     dialog.active = None;
                 }
+            }
+        }
+        if hits_updated {
+            dialog.hits.sort_unstable_by_key(|hit| hit.address);
+            dialog.selected = selected_address.and_then(|address| {
+                dialog.hits.iter().position(|hit| hit.address == address)
+            });
+            let total: usize = dialog.hits.iter().map(|hit| hit.count).sum();
+            if !dialog.status.starts_with("First hit captured") {
+                dialog.status = format!("{total} hit(s), {} instruction(s)", dialog.hits.len());
             }
         }
         let mut open = true;
@@ -11895,7 +11933,15 @@ impl CrosshairApp {
         let Some(mut dialog) = self.memory_panel.code_access_dialog.take() else {
             return;
         };
-        while let Ok(event) = dialog.rx.try_recv() {
+        let mut events_processed = 0;
+        let mut addresses_updated = false;
+        let selected_address = dialog
+            .selected
+            .and_then(|index| dialog.addresses.get(index))
+            .map(|(address, _)| *address);
+
+        while events_processed < 500 && let Ok(event) = dialog.rx.try_recv() {
+            events_processed += 1;
             match event {
                 WatchEvent::Started {
                     armed_threads,
@@ -11906,10 +11952,7 @@ impl CrosshairApp {
                     )
                 }
                 WatchEvent::AccessHit { data_address, .. } => {
-                    let selected_address = dialog
-                        .selected
-                        .and_then(|index| dialog.addresses.get(index))
-                        .map(|(address, _)| *address);
+                    addresses_updated = true;
                     if let Some((_, count)) = dialog
                         .addresses
                         .iter_mut()
@@ -11918,27 +11961,7 @@ impl CrosshairApp {
                         *count += 1;
                     } else {
                         dialog.addresses.push((data_address, 1));
-                        dialog
-                            .addresses
-                            .sort_unstable_by_key(|(address, _)| *address);
                     }
-                    if let Some(pid) = self.memory_panel.process_pid
-                        && let Ok(value) = read_scan_value(pid, data_address, dialog.value_type)
-                    {
-                        dialog.values.insert(
-                            data_address,
-                            format_scan_value(value, self.memory_panel.hex),
-                        );
-                    }
-                    dialog.selected = selected_address.and_then(|address| {
-                        dialog
-                            .addresses
-                            .iter()
-                            .position(|(candidate, _)| *candidate == address)
-                    });
-                    let total: usize = dialog.addresses.iter().map(|(_, count)| count).sum();
-                    dialog.status =
-                        format!("{total} hit(s), {} address(es)", dialog.addresses.len());
                     if dialog.auto_stop_on_hit
                         && let Some(mut active) = dialog.active.take()
                     {
@@ -11963,6 +11986,34 @@ impl CrosshairApp {
                     dialog.active = None;
                 }
                 WatchEvent::AddressHit { .. } | WatchEvent::BatchProgress { .. } => {}
+            }
+        }
+        if addresses_updated {
+            dialog
+                .addresses
+                .sort_unstable_by_key(|(address, _)| *address);
+            if let Some(pid) = self.memory_panel.process_pid {
+                for (data_address, _) in &dialog.addresses {
+                    if !dialog.values.contains_key(data_address) {
+                        if let Ok(value) = read_scan_value(pid, *data_address, dialog.value_type) {
+                            dialog.values.insert(
+                                *data_address,
+                                format_scan_value(value, self.memory_panel.hex),
+                            );
+                        }
+                    }
+                }
+            }
+            dialog.selected = selected_address.and_then(|address| {
+                dialog
+                    .addresses
+                    .iter()
+                    .position(|(candidate, _)| *candidate == address)
+            });
+            let total: usize = dialog.addresses.iter().map(|(_, count)| count).sum();
+            if !dialog.status.starts_with("First address captured") {
+                dialog.status =
+                    format!("{total} hit(s), {} address(es)", dialog.addresses.len());
             }
         }
         let entry = self.state.memory_code_list.get(dialog.code_index);
