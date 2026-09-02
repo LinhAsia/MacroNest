@@ -296,20 +296,29 @@ impl EspPreset {
             target_audio_volume: 1.0,
             target_audio_full_volume_distance: 5.0,
             target_audio_max_distance: 500.0,
-            update_interval_ms: 33,
-            motion_smoothing_ms: 40,
+            update_interval_ms: 1,
+            motion_smoothing_ms: 1,
         }
     }
 
     pub fn migrate_marker_sources(&mut self) -> bool {
+        let mut changed = false;
         if self.marker_source == EspMarkerSource::Svg
             && self.marker_svg_source.trim().is_empty()
             && !self.marker_asset_path.trim().is_empty()
         {
             self.marker_svg_source = std::mem::take(&mut self.marker_asset_path);
-            return true;
+            changed = true;
         }
-        false
+        if self.update_interval_ms == 33 {
+            self.update_interval_ms = 1;
+            changed = true;
+        }
+        if self.motion_smoothing_ms == 40 {
+            self.motion_smoothing_ms = 1;
+            changed = true;
+        }
+        changed
     }
 
     pub fn scan_mode(&self) -> EspAutoScanMode {

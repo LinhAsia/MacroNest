@@ -12801,6 +12801,9 @@ impl CrosshairApp {
                 .process_pid
                 .and_then(|pid| query_memory_region(pid, address).ok())
         });
+        if dialog.reset_memory_scroll {
+            dialog.scroll_offset = 0;
+        }
         let (start_address, read_size) = match kind {
             MemoryViewKind::Bytes => {
                 let aligned = address / row_bytes * row_bytes;
@@ -13115,9 +13118,13 @@ impl CrosshairApp {
         }
         match dialog.kind {
             MemoryViewKind::Bytes => {
-                let scroll_area = egui::ScrollArea::both()
-                    .id_salt("memory-region-grid")
+                let mut scroll_area = egui::ScrollArea::both()
+                    .id_salt(("memory-region-grid", dialog.address))
                     .auto_shrink([false, false]);
+                if dialog.reset_memory_scroll {
+                    scroll_area = scroll_area.vertical_scroll_offset(0.0).horizontal_scroll_offset(0.0);
+                    dialog.reset_memory_scroll = false;
+                }
                 let output = scroll_area.show(ui, |ui| {
                     Self::render_memory_region_grid(
                         ui,
@@ -13328,13 +13335,17 @@ impl CrosshairApp {
                 ui.separator();
 
                 // Main structure elements view full width
-                egui::ScrollArea::both()
-                    .id_salt("structure-elements")
+                let mut struct_scroll = egui::ScrollArea::both()
+                    .id_salt(("structure-elements", dialog.address))
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-                    .max_height(ui.available_height())
-                    .show(ui, |ui| {
-                        Self::render_structure_elements(ui, dialog, bytes, process_pid)
-                    });
+                    .max_height(ui.available_height());
+                if dialog.reset_memory_scroll {
+                    struct_scroll = struct_scroll.vertical_scroll_offset(0.0).horizontal_scroll_offset(0.0);
+                    dialog.reset_memory_scroll = false;
+                }
+                struct_scroll.show(ui, |ui| {
+                    Self::render_structure_elements(ui, dialog, bytes, process_pid)
+                });
                 if let Some(active) = dialog.classes.get_mut(dialog.selected_class) {
                     active.address = dialog.address;
                     active.elements = dialog.elements.clone();
@@ -16408,7 +16419,7 @@ impl CrosshairApp {
                 .collect::<Vec<_>>();
             for event in events {
                 for (action, expected) in &bindings {
-                    if hotkey::binding_matches(expected, &event) {
+                    if hotkey::binding_matches_allow_held_modifiers(expected, &event) {
                         self.start_memory_action(*action);
                     }
                 }

@@ -229,6 +229,37 @@ pub fn binding_matches(expected: &HotkeyBinding, observed: &HotkeyBinding) -> bo
     !expected_keys.is_empty() && expected_keys == observed_keys
 }
 
+pub fn binding_has_modifier(binding: &HotkeyBinding) -> bool {
+    binding.ctrl
+        || binding.alt
+        || binding.shift
+        || binding.win
+        || binding_key_names(binding).iter().any(|k| is_modifier_key_name(k))
+}
+
+pub fn binding_matches_allow_held_modifiers(
+    expected: &HotkeyBinding,
+    observed: &HotkeyBinding,
+) -> bool {
+    if binding_has_modifier(expected) {
+        binding_matches(expected, observed)
+    } else {
+        let expected_keys = binding_non_modifier_signature(expected);
+        let observed_keys = binding_non_modifier_signature(observed);
+        !expected_keys.is_empty() && expected_keys == observed_keys
+    }
+}
+
+fn binding_non_modifier_signature(binding: &HotkeyBinding) -> Vec<String> {
+    let mut keys: Vec<String> = binding_key_names(binding)
+        .into_iter()
+        .filter(|key| !is_modifier_key_name(key))
+        .map(|key| key.to_ascii_lowercase())
+        .collect();
+    keys.sort();
+    keys
+}
+
 fn binding_key_signature(binding: &HotkeyBinding) -> Vec<String> {
     let mut keys = binding_key_names(binding)
         .into_iter()
@@ -702,5 +733,46 @@ mod tests {
         )
         .unwrap();
         assert_eq!(format_binding(Some(&binding)), "Ctrl+Alt+Shift");
+    }
+
+    #[test]
+    fn single_key_matches_even_with_held_modifiers() {
+        let expected = HotkeyBinding {
+            key: "1".to_owned(),
+            ..HotkeyBinding::default()
+        };
+        let observed_clean = HotkeyBinding {
+            key: "1".to_owned(),
+            ..HotkeyBinding::default()
+        };
+        let observed_with_ctrl = HotkeyBinding {
+            key: "1".to_owned(),
+            ctrl: true,
+            ..HotkeyBinding::default()
+        };
+        let observed_with_shift_alt = HotkeyBinding {
+            key: "1".to_owned(),
+            shift: true,
+            alt: true,
+            ..HotkeyBinding::default()
+        };
+        assert!(binding_matches_allow_held_modifiers(&expected, &observed_clean));
+        assert!(binding_matches_allow_held_modifiers(&expected, &observed_with_ctrl));
+        assert!(binding_matches_allow_held_modifiers(&expected, &observed_with_shift_alt));
+
+        let different_key_with_ctrl = HotkeyBinding {
+            key: "2".to_owned(),
+            ctrl: true,
+            ..HotkeyBinding::default()
+        };
+        assert!(!binding_matches_allow_held_modifiers(&expected, &different_key_with_ctrl));
+
+        let expected_combo = HotkeyBinding {
+            key: "1".to_owned(),
+            ctrl: true,
+            ..HotkeyBinding::default()
+        };
+        assert!(binding_matches_allow_held_modifiers(&expected_combo, &observed_with_ctrl));
+        assert!(!binding_matches_allow_held_modifiers(&expected_combo, &observed_clean));
     }
 }

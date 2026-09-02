@@ -1832,7 +1832,7 @@ impl CrosshairApp {
                                     ui.add_space(4.0);
                                     let mut smooth_enabled = preset.motion_smoothing_ms > 0;
                                     if ui.checkbox(&mut smooth_enabled, "Smooth").clicked() {
-                                        preset.motion_smoothing_ms = if smooth_enabled { 40 } else { 0 };
+                                        preset.motion_smoothing_ms = if smooth_enabled { 1 } else { 0 };
                                     }
                                     if smooth_enabled {
                                         ui.add(
