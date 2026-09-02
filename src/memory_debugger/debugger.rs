@@ -10,7 +10,7 @@ use std::{
     collections::{HashMap, HashSet},
     io,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
@@ -195,7 +195,25 @@ pub fn is_instruction_compatible(expected: &str, found: &str) -> bool {
     found.contains('[') && found.contains(']')
 }
 
+static MODULE_CACHE: Mutex<Option<(u32, Instant, Vec<(String, usize, usize)>)>> = Mutex::new(None);
+
+pub fn invalidate_process_modules_cache() {
+    if let Ok(mut guard) = MODULE_CACHE.lock() {
+        *guard = None;
+    }
+    if let Ok(mut guard) = POINTER_WIDTH_CACHE.lock() {
+        *guard = None;
+    }
+}
+
 pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
+    if let Ok(guard) = MODULE_CACHE.lock() {
+        if let Some((cached_pid, timestamp, ref modules)) = *guard {
+            if cached_pid == pid && timestamp.elapsed() < Duration::from_millis(1500) {
+                return Ok(modules.clone());
+            }
+        }
+    }
     let mut attempts = 0;
     let snapshot = loop {
         let snapshot =
@@ -235,6 +253,9 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
         ok = unsafe { Module32NextW(snapshot, &mut entry) };
     }
     unsafe { CloseHandle(snapshot) };
+    if let Ok(mut guard) = MODULE_CACHE.lock() {
+        *guard = Some((pid, Instant::now(), modules.clone()));
+    }
     Ok(modules)
 }
 
@@ -727,13 +748,24 @@ fn target_architecture(
     }
 }
 
+static POINTER_WIDTH_CACHE: Mutex<Option<(u32, usize)>> = Mutex::new(None);
+
 pub fn process_pointer_width(pid: u32) -> io::Result<usize> {
-    Ok(
-        match target_architecture(pid, MemoryDebuggerArchitecture::Auto)? {
-            TargetArchitecture::X86 => 4,
-            TargetArchitecture::X64 => 8,
-        },
-    )
+    if let Ok(guard) = POINTER_WIDTH_CACHE.lock() {
+        if let Some((cached_pid, width)) = *guard {
+            if cached_pid == pid {
+                return Ok(width);
+            }
+        }
+    }
+    let width = match target_architecture(pid, MemoryDebuggerArchitecture::Auto)? {
+        TargetArchitecture::X86 => 4,
+        TargetArchitecture::X64 => 8,
+    };
+    if let Ok(mut guard) = POINTER_WIDTH_CACHE.lock() {
+        *guard = Some((pid, width));
+    }
+    Ok(width)
 }
 
 fn watch_loop<F>(

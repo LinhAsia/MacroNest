@@ -888,6 +888,8 @@ pub(crate) struct MemoryPanelState {
     last_refresh: Instant,
     last_saved_refresh: Instant,
     visible_scan_ranges: [Option<(usize, usize, Instant)>; 2],
+    visible_saved_ranges: [Option<(usize, usize, Instant)>; 2],
+    saved_background_refresh_cursor: usize,
     last_scan_result_click: Option<(usize, bool, Instant)>,
     pending_write_checks: Vec<PendingWriteCheck>,
     freeze_worker: MemoryFreezeWorker,
@@ -1011,6 +1013,8 @@ impl Default for MemoryPanelState {
             last_refresh: Instant::now(),
             last_saved_refresh: Instant::now(),
             visible_scan_ranges: [None, None],
+            visible_saved_ranges: [None, None],
+            saved_background_refresh_cursor: 0,
             last_scan_result_click: None,
             pending_write_checks: Vec::new(),
             freeze_worker: MemoryFreezeWorker::default(),
@@ -1059,6 +1063,7 @@ impl CrosshairApp {
             self.memory_panel.selected_code.clear();
             self.memory_panel.code_selection_anchor = None;
         }
+        crate::memory_debugger::debugger::invalidate_process_modules_cache();
         self.memory_panel.process_pid = pid;
         if let Some(p) = pid {
             let path = {
@@ -2656,11 +2661,7 @@ impl CrosshairApp {
 
     fn memory_action_button(&mut self, ui: &mut egui::Ui, action: MemoryScanAction, hotkey: bool) {
         let width = ui.available_width();
-        let action_btn_text = if action == MemoryScanAction::SetBase {
-            RichText::new(self.tr("Set as base", "Set as base")).color(Color32::from_rgb(84, 214, 140)).strong()
-        } else {
-            RichText::new(self.tr(action.label(), action.label()))
-        };
+        let action_btn_text = RichText::new(self.tr(action.label(), action.label()));
         ui.horizontal(|ui| {
             let stable_filter_enabled = self
                 .memory_panel
@@ -3777,11 +3778,14 @@ impl CrosshairApp {
                 ui.separator();
                 let row_height = 26.0;
                 let count = self.memory_panel.saved.len();
+                let pinned_idx = usize::from(self.memory_panel.address_list_pinned);
                 egui::ScrollArea::vertical()
                     .id_salt("saved-memory-addresses")
                     .auto_shrink([false, false])
                     .max_height(ui.available_height())
                     .show_rows(ui, row_height, count, |ui, rows| {
+                        self.memory_panel.visible_saved_ranges[pinned_idx] =
+                            Some((rows.start, rows.end, Instant::now()));
                         ui.spacing_mut().item_spacing.y = 0.0;
                         for index in rows {
                             if index >= self.memory_panel.saved.len() {
@@ -16164,25 +16168,64 @@ impl CrosshairApp {
         let Some(pid) = self.memory_panel.process_pid else {
             return;
         };
-        for saved in &mut self.memory_panel.saved {
+        let total_saved = self.memory_panel.saved.len();
+        if total_saved == 0 {
+            return;
+        }
+
+        let mut to_refresh = HashSet::new();
+        if total_saved <= 32 {
+            for i in 0..total_saved {
+                to_refresh.insert(i);
+            }
+        } else {
+            for (start, end, rendered_at) in
+                self.memory_panel.visible_saved_ranges.into_iter().flatten()
+            {
+                if rendered_at.elapsed() <= Duration::from_millis(200) {
+                    let end = end.min(total_saved);
+                    for i in start..end {
+                        to_refresh.insert(i);
+                    }
+                }
+            }
+            if to_refresh.is_empty() {
+                for i in 0..32.min(total_saved) {
+                    to_refresh.insert(i);
+                }
+            }
+            for (i, saved) in self.memory_panel.saved.iter().enumerate() {
+                if saved.frozen.is_some() {
+                    to_refresh.insert(i);
+                }
+            }
+            let cursor = self.memory_panel.saved_background_refresh_cursor % total_saved;
+            for i in 0..16.min(total_saved) {
+                to_refresh.insert((cursor + i) % total_saved);
+            }
+            self.memory_panel.saved_background_refresh_cursor = (cursor + 16) % total_saved;
+        }
+
+        for index in to_refresh {
+            let Some(saved) = self.memory_panel.saved.get_mut(index) else {
+                continue;
+            };
             if let Some(encoding) = saved.text_encoding {
                 saved.current_text =
                     read_text_memory(pid, saved.address, saved.text_byte_len, encoding).ok();
                 saved.current = None;
             } else {
-                let value = read_scan_value(pid, saved.address, saved.value_type).ok();
-                if value.is_none() && saved.pointer.is_some() {
-                    if let Some(pointer) = saved.pointer.as_ref()
-                        && let Ok(address) = resolve_memory_address(pid, pointer.base, Some(pointer))
-                    {
+                let mut value = if let Some(pointer) = saved.pointer.as_ref() {
+                    if let Ok(address) = resolve_memory_address(pid, pointer.base, Some(pointer)) {
                         saved.address = address;
-                        saved.current = read_scan_value(pid, address, saved.value_type).ok();
+                        read_scan_value(pid, address, saved.value_type).ok()
                     } else {
-                        saved.current = None;
+                        None
                     }
                 } else {
-                    saved.current = value;
-                }
+                    read_scan_value(pid, saved.address, saved.value_type).ok()
+                };
+                saved.current = value;
                 saved.current_text = None;
             }
         }
@@ -17780,6 +17823,12 @@ fn resolve_memory_address(
         })?;
     #[cfg(not(windows))]
     let mut address = pointer.base;
+    if address == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "null base pointer",
+        ));
+    }
     #[cfg(windows)]
     let pointer_width = process_pointer_width(pid)?;
     #[cfg(not(windows))]
@@ -17806,6 +17855,12 @@ fn resolve_memory_address(
                 ));
             }
         };
+        if next == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "null pointer in chain",
+            ));
+        }
         address = next.checked_add(*offset).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "pointer overflow")
         })?;
