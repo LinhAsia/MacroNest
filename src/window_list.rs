@@ -1158,7 +1158,7 @@ mod windows_impl {
         d3d_device: ID3D11Device,
         frame_pool: Direct3D11CaptureFramePool,
         session: GraphicsCaptureSession,
-        staging_textures: Option<([ID3D11Texture2D; 4], u32, u32)>,
+        staging_textures: Option<([ID3D11Texture2D; 2], u32, u32)>,
         write_idx: usize,
         copies_count: usize,
     }
@@ -1205,7 +1205,7 @@ mod windows_impl {
         let frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &dxgi_device_winrt,
             DirectXPixelFormat::B8G8R8A8UIntNormalized,
-            6,
+            2,
             size,
         )?;
 
@@ -1301,20 +1301,14 @@ mod windows_impl {
 
                 let mut s0 = None;
                 let mut s1 = None;
-                let mut s2 = None;
-                let mut s3 = None;
                 unsafe {
                     self.d3d_device
                         .CreateTexture2D(&staging_desc, None, Some(&mut s0))?;
                     self.d3d_device
                         .CreateTexture2D(&staging_desc, None, Some(&mut s1))?;
-                    self.d3d_device
-                        .CreateTexture2D(&staging_desc, None, Some(&mut s2))?;
-                    self.d3d_device
-                        .CreateTexture2D(&staging_desc, None, Some(&mut s3))?;
                 }
                 self.staging_textures = Some((
-                    [s0.unwrap(), s1.unwrap(), s2.unwrap(), s3.unwrap()],
+                    [s0.unwrap(), s1.unwrap()],
                     desc.Width,
                     desc.Height,
                 ));
@@ -1325,37 +1319,32 @@ mod windows_impl {
             let (staging_textures, _, _) = self.staging_textures.as_ref().unwrap();
             let d3d_context = unsafe { self.d3d_device.GetImmediateContext()? };
 
-            let current_write = self.write_idx;
+            let write_idx = self.write_idx;
             unsafe {
-                d3d_context.CopyResource(&staging_textures[current_write], &texture);
+                d3d_context.CopyResource(&staging_textures[write_idx], &texture);
             }
             drop(texture);
             drop(access);
             drop(surface);
             drop(frame);
 
-            self.write_idx = (self.write_idx + 1) % 4;
             self.copies_count += 1;
-
-            let read_idx = if self.copies_count >= 3 {
-                (current_write + 1) % 4
+            let read_idx = if self.copies_count > 1 {
+                1 - write_idx
             } else {
-                current_write
+                write_idx
             };
 
             let read_tex = &staging_textures[read_idx];
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            let map_res = unsafe {
+            unsafe {
                 d3d_context.Map(
                     read_tex,
                     0,
                     D3D11_MAP_READ,
-                    windows::Win32::Graphics::Direct3D11::D3D11_MAP_FLAG_DO_NOT_WAIT.0 as u32,
+                    0,
                     Some(&mut mapped),
-                )
-            };
-            if map_res.is_err() {
-                return Ok(true);
+                )?;
             }
 
             let pitch = mapped.RowPitch as usize;
@@ -1430,6 +1419,7 @@ mod windows_impl {
                 d3d_context.Unmap(read_tex, 0);
             }
 
+            self.write_idx = 1 - write_idx;
             Ok(true)
         }
 
