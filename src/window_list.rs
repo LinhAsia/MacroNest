@@ -40,14 +40,14 @@ mod windows_impl {
         },
         Win32::{
             Graphics::{
-                Direct3D::D3D_DRIVER_TYPE_HARDWARE,
+                Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN},
                 Direct3D11::{
                     D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                     D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_FLAG,
                     D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
                     D3D11CreateDevice, ID3D11Device, ID3D11Texture2D,
                 },
-                Dxgi::IDXGIDevice,
+                Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIDevice, IDXGIFactory1},
             },
             System::WinRT::{
                 Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess},
@@ -1178,19 +1178,54 @@ mod windows_impl {
     static WGC_MANAGER: Lazy<Mutex<Option<WgcSession>>> = Lazy::new(|| Mutex::new(None));
 
     pub(crate) fn init_wgc_session(hwnd: HWND) -> anyhow::Result<WgcSession> {
+        let mut best_adapter: Option<IDXGIAdapter> = None;
+        if let Ok(factory) = unsafe { CreateDXGIFactory1::<IDXGIFactory1>() } {
+            let mut i = 0;
+            let mut max_vram = 0;
+            while let Ok(adapter1) = unsafe { factory.EnumAdapters1(i) } {
+                if let Ok(desc) = unsafe { adapter1.GetDesc1() } {
+                    if (desc.Flags & 2) == 0 && desc.DedicatedVideoMemory > max_vram {
+                        max_vram = desc.DedicatedVideoMemory;
+                        if let Ok(adapter) = adapter1.cast::<IDXGIAdapter>() {
+                            best_adapter = Some(adapter);
+                        }
+                    }
+                }
+                i += 1;
+            }
+        }
+
         let mut d3d_device: Option<ID3D11Device> = None;
-        unsafe {
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut d3d_device),
-                None,
-                None,
-            )?;
+        if let Some(ref adapter) = best_adapter {
+            unsafe {
+                let _ = D3D11CreateDevice(
+                    Some(adapter),
+                    D3D_DRIVER_TYPE_UNKNOWN,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    None,
+                    D3D11_SDK_VERSION,
+                    Some(&mut d3d_device),
+                    None,
+                    None,
+                );
+            }
+        }
+
+        if d3d_device.is_none() {
+            unsafe {
+                D3D11CreateDevice(
+                    None,
+                    D3D_DRIVER_TYPE_HARDWARE,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    None,
+                    D3D11_SDK_VERSION,
+                    Some(&mut d3d_device),
+                    None,
+                    None,
+                )?;
+            }
         }
         let d3d_device = d3d_device.context("Failed to create D3D11 Device")?;
         let dxgi_device: IDXGIDevice = d3d_device.cast()?;
