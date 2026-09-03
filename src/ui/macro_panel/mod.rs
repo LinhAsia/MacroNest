@@ -15859,7 +15859,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     .changed();
                                                 ui.add_space(6.0);
                                                 ui.label(
-                                                    RichText::new("⚡")
+                                                    RichText::new(Self::tr_lang(language, "Speed", "Tốc độ"))
                                                         .strong()
                                                         .color(Color32::from_rgb(255, 210, 90)),
                                                 )
@@ -16905,6 +16905,7 @@ if supports_move_mouse || show_detection_tuning {
                         });
                         self.sync_mouse_path_preview(path_preset_id, preview_events, None);
                     } else if let Some(path_id) = hovered_mouse_path_step {
+                        self.mouse_path_hover_last_seen = Some(Instant::now());
                         if self.mouse_path_step_preview_preset_id != Some(path_id) {
                             let preview_events = self
                                 .state
@@ -16916,8 +16917,16 @@ if supports_move_mouse || show_detection_tuning {
                             self.mouse_path_hover_preview_active = true;
                         }
                     } else if self.mouse_path_hover_preview_active {
-                        self.clear_mouse_path_preview();
-                        self.mouse_path_hover_preview_active = false;
+                        if self
+                            .mouse_path_hover_last_seen
+                            .is_some_and(|t| t.elapsed() > Duration::from_millis(150))
+                        {
+                            self.clear_mouse_path_preview();
+                            self.mouse_path_hover_preview_active = false;
+                            self.mouse_path_hover_last_seen = None;
+                        } else {
+                            ui.ctx().request_repaint_after(Duration::from_millis(50));
+                        }
                     }
                     if let Some((group_id, preset_id, step_index, selected_id)) =
                         add_mouse_path_preset_request.take()

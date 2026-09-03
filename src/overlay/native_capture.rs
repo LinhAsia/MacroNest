@@ -138,6 +138,8 @@ struct CaptureState {
     paint_dc: Option<HDC>,
     paint_bmp: Option<windows::Win32::Graphics::Gdi::HBITMAP>,
     last_panel_rect: Option<RECT>,
+    last_cursor_near_pill: bool,
+    last_pill_rect: Option<RECT>,
 }
 
 impl Drop for CaptureState {
@@ -284,6 +286,8 @@ impl CaptureState {
             paint_dc: None,
             paint_bmp: None,
             last_panel_rect: None,
+            last_cursor_near_pill: false,
+            last_pill_rect: None,
         }
     }
 }
@@ -548,7 +552,28 @@ unsafe extern "system" fn capture_wnd_proc(
                         let old_pt = state.current_point;
                         state.current_point = Some((rx, ry));
                         let new_panel_rect = point_click_panel_rect(state.width, state.height, (rx, ry));
+
+                        let pill_rect = state.last_pill_rect.unwrap_or(RECT {
+                            left: (state.width - 750) / 2,
+                            top: 36,
+                            right: (state.width + 750) / 2,
+                            bottom: 84,
+                        });
+                        let margin_x = 40;
+                        let margin_y = 30;
+                        let is_near_pill = rx >= pill_rect.left - margin_x
+                            && rx <= pill_rect.right + margin_x
+                            && ry >= pill_rect.top - margin_y
+                            && ry <= pill_rect.bottom + margin_y;
+
+                        let pill_transition = is_near_pill != state.last_cursor_near_pill;
+                        state.last_cursor_near_pill = is_near_pill;
+
                         unsafe {
+                            if pill_transition {
+                                InvalidateRect(hwnd, Some(&pill_rect), false);
+                            }
+
                             if let Some((ox, oy)) = old_pt {
                                 let old_cross_rect = RECT {
                                     left: (ox - 18).max(0),
@@ -1867,6 +1892,14 @@ unsafe fn draw_capture_to_dc(
     let pill_h = text_h + 16;
     let pill_x = (state.width - pill_w) / 2;
     let pill_y = 40;
+
+    let pill_rect = RECT {
+        left: (pill_x - 4).max(0),
+        top: (pill_y - 4).max(0),
+        right: (pill_x + pill_w + 4).min(state.width),
+        bottom: (pill_y + pill_h + 4).min(state.height),
+    };
+    state.last_pill_rect = Some(pill_rect);
 
     let cursor_near_pill = state.current_point.is_some_and(|(cx, cy)| {
         let margin_x = 40;

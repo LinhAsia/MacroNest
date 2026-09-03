@@ -27557,15 +27557,10 @@ mod windows_overlay {
                     paint_cooldown_frames = 2;
                 }
 
-                // ponytail: present only while coordinates are moving, animations are updating,
-                // or shapes changed (needs 2 frames to paint both swap chain buffers).
-                if !sample_received && !animation_changed && paint_cooldown_frames == 0 && !has_extra && !last_had_extra {
+                let has_moving_animations = animation_changed || animations.values().any(|a| a.smoothing_ms > 1);
+                if !shapes_changed && paint_cooldown_frames == 0 && !has_moving_animations {
                     continue;
                 }
-                if !sample_received && !animation_changed && paint_cooldown_frames == 0 && has_extra && last_had_extra {
-                    continue;
-                }
-                last_had_extra = has_extra;
 
                 if shapes.is_empty() {
                     if last_shapes_empty {
