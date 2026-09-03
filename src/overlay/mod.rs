@@ -141,7 +141,7 @@ mod windows_overlay {
                     PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN,
                     SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
                     SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNA,
-                    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                    SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
                     SWP_SHOWWINDOW, SetCursor, SetCursorPos, SetForegroundWindow,
                     SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowLongW,
                     SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
@@ -4075,7 +4075,7 @@ mod windows_overlay {
                                 0,
                                 0,
                                 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | SWP_SHOWWINDOW,
                             );
                         }
                     }
@@ -4633,10 +4633,6 @@ mod windows_overlay {
 
                     if pin_source_hwnd != 0 && target_hwnd.0 as isize == pin_source_hwnd {
                         let _ = refresh_pin_overlay(runtime);
-                    }
-
-                    if runtime.interactive_pin_enabled {
-                        let _ = paint_interactive_pin_overlay(runtime);
                     }
                 }
                 LRESULT(0)
@@ -20723,7 +20719,7 @@ mod windows_overlay {
                         0,
                         0,
                         0,
-                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | SWP_SHOWWINDOW,
                     )
                 };
             }
@@ -21026,6 +21022,31 @@ mod windows_overlay {
                 },
                 is_topmost: target.is_topmost,
             });
+        }
+
+        fn badges_equal(a: &[InteractivePinBadge], b: &[InteractivePinBadge]) -> bool {
+            if a.len() != b.len() {
+                return false;
+            }
+            for (x, y) in a.iter().zip(b.iter()) {
+                if x.hwnd != y.hwnd
+                    || x.is_topmost != y.is_topmost
+                    || x.rect.left != y.rect.left
+                    || x.rect.top != y.rect.top
+                    || x.rect.right != y.rect.right
+                    || x.rect.bottom != y.rect.bottom
+                {
+                    return false;
+                }
+            }
+            true
+        }
+
+        {
+            let current = INTERACTIVE_PIN_BADGES.lock();
+            if badges_equal(&current, &new_badges) {
+                return Ok(());
+            }
         }
 
         *INTERACTIVE_PIN_BADGES.lock() = new_badges.clone();
@@ -22494,8 +22515,7 @@ mod windows_overlay {
         let active_pin = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
         let need_hook = active_highlight != 0
             || active_focus_mode != 0
-            || active_pin != 0
-            || runtime.interactive_pin_enabled;
+            || active_pin != 0;
         let _ = set_window_location_event_hook_enabled(runtime, need_hook);
     }
 
@@ -22542,10 +22562,8 @@ mod windows_overlay {
         let active_hwnd = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
         let focus_mode_hwnd = ACTIVE_FOCUS_MODE_HWND.load(Ordering::Relaxed);
         let pin_source_hwnd = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
-        let interactive_pin = INTERACTIVE_PIN_ENABLED.load(Ordering::Relaxed);
 
-        let is_target = interactive_pin
-            || (active_hwnd != 0 && hwnd.0 as isize == active_hwnd)
+        let is_target = (active_hwnd != 0 && hwnd.0 as isize == active_hwnd)
             || (focus_mode_hwnd != 0 && hwnd.0 as isize == focus_mode_hwnd)
             || (pin_source_hwnd != 0 && hwnd.0 as isize == pin_source_hwnd);
 
