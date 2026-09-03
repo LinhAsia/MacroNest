@@ -1225,6 +1225,35 @@ mod windows_impl {
         })
     }
 
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[target_feature(enable = "sse4.1")]
+    unsafe fn fast_streaming_copy(src: *const u8, dst: *mut u8, len: usize) {
+        use std::arch::x86_64::*;
+        let chunks = len / 64;
+        let mut s = src as *const __m128i;
+        let mut d = dst as *mut __m128i;
+
+        for _ in 0..chunks {
+            let l0 = _mm_stream_load_si128(s);
+            let l1 = _mm_stream_load_si128(s.add(1));
+            let l2 = _mm_stream_load_si128(s.add(2));
+            let l3 = _mm_stream_load_si128(s.add(3));
+
+            _mm_storeu_si128(d, l0);
+            _mm_storeu_si128(d.add(1), l1);
+            _mm_storeu_si128(d.add(2), l2);
+            _mm_storeu_si128(d.add(3), l3);
+
+            s = s.add(4);
+            d = d.add(4);
+        }
+
+        let remainder = len % 64;
+        if remainder > 0 {
+            std::ptr::copy_nonoverlapping(s as *const u8, d as *mut u8, remainder);
+        }
+    }
+
     impl WgcSession {
         pub(crate) fn poll_into_buffer(
             &mut self,
@@ -1311,18 +1340,68 @@ mod windows_impl {
             let pitch = mapped.RowPitch as usize;
             let row_bytes = width * 4;
             let total_bytes = row_bytes * height;
-            let src_slice = unsafe {
-                std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height)
-            };
+            let src_ptr = mapped.pData as *const u8;
 
-            buffer.clear();
-            buffer.reserve(total_bytes);
-            if pitch == row_bytes {
-                buffer.extend_from_slice(&src_slice[..total_bytes]);
-            } else {
-                for y in 0..height {
-                    let src_offset = y * pitch;
-                    buffer.extend_from_slice(&src_slice[src_offset..src_offset + row_bytes]);
+            buffer.resize(total_bytes, 0);
+            let dst_ptr = buffer.as_mut_ptr();
+
+            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            {
+                if is_x86_feature_detected!("sse4.1") {
+                    if pitch == row_bytes {
+                        unsafe {
+                            fast_streaming_copy(src_ptr, dst_ptr, total_bytes);
+                        }
+                    } else {
+                        for y in 0..height {
+                            let src_offset = y * pitch;
+                            let dst_offset = y * row_bytes;
+                            unsafe {
+                                fast_streaming_copy(
+                                    src_ptr.add(src_offset),
+                                    dst_ptr.add(dst_offset),
+                                    row_bytes,
+                                );
+                            }
+                        }
+                    }
+                } else if pitch == row_bytes {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, total_bytes);
+                    }
+                } else {
+                    for y in 0..height {
+                        let src_offset = y * pitch;
+                        let dst_offset = y * row_bytes;
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                src_ptr.add(src_offset),
+                                dst_ptr.add(dst_offset),
+                                row_bytes,
+                            );
+                        }
+                    }
+                }
+            }
+
+            #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+            {
+                if pitch == row_bytes {
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, total_bytes);
+                    }
+                } else {
+                    for y in 0..height {
+                        let src_offset = y * pitch;
+                        let dst_offset = y * row_bytes;
+                        unsafe {
+                            std::ptr::copy_nonoverlapping(
+                                src_ptr.add(src_offset),
+                                dst_ptr.add(dst_offset),
+                                row_bytes,
+                            );
+                        }
+                    }
                 }
             }
 

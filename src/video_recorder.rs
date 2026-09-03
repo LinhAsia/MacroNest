@@ -98,7 +98,16 @@ static HOTKEY_PRESS_ID: AtomicU64 = AtomicU64::new(0);
 static REGION_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PRESS_HANDLED_ON_DOWN: AtomicBool = AtomicBool::new(false);
 static SESSION_ID: AtomicU64 = AtomicU64::new(0);
-static HARDWARE_ENCODING: Lazy<Mutex<Option<(String, bool)>>> = Lazy::new(|| Mutex::new(None));
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HardwareEncoderKind {
+    Qsv,
+    MediaFoundation,
+    Software,
+}
+
+static HARDWARE_ENCODER: Lazy<Mutex<Option<(String, HardwareEncoderKind)>>> =
+    Lazy::new(|| Mutex::new(None));
 static PREPARED_FFMPEG: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 static VIDEO_EDIT_BUSY: AtomicBool = AtomicBool::new(false);
 static VIDEO_EDIT_PROGRESS: AtomicU64 = AtomicU64::new(0);
@@ -189,7 +198,7 @@ fn prepare_hardware_encoding_async(ffmpeg_exe: &Path) {
     *prepared = Some(signature);
     let ffmpeg_exe = ffmpeg_exe.to_owned();
     thread::spawn(move || {
-        hardware_encoding_available(&ffmpeg_exe);
+        detect_hardware_encoder(&ffmpeg_exe);
     });
 }
 
@@ -987,53 +996,79 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         }
     }
 
-    let use_hw = hardware_encoding_available(&config.ffmpeg_exe);
-    if use_hw {
-        command.args([
-            "-vf",
-            "format=nv12",
-            "-an",
-            "-c:v",
-            "h264_mf",
-            "-hw_encoding",
-            "1",
-            "-scenario",
-            "display_remoting",
-            "-b:v",
-            "12M",
-            "-g",
-            &gop_size,
-            "-fps_mode",
-            "cfr",
-            "-avoid_negative_ts",
-            "make_zero",
-            "-movflags",
-            "+faststart",
-        ]);
-    } else {
-        command.args([
-            "-vf",
-            "format=yuv420p",
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-tune",
-            "zerolatency",
-            "-crf",
-            "20",
-            "-g",
-            &gop_size,
-            "-bf",
-            "0",
-            "-fps_mode",
-            "cfr",
-            "-avoid_negative_ts",
-            "make_zero",
-            "-movflags",
-            "+faststart",
-        ]);
+    let encoder_kind = detect_hardware_encoder(&config.ffmpeg_exe);
+    match encoder_kind {
+        HardwareEncoderKind::Qsv => {
+            command.args([
+                "-vf",
+                "format=nv12",
+                "-an",
+                "-c:v",
+                "h264_qsv",
+                "-preset",
+                "veryfast",
+                "-scenario",
+                "displayremoting",
+                "-b:v",
+                "12M",
+                "-g",
+                &gop_size,
+                "-fps_mode",
+                "cfr",
+                "-avoid_negative_ts",
+                "make_zero",
+                "-movflags",
+                "+faststart",
+            ]);
+        }
+        HardwareEncoderKind::MediaFoundation => {
+            command.args([
+                "-vf",
+                "format=nv12",
+                "-an",
+                "-c:v",
+                "h264_mf",
+                "-hw_encoding",
+                "1",
+                "-scenario",
+                "display_remoting",
+                "-b:v",
+                "12M",
+                "-g",
+                &gop_size,
+                "-fps_mode",
+                "cfr",
+                "-avoid_negative_ts",
+                "make_zero",
+                "-movflags",
+                "+faststart",
+            ]);
+        }
+        HardwareEncoderKind::Software => {
+            command.args([
+                "-vf",
+                "format=yuv420p",
+                "-an",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-tune",
+                "zerolatency",
+                "-crf",
+                "20",
+                "-g",
+                &gop_size,
+                "-bf",
+                "0",
+                "-fps_mode",
+                "cfr",
+                "-avoid_negative_ts",
+                "make_zero",
+                "-movflags",
+                "+faststart",
+            ]);
+        }
     }
     command.arg(&output_path);
 
@@ -1273,29 +1308,32 @@ fn concise_ffmpeg_error(log: &str) -> String {
     detail.chars().take(180).collect()
 }
 
-fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
+fn detect_hardware_encoder(ffmpeg_exe: &Path) -> HardwareEncoderKind {
     let signature = ffmpeg_signature(ffmpeg_exe);
-    let mut cached = HARDWARE_ENCODING.lock();
-    if let Some((cached_signature, available)) = cached.as_ref()
+    let mut cached = HARDWARE_ENCODER.lock();
+    if let Some((cached_signature, kind)) = cached.as_ref()
         && cached_signature == &signature
     {
-        return *available;
+        return *kind;
     }
-    let cache_path = ffmpeg_exe.with_file_name("ffmpeg-hardware-encoding.cache");
+    let cache_path = ffmpeg_exe.with_file_name("ffmpeg-hardware-encoder-choice.cache");
     if let Ok(value) = fs::read_to_string(&cache_path)
-        && let Some((cached_signature, available)) = value.trim().rsplit_once('|')
+        && let Some((cached_signature, kind_str)) = value.trim().rsplit_once('|')
         && cached_signature == signature
-        && let Ok(available) = available.parse::<bool>()
     {
-        *cached = Some((signature, available));
-        return available;
+        let kind = match kind_str {
+            "qsv" => HardwareEncoderKind::Qsv,
+            "mf" => HardwareEncoderKind::MediaFoundation,
+            _ => HardwareEncoderKind::Software,
+        };
+        *cached = Some((signature, kind));
+        return kind;
     }
-    *cached = Some((signature.clone(), true));
+
     let exe = ffmpeg_exe.to_path_buf();
-    thread::spawn(move || {
-        let mut available = false;
-        if let Ok(mut child) = Command::new(&exe)
-            .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+    let qsv_check = {
+        let mut cmd = Command::new(&exe);
+        cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1312,35 +1350,60 @@ fn hardware_encoding_available(ffmpeg_exe: &Path) -> bool {
                 "-vf",
                 "format=nv12",
                 "-c:v",
-                "h264_mf",
-                "-hw_encoding",
-                "1",
+                "h264_qsv",
                 "-f",
                 "null",
                 "-",
-            ])
-            .spawn()
-        {
-            let deadline = Instant::now() + Duration::from_millis(1500);
-            available = loop {
-                match child.try_wait() {
-                    Ok(Some(status)) => break status.success(),
-                    Ok(None) if Instant::now() < deadline => {
-                        thread::sleep(Duration::from_millis(20))
-                    }
-                    Ok(None) => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break false;
-                    }
-                    Err(_) => break false,
-                }
-            };
+            ]);
+        cmd.status().map_or(false, |s| s.success())
+    };
+
+    let kind = if qsv_check {
+        HardwareEncoderKind::Qsv
+    } else {
+        let mf_check = {
+            let mut cmd = Command::new(&exe);
+            cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .args([
+                    "-hide_banner",
+                    "-loglevel",
+                    "quiet",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=size=64x64:rate=1",
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "format=nv12",
+                    "-c:v",
+                    "h264_mf",
+                    "-hw_encoding",
+                    "1",
+                    "-f",
+                    "null",
+                    "-",
+                ]);
+            cmd.status().map_or(false, |s| s.success())
+        };
+        if mf_check {
+            HardwareEncoderKind::MediaFoundation
+        } else {
+            HardwareEncoderKind::Software
         }
-        cache_hardware_encoding(&cache_path, &signature, available);
-        *HARDWARE_ENCODING.lock() = Some((signature, available));
-    });
-    true
+    };
+
+    let kind_str = match kind {
+        HardwareEncoderKind::Qsv => "qsv",
+        HardwareEncoderKind::MediaFoundation => "mf",
+        HardwareEncoderKind::Software => "software",
+    };
+    let _ = fs::write(&cache_path, format!("{signature}|{kind_str}"));
+    *cached = Some((signature, kind));
+    kind
 }
 
 fn ffmpeg_signature(ffmpeg_exe: &Path) -> String {
@@ -1353,10 +1416,6 @@ fn ffmpeg_signature(ffmpeg_exe: &Path) -> String {
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |duration| duration.as_secs());
     format!("{}:{}:{}", ffmpeg_exe.display(), metadata.len(), modified)
-}
-
-fn cache_hardware_encoding(cache_path: &Path, signature: &str, available: bool) {
-    let _ = fs::write(cache_path, format!("{signature}|{available}"));
 }
 
 fn start_system_audio_capture(
