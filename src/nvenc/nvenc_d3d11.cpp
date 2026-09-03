@@ -150,32 +150,24 @@ extern "C" __declspec(dllexport) void* nvenc_register_texture(void* handle, ID3D
     D3D11_TEXTURE2D_DESC desc;
     texture->GetDesc(&desc);
 
-    NV_ENC_REGISTER_RESOURCE reg = { 0 };
-    reg.version = NV_ENC_REGISTER_RESOURCE_VER;
-    reg.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX;
-    reg.width = enc->width;
-    reg.height = enc->height;
-    reg.pitch = 0;
-    reg.bufferUsage = NV_ENC_INPUT_IMAGE;
-    reg.subResourceIndex = 0;
-    reg.resourceToRegister = texture;
-    reg.bufferFormat = (desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM || desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB) 
-        ? NV_ENC_BUFFER_FORMAT_ARGB : NV_ENC_BUFFER_FORMAT_ABGR;
+    DXGI_FORMAT encFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+    NV_ENC_BUFFER_FORMAT nvFormat = NV_ENC_BUFFER_FORMAT_ARGB;
 
-    NVENCSTATUS st = enc->fn.nvEncRegisterResource(enc->encoder, &reg);
-    if (st == NV_ENC_SUCCESS) {
-        enc->registeredTex = reg.registeredResource;
-        return reg.registeredResource;
+    if (desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) {
+        encFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        nvFormat = NV_ENC_BUFFER_FORMAT_ABGR;
+    } else {
+        encFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
+        nvFormat = NV_ENC_BUFFER_FORMAT_ARGB;
     }
 
-    // Direct registration failed on shared resource handle.
-    // Create dedicated NVENC VRAM texture and copy on GPU (0% CPU, 0.02ms on VRAM)
+    // Always use dedicated non-sRGB intermediate texture on VRAM for 100% NVENC compatibility
     D3D11_TEXTURE2D_DESC td = { 0 };
     td.Width = enc->width;
     td.Height = enc->height;
     td.MipLevels = 1;
     td.ArraySize = 1;
-    td.Format = desc.Format;
+    td.Format = encFormat;
     td.SampleDesc.Count = 1;
     td.Usage = D3D11_USAGE_DEFAULT;
     td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
@@ -186,8 +178,18 @@ extern "C" __declspec(dllexport) void* nvenc_register_texture(void* handle, ID3D
         return NULL;
     }
 
+    NV_ENC_REGISTER_RESOURCE reg = { 0 };
+    reg.version = NV_ENC_REGISTER_RESOURCE_VER;
+    reg.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX;
+    reg.width = enc->width;
+    reg.height = enc->height;
+    reg.pitch = 0;
+    reg.bufferUsage = NV_ENC_INPUT_IMAGE;
+    reg.subResourceIndex = 0;
     reg.resourceToRegister = enc->intermediateTex;
-    st = enc->fn.nvEncRegisterResource(enc->encoder, &reg);
+    reg.bufferFormat = nvFormat;
+
+    NVENCSTATUS st = enc->fn.nvEncRegisterResource(enc->encoder, &reg);
     if (st != NV_ENC_SUCCESS) {
         if (out_err) *out_err = 600 + st;
         enc->intermediateTex->Release();
@@ -204,7 +206,7 @@ extern "C" __declspec(dllexport) int nvenc_encode_frame(void* handle, ID3D11Text
     NvencEncoder* enc = (NvencEncoder*)handle;
 
     if (enc->intermediateTex && source_tex && enc->context) {
-        // Fast 0.02ms GPU VRAM copy
+        // Fast 0.02ms GPU VRAM copy (works identically across sRGB and UNORM)
         enc->context->CopyResource(enc->intermediateTex, source_tex);
     }
 
