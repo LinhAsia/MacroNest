@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
@@ -30,30 +31,33 @@ use windows::{
     },
 };
 
-pub fn find_game_capture_binaries(paths: &crate::storage::AppPaths) -> Option<(PathBuf, PathBuf, PathBuf)> {
+pub fn find_game_capture_binaries(paths: &crate::storage::AppPaths, is_32bit: bool) -> Option<(PathBuf, PathBuf, PathBuf)> {
+    let hook_name = if is_32bit { "graphics-hook32.dll" } else { "graphics-hook64.dll" };
+    let inject_name = if is_32bit { "inject-helper32.exe" } else { "inject-helper64.exe" };
+    let offsets_name = if is_32bit { "get-graphics-offsets32.exe" } else { "get-graphics-offsets64.exe" };
+
     // 1. Check local AppData bin/game_capture
-    if paths.graphics_hook64_dll.exists() && paths.inject_helper64_exe.exists() {
-        return Some((
-            paths.graphics_hook64_dll.clone(),
-            paths.inject_helper64_exe.clone(),
-            paths.get_graphics_offsets64_exe.clone(),
-        ));
+    let local_hook = paths.game_capture_dir.join(hook_name);
+    let local_inject = paths.game_capture_dir.join(inject_name);
+    let local_offsets = paths.game_capture_dir.join(offsets_name);
+    if local_hook.exists() && local_inject.exists() {
+        return Some((local_hook, local_inject, local_offsets));
     }
 
     // 2. Check installed OBS Studio
     let obs_dir = PathBuf::from(r"D:\obs-studio\data\obs-plugins\win-capture");
-    let obs_hook = obs_dir.join("graphics-hook64.dll");
-    let obs_inject = obs_dir.join("inject-helper64.exe");
-    let obs_offsets = obs_dir.join("get-graphics-offsets64.exe");
+    let obs_hook = obs_dir.join(hook_name);
+    let obs_inject = obs_dir.join(inject_name);
+    let obs_offsets = obs_dir.join(offsets_name);
     if obs_hook.exists() && obs_inject.exists() {
         return Some((obs_hook, obs_inject, obs_offsets));
     }
 
     // 3. Check Program Files OBS Studio
     let pf_dir = PathBuf::from(r"C:\Program Files\obs-studio\data\obs-plugins\win-capture");
-    let pf_hook = pf_dir.join("graphics-hook64.dll");
-    let pf_inject = pf_dir.join("inject-helper64.exe");
-    let pf_offsets = pf_dir.join("get-graphics-offsets64.exe");
+    let pf_hook = pf_dir.join(hook_name);
+    let pf_inject = pf_dir.join(inject_name);
+    let pf_offsets = pf_dir.join(offsets_name);
     if pf_hook.exists() && pf_inject.exists() {
         return Some((pf_hook, pf_inject, pf_offsets));
     }
@@ -62,7 +66,7 @@ pub fn find_game_capture_binaries(paths: &crate::storage::AppPaths) -> Option<(P
 }
 
 pub fn is_game_capture_available(paths: &crate::storage::AppPaths) -> bool {
-    find_game_capture_binaries(paths).is_some()
+    find_game_capture_binaries(paths, false).is_some()
 }
 
 #[repr(C, packed(8))]
@@ -258,9 +262,6 @@ fn to_wide(s: &str) -> Vec<u16> {
 #[cfg(windows)]
 impl GameCaptureSession {
     pub fn start(hwnd: HWND, paths: &crate::storage::AppPaths) -> Result<Self> {
-        let (hook_dll, inject_helper, offsets_exe) = find_game_capture_binaries(paths)
-            .context("Game Capture binaries not found. Install Game Capture in Settings > Downloaded Tools.")?;
-
         let mut pid: u32 = 0;
         unsafe {
             GetWindowThreadProcessId(hwnd, Some(&mut pid));
@@ -268,38 +269,71 @@ impl GameCaptureSession {
         if pid == 0 {
             bail!("Could not determine target window process ID.");
         }
+        if pid == std::process::id() {
+            bail!("Cannot hook into MacroNest itself. Select the game window from the dropdown.");
+        }
+
+        let mut is_32bit = false;
+        unsafe {
+            use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, IsWow64Process};
+            if let Ok(process_handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                let mut wow64 = windows::core::BOOL::from(false);
+                if IsWow64Process(process_handle, &mut wow64).is_ok() {
+                    is_32bit = wow64.as_bool();
+                }
+                let _ = CloseHandle(process_handle);
+            }
+        }
+
+        let (hook_dll, inject_helper, offsets_exe) = find_game_capture_binaries(paths, is_32bit)
+            .context("Game Capture binaries not found. Install Game Capture in Settings > Downloaded Tools.")?;
 
         let offsets = get_graphics_offsets(&offsets_exe);
 
         unsafe {
+            use windows::Win32::Security::{
+                InitializeSecurityDescriptor, SetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR,
+                SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
+            };
+
+            let mut sd = SECURITY_DESCRIPTOR::default();
+            let _ = InitializeSecurityDescriptor(PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut _), 1);
+            let _ = SetSecurityDescriptorDacl(PSECURITY_DESCRIPTOR(&mut sd as *mut _ as *mut _), true, None, false);
+            let sa = SECURITY_ATTRIBUTES {
+                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: &mut sd as *mut _ as *mut _,
+                bInheritHandle: false.into(),
+            };
+            let sa_ptr = Some(&sa as *const _);
+
             let keepalive_name = to_wide(&format!("CaptureHook_KeepAlive{pid}"));
-            let keepalive = CreateMutexW(None, false, PCWSTR(keepalive_name.as_ptr()))?;
+            let keepalive = CreateMutexW(sa_ptr, false, PCWSTR(keepalive_name.as_ptr()))?;
 
             let hook_init_name = to_wide(&format!("CaptureHook_Initialize{pid}"));
-            let hook_init = CreateEventW(None, false, false, PCWSTR(hook_init_name.as_ptr()))?;
+            let hook_init = CreateEventW(sa_ptr, false, false, PCWSTR(hook_init_name.as_ptr()))?;
 
             let hook_ready_name = to_wide(&format!("CaptureHook_HookReady{pid}"));
-            let hook_ready = CreateEventW(None, false, false, PCWSTR(hook_ready_name.as_ptr()))?;
+            let hook_ready = CreateEventW(sa_ptr, false, false, PCWSTR(hook_ready_name.as_ptr()))?;
 
             let hook_exit_name = to_wide(&format!("CaptureHook_Exit{pid}"));
-            let hook_exit = CreateEventW(None, false, false, PCWSTR(hook_exit_name.as_ptr()))?;
+            let hook_exit = CreateEventW(sa_ptr, false, false, PCWSTR(hook_exit_name.as_ptr()))?;
 
             let hook_restart_name = to_wide(&format!("CaptureHook_Restart{pid}"));
-            let hook_restart = CreateEventW(None, false, false, PCWSTR(hook_restart_name.as_ptr()))?;
+            let hook_restart = CreateEventW(sa_ptr, false, false, PCWSTR(hook_restart_name.as_ptr()))?;
 
             let hook_stop_name = to_wide(&format!("CaptureHook_Stop{pid}"));
-            let hook_stop = CreateEventW(None, false, false, PCWSTR(hook_stop_name.as_ptr()))?;
+            let hook_stop = CreateEventW(sa_ptr, false, false, PCWSTR(hook_stop_name.as_ptr()))?;
 
             let tex_m1_name = to_wide(&format!("CaptureHook_TextureMutex1{pid}"));
-            let tex_m1 = CreateMutexW(None, false, PCWSTR(tex_m1_name.as_ptr()))?;
+            let tex_m1 = CreateMutexW(sa_ptr, false, PCWSTR(tex_m1_name.as_ptr()))?;
 
             let tex_m2_name = to_wide(&format!("CaptureHook_TextureMutex2{pid}"));
-            let tex_m2 = CreateMutexW(None, false, PCWSTR(tex_m2_name.as_ptr()))?;
+            let tex_m2 = CreateMutexW(sa_ptr, false, PCWSTR(tex_m2_name.as_ptr()))?;
 
             let hook_info_name = to_wide(&format!("CaptureHook_HookInfo{pid}"));
             let hook_info_map = CreateFileMappingW(
                 HANDLE(usize::MAX as *mut _),
-                None,
+                sa_ptr,
                 PAGE_READWRITE,
                 0,
                 std::mem::size_of::<HookInfo>() as u32,
@@ -322,7 +356,7 @@ impl GameCaptureSession {
             hi.offsets = offsets;
             hi.allow_srgb_alias = true;
 
-            // Spawn inject-helper64.exe to inject graphics-hook64.dll into the game
+            // Spawn inject-helper to inject graphics-hook into the game
             let inject_status = Command::new(&inject_helper)
                 .creation_flags(0x0800_0000)
                 .args([
@@ -331,7 +365,7 @@ impl GameCaptureSession {
                     &pid.to_string(),
                 ])
                 .status()
-                .context("Failed to spawn inject-helper64.exe")?;
+                .context("Failed to spawn inject-helper.exe")?;
 
             if !inject_status.success() {
                 let _ = Command::new(&inject_helper)
@@ -364,10 +398,21 @@ impl GameCaptureSession {
             let d3d_device = d3d_device.context("Failed to create D3D11 device")?;
             let d3d_context = d3d_context.context("Failed to create D3D11 context")?;
 
-            // Wait up to 5 seconds for the game hook to produce the first texture
-            let wait_res = WaitForSingleObject(hook_ready, 5000);
-            if wait_res.0 != 0 {
-                bail!("Game hook did not signal ready within 5 seconds. Make sure the game is actively rendering.");
+            // Wait up to 10 seconds for the game hook to produce the first texture
+            let start_wait = Instant::now();
+            let mut ready = false;
+            while start_wait.elapsed() < Duration::from_secs(10) {
+                let wait_res = WaitForSingleObject(hook_ready, 100);
+                if wait_res.0 == 0 {
+                    ready = true;
+                    break;
+                }
+                if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
+                    bail!("Target game window closed.");
+                }
+            }
+            if !ready {
+                bail!("Game hook did not signal ready within 10 seconds. Make sure the game is focused and actively rendering 3D graphics (DirectX 9/11/12 or OpenGL).");
             }
 
             // Read texture handle from CaptureHook_Texture<pid>

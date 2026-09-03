@@ -1712,11 +1712,16 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<CaptureSource, String>
         }
         QuickVideoRecordMode::GameCapture => {
             let hwnd = if let Some(hwnd) = selector_hwnd(&config.target_window) {
+                if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
+                    return Err("The selected game window is no longer available.".to_owned());
+                }
                 hwnd
             } else {
                 let hwnd = unsafe { GetForegroundWindow() };
-                if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
-                    return Err("No active game window found. Focus the game or select its window first.".to_owned());
+                let mut fg_pid: u32 = 0;
+                unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, Some(&mut fg_pid)) };
+                if hwnd.0.is_null() || fg_pid == std::process::id() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
+                    return Err("Select a game window from the dropdown first.".to_owned());
                 }
                 hwnd
             };

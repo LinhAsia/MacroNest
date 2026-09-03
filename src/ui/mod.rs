@@ -7171,18 +7171,26 @@ impl CrosshairApp {
                                     }
 
                                     match self.state.quick_video_record_mode {
-                                        QuickVideoRecordMode::SelectedWindow => {
-                                            let selected = if self
-                                                .state
-                                                .quick_video_record_target_window
-                                                .is_empty()
-                                            {
+                                        QuickVideoRecordMode::SelectedWindow | QuickVideoRecordMode::GameCapture => {
+                                            let default_label = if self.state.quick_video_record_mode == QuickVideoRecordMode::GameCapture {
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Select game window",
+                                                    "Chọn cửa sổ game",
+                                                )
+                                            } else {
                                                 Self::tr_lang(
                                                     self.state.ui_language,
                                                     "Select window",
                                                     "Chọn cửa sổ",
                                                 )
-                                                .to_owned()
+                                            };
+                                            let selected = if self
+                                                .state
+                                                .quick_video_record_target_window
+                                                .is_empty()
+                                            {
+                                                default_label.to_owned()
                                             } else {
                                                 Self::truncate_window_title(
                                                     &Self::quick_action_window_display(
@@ -7345,14 +7353,37 @@ impl CrosshairApp {
                                     }
                                     keep_open |= capture_active;
 
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
+                                    let hint_text = match self.state.quick_video_record_mode {
+                                        QuickVideoRecordMode::Region => Self::tr_lang(
                                             self.state.ui_language,
                                             "Hold trigger to select and record a region",
                                             "Giữ trigger để chọn và quay một vùng",
-                                        ))
-                                        .size(12.0)
-                                        .weak(),
+                                        ),
+                                        QuickVideoRecordMode::GameCapture => Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Hook into game DirectX SwapChain (OBS Engine)",
+                                            "Móc trực tiếp vào DirectX SwapChain của game",
+                                        ),
+                                        QuickVideoRecordMode::FocusedWindow => Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Record active focused window",
+                                            "Quay cửa sổ đang focus",
+                                        ),
+                                        QuickVideoRecordMode::SelectedWindow => Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Record selected window",
+                                            "Quay cửa sổ đã chọn",
+                                        ),
+                                        QuickVideoRecordMode::FullScreen => Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Record entire screen",
+                                            "Quay toàn bộ màn hình",
+                                        ),
+                                    };
+                                    ui.label(
+                                        RichText::new(hint_text)
+                                            .size(12.0)
+                                            .weak(),
                                     );
 
                                     ui.horizontal(|ui| {
