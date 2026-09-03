@@ -1036,9 +1036,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 "-loglevel",
                 "error",
                 "-thread_queue_size",
-                "1024",
-                "-rtbufsize",
-                "512M",
+                "32",
                 "-f",
                 "rawvideo",
                 "-pix_fmt",
@@ -1087,16 +1085,10 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         HardwareEncoderKind::MediaFoundation => {
             command.args([
                 "-vf",
-                "format=nv12",
+                "format=yuv420p",
                 "-an",
                 "-c:v",
                 "h264_mf",
-                "-hw_encoding",
-                "true",
-                "-scenario",
-                "display_remoting",
-                "-rate_control",
-                "ld_vbr",
                 "-b:v",
                 "12M",
                 "-g",
@@ -1190,16 +1182,26 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             }
 
             let frame_duration = Duration::from_micros(1_000_000 / feeder_fps);
-            let mut next_frame_time = Instant::now() + frame_duration;
+            let mut start_time = Instant::now();
+            let mut frame_count: u64 = 0;
 
             'feeder: while !feeder_stop.load(Ordering::Acquire) {
+                frame_count += 1;
+                let target_time = start_time + Duration::from_micros(frame_count * 1_000_000 / feeder_fps);
                 let now = Instant::now();
-                if next_frame_time > now {
-                    thread::sleep(next_frame_time - now);
-                } else if now - next_frame_time > frame_duration * 2 {
-                    next_frame_time = now;
+                if target_time > now {
+                    let diff = target_time - now;
+                    if diff > Duration::from_millis(2) {
+                        thread::sleep(diff - Duration::from_millis(2));
+                    }
+                    while Instant::now() < target_time {
+                        std::hint::spin_loop();
+                    }
+                } else if now.saturating_duration_since(target_time) > frame_duration * 3 {
+                    // Heavily lagged behind, resync time anchor
+                    start_time = now;
+                    frame_count = 0;
                 }
-                next_frame_time += frame_duration;
 
                 let _ = active_session.poll_into_buffer(&mut last_frame, width, height);
 

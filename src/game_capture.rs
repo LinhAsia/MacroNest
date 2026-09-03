@@ -175,7 +175,7 @@ pub struct GameCaptureSession {
     d3d_device: ID3D11Device,
     d3d_context: ID3D11DeviceContext,
     shared_texture: Option<ID3D11Texture2D>,
-    staging_textures: Option<([ID3D11Texture2D; 2], u32, u32)>,
+    staging_textures: Option<([ID3D11Texture2D; 3], u32, u32)>,
     write_idx: usize,
     copies_count: usize,
     hook_info_map: HANDLE,
@@ -590,9 +590,11 @@ impl GameCaptureSession {
 
                 let mut s0 = None;
                 let mut s1 = None;
+                let mut s2 = None;
                 self.d3d_device.CreateTexture2D(&staging_desc, None, Some(&mut s0))?;
                 self.d3d_device.CreateTexture2D(&staging_desc, None, Some(&mut s1))?;
-                self.staging_textures = Some(([s0.unwrap(), s1.unwrap()], desc.Width, desc.Height));
+                self.d3d_device.CreateTexture2D(&staging_desc, None, Some(&mut s2))?;
+                self.staging_textures = Some(([s0.unwrap(), s1.unwrap(), s2.unwrap()], desc.Width, desc.Height));
                 self.write_idx = 0;
                 self.copies_count = 0;
             }
@@ -602,10 +604,11 @@ impl GameCaptureSession {
 
             // Copy directly on GPU VRAM from shared game texture
             self.d3d_context.CopyResource(&staging_textures[write_idx], shared_tex);
+            self.d3d_context.Flush();
 
             self.copies_count += 1;
-            let read_idx = if self.copies_count > 1 {
-                1 - write_idx
+            let read_idx = if self.copies_count >= 3 {
+                (write_idx + 1) % 3
             } else {
                 write_idx
             };
@@ -631,7 +634,7 @@ impl GameCaptureSession {
             }
 
             self.d3d_context.Unmap(read_tex, 0);
-            self.write_idx = 1 - write_idx;
+            self.write_idx = (write_idx + 1) % 3;
 
             Ok(true)
         }
