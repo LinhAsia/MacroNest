@@ -1205,7 +1205,7 @@ mod windows_impl {
         let frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &dxgi_device_winrt,
             DirectXPixelFormat::B8G8R8A8UIntNormalized,
-            2,
+            6,
             size,
         )?;
 
@@ -1322,6 +1322,11 @@ mod windows_impl {
             unsafe {
                 d3d_context.CopyResource(&staging_textures[current_write], &texture);
             }
+            drop(texture);
+            drop(access);
+            drop(surface);
+            drop(frame);
+
             self.write_idx = (self.write_idx + 1) % 3;
             self.copies_count += 1;
 

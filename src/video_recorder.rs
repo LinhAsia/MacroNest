@@ -888,7 +888,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     let gop_size = config.fps.clamp(1, 240).to_string();
     let mut command = Command::new(&config.ffmpeg_exe);
     command
-        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+        .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));
@@ -1108,11 +1108,15 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         let thread_handle = thread::spawn(move || {
             #[cfg(windows)]
             unsafe {
+                use windows::Win32::System::Threading::{
+                    GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
+                };
                 let _ = timeBeginPeriod(1);
+                let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
             }
             let mut last_frame = initial.rgba;
             let mut wgc = session;
-            let mut pipe = std::io::BufWriter::with_capacity(width * height * 4 + 4096, stdin);
+            let mut pipe = stdin;
 
             if pipe.write_all(&last_frame).is_ok() && pipe.flush().is_ok() {
                 let _ = audio_start_clone.send(());
@@ -1138,10 +1142,11 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
 
                 let _ = wgc.poll_into_buffer(&mut last_frame, width, height);
 
-                if pipe.write_all(&last_frame).is_err() || pipe.flush().is_err() {
+                if pipe.write_all(&last_frame).is_err() {
                     break 'feeder;
                 }
             }
+            let _ = pipe.flush();
             #[cfg(windows)]
             unsafe {
                 let _ = timeEndPeriod(1);
