@@ -1158,7 +1158,7 @@ mod windows_impl {
         d3d_device: ID3D11Device,
         frame_pool: Direct3D11CaptureFramePool,
         session: GraphicsCaptureSession,
-        staging_textures: Option<([ID3D11Texture2D; 3], u32, u32)>,
+        staging_textures: Option<([ID3D11Texture2D; 4], u32, u32)>,
         write_idx: usize,
         copies_count: usize,
     }
@@ -1302,6 +1302,7 @@ mod windows_impl {
                 let mut s0 = None;
                 let mut s1 = None;
                 let mut s2 = None;
+                let mut s3 = None;
                 unsafe {
                     self.d3d_device
                         .CreateTexture2D(&staging_desc, None, Some(&mut s0))?;
@@ -1309,8 +1310,14 @@ mod windows_impl {
                         .CreateTexture2D(&staging_desc, None, Some(&mut s1))?;
                     self.d3d_device
                         .CreateTexture2D(&staging_desc, None, Some(&mut s2))?;
+                    self.d3d_device
+                        .CreateTexture2D(&staging_desc, None, Some(&mut s3))?;
                 }
-                self.staging_textures = Some(([s0.unwrap(), s1.unwrap(), s2.unwrap()], desc.Width, desc.Height));
+                self.staging_textures = Some((
+                    [s0.unwrap(), s1.unwrap(), s2.unwrap(), s3.unwrap()],
+                    desc.Width,
+                    desc.Height,
+                ));
                 self.write_idx = 0;
                 self.copies_count = 0;
             }
@@ -1327,19 +1334,28 @@ mod windows_impl {
             drop(surface);
             drop(frame);
 
-            self.write_idx = (self.write_idx + 1) % 3;
+            self.write_idx = (self.write_idx + 1) % 4;
             self.copies_count += 1;
 
-            let read_idx = if self.copies_count >= 2 {
-                (current_write + 1) % 3
+            let read_idx = if self.copies_count >= 3 {
+                (current_write + 1) % 4
             } else {
                 current_write
             };
 
             let read_tex = &staging_textures[read_idx];
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            unsafe {
-                d3d_context.Map(read_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+            let map_res = unsafe {
+                d3d_context.Map(
+                    read_tex,
+                    0,
+                    D3D11_MAP_READ,
+                    windows::Win32::Graphics::Direct3D11::D3D11_MAP_FLAG_DO_NOT_WAIT.0 as u32,
+                    Some(&mut mapped),
+                )
+            };
+            if map_res.is_err() {
+                return Ok(true);
             }
 
             let pitch = mapped.RowPitch as usize;
