@@ -233,15 +233,41 @@ pub fn get_graphics_offsets(offsets_exe: &Path) -> GraphicsOffsets {
     if offsets_exe.exists() {
         if let Ok(output) = Command::new(offsets_exe).creation_flags(0x0800_0000).output() {
             let str_out = String::from_utf8_lossy(&output.stdout);
+            let mut section = "";
             for line in str_out.lines() {
-                let parts: Vec<&str> = line.trim().split('=').collect();
+                let trimmed = line.trim();
+                if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                    section = &trimmed[1..trimmed.len() - 1];
+                    continue;
+                }
+                let parts: Vec<&str> = trimmed.split('=').collect();
                 if parts.len() == 2 {
-                    let key = parts[0];
-                    let val = u32::from_str_radix(parts[1].trim_start_matches("0x"), 16).unwrap_or(0);
-                    match key {
-                        "present" if offsets.dxgi.present == 0 => offsets.dxgi.present = val,
-                        "present1" => offsets.dxgi.present1 = val,
-                        "resize" => offsets.dxgi.resize = val,
+                    let key = parts[0].trim();
+                    let val = u32::from_str_radix(parts[1].trim().trim_start_matches("0x"), 16).unwrap_or(0);
+                    match section {
+                        "d3d8" => match key {
+                            "present" => offsets.d3d8.present = val,
+                            _ => {}
+                        },
+                        "d3d9" => match key {
+                            "present" => offsets.d3d9.present = val,
+                            "present_ex" => offsets.d3d9.present_ex = val,
+                            "present_swap" => offsets.d3d9.present_swap = val,
+                            "d3d9_clsoff" => offsets.d3d9.d3d9_clsoff = val,
+                            "is_d3d9ex_clsoff" => offsets.d3d9.is_d3d9ex_clsoff = val,
+                            _ => {}
+                        },
+                        "dxgi" => match key {
+                            "present" => offsets.dxgi.present = val,
+                            "present1" => offsets.dxgi.present1 = val,
+                            "resize" => offsets.dxgi.resize = val,
+                            "release" => offsets.dxgi2.release = val,
+                            _ => {}
+                        },
+                        "d3d12" => match key {
+                            "execute_command_lists" => offsets.d3d12.execute_command_lists = val,
+                            _ => {}
+                        },
                         _ => {}
                     }
                 }
@@ -252,6 +278,7 @@ pub fn get_graphics_offsets(offsets_exe: &Path) -> GraphicsOffsets {
         offsets.dxgi.present = 0x19960;
         offsets.dxgi.present1 = 0x19e00;
         offsets.dxgi.resize = 0x38530;
+        offsets.dxgi2.release = 0x34460;
     }
     offsets
 }
@@ -435,9 +462,7 @@ impl GameCaptureSession {
             }
 
             // Read texture handle from CaptureHook_Texture shared memory
-            let top_hwnd = unsafe {
-                windows::Win32::UI::WindowsAndMessaging::GetAncestor(hwnd, windows::Win32::UI::WindowsAndMessaging::GA_ROOT)
-            };
+            let top_hwnd = windows::Win32::UI::WindowsAndMessaging::GetAncestor(hwnd, windows::Win32::UI::WindowsAndMessaging::GA_ROOT);
             let hi_map_id = (&*hook_info_ptr).map_id;
             let candidates = [
                 format!("CaptureHook_Texture_{}_{}", top_hwnd.0 as usize, hi_map_id),

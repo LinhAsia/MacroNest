@@ -867,7 +867,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 bottom: top + height,
             })
         }
-        CaptureSource::WgcWindow { hwnd, .. } | CaptureSource::GameCapture { hwnd, .. } => {
+        CaptureSource::WgcWindow { hwnd, .. } => {
             let mut r = RECT::default();
             unsafe {
                 if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
@@ -878,6 +878,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             }
         }
         CaptureSource::Region { region, .. } => Some(*region),
+        CaptureSource::GameCapture { .. } => None,
     };
     let (region_border, recording_active_signal) = match border_rect {
         Some(rect) => {
