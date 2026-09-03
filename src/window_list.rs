@@ -1203,7 +1203,7 @@ mod windows_impl {
         let frame_pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &dxgi_device_winrt,
             DirectXPixelFormat::B8G8R8A8UIntNormalized,
-            1,
+            2,
             size,
         )?;
 
@@ -1224,7 +1224,7 @@ mod windows_impl {
     impl WgcSession {
         pub(crate) fn get_next_frame(&mut self) -> anyhow::Result<ScreenCaptureFrame> {
             let mut frame_opt = None;
-            for _ in 0..15 {
+            for _ in 0..20 {
                 if let Ok(frame) = self.frame_pool.TryGetNextFrame() {
                     frame_opt = Some(frame);
                     while let Ok(next) = self.frame_pool.TryGetNextFrame() {
@@ -1232,7 +1232,7 @@ mod windows_impl {
                     }
                     break;
                 }
-                std::thread::sleep(std::time::Duration::from_millis(5));
+                std::thread::sleep(std::time::Duration::from_millis(1));
             }
 
             let frame = frame_opt.context("No frame available from WGC pool")?;
@@ -1283,20 +1283,17 @@ mod windows_impl {
             }
 
             let pitch = mapped.RowPitch as usize;
+            let row_bytes = (width as usize) * 4;
             let src_slice = unsafe {
                 std::slice::from_raw_parts(mapped.pData as *const u8, pitch * height as usize)
             };
-            let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
-            for y in 0..height as usize {
-                let src_offset = y * pitch;
-                let dst_offset = y * (width as usize) * 4;
-                let src_row = &src_slice[src_offset..(src_offset + (width as usize) * 4)];
-                let dst_row = &mut rgba[dst_offset..(dst_offset + (width as usize) * 4)];
-                for (dst, src) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
-                    dst[0] = src[2];
-                    dst[1] = src[1];
-                    dst[2] = src[0];
-                    dst[3] = src[3];
+            let mut rgba = Vec::with_capacity(row_bytes * height as usize);
+            if pitch == row_bytes {
+                rgba.extend_from_slice(&src_slice[..row_bytes * height as usize]);
+            } else {
+                for y in 0..height as usize {
+                    let src_offset = y * pitch;
+                    rgba.extend_from_slice(&src_slice[src_offset..src_offset + row_bytes]);
                 }
             }
 

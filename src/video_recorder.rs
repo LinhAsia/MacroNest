@@ -965,7 +965,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 "-f",
                 "rawvideo",
                 "-pix_fmt",
-                "rgba",
+                "bgra",
                 "-s",
                 &format!("{width}x{height}"),
                 "-r",
@@ -976,29 +976,50 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         }
     }
 
-    command.args([
-        "-vf",
-        "format=yuv420p",
-        "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-tune",
-        "zerolatency",
-        "-crf",
-        "20",
-        "-g",
-        &gop_size,
-        "-bf",
-        "0",
-        "-fps_mode",
-        "cfr",
-        "-avoid_negative_ts",
-        "make_zero",
-        "-movflags",
-        "+faststart",
-    ]);
+    let use_hw = hardware_encoding_available(&config.ffmpeg_exe);
+    if use_hw {
+        command.args([
+            "-vf",
+            "format=yuv420p",
+            "-an",
+            "-c:v",
+            "h264_mf",
+            "-b:v",
+            "12M",
+            "-g",
+            &gop_size,
+            "-fps_mode",
+            "cfr",
+            "-avoid_negative_ts",
+            "make_zero",
+            "-movflags",
+            "+faststart",
+        ]);
+    } else {
+        command.args([
+            "-vf",
+            "format=yuv420p",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-crf",
+            "20",
+            "-g",
+            &gop_size,
+            "-bf",
+            "0",
+            "-fps_mode",
+            "cfr",
+            "-avoid_negative_ts",
+            "make_zero",
+            "-movflags",
+            "+faststart",
+        ]);
+    }
     command.arg(&output_path);
 
     let mut child = match command.spawn() {
@@ -1033,10 +1054,12 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         let stop_signal = Arc::new(AtomicBool::new(false));
         let feeder_stop = stop_signal.clone();
         let frame_interval = Duration::from_micros(1_000_000 / (fps.max(1) as u64));
+        let audio_start_clone = audio_start.clone();
         let thread_handle = thread::spawn(move || {
             let mut last_frame = initial.rgba;
             let mut wgc = session;
-            let mut pipe = stdin;
+            let mut pipe = std::io::BufWriter::with_capacity(1024 * 1024, stdin);
+            let mut audio_started = false;
             while !feeder_stop.load(Ordering::Acquire) {
                 let loop_start = Instant::now();
                 if let Ok(frame) = wgc.get_next_frame() {
@@ -1047,6 +1070,10 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 if pipe.write_all(&last_frame).is_err() {
                     break;
                 }
+                if !audio_started {
+                    let _ = audio_start_clone.send(());
+                    audio_started = true;
+                }
                 let elapsed = loop_start.elapsed();
                 if elapsed < frame_interval {
                     thread::sleep(frame_interval - elapsed);
@@ -1056,26 +1083,13 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         });
         (Some(stop_signal), Some(thread_handle))
     } else {
+        let _ = audio_start.send(());
         (None, None)
     };
 
-    let output_check = output_path.clone();
-    thread::spawn(move || {
-        let start = Instant::now();
-        while start.elapsed() < Duration::from_millis(2000) {
-            if fs::metadata(&output_check)
-                .map(|m| m.len() > 0)
-                .unwrap_or(false)
-            {
-                break;
-            }
-            thread::sleep(Duration::from_millis(2));
-        }
-        let _ = audio_start.send(());
-        if let Some(signal) = recording_active_signal {
-            signal.store(true, Ordering::Release);
-        }
-    });
+    if let Some(signal) = recording_active_signal {
+        signal.store(true, Ordering::Release);
+    }
     let session_id = SESSION_ID.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
     *PROCESS.lock() = Some(RecordingProcess {
         child,
@@ -1112,6 +1126,7 @@ fn stop_recording_inner() {
     crate::platform::update_native_taskbar_recording_state(false);
     crate::overlay::request_ui_repaint();
     *STATUS.lock() = "Finishing video...".to_owned();
+    recording.audio_stop.store(true, Ordering::Release);
     if let Some(stop) = recording.stream_stop.take() {
         stop.store(true, Ordering::Release);
     }
@@ -1386,9 +1401,6 @@ fn capture_system_audio(
             .get_audiocaptureclient()
             .map_err(|error| error.to_string())?;
         let file = File::create(audio_path).map_err(|error| error.to_string())?;
-        audio_client
-            .start_stream()
-            .map_err(|error| error.to_string())?;
         Ok((audio_client, capture, event, BufWriter::new(file)))
     })();
 
@@ -1403,22 +1415,13 @@ fn capture_system_audio(
         }
     };
     if start.recv_timeout(Duration::from_secs(5)).is_err() {
-        let _ = audio_client.stop_stream();
         return Ok(());
     }
+    audio_client
+        .start_stream()
+        .map_err(|error| error.to_string())?;
 
     let mut samples = VecDeque::new();
-    while capture
-        .get_next_packet_size()
-        .map_err(|error| error.to_string())?
-        .unwrap_or(0)
-        > 0
-    {
-        capture
-            .read_from_device_to_deque(&mut samples)
-            .map_err(|error| error.to_string())?;
-        samples.clear();
-    }
 
     while !stop.load(Ordering::Acquire) {
         if capture
