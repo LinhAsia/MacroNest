@@ -13996,19 +13996,28 @@ if supports_move_mouse || show_detection_tuning {
                                                             std::time::Duration::from_millis(250),
                                                         );
                                                     }
-                                                    let draw_button = Button::new(
-                                                        RichText::new(format!(
-                                                            "{} {}",
-                                                            Self::material_icon_text(
-                                                                draw_button_icon,
-                                                                10.0
-                                                            )
-                                                            .text(),
-                                                            draw_button_label
-                                                        ))
-                                                        .color(draw_button_color)
-                                                        .strong(),
+                                                    let mut draw_job = egui::text::LayoutJob::default();
+                                                    draw_job.append(
+                                                        &char::from_u32(draw_button_icon).unwrap_or('?').to_string(),
+                                                        0.0,
+                                                        egui::TextFormat {
+                                                            font_id: egui::FontId::new(10.0, egui::FontFamily::Name(MATERIAL_ICONS_FONT.into())),
+                                                            valign: egui::Align::Center,
+                                                            color: draw_button_color,
+                                                            ..Default::default()
+                                                        },
                                                     );
+                                                    draw_job.append(
+                                                        &format!(" {}", draw_button_label),
+                                                        0.0,
+                                                        egui::TextFormat {
+                                                            font_id: egui::FontId::new(12.0, egui::FontFamily::Proportional),
+                                                            valign: egui::Align::Center,
+                                                            color: draw_button_color,
+                                                            ..Default::default()
+                                                        },
+                                                    );
+                                                    let draw_button = Button::new(draw_job);
                                                     let draw_tooltip = if selected_id.is_some() || draw_capture_active {
                                                         Self::tr_lang(language, "Hide the app, hold left mouse to draw this path, then release to save into the selected Mouse Path preset.", "Hide the app, hold left mouse to draw this path, then release to save into the selected Mouse Path preset.")
                                                     } else {

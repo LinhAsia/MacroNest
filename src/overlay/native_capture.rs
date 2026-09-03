@@ -478,10 +478,8 @@ unsafe extern "system" fn capture_wnd_proc(
                 && matches!(state.mode, NativeCaptureMode::PointClick { .. })
             {
                 unsafe {
-                    if let Ok(cursor) = LoadCursorW(None, IDC_CROSS) {
-                        SetCursor(Some(cursor));
-                        return LRESULT(1);
-                    }
+                    SetCursor(None);
+                    return LRESULT(1);
                 }
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -547,9 +545,27 @@ unsafe extern "system" fn capture_wnd_proc(
                             InvalidateRect(hwnd, None, false);
                         }
                     } else if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
+                        let old_pt = state.current_point;
                         state.current_point = Some((rx, ry));
                         let new_panel_rect = point_click_panel_rect(state.width, state.height, (rx, ry));
                         unsafe {
+                            if let Some((ox, oy)) = old_pt {
+                                let old_cross_rect = RECT {
+                                    left: (ox - 18).max(0),
+                                    top: (oy - 18).max(0),
+                                    right: (ox + 19).min(state.width),
+                                    bottom: (oy + 19).min(state.height),
+                                };
+                                InvalidateRect(hwnd, Some(&old_cross_rect), false);
+                            }
+                            let new_cross_rect = RECT {
+                                left: (rx - 18).max(0),
+                                top: (ry - 18).max(0),
+                                right: (rx + 19).min(state.width),
+                                bottom: (ry + 19).min(state.height),
+                            };
+                            InvalidateRect(hwnd, Some(&new_cross_rect), false);
+
                             if let Some(old_rect) = state.last_panel_rect {
                                 if old_rect != new_panel_rect {
                                     InvalidateRect(hwnd, Some(&old_rect), false);
@@ -1372,6 +1388,34 @@ unsafe fn draw_capture_to_dc(
                 dirty_y,
                 SRCCOPY,
             );
+        }
+
+        if let Some(curr) = state.current_point {
+            let cx = curr.0;
+            let cy = curr.1;
+
+            // 1. Outer black border (thickness 4) - ensures 100% visibility on white and light backgrounds
+            let border_pen = CreatePen(PS_SOLID, 4, rgb(0, 0, 0));
+            let old_pen = SelectObject(mem_dc, HGDIOBJ(border_pen.0));
+            let _ = MoveToEx(mem_dc, cx - 15, cy, None);
+            let _ = LineTo(mem_dc, cx + 16, cy);
+            let _ = MoveToEx(mem_dc, cx, cy - 15, None);
+            let _ = LineTo(mem_dc, cx, cy + 16);
+            SelectObject(mem_dc, old_pen);
+            let _ = DeleteObject(HGDIOBJ(border_pen.0));
+
+            // 2. Inner bright cyan core (thickness 2) - bright and distinct on dark backgrounds
+            let inner_pen = CreatePen(PS_SOLID, 2, rgb(0, 220, 255));
+            let old_pen = SelectObject(mem_dc, HGDIOBJ(inner_pen.0));
+            let _ = MoveToEx(mem_dc, cx - 14, cy, None);
+            let _ = LineTo(mem_dc, cx + 15, cy);
+            let _ = MoveToEx(mem_dc, cx, cy - 14, None);
+            let _ = LineTo(mem_dc, cx, cy + 15);
+            SelectObject(mem_dc, old_pen);
+            let _ = DeleteObject(HGDIOBJ(inner_pen.0));
+
+            // 3. Crisp white center dot
+            let _ = windows::Win32::Graphics::Gdi::SetPixel(mem_dc, cx, cy, rgb(255, 255, 255));
         }
     } else if matches!(
         state.mode,
