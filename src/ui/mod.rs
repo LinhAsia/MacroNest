@@ -9768,21 +9768,6 @@ impl CrosshairApp {
         let live_open_windows = LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
         let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
         let window_groups = Self::grouped_window_selectors(effective_open_windows);
-        if !effective_open_windows.is_empty() {
-            if let Some(current) = target.as_ref() {
-                let clean_target = window_list::strip_rule_suffix(current);
-                let still_exists = effective_open_windows.iter().any(|window| {
-                    window.selector == *current
-                        || window.title == *current
-                        || window_list::strip_rule_suffix(&window.title) == clean_target
-                });
-                if !still_exists {
-                    *target = None;
-                    *match_duplicate_window_titles = false;
-                    changed = true;
-                }
-            }
-        }
         let selected_text = target
             .as_deref()
             .map(|current| {
