@@ -367,6 +367,7 @@ mod windows_impl {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_window_topmost(selector: &str, topmost: bool) -> bool {
         let Some(hwnd) = find_window_handle(Some(selector)) else {
             return false;
@@ -1677,6 +1678,7 @@ mod fallback {
         false
     }
 
+    #[allow(dead_code)]
     pub fn set_window_topmost(_selector: &str, _topmost: bool) -> bool {
         false
     }

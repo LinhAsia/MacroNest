@@ -810,8 +810,6 @@ pub struct CrosshairApp {
     macro_record_insert_index: Option<(u32, u32, usize)>,
     active_hud_preview_preset_id: Option<u32>,
     active_timer_preview_preset_id: Option<u32>,
-    quick_action_window_selector: String,
-    quick_action_pinned_windows: HashSet<String>,
     command_ai_dialog: Option<CommandAiDialog>,
     command_ai_job: Option<CommandAiJob>,
     command_ai_next_token: u64,
@@ -1195,8 +1193,6 @@ impl CrosshairApp {
             macro_record_insert_index: None,
             active_hud_preview_preset_id: None,
             active_timer_preview_preset_id: None,
-            quick_action_window_selector: String::new(),
-            quick_action_pinned_windows: HashSet::new(),
             command_ai_dialog: None,
             command_ai_job: None,
             command_ai_next_token: 1,
@@ -4859,35 +4855,12 @@ impl CrosshairApp {
         response
     }
 
-    fn set_quick_action_window_pinned(&mut self, selector: &str, pinned: bool) -> bool {
-        let success = window_list::set_window_topmost(selector, pinned);
-        if success {
-            if pinned {
-                self.quick_action_pinned_windows.insert(selector.to_owned());
-            } else {
-                self.quick_action_pinned_windows.remove(selector);
-            }
-        } else if !pinned {
-            self.quick_action_pinned_windows.remove(selector);
-        }
-        success
-    }
-
-    fn unpin_all_quick_action_windows(&mut self) {
-        let selectors = self.quick_action_pinned_windows.drain().collect::<Vec<_>>();
-        for selector in selectors {
-            let _ = window_list::set_window_topmost(&selector, false);
-        }
-    }
-
     fn render_titlebar_quick_actions_grid(
         &mut self,
         ui: &mut egui::Ui,
         taskbar_hidden: bool,
     ) -> bool {
         self.prime_open_windows_if_empty();
-        self.sync_quick_action_window_selection();
-        let pinned_window_active = !self.quick_action_pinned_windows.is_empty();
         let macro_visual_overlay_active = crate::overlay::has_active_macro_visual_overlay();
         let mut keep_menu_open = false;
         // Reset hover-card visibility flag each frame before render_popup calls
@@ -5015,7 +4988,6 @@ impl CrosshairApp {
                         action_kind,
                         TitlebarQuickActionKind::Taskbar
                             | TitlebarQuickActionKind::WindowsKey
-                            | TitlebarQuickActionKind::WindowPin
                             | TitlebarQuickActionKind::FocusHighlight
                             | TitlebarQuickActionKind::FocusMode
                             | TitlebarQuickActionKind::WindowOpacity
@@ -5304,163 +5276,6 @@ impl CrosshairApp {
                                 ));
                             },
                         );
-
-                        // Popup settings
-                        let mut keep_open = false;
-                        render_popup(
-                            ui,
-                            &button_response,
-                            TitlebarQuickActionKind::WindowPin,
-                            &mut |ui| {
-                                ui.vertical_centered(|ui| {
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Target window",
-                                            "Cửa sổ mục tiêu",
-                                        ))
-                                        .size(12.0),
-                                    );
-
-                                    let selected_window_text = if pinned_window_active {
-                                        format!(
-                                            "{} ({})",
-                                            Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Selected",
-                                                "Đã chọn",
-                                            ),
-                                            self.quick_action_pinned_windows.len()
-                                        )
-                                    } else {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Select windows",
-                                            "Chọn cửa sổ",
-                                        )
-                                        .to_owned()
-                                    };
-
-                                    let selector_popup_id =
-                                        ui.make_persistent_id("quick-action-window-selector-popup");
-                                    let mut selector_popup_open = ui
-                                        .ctx()
-                                        .data(|data| data.get_temp::<bool>(selector_popup_id))
-                                        .unwrap_or(false);
-
-                                    let selector_button = Button::new(
-                                        RichText::new(format!("{selected_window_text}  v"))
-                                            .size(12.0),
-                                    )
-                                    .fill(Color32::from_rgba_premultiplied(60, 60, 60, 220));
-                                    let selector_response =
-                                        ui.add_sized([164.0, 22.0], selector_button);
-                                    if selector_response.clicked() {
-                                        selector_popup_open = !selector_popup_open;
-                                        if selector_popup_open {
-                                            self.ensure_open_windows_ready(true);
-                                        }
-                                    }
-
-                                    let selector_popup_result =
-                                        egui::Popup::from_response(&selector_response)
-                                            .id(selector_popup_id)
-                                            .open_bool(&mut selector_popup_open)
-                                            .close_behavior(
-                                                egui::PopupCloseBehavior::CloseOnClickOutside,
-                                            )
-                                            .align(egui::RectAlign::BOTTOM_START)
-                                            .width(164.0)
-                                            .show(|ui| {
-                                                ui.set_min_width(164.0);
-                                                ui.set_max_width(164.0);
-                                                let windows = self
-                                                    .open_window_infos
-                                                    .iter()
-                                                    .map(|window| {
-                                                        (
-                                                            window.selector.clone(),
-                                                            window.title.clone(),
-                                                        )
-                                                    })
-                                                    .collect::<Vec<_>>();
-                                                for (selector, title) in windows {
-                                                    let display_title =
-                                                        Self::quick_action_window_display(
-                                                            &selector,
-                                                            &self.open_window_infos,
-                                                        );
-                                                    let truncated_title =
-                                                        Self::truncate_window_title(
-                                                            &display_title,
-                                                            20,
-                                                        );
-                                                    let mut selected = self
-                                                        .quick_action_pinned_windows
-                                                        .contains(&selector);
-                                                    let response = ui.checkbox(
-                                                        &mut selected,
-                                                        truncated_title,
-                                                    );
-                                                    if response.changed()
-                                                        && !self.set_quick_action_window_pinned(
-                                                            &selector,
-                                                            selected,
-                                                        )
-                                                    {
-                                                        self.status = Self::tr_lang(
-                                                            self.state.ui_language,
-                                                            "Could not update the selected window.",
-                                                            "Không thể cập nhật cửa sổ đã chọn.",
-                                                        )
-                                                        .to_owned();
-                                                    }
-                                                    response.on_hover_text(title);
-                                                }
-                                            });
-                                    let _ = selector_popup_result;
-                                    if selector_popup_open {
-                                        keep_open = true;
-                                    }
-                                    ui.ctx().data_mut(|data| {
-                                        data.insert_temp(selector_popup_id, selector_popup_open);
-                                    });
-
-                                    ui.add_space(4.0);
-                                    ui.separator();
-                                    ui.add_space(4.0);
-                                    let mut interactive_pin =
-                                        self.state.interactive_window_pin_enabled;
-                                    if ui
-                                        .checkbox(
-                                            &mut interactive_pin,
-                                            Self::tr_lang(
-                                                self.state.ui_language,
-                                                "Pin button on windows",
-                                                "Nút ghim trên cửa sổ",
-                                            ),
-                                        )
-                                        .on_hover_text(Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Show a clickable pin icon in the corner of all windows",
-                                            "Hiện nút ghim có thể nhấp ở góc của các cửa sổ",
-                                        ))
-                                        .changed()
-                                    {
-                                        self.state.interactive_window_pin_enabled =
-                                            interactive_pin;
-                                        self.sync_interactive_pin_state();
-                                        self.persist();
-                                    }
-
-                                    selector_popup_open
-                                })
-                                .inner
-                            },
-                        );
-                        if keep_open {
-                            keep_menu_open = true;
-                        }
                     },
                 );
 
@@ -16971,7 +16786,6 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::OpenWindowsLoaded { windows, status } => {
                     self.open_window_infos = windows;
-                    self.sync_quick_action_window_selection();
                     self.open_windows_loaded_once = true;
                     self.open_windows_loading = false;
                     self.last_window_refresh_at = Instant::now();
@@ -17580,7 +17394,6 @@ impl eframe::App for CrosshairApp {
                                 false,
                             ),
                         );
-                        let pinned_window_active = !self.quick_action_pinned_windows.is_empty();
                         let mut active_count = 0;
                         if taskbar_hidden {
                             active_count += 1;
@@ -17588,7 +17401,7 @@ impl eframe::App for CrosshairApp {
                         if self.state.windows_key_locked {
                             active_count += 1;
                         }
-                        if pinned_window_active {
+                        if self.state.interactive_window_pin_enabled {
                             active_count += 1;
                         }
                         if self.state.native_focus_highlight_enabled {
@@ -18260,7 +18073,6 @@ impl eframe::App for CrosshairApp {
         self.network_panel.shutdown();
         crate::video_recorder::stop_blocking();
         let _ = crate::platform::show_taskbar();
-        self.unpin_all_quick_action_windows();
         crate::overlay::unpin_all_interactive_windows();
         self.state.interactive_window_pin_enabled = false;
         self.sync_interactive_pin_state();

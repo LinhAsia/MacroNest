@@ -780,21 +780,6 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn sync_quick_action_window_selection(&mut self) {
-        if self.open_window_infos.is_empty() {
-            self.quick_action_window_selector.clear();
-            return;
-        }
-        if self.quick_action_window_selector.is_empty()
-            || !self
-                .open_window_infos
-                .iter()
-                .any(|item| item.selector == self.quick_action_window_selector)
-        {
-            self.quick_action_window_selector = self.open_window_infos[0].selector.clone();
-        }
-    }
-
     pub(crate) fn schedule_audio_sense_devices_refresh(&mut self) {
         if self.audio_sense_devices_loading {
             return;
