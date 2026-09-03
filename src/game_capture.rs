@@ -160,6 +160,8 @@ pub struct HookInfo {
     pub reserved: [u32; 126],
 }
 
+const _: () = assert!(std::mem::size_of::<HookInfo>() == 648);
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ShtexData {
@@ -263,9 +265,9 @@ fn to_wide(s: &str) -> Vec<u16> {
 impl GameCaptureSession {
     pub fn start(hwnd: HWND, paths: &crate::storage::AppPaths) -> Result<Self> {
         let mut pid: u32 = 0;
-        unsafe {
-            GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        }
+        let thread_id = unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid))
+        };
         if pid == 0 {
             bail!("Could not determine target window process ID.");
         }
@@ -364,22 +366,31 @@ impl GameCaptureSession {
                     "0",
                     &pid.to_string(),
                 ])
-                .status()
-                .context("Failed to spawn inject-helper.exe")?;
+                .status();
 
-            if !inject_status.success() {
-                let _ = Command::new(&inject_helper)
+            let mut inject_ok = match &inject_status {
+                Ok(s) => s.success(),
+                Err(_) => false,
+            };
+
+            if !inject_ok {
+                // Try safe injection with thread_id (SetWindowsHookEx)
+                if let Ok(safe_status) = Command::new(&inject_helper)
                     .creation_flags(0x0800_0000)
                     .args([
                         hook_dll.to_str().unwrap_or_default(),
                         "1",
-                        &pid.to_string(),
+                        &thread_id.to_string(),
                     ])
-                    .status();
+                    .status()
+                {
+                    inject_ok = safe_status.success();
+                }
             }
 
-            // Signal the hook to initialize
+            // Signal both hook_init (starts capture loop) and hook_restart (authorizes capture_should_init)
             let _ = SetEvent(hook_init);
+            let _ = SetEvent(hook_restart);
 
             // Create D3D11 Device for MacroNest to open the shared texture
             let mut d3d_device: Option<ID3D11Device> = None;
@@ -407,28 +418,55 @@ impl GameCaptureSession {
                     ready = true;
                     break;
                 }
+                // Keep signaling restart if needed
+                let _ = SetEvent(hook_restart);
                 if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
                     bail!("Target game window closed.");
                 }
             }
             if !ready {
+                if let Ok(status) = &inject_status {
+                    let code = status.code().unwrap_or(0);
+                    if code == -3 || code == 253 || code == 0xFFFFFFFD_u32 as i32 {
+                        bail!("Game process access denied. Please run MacroNest as Administrator to hook this game.");
+                    }
+                }
                 bail!("Game hook did not signal ready within 10 seconds. Make sure the game is focused and actively rendering 3D graphics (DirectX 9/11/12 or OpenGL).");
             }
 
-            // Read texture handle from CaptureHook_Texture<pid>
-            let tex_map_name = to_wide(&format!("CaptureHook_Texture{pid}"));
-            let tex_map = OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(tex_map_name.as_ptr()))?;
-            let tex_view = MapViewOfFile(tex_map, FILE_MAP_ALL_ACCESS, 0, 0, std::mem::size_of::<ShtexData>());
-            if tex_view.Value.is_null() {
-                bail!("Failed to open CaptureHook_Texture shared memory");
-            }
-            let shtex = *(tex_view.Value as *const ShtexData);
-            let _ = UnmapViewOfFile(tex_view);
-            let _ = CloseHandle(tex_map);
+            // Read texture handle from CaptureHook_Texture shared memory
+            let top_hwnd = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetAncestor(hwnd, windows::Win32::UI::WindowsAndMessaging::GA_ROOT)
+            };
+            let hi_map_id = (&*hook_info_ptr).map_id;
+            let candidates = [
+                format!("CaptureHook_Texture_{}_{}", top_hwnd.0 as usize, hi_map_id),
+                format!("CaptureHook_Texture_{}_{}", hwnd.0 as usize, hi_map_id),
+                format!("CaptureHook_Texture_{}_{}", top_hwnd.0 as usize, 1),
+                format!("CaptureHook_Texture_{}_{}", hwnd.0 as usize, 1),
+                format!("CaptureHook_Texture{pid}"),
+            ];
 
-            if shtex.tex_handle == 0 {
-                bail!("Invalid shared texture handle from game hook");
+            let mut shtex_opt: Option<ShtexData> = None;
+            for candidate in &candidates {
+                let name = to_wide(candidate);
+                if let Ok(tex_map) = OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(name.as_ptr())) {
+                    let tex_view = MapViewOfFile(tex_map, FILE_MAP_ALL_ACCESS, 0, 0, std::mem::size_of::<ShtexData>());
+                    if !tex_view.Value.is_null() {
+                        let shtex = *(tex_view.Value as *const ShtexData);
+                        let _ = UnmapViewOfFile(tex_view);
+                        let _ = CloseHandle(tex_map);
+                        if shtex.tex_handle != 0 {
+                            shtex_opt = Some(shtex);
+                            break;
+                        }
+                    } else {
+                        let _ = CloseHandle(tex_map);
+                    }
+                }
             }
+
+            let shtex = shtex_opt.context("Failed to open CaptureHook_Texture shared memory. Make sure the game is actively rendering.")?;
 
             // Open shared resource texture on MacroNest D3D11 device
             let mut shared_texture: Option<ID3D11Texture2D> = None;
