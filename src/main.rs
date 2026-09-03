@@ -23,6 +23,8 @@ mod ui;
 mod video_recorder;
 mod window_list;
 mod game_capture;
+#[cfg(windows)]
+pub mod nvenc;
 
 use anyhow::Result;
 use crossbeam_channel::unbounded;

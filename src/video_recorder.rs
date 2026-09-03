@@ -825,6 +825,20 @@ impl ActiveCaptureSession {
             Self::Game(s) => s.poll_into_buffer(buffer, w, h),
         }
     }
+
+    fn has_nvenc(&self) -> bool {
+        match self {
+            Self::Game(s) => s.has_nvenc(),
+            _ => false,
+        }
+    }
+
+    fn poll_encoded_frame(&mut self, force_idr: bool) -> anyhow::Result<Option<&'static [u8]>> {
+        match self {
+            Self::Game(s) => s.poll_encoded_frame(force_idr),
+            _ => anyhow::bail!("Not an NVENC session"),
+        }
+    }
 }
 
 fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String> {
@@ -958,12 +972,14 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             };
             let (width, height) = session.dimensions();
             let mut initial_rgba = Vec::new();
-            if let Err(err) = session.poll_into_buffer(&mut initial_rgba, width as usize, height as usize) {
-                audio_stop.store(true, Ordering::Release);
-                let _ = audio_start.send(());
-                let _ = audio_thread.join();
-                let _ = fs::remove_file(&audio_path);
-                return Err(format!("Could not capture initial game frame: {err}"));
+            if !session.has_nvenc() {
+                if let Err(err) = session.poll_into_buffer(&mut initial_rgba, width as usize, height as usize) {
+                    audio_stop.store(true, Ordering::Release);
+                    let _ = audio_start.send(());
+                    let _ = audio_thread.join();
+                    let _ = fs::remove_file(&audio_path);
+                    return Err(format!("Could not capture initial game frame: {err}"));
+                }
             }
             let initial_frame = crate::window_list::ScreenCaptureFrame {
                 screen_x: 0,
@@ -976,6 +992,8 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         }
         _ => (None, None),
     };
+
+    let use_nvenc = session_opt.as_ref().map(|s| s.has_nvenc()).unwrap_or(false);
 
     match &source {
         CaptureSource::Desktop { fps } => {
@@ -1027,104 +1045,133 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             ]);
         }
         CaptureSource::WgcWindow { fps, .. } | CaptureSource::GameCapture { fps, .. } => {
-            let initial = initial_frame_opt.as_ref().unwrap();
-            let width = initial.width;
-            let height = initial.height;
-            command.args([
-                "-y",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-thread_queue_size",
-                "32",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "bgra",
-                "-s",
-                &format!("{width}x{height}"),
-                "-r",
-                &fps.to_string(),
-                "-i",
-                "pipe:0",
-            ]);
+            if use_nvenc {
+                command.args([
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-thread_queue_size",
+                    "32",
+                    "-f",
+                    "h264",
+                    "-r",
+                    &fps.to_string(),
+                    "-i",
+                    "pipe:0",
+                ]);
+            } else {
+                let initial = initial_frame_opt.as_ref().unwrap();
+                let width = initial.width;
+                let height = initial.height;
+                command.args([
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-thread_queue_size",
+                    "32",
+                    "-f",
+                    "rawvideo",
+                    "-pix_fmt",
+                    "bgra",
+                    "-s",
+                    &format!("{width}x{height}"),
+                    "-r",
+                    &fps.to_string(),
+                    "-i",
+                    "pipe:0",
+                ]);
+            }
         }
     }
 
-    let encoder_kind = detect_hardware_encoder(&config.ffmpeg_exe);
-    match encoder_kind {
-        HardwareEncoderKind::Qsv => {
-            command.args([
-                "-threads",
-                "2",
-                "-vf",
-                "format=nv12",
-                "-an",
-                "-c:v",
-                "h264_qsv",
-                "-preset",
-                "veryfast",
-                "-scenario",
-                "displayremoting",
-                "-async_depth",
-                "2",
-                "-look_ahead",
-                "0",
-                "-b:v",
-                "12M",
-                "-g",
-                &gop_size,
-                "-fps_mode",
-                "cfr",
-                "-avoid_negative_ts",
-                "make_zero",
-                "-movflags",
-                "+faststart",
-            ]);
-        }
-        HardwareEncoderKind::MediaFoundation => {
-            command.args([
-                "-vf",
-                "format=yuv420p",
-                "-an",
-                "-c:v",
-                "h264_mf",
-                "-b:v",
-                "12M",
-                "-g",
-                &gop_size,
-                "-fps_mode",
-                "cfr",
-                "-avoid_negative_ts",
-                "make_zero",
-                "-movflags",
-                "+faststart",
-            ]);
-        }
-        HardwareEncoderKind::Software => {
-            command.args([
-                "-vf",
-                "format=yuv420p",
-                "-an",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "ultrafast",
-                "-tune",
-                "zerolatency",
-                "-crf",
-                "20",
-                "-g",
-                &gop_size,
-                "-bf",
-                "0",
-                "-fps_mode",
-                "cfr",
-                "-avoid_negative_ts",
-                "make_zero",
-                "-movflags",
-                "+faststart",
-            ]);
+    if use_nvenc {
+        command.args([
+            "-an",
+            "-c:v",
+            "copy",
+            "-fps_mode",
+            "cfr",
+            "-movflags",
+            "+faststart",
+        ]);
+    } else {
+        let encoder_kind = detect_hardware_encoder(&config.ffmpeg_exe);
+        match encoder_kind {
+            HardwareEncoderKind::Qsv => {
+                command.args([
+                    "-threads",
+                    "2",
+                    "-vf",
+                    "format=nv12",
+                    "-an",
+                    "-c:v",
+                    "h264_qsv",
+                    "-preset",
+                    "veryfast",
+                    "-scenario",
+                    "displayremoting",
+                    "-async_depth",
+                    "2",
+                    "-look_ahead",
+                    "0",
+                    "-b:v",
+                    "12M",
+                    "-g",
+                    &gop_size,
+                    "-fps_mode",
+                    "cfr",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                    "-movflags",
+                    "+faststart",
+                ]);
+            }
+            HardwareEncoderKind::MediaFoundation => {
+                command.args([
+                    "-vf",
+                    "format=yuv420p",
+                    "-an",
+                    "-c:v",
+                    "h264_mf",
+                    "-b:v",
+                    "12M",
+                    "-g",
+                    &gop_size,
+                    "-fps_mode",
+                    "cfr",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                    "-movflags",
+                    "+faststart",
+                ]);
+            }
+            HardwareEncoderKind::Software => {
+                command.args([
+                    "-vf",
+                    "format=yuv420p",
+                    "-an",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "ultrafast",
+                    "-tune",
+                    "zerolatency",
+                    "-crf",
+                    "20",
+                    "-g",
+                    &gop_size,
+                    "-bf",
+                    "0",
+                    "-fps_mode",
+                    "cfr",
+                    "-avoid_negative_ts",
+                    "make_zero",
+                    "-movflags",
+                    "+faststart",
+                ]);
+            }
         }
     }
     command.arg(&output_path);
@@ -1167,18 +1214,39 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             unsafe {
                 let _ = timeBeginPeriod(1);
             }
-            let mut last_frame = initial.rgba;
             let mut active_session = session;
+            let use_nvenc = active_session.has_nvenc();
+            let mut last_frame = initial.rgba;
             let mut pipe = std::io::BufWriter::with_capacity(8 * 1024 * 1024, stdin);
 
-            if pipe.write_all(&last_frame).is_ok() && pipe.flush().is_ok() {
-                let _ = audio_start_clone.send(());
-            } else {
-                #[cfg(windows)]
-                unsafe {
-                    let _ = timeEndPeriod(1);
+            if use_nvenc {
+                if let Ok(Some(first_packet)) = active_session.poll_encoded_frame(true) {
+                    if pipe.write_all(first_packet).is_ok() && pipe.flush().is_ok() {
+                        let _ = audio_start_clone.send(());
+                    } else {
+                        #[cfg(windows)]
+                        unsafe {
+                            let _ = timeEndPeriod(1);
+                        }
+                        return;
+                    }
+                } else {
+                    #[cfg(windows)]
+                    unsafe {
+                        let _ = timeEndPeriod(1);
+                    }
+                    return;
                 }
-                return;
+            } else {
+                if pipe.write_all(&last_frame).is_ok() && pipe.flush().is_ok() {
+                    let _ = audio_start_clone.send(());
+                } else {
+                    #[cfg(windows)]
+                    unsafe {
+                        let _ = timeEndPeriod(1);
+                    }
+                    return;
+                }
             }
 
             let frame_duration = Duration::from_micros(1_000_000 / feeder_fps);
@@ -1191,22 +1259,28 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 let now = Instant::now();
                 if target_time > now {
                     let diff = target_time - now;
-                    if diff > Duration::from_millis(2) {
-                        thread::sleep(diff - Duration::from_millis(2));
-                    }
-                    while Instant::now() < target_time {
-                        std::hint::spin_loop();
-                    }
+                    thread::sleep(diff);
                 } else if now.saturating_duration_since(target_time) > frame_duration * 3 {
                     // Heavily lagged behind, resync time anchor
                     start_time = now;
                     frame_count = 0;
                 }
 
-                let _ = active_session.poll_into_buffer(&mut last_frame, width, height);
+                if use_nvenc {
+                    let force_idr = (frame_count % (feeder_fps * 2)) == 0;
+                    if let Ok(Some(packet)) = active_session.poll_encoded_frame(force_idr) {
+                        if !packet.is_empty() {
+                            if pipe.write_all(packet).is_err() {
+                                break 'feeder;
+                            }
+                        }
+                    }
+                } else {
+                    let _ = active_session.poll_into_buffer(&mut last_frame, width, height);
 
-                if pipe.write_all(&last_frame).is_err() {
-                    break 'feeder;
+                    if pipe.write_all(&last_frame).is_err() {
+                        break 'feeder;
+                    }
                 }
             }
             let _ = pipe.flush();

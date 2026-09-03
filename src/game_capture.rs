@@ -189,6 +189,7 @@ pub struct GameCaptureSession {
     keepalive: HANDLE,
     width: u32,
     height: u32,
+    nvenc: Option<crate::nvenc::NvencHardwareEncoder>,
 }
 
 #[cfg(windows)]
@@ -542,6 +543,27 @@ impl GameCaptureSession {
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             shared_texture.GetDesc(&mut desc);
 
+            let mut nvenc = None;
+            if paths.nvenc_dll.exists() {
+                match crate::nvenc::NvencHardwareEncoder::new(
+                    &paths.nvenc_dll,
+                    &d3d_device,
+                    &shared_texture,
+                    desc.Width,
+                    desc.Height,
+                    60,
+                    15000,
+                ) {
+                    Ok(encoder) => {
+                        eprintln!("[MacroNest] NVENC hardware encoder active on GPU (100% VRAM zero-copy, 0% CPU)");
+                        nvenc = Some(encoder);
+                    }
+                    Err(e) => {
+                        eprintln!("[MacroNest] NVENC init skipped: {e}. Using staging fallback.");
+                    }
+                }
+            }
+
             Ok(Self {
                 hwnd,
                 pid,
@@ -562,6 +584,7 @@ impl GameCaptureSession {
                 keepalive,
                 width: desc.Width,
                 height: desc.Height,
+                nvenc,
             })
         }
     }
@@ -642,5 +665,24 @@ impl GameCaptureSession {
 
     pub fn dimensions(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    pub fn has_nvenc(&self) -> bool {
+        self.nvenc.is_some()
+    }
+
+    pub fn poll_encoded_frame(&mut self, force_idr: bool) -> Result<Option<&'static [u8]>> {
+        if let Some(encoder) = &self.nvenc {
+            unsafe {
+                let wait_res = WaitForSingleObject(self.hook_ready, 0);
+                if wait_res.0 == 0 || force_idr {
+                    let packet = encoder.encode_frame(force_idr)?;
+                    return Ok(Some(packet));
+                }
+            }
+            Ok(None)
+        } else {
+            bail!("NVENC hardware encoder not initialized");
+        }
     }
 }

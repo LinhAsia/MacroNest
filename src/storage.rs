@@ -11,6 +11,8 @@ use directories::ProjectDirs;
 use crate::model::{AppState, CrosshairStyle, ProfileRecord, VietnameseInputMode, VisionPreset};
 
 const BUNDLED_ARDUINO_SERIAL_FIRMWARE: &[u8] = include_bytes!("../assets/firmware-serial.hex");
+#[cfg(windows)]
+const BUNDLED_NVENC_DLL: &[u8] = include_bytes!("../assets/bin/nvenc_d3d11.dll");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StateLoadStatus {
@@ -48,6 +50,7 @@ pub struct AppPaths {
     pub graphics_hook64_dll: PathBuf,
     pub inject_helper64_exe: PathBuf,
     pub get_graphics_offsets64_exe: PathBuf,
+    pub nvenc_dll: PathBuf,
 }
 
 impl AppPaths {
@@ -114,6 +117,7 @@ impl AppPaths {
         let graphics_hook64_dll = game_capture_dir.join("graphics-hook64.dll");
         let inject_helper64_exe = game_capture_dir.join("inject-helper64.exe");
         let get_graphics_offsets64_exe = game_capture_dir.join("get-graphics-offsets64.exe");
+        let nvenc_dll = bin_dir.join("nvenc_d3d11.dll");
 
         fs::create_dir_all(&root)?;
         fs::create_dir_all(&profiles_dir)?;
@@ -148,6 +152,7 @@ impl AppPaths {
             graphics_hook64_dll,
             inject_helper64_exe,
             get_graphics_offsets64_exe,
+            nvenc_dll,
         })
     }
 
@@ -189,6 +194,8 @@ impl AppPaths {
         fs::create_dir_all(&self.ocr_dir)?;
         ensure_opencv_videoio_ffmpeg_plugin(&self.opencv_videoio_ffmpeg_dll);
         ensure_bundled_file(&self.arduino_firmware_hex, BUNDLED_ARDUINO_SERIAL_FIRMWARE)?;
+        #[cfg(windows)]
+        ensure_bundled_file(&self.nvenc_dll, BUNDLED_NVENC_DLL)?;
         Ok(())
     }
 

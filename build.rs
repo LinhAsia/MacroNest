@@ -13,6 +13,7 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=assets/app-icon.svg");
     println!("cargo:rerun-if-changed=assets/app-icon-disabled.svg");
+    println!("cargo:rerun-if-changed=assets/bin/nvenc_d3d11.dll");
     let build_tag = normalize_version_tag(&env::var("CARGO_PKG_VERSION").unwrap_or_default());
     if !build_tag.is_empty() {
         println!("cargo:rustc-env=MACRONEST_BUILD_TAG={build_tag}");
