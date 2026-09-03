@@ -4049,19 +4049,6 @@ mod windows_overlay {
                             INTERACTIVE_PINNED_HWNDS.lock().remove(&target_raw);
                         }
 
-                        let (s_left, s_top, s_w, s_h) = crate::window_list::virtual_screen_bounds();
-                        if s_w > 0 && s_h > 0 {
-                            let badges = INTERACTIVE_PIN_BADGES.lock().clone();
-                            let _ = render_badges_to_layered_window(
-                                hwnd,
-                                &badges,
-                                s_left,
-                                s_top,
-                                s_w as u32,
-                                s_h as u32,
-                            );
-                        }
-
                         let target_hwnd = HWND(target_raw as *mut c_void);
                         if windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(target_hwnd)).as_bool() {
                             let _ = SetWindowPos(
@@ -4075,7 +4062,30 @@ mod windows_overlay {
                                 0,
                                 0,
                                 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | SWP_SHOWWINDOW,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                            );
+                        }
+
+                        let _ = SetWindowPos(
+                            hwnd,
+                            Some(HWND_TOPMOST),
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                        );
+
+                        let (s_left, s_top, s_w, s_h) = crate::window_list::virtual_screen_bounds();
+                        if s_w > 0 && s_h > 0 {
+                            let badges = INTERACTIVE_PIN_BADGES.lock().clone();
+                            let _ = render_badges_to_layered_window(
+                                hwnd,
+                                &badges,
+                                s_left,
+                                s_top,
+                                s_w as u32,
+                                s_h as u32,
                             );
                         }
                     }
@@ -20901,6 +20911,16 @@ mod windows_overlay {
         let width = screen_width as u32;
         let height = screen_height as u32;
 
+        let _ = SetWindowPos(
+            runtime.interactive_pin_hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+
         struct PinTargetWindow {
             hwnd: HWND,
             rect: RECT,
@@ -20931,6 +20951,15 @@ mod windows_overlay {
                 return true.into();
             }
 
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            if (ex_style & WS_EX_TOOLWINDOW.0) != 0 {
+                return true.into();
+            }
+
+            if windows::Win32::UI::WindowsAndMessaging::GetWindowTextLengthW(hwnd) <= 0 {
+                return true.into();
+            }
+
             let mut class_name = [0u16; 64];
             let len = GetClassNameW(hwnd, &mut class_name);
             if len > 0 {
@@ -20956,40 +20985,41 @@ mod windows_overlay {
 
             let st = &mut *(lparam.0 as *mut EnumPinState);
 
+            let is_explicitly_pinned = INTERACTIVE_PINNED_HWNDS.lock().contains(&(hwnd.0 as isize));
+            let is_topmost_style = (ex_style & WS_EX_TOPMOST.0) != 0;
+            let is_topmost = is_topmost_style || is_explicitly_pinned;
+
             let badge_screen_x = rect.left + 8;
             let badge_screen_y = rect.top + 6;
             let badge_center_x = badge_screen_x + 12;
             let badge_center_y = badge_screen_y + 12;
 
-            // Check if this badge position is occluded by ANY window higher in Z-order
-            let is_occluded = st.occluders.iter().any(|occ| {
-                badge_center_x >= occ.left
-                    && badge_center_x <= occ.right
-                    && badge_center_y >= occ.top
-                    && badge_center_y <= occ.bottom
-            });
+            if !is_explicitly_pinned {
+                // Check if this badge position is occluded by ANY window higher in Z-order
+                let is_occluded = st.occluders.iter().any(|occ| {
+                    badge_center_x >= occ.left
+                        && badge_center_x <= occ.right
+                        && badge_center_y >= occ.top
+                        && badge_center_y <= occ.bottom
+                });
 
-            if is_occluded {
-                st.occluders.push(rect);
-                return true.into();
+                if is_occluded {
+                    st.occluders.push(rect);
+                    return true.into();
+                }
+
+                // Check if any existing target already placed a badge at/near this position (within 28px)
+                let badge_collides = st.targets.iter().any(|t| {
+                    let t_bx = t.rect.left + 8;
+                    let t_by = t.rect.top + 6;
+                    (t_bx - badge_screen_x).abs() < 28 && (t_by - badge_screen_y).abs() < 28
+                });
+
+                if badge_collides {
+                    st.occluders.push(rect);
+                    return true.into();
+                }
             }
-
-            // Check if any existing target already placed a badge at/near this position (within 28px)
-            let badge_collides = st.targets.iter().any(|t| {
-                let t_bx = t.rect.left + 8;
-                let t_by = t.rect.top + 6;
-                (t_bx - badge_screen_x).abs() < 28 && (t_by - badge_screen_y).abs() < 28
-            });
-
-            if badge_collides {
-                st.occluders.push(rect);
-                return true.into();
-            }
-
-            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            let is_topmost_style = (ex_style & WS_EX_TOPMOST.0) != 0;
-            let is_topmost = is_topmost_style
-                || INTERACTIVE_PINNED_HWNDS.lock().contains(&(hwnd.0 as isize));
 
             st.targets.push(PinTargetWindow {
                 hwnd,
