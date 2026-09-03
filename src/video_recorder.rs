@@ -860,29 +860,41 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     let border_rect = match &source {
         CaptureSource::Desktop { .. } => {
             let (left, top, width, height) = crate::window_list::virtual_screen_bounds();
-            Some(RECT {
-                left,
-                top,
-                right: left + width,
-                bottom: top + height,
-            })
+            Some((
+                RECT {
+                    left,
+                    top,
+                    right: left + width,
+                    bottom: top + height,
+                },
+                false,
+            ))
         }
         CaptureSource::WgcWindow { hwnd, .. } => {
             let mut r = RECT::default();
             unsafe {
                 if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
-                    Some(r)
+                    Some((r, false))
                 } else {
                     None
                 }
             }
         }
-        CaptureSource::Region { region, .. } => Some(*region),
-        CaptureSource::GameCapture { .. } => None,
+        CaptureSource::Region { region, .. } => Some((*region, false)),
+        CaptureSource::GameCapture { hwnd, .. } => {
+            let mut r = RECT::default();
+            unsafe {
+                if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
+                    Some((r, true))
+                } else {
+                    None
+                }
+            }
+        }
     };
     let (region_border, recording_active_signal) = match border_rect {
-        Some(rect) => {
-            let (border, signal) = RegionBorder::start(rect, config.ui_language);
+        Some((rect, badge_only)) => {
+            let (border, signal) = RegionBorder::start(rect, config.ui_language, badge_only);
             (Some(border), Some(signal))
         }
         None => (None, None),
@@ -1075,10 +1087,16 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         HardwareEncoderKind::MediaFoundation => {
             command.args([
                 "-vf",
-                "format=yuv420p",
+                "format=nv12",
                 "-an",
                 "-c:v",
                 "h264_mf",
+                "-hw_encoding",
+                "true",
+                "-scenario",
+                "display_remoting",
+                "-rate_control",
+                "ld_vbr",
                 "-b:v",
                 "12M",
                 "-g",
@@ -1159,7 +1177,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             }
             let mut last_frame = initial.rgba;
             let mut active_session = session;
-            let mut pipe = std::io::BufWriter::with_capacity(1024 * 1024, stdin);
+            let mut pipe = std::io::BufWriter::with_capacity(8 * 1024 * 1024, stdin);
 
             if pipe.write_all(&last_frame).is_ok() && pipe.flush().is_ok() {
                 let _ = audio_start_clone.send(());
@@ -1210,7 +1228,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         output_path: output_path.clone(),
         log_path,
         region_border,
-        region_rect: border_rect,
+        region_rect: border_rect.map(|(r, _)| r),
         audio_stop,
         audio_thread: Some(audio_thread),
         audio_path,
@@ -1804,12 +1822,12 @@ struct RegionBorder {
 
 #[cfg(windows)]
 impl RegionBorder {
-    fn start(rect: RECT, language: crate::model::UiLanguage) -> (Self, std::sync::Arc<AtomicBool>) {
+    fn start(rect: RECT, language: crate::model::UiLanguage, badge_only: bool) -> (Self, std::sync::Arc<AtomicBool>) {
         let stop = std::sync::Arc::new(AtomicBool::new(false));
         let recording_active = std::sync::Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
         let thread_active = recording_active.clone();
-        thread::spawn(move || run_region_border(rect, thread_stop, thread_active, language));
+        thread::spawn(move || run_region_border(rect, thread_stop, thread_active, language, badge_only));
         (Self { stop }, recording_active)
     }
 }
@@ -1827,6 +1845,7 @@ fn run_region_border(
     stop: std::sync::Arc<AtomicBool>,
     recording_active: std::sync::Arc<AtomicBool>,
     language: crate::model::UiLanguage,
+    badge_only: bool,
 ) {
     use windows::{
         Win32::{
@@ -1883,15 +1902,21 @@ fn run_region_border(
             return;
         }
 
+        let (win_x, win_y, win_w, win_h, prep_badge_w, badge_h) = if badge_only {
+            (rect.left + 8, rect.top + 8, 145, 24, 145, 24)
+        } else {
+            (rect.left, rect.top, width, height, 145.min(width - 6), 24.min(height - 6))
+        };
+
         let Ok(hwnd) = CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
             class_name,
             PCWSTR::null(),
             WS_POPUP,
-            rect.left,
-            rect.top,
-            width,
-            height,
+            win_x,
+            win_y,
+            win_w,
+            win_h,
             None,
             None,
             Some(HINSTANCE(module.0)),
@@ -1900,19 +1925,18 @@ fn run_region_border(
             return;
         };
 
-        let prep_badge_w = 145.min(width - 6);
-        let badge_h = 24.min(height - 6);
+        if !badge_only {
+            let outer_rgn = CreateRectRgn(0, 0, width, height);
+            let inner_rgn = CreateRectRgn(3, 3, (width - 3).max(3), (height - 3).max(3));
+            let badge_rgn = CreateRectRgn(3, 3, 3 + prep_badge_w, 3 + badge_h);
 
-        let outer_rgn = CreateRectRgn(0, 0, width, height);
-        let inner_rgn = CreateRectRgn(3, 3, (width - 3).max(3), (height - 3).max(3));
-        let badge_rgn = CreateRectRgn(3, 3, 3 + prep_badge_w, 3 + badge_h);
+            let _ = CombineRgn(Some(outer_rgn), Some(outer_rgn), Some(inner_rgn), RGN_DIFF);
+            let _ = CombineRgn(Some(outer_rgn), Some(outer_rgn), Some(badge_rgn), RGN_OR);
+            let _ = DeleteObject(HGDIOBJ(inner_rgn.0));
+            let _ = DeleteObject(HGDIOBJ(badge_rgn.0));
 
-        let _ = CombineRgn(Some(outer_rgn), Some(outer_rgn), Some(inner_rgn), RGN_DIFF);
-        let _ = CombineRgn(Some(outer_rgn), Some(outer_rgn), Some(badge_rgn), RGN_OR);
-        let _ = DeleteObject(HGDIOBJ(inner_rgn.0));
-        let _ = DeleteObject(HGDIOBJ(badge_rgn.0));
-
-        let _ = SetWindowRgn(hwnd, Some(outer_rgn), true);
+            let _ = SetWindowRgn(hwnd, Some(outer_rgn), true);
+        }
         let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 
@@ -1943,6 +1967,8 @@ fn run_region_border(
 
         let mut message = MSG::default();
 
+        let (b_left, b_top) = if badge_only { (0, 0) } else { (3, 3) };
+
         while !stop.load(Ordering::Acquire) {
             while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
                 let _ = TranslateMessage(&message);
@@ -1959,18 +1985,18 @@ fn run_region_border(
                     let hdc = GetDC(Some(hwnd));
                     if !hdc.0.is_null() {
                         let full_badge_rect = RECT {
-                            left: 3,
-                            top: 3,
-                            right: 3 + prep_badge_w,
-                            bottom: 3 + badge_h,
+                            left: b_left,
+                            top: b_top,
+                            right: b_left + prep_badge_w,
+                            bottom: b_top + badge_h,
                         };
                         FillRect(hdc, &full_badge_rect, dark_brush);
 
                         let dot_rect = RECT {
-                            left: 9,
-                            top: 10,
-                            right: 17,
-                            bottom: 18,
+                            left: b_left + 6,
+                            top: b_top + 7,
+                            right: b_left + 14,
+                            bottom: b_top + 15,
                         };
                         FillRect(hdc, &dot_rect, red_brush);
 
@@ -1981,10 +2007,10 @@ fn run_region_border(
                             .chain(std::iter::once(0))
                             .collect();
                         let mut text_rect = RECT {
-                            left: 20,
-                            top: 3,
-                            right: 3 + prep_badge_w,
-                            bottom: 3 + badge_h,
+                            left: b_left + 17,
+                            top: b_top,
+                            right: b_left + prep_badge_w,
+                            bottom: b_top + badge_h,
                         };
                         let old_font =
                             windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
@@ -2007,10 +2033,10 @@ fn run_region_border(
                     let hdc = GetDC(Some(hwnd));
                     if !hdc.0.is_null() {
                         let badge_rect = RECT {
-                            left: 3,
-                            top: 3,
-                            right: 3 + prep_badge_w,
-                            bottom: 3 + badge_h,
+                            left: b_left,
+                            top: b_top,
+                            right: b_left + prep_badge_w,
+                            bottom: b_top + badge_h,
                         };
                         FillRect(hdc, &badge_rect, dark_brush);
 
@@ -2027,10 +2053,10 @@ fn run_region_border(
                         let mut msg_utf16: Vec<u16> =
                             msg.encode_utf16().chain(std::iter::once(0)).collect();
                         let mut text_rect = RECT {
-                            left: 3,
-                            top: 3,
-                            right: 3 + prep_badge_w,
-                            bottom: 3 + badge_h,
+                            left: b_left,
+                            top: b_top,
+                            right: b_left + prep_badge_w,
+                            bottom: b_top + badge_h,
                         };
                         let old_font =
                             windows::Win32::Graphics::Gdi::SelectObject(hdc, HGDIOBJ(font.0));
