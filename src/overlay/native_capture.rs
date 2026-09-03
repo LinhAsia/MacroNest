@@ -8,7 +8,7 @@ use windows::Win32::{
         DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
         DrawTextW, EndPaint, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
         FONT_QUALITY, FW_BOLD, FW_NORMAL, FW_SEMIBOLD, FillRect, GetDC, HDC, HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT,
-        PS_SOLID, Rectangle, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetTextColor,
+        PS_SOLID, Rectangle, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetPixel, SetTextColor,
         SetViewportOrgEx, StretchDIBits, TRANSPARENT, UpdateWindow,
     },
     UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN, VK_SHIFT},
@@ -491,7 +491,12 @@ unsafe extern "system" fn capture_wnd_proc(
         }
         WM_SETCURSOR => {
             if let Some(state) = get_state(hwnd)
-                && matches!(state.mode, NativeCaptureMode::PointClick { .. })
+                && matches!(
+                    state.mode,
+                    NativeCaptureMode::PointClick { .. }
+                        | NativeCaptureMode::DistanceMeasure { .. }
+                        | NativeCaptureMode::ProtractorCalibration { .. }
+                )
             {
                 unsafe {
                     SetCursor(None);
@@ -1330,6 +1335,50 @@ fn draw_rounded_rect(
     }
 }
 
+unsafe fn draw_precision_crosshair(hdc: HDC, cx: i32, cy: i32) {
+    let black_pen = CreatePen(PS_SOLID, 1, rgb(0, 0, 0));
+    let cyan_pen = CreatePen(PS_SOLID, 1, rgb(0, 220, 255));
+    let old_pen = SelectObject(hdc, HGDIOBJ(black_pen.0));
+
+    // 1. Black outer border lines (1px)
+    // Horizontal top border: (cx - 6 ..= cx + 6) at cy - 1
+    let _ = MoveToEx(hdc, cx - 6, cy - 1, None);
+    let _ = LineTo(hdc, cx + 7, cy - 1);
+    // Horizontal bottom border: (cx - 6 ..= cx + 6) at cy + 1
+    let _ = MoveToEx(hdc, cx - 6, cy + 1, None);
+    let _ = LineTo(hdc, cx + 7, cy + 1);
+
+    // Vertical left border: (cy - 6 ..= cy + 6) at cx - 1
+    let _ = MoveToEx(hdc, cx - 1, cy - 6, None);
+    let _ = LineTo(hdc, cx - 1, cy + 7);
+    // Vertical right border: (cy - 6 ..= cy + 6) at cx + 1
+    let _ = MoveToEx(hdc, cx + 1, cy - 6, None);
+    let _ = LineTo(hdc, cx + 1, cy + 7);
+
+    // End caps (1px black at the tips)
+    let _ = SetPixel(hdc, cx - 7, cy, rgb(0, 0, 0));
+    let _ = SetPixel(hdc, cx + 7, cy, rgb(0, 0, 0));
+    let _ = SetPixel(hdc, cx, cy - 7, rgb(0, 0, 0));
+    let _ = SetPixel(hdc, cx, cy + 7, rgb(0, 0, 0));
+
+    // 2. Cyan inner core lines (1px)
+    let _ = SelectObject(hdc, HGDIOBJ(cyan_pen.0));
+    // Horizontal core: (cx - 6 ..= cx + 6) at cy
+    let _ = MoveToEx(hdc, cx - 6, cy, None);
+    let _ = LineTo(hdc, cx + 7, cy);
+    // Vertical core: (cy - 6 ..= cy + 6) at cx
+    let _ = MoveToEx(hdc, cx, cy - 6, None);
+    let _ = LineTo(hdc, cx, cy + 7);
+
+    // 3. Crisp white center target dot
+    let _ = SetPixel(hdc, cx, cy, rgb(255, 255, 255));
+
+    // Restore GDI state
+    let _ = SelectObject(hdc, old_pen);
+    let _ = DeleteObject(HGDIOBJ(black_pen.0));
+    let _ = DeleteObject(HGDIOBJ(cyan_pen.0));
+}
+
 unsafe fn draw_capture_to_dc(
     hdc: HDC,
     state: &mut CaptureState,
@@ -1428,31 +1477,7 @@ unsafe fn draw_capture_to_dc(
         }
 
         if let Some(curr) = state.current_point {
-            let cx = curr.0;
-            let cy = curr.1;
-
-            // 1. Outer black border (thickness 4) - ensures 100% visibility on white and light backgrounds
-            let border_pen = CreatePen(PS_SOLID, 4, rgb(0, 0, 0));
-            let old_pen = SelectObject(mem_dc, HGDIOBJ(border_pen.0));
-            let _ = MoveToEx(mem_dc, cx - 15, cy, None);
-            let _ = LineTo(mem_dc, cx + 16, cy);
-            let _ = MoveToEx(mem_dc, cx, cy - 15, None);
-            let _ = LineTo(mem_dc, cx, cy + 16);
-            SelectObject(mem_dc, old_pen);
-            let _ = DeleteObject(HGDIOBJ(border_pen.0));
-
-            // 2. Inner bright cyan core (thickness 2) - bright and distinct on dark backgrounds
-            let inner_pen = CreatePen(PS_SOLID, 2, rgb(0, 220, 255));
-            let old_pen = SelectObject(mem_dc, HGDIOBJ(inner_pen.0));
-            let _ = MoveToEx(mem_dc, cx - 14, cy, None);
-            let _ = LineTo(mem_dc, cx + 15, cy);
-            let _ = MoveToEx(mem_dc, cx, cy - 14, None);
-            let _ = LineTo(mem_dc, cx, cy + 15);
-            SelectObject(mem_dc, old_pen);
-            let _ = DeleteObject(HGDIOBJ(inner_pen.0));
-
-            // 3. Crisp white center dot
-            let _ = windows::Win32::Graphics::Gdi::SetPixel(mem_dc, cx, cy, rgb(255, 255, 255));
+            draw_precision_crosshair(mem_dc, curr.0, curr.1);
         }
     } else if matches!(
         state.mode,
@@ -1803,6 +1828,15 @@ unsafe fn draw_capture_to_dc(
             DIB_RGB_COLORS,
             SRCCOPY,
         );
+    }
+
+    if matches!(
+        state.mode,
+        NativeCaptureMode::DistanceMeasure { .. }
+            | NativeCaptureMode::ProtractorCalibration { .. }
+    ) && let Some(curr) = state.current_point
+    {
+        draw_precision_crosshair(mem_dc, curr.0, curr.1);
     }
 
     // Draw status bar & instructions pill using GDI DrawTextW on mem_dc

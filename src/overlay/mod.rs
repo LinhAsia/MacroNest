@@ -12463,8 +12463,96 @@ mod windows_overlay {
         SCREEN_DRAW_STATE.lock().screen_color_pick_mode
     }
 
+    static PRECISION_CROSSHAIR_CURSOR: parking_lot::Mutex<Option<isize>> =
+        parking_lot::Mutex::new(None);
+
+    unsafe fn get_or_create_precision_crosshair_cursor() -> Option<HCURSOR> {
+        let mut lock = PRECISION_CROSSHAIR_CURSOR.lock();
+        if let Some(handle) = *lock {
+            return Some(HCURSOR(handle as *mut c_void));
+        }
+        let side = 15i32;
+        let center = 7i32;
+        let mut pixels = vec![0u8; (side * side * 4) as usize];
+        let set_p = |pixels: &mut [u8], x: i32, y: i32, r: u8, g: u8, b: u8, a: u8| {
+            if x >= 0 && x < side && y >= 0 && y < side {
+                let idx = ((y * side + x) * 4) as usize;
+                pixels[idx] = b;
+                pixels[idx + 1] = g;
+                pixels[idx + 2] = r;
+                pixels[idx + 3] = a;
+            }
+        };
+
+        // Horizontal black borders (rows center - 1 and center + 1)
+        for x in 1..=13 {
+            set_p(&mut pixels, x, center - 1, 0, 0, 0, 255);
+            set_p(&mut pixels, x, center + 1, 0, 0, 0, 255);
+        }
+        // Vertical black borders (cols center - 1 and center + 1)
+        for y in 1..=13 {
+            set_p(&mut pixels, center - 1, y, 0, 0, 0, 255);
+            set_p(&mut pixels, center + 1, y, 0, 0, 0, 255);
+        }
+        // Black end caps
+        set_p(&mut pixels, 0, center, 0, 0, 0, 255);
+        set_p(&mut pixels, 14, center, 0, 0, 0, 255);
+        set_p(&mut pixels, center, 0, 0, 0, 0, 255);
+        set_p(&mut pixels, center, 14, 0, 0, 0, 255);
+
+        // Cyan core lines
+        for x in 1..=13 {
+            set_p(&mut pixels, x, center, 0, 220, 255, 255);
+        }
+        for y in 1..=13 {
+            set_p(&mut pixels, center, y, 0, 220, 255, 255);
+        }
+        // Center white dot
+        set_p(&mut pixels, center, center, 255, 255, 255, 255);
+
+        let color_bitmap =
+            CreateBitmap(side, side, 1, 32, Some(pixels.as_ptr().cast::<c_void>()));
+        let mask_stride = ((side + 15) / 16 * 2) as usize;
+        let mask_pixels = vec![0u8; mask_stride * side as usize];
+        let mask_bitmap = CreateBitmap(
+            side,
+            side,
+            1,
+            1,
+            Some(mask_pixels.as_ptr().cast::<c_void>()),
+        );
+        if color_bitmap.is_invalid() || mask_bitmap.is_invalid() {
+            if !color_bitmap.is_invalid() {
+                let _ = DeleteObject(HGDIOBJ(color_bitmap.0));
+            }
+            if !mask_bitmap.is_invalid() {
+                let _ = DeleteObject(HGDIOBJ(mask_bitmap.0));
+            }
+            return None;
+        }
+        let icon = CreateIconIndirect(&ICONINFO {
+            fIcon: false.into(),
+            xHotspot: center as u32,
+            yHotspot: center as u32,
+            hbmMask: mask_bitmap,
+            hbmColor: color_bitmap,
+        })
+        .ok();
+        let _ = DeleteObject(HGDIOBJ(color_bitmap.0));
+        let _ = DeleteObject(HGDIOBJ(mask_bitmap.0));
+        if let Some(icon) = icon {
+            let hcursor = HCURSOR(icon.0);
+            *lock = Some(hcursor.0 as isize);
+            Some(hcursor)
+        } else {
+            None
+        }
+    }
+
     unsafe fn set_screen_draw_color_pick_cursor() {
-        if let Ok(cursor) = LoadCursorW(None, IDC_CROSS) {
+        if let Some(cursor) = get_or_create_precision_crosshair_cursor() {
+            SetCursor(Some(cursor));
+        } else if let Ok(cursor) = LoadCursorW(None, IDC_CROSS) {
             SetCursor(Some(cursor));
         }
     }
