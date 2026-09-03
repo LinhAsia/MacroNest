@@ -1077,9 +1077,9 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             }
             let mut last_frame = initial.rgba;
             let mut wgc = session;
-            let mut pipe = std::io::BufWriter::with_capacity(16 * 1024 * 1024, stdin);
+            let mut pipe = std::io::BufWriter::with_capacity(width * height * 4 + 4096, stdin);
 
-            if pipe.write_all(&last_frame).is_ok() {
+            if pipe.write_all(&last_frame).is_ok() && pipe.flush().is_ok() {
                 let _ = audio_start_clone.send(());
             } else {
                 #[cfg(windows)]
@@ -1089,34 +1089,24 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 return;
             }
 
-            let start_time = Instant::now();
-            let mut frames_written = 1u64;
+            let frame_duration = Duration::from_micros(1_000_000 / feeder_fps);
+            let mut next_frame_time = Instant::now() + frame_duration;
 
             'feeder: while !feeder_stop.load(Ordering::Acquire) {
+                let now = Instant::now();
+                if next_frame_time > now {
+                    thread::sleep(next_frame_time - now);
+                } else if now - next_frame_time > frame_duration * 2 {
+                    next_frame_time = now;
+                }
+                next_frame_time += frame_duration;
+
                 let _ = wgc.poll_into_buffer(&mut last_frame, width, height);
 
-                let elapsed_micros = start_time.elapsed().as_micros();
-                let target_frames = ((elapsed_micros * feeder_fps as u128) / 1_000_000) as u64 + 1;
-
-                if target_frames > frames_written + 2 {
-                    frames_written = target_frames - 1;
-                }
-
-                while frames_written < target_frames {
-                    if pipe.write_all(&last_frame).is_err() {
-                        break 'feeder;
-                    }
-                    frames_written += 1;
-                }
-
-                let next_frame_micros = (frames_written as u128 * 1_000_000) / feeder_fps as u128;
-                let next_instant = start_time + Duration::from_micros(next_frame_micros as u64);
-                let now = Instant::now();
-                if next_instant > now {
-                    thread::sleep(next_instant - now);
+                if pipe.write_all(&last_frame).is_err() || pipe.flush().is_err() {
+                    break 'feeder;
                 }
             }
-            let _ = pipe.flush();
             #[cfg(windows)]
             unsafe {
                 let _ = timeEndPeriod(1);
