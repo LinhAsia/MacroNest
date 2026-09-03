@@ -844,16 +844,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 bottom: top + height,
             })
         }
-        CaptureSource::WgcWindow { hwnd, .. } => {
-            let mut r = RECT::default();
-            unsafe {
-                if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
-                    Some(r)
-                } else {
-                    None
-                }
-            }
-        }
+        CaptureSource::WgcWindow { .. } => None,
         CaptureSource::Region { region, .. } => Some(*region),
     };
     let (region_border, recording_active_signal) = match border_rect {
@@ -879,7 +870,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     let gop_size = config.fps.clamp(1, 240).to_string();
     let mut command = Command::new(&config.ffmpeg_exe);
     command
-        .creation_flags(CREATE_NO_WINDOW)
+        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));
@@ -1085,11 +1076,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             let mut frames_written = 1u64;
 
             'feeder: while !feeder_stop.load(Ordering::Acquire) {
-                if let Ok(Some(frame)) = wgc.poll_next_frame() {
-                    if frame.width == width && frame.height == height {
-                        last_frame = frame.rgba;
-                    }
-                }
+                let _ = wgc.poll_into_buffer(&mut last_frame, width, height);
 
                 let elapsed_micros = start_time.elapsed().as_micros();
                 let target_frames = ((elapsed_micros * feeder_fps as u128) / 1_000_000) as u64 + 1;
