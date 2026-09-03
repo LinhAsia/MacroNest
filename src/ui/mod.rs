@@ -15162,6 +15162,7 @@ impl CrosshairApp {
         let _ = self
             .overlay_tx
             .send(OverlayCommand::SetProtractorEnabled(false));
+        self.last_synced_protractor_enabled = Some(false);
         crate::overlay::wake_command_queue();
 
         let ui_tx = self.ui_tx.clone();
@@ -15664,6 +15665,8 @@ impl CrosshairApp {
                 .to_owned();
             }
         }
+        self.last_synced_protractor_enabled = None;
+        self.last_synced_protractor_config = None;
         self.sync_protractor_state();
         self.persist();
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
@@ -16571,6 +16574,8 @@ impl eframe::App for CrosshairApp {
                                 "Protractor calibration cancelled.",
                             )
                             .to_owned();
+                            self.last_synced_protractor_enabled = None;
+                            self.last_synced_protractor_config = None;
                             self.sync_protractor_state();
                         }
                     }

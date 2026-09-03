@@ -20036,6 +20036,28 @@ mod windows_overlay {
         let cx = half_size;
         let cy = half_size;
 
+        // 0. Fill full circle disc with alpha = 2 so Windows layered window hit-testing
+        // treats the whole circle as solid for mouse interaction (clicking/dragging),
+        // while remaining visually transparent on screen.
+        draw_skia_circle_fill(
+            &mut pixmap,
+            cx as f32,
+            cy as f32,
+            radius as f32 + 6.0 * scale,
+            [0, 0, 0, 2],
+        );
+
+        // Fill slider area with alpha = 2 so thickness slider track is easily clickable
+        let slider_left = cx as f32 - 30.0;
+        draw_skia_rect_fill(
+            &mut pixmap,
+            slider_left - 6.0,
+            size as f32 - 20.0,
+            72.0,
+            16.0,
+            [0, 0, 0, 2],
+        );
+
         // 1. Draw angular sector fill between needles
         let mut pb_sector = tiny_skia::PathBuilder::new();
         pb_sector.move_to(cx as f32, cy as f32);
