@@ -154,7 +154,13 @@ extern "C" __declspec(dllexport) void* nvenc_register_texture(void* handle, ID3D
     DXGI_FORMAT encFormat = DXGI_FORMAT_B8G8R8A8_UNORM;
     NV_ENC_BUFFER_FORMAT nvFormat = NV_ENC_BUFFER_FORMAT_ARGB;
 
-    if (desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB) {
+    // Correctly map all RGBA-family formats (including DXGI_FORMAT_R8G8B8A8_TYPELESS == 27 from OBS hook!)
+    if (desc.Format == DXGI_FORMAT_R8G8B8A8_TYPELESS ||
+        desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM ||
+        desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
+        desc.Format == DXGI_FORMAT_R8G8B8A8_UINT ||
+        desc.Format == DXGI_FORMAT_R8G8B8A8_SNORM ||
+        desc.Format == DXGI_FORMAT_R8G8B8A8_SINT) {
         encFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
         nvFormat = NV_ENC_BUFFER_FORMAT_ABGR;
     } else {
@@ -179,7 +185,7 @@ extern "C" __declspec(dllexport) void* nvenc_register_texture(void* handle, ID3D
         return NULL;
     }
 
-    // Create 1x1 staging texture for diagnostic pixel checking
+    // Diagnostic 1x1 staging texture matching intermediate format
     td.Width = 1;
     td.Height = 1;
     td.Usage = D3D11_USAGE_STAGING;
@@ -225,33 +231,24 @@ extern "C" __declspec(dllexport) int nvenc_encode_frame(void* handle, ID3D11Text
         enc->context->CopySubresourceRegion(enc->intermediateTex, 0, 0, 0, 0, source_tex, 0, &box);
         enc->context->Flush();
 
-        // Diag log for the first 3 frames
+        // Diag log for first 3 frames
         if (g_frame_diag_count < 3) {
             g_frame_diag_count++;
-            uint32_t srcPx = 0, dstPx = 0;
+            uint32_t px = 0;
             if (enc->debugStaging) {
-                D3D11_BOX singleBox = { sDesc.Width / 2, sDesc.Height / 2, 0, sDesc.Width / 2 + 1, sDesc.Height / 2 + 1, 1 };
-                enc->context->CopySubresourceRegion(enc->debugStaging, 0, 0, 0, 0, source_tex, 0, &singleBox);
+                D3D11_BOX singleBox = { enc->width / 2, enc->height / 2, 0, enc->width / 2 + 1, enc->height / 2 + 1, 1 };
+                enc->context->CopySubresourceRegion(enc->debugStaging, 0, 0, 0, 0, enc->intermediateTex, 0, &singleBox);
                 enc->context->Flush();
                 D3D11_MAPPED_SUBRESOURCE mapped = { 0 };
                 if (SUCCEEDED(enc->context->Map(enc->debugStaging, 0, D3D11_MAP_READ, 0, &mapped))) {
-                    srcPx = *(uint32_t*)mapped.pData;
-                    enc->context->Unmap(enc->debugStaging, 0);
-                }
-
-                D3D11_BOX singleBoxDst = { enc->width / 2, enc->height / 2, 0, enc->width / 2 + 1, enc->height / 2 + 1, 1 };
-                enc->context->CopySubresourceRegion(enc->debugStaging, 0, 0, 0, 0, enc->intermediateTex, 0, &singleBoxDst);
-                enc->context->Flush();
-                if (SUCCEEDED(enc->context->Map(enc->debugStaging, 0, D3D11_MAP_READ, 0, &mapped))) {
-                    dstPx = *(uint32_t*)mapped.pData;
+                    px = *(uint32_t*)mapped.pData;
                     enc->context->Unmap(enc->debugStaging, 0);
                 }
             }
 
             FILE* f = fopen("C:\\Users\\Admin\\AppData\\Local\\MacroNest\\data\\nvenc_pixel_debug.log", "a");
             if (f) {
-                fprintf(f, "frame %d: srcPx=0x%08X, dstPx=0x%08X (src: %ux%u fmt=%u, enc: %ux%u)\n",
-                    g_frame_diag_count, srcPx, dstPx, sDesc.Width, sDesc.Height, sDesc.Format, enc->width, enc->height);
+                fprintf(f, "frame %d: pixel=0x%08X (src fmt=%u, enc fmt=R8G8B8A8)\n", g_frame_diag_count, px, sDesc.Format);
                 fclose(f);
             }
         }
