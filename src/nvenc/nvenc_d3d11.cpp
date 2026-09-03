@@ -14,6 +14,7 @@ struct NvencEncoder {
     ID3D11Device* device;
     ID3D11DeviceContext* context;
     ID3D11Texture2D* intermediateTex;
+    ID3D11Texture2D* debugStaging;
     uint32_t width;
     uint32_t height;
     uint32_t fps;
@@ -178,6 +179,14 @@ extern "C" __declspec(dllexport) void* nvenc_register_texture(void* handle, ID3D
         return NULL;
     }
 
+    // Create 1x1 staging texture for diagnostic pixel checking
+    td.Width = 1;
+    td.Height = 1;
+    td.Usage = D3D11_USAGE_STAGING;
+    td.BindFlags = 0;
+    td.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    enc->device->CreateTexture2D(&td, NULL, &enc->debugStaging);
+
     NV_ENC_REGISTER_RESOURCE reg = { 0 };
     reg.version = NV_ENC_REGISTER_RESOURCE_VER;
     reg.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX;
@@ -201,13 +210,51 @@ extern "C" __declspec(dllexport) void* nvenc_register_texture(void* handle, ID3D
     return reg.registeredResource;
 }
 
+static int g_frame_diag_count = 0;
+
 extern "C" __declspec(dllexport) int nvenc_encode_frame(void* handle, ID3D11Texture2D* source_tex, int force_idr, uint8_t** out_data, uint32_t* out_size) {
     if (!handle || !out_data || !out_size) return -1;
     NvencEncoder* enc = (NvencEncoder*)handle;
 
     if (enc->intermediateTex && source_tex && enc->context) {
-        // Fast 0.02ms GPU VRAM copy (works identically across sRGB and UNORM)
-        enc->context->CopyResource(enc->intermediateTex, source_tex);
+        D3D11_TEXTURE2D_DESC sDesc = { 0 };
+        source_tex->GetDesc(&sDesc);
+        UINT copyW = (enc->width < sDesc.Width) ? enc->width : sDesc.Width;
+        UINT copyH = (enc->height < sDesc.Height) ? enc->height : sDesc.Height;
+        D3D11_BOX box = { 0, 0, 0, copyW, copyH, 1 };
+        enc->context->CopySubresourceRegion(enc->intermediateTex, 0, 0, 0, 0, source_tex, 0, &box);
+        enc->context->Flush();
+
+        // Diag log for the first 3 frames
+        if (g_frame_diag_count < 3) {
+            g_frame_diag_count++;
+            uint32_t srcPx = 0, dstPx = 0;
+            if (enc->debugStaging) {
+                D3D11_BOX singleBox = { sDesc.Width / 2, sDesc.Height / 2, 0, sDesc.Width / 2 + 1, sDesc.Height / 2 + 1, 1 };
+                enc->context->CopySubresourceRegion(enc->debugStaging, 0, 0, 0, 0, source_tex, 0, &singleBox);
+                enc->context->Flush();
+                D3D11_MAPPED_SUBRESOURCE mapped = { 0 };
+                if (SUCCEEDED(enc->context->Map(enc->debugStaging, 0, D3D11_MAP_READ, 0, &mapped))) {
+                    srcPx = *(uint32_t*)mapped.pData;
+                    enc->context->Unmap(enc->debugStaging, 0);
+                }
+
+                D3D11_BOX singleBoxDst = { enc->width / 2, enc->height / 2, 0, enc->width / 2 + 1, enc->height / 2 + 1, 1 };
+                enc->context->CopySubresourceRegion(enc->debugStaging, 0, 0, 0, 0, enc->intermediateTex, 0, &singleBoxDst);
+                enc->context->Flush();
+                if (SUCCEEDED(enc->context->Map(enc->debugStaging, 0, D3D11_MAP_READ, 0, &mapped))) {
+                    dstPx = *(uint32_t*)mapped.pData;
+                    enc->context->Unmap(enc->debugStaging, 0);
+                }
+            }
+
+            FILE* f = fopen("C:\\Users\\Admin\\AppData\\Local\\MacroNest\\data\\nvenc_pixel_debug.log", "a");
+            if (f) {
+                fprintf(f, "frame %d: srcPx=0x%08X, dstPx=0x%08X (src: %ux%u fmt=%u, enc: %ux%u)\n",
+                    g_frame_diag_count, srcPx, dstPx, sDesc.Width, sDesc.Height, sDesc.Format, enc->width, enc->height);
+                fclose(f);
+            }
+        }
     }
 
     NV_ENC_MAP_INPUT_RESOURCE map = { 0 };
@@ -268,6 +315,10 @@ extern "C" __declspec(dllexport) void nvenc_destroy(void* handle) {
     if (enc->intermediateTex) {
         enc->intermediateTex->Release();
         enc->intermediateTex = NULL;
+    }
+    if (enc->debugStaging) {
+        enc->debugStaging->Release();
+        enc->debugStaging = NULL;
     }
     if (enc->context) {
         enc->context->Release();
