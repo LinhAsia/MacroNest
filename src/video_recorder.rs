@@ -33,6 +33,13 @@ use crate::{
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
+#[cfg(windows)]
+#[link(name = "winmm")]
+unsafe extern "system" {
+    fn timeBeginPeriod(uPeriod: u32) -> u32;
+    fn timeEndPeriod(uPeriod: u32) -> u32;
+}
+
 #[derive(Clone)]
 pub struct VideoRecorderConfig {
     pub enabled: bool,
@@ -1053,33 +1060,59 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         };
         let stop_signal = Arc::new(AtomicBool::new(false));
         let feeder_stop = stop_signal.clone();
-        let frame_interval = Duration::from_micros(1_000_000 / (fps.max(1) as u64));
+        let feeder_fps = fps.max(1) as u64;
         let audio_start_clone = audio_start.clone();
         let thread_handle = thread::spawn(move || {
+            #[cfg(windows)]
+            unsafe {
+                let _ = timeBeginPeriod(1);
+            }
             let mut last_frame = initial.rgba;
             let mut wgc = session;
-            let mut pipe = std::io::BufWriter::with_capacity(1024 * 1024, stdin);
-            let mut audio_started = false;
-            while !feeder_stop.load(Ordering::Acquire) {
-                let loop_start = Instant::now();
-                if let Ok(frame) = wgc.get_next_frame() {
+            let mut pipe = std::io::BufWriter::with_capacity(2 * 1024 * 1024, stdin);
+
+            if pipe.write_all(&last_frame).is_ok() {
+                let _ = audio_start_clone.send(());
+            } else {
+                #[cfg(windows)]
+                unsafe {
+                    let _ = timeEndPeriod(1);
+                }
+                return;
+            }
+
+            let start_time = Instant::now();
+            let mut frames_written = 1u64;
+
+            'feeder: while !feeder_stop.load(Ordering::Acquire) {
+                if let Ok(Some(frame)) = wgc.poll_next_frame() {
                     if frame.width == width && frame.height == height {
                         last_frame = frame.rgba;
                     }
                 }
-                if pipe.write_all(&last_frame).is_err() {
-                    break;
+
+                let elapsed_micros = start_time.elapsed().as_micros();
+                let target_frames = ((elapsed_micros * feeder_fps as u128) / 1_000_000) as u64 + 1;
+
+                while frames_written < target_frames {
+                    if pipe.write_all(&last_frame).is_err() {
+                        break 'feeder;
+                    }
+                    frames_written += 1;
                 }
-                if !audio_started {
-                    let _ = audio_start_clone.send(());
-                    audio_started = true;
-                }
-                let elapsed = loop_start.elapsed();
-                if elapsed < frame_interval {
-                    thread::sleep(frame_interval - elapsed);
+
+                let next_frame_micros = (frames_written as u128 * 1_000_000) / feeder_fps as u128;
+                let next_instant = start_time + Duration::from_micros(next_frame_micros as u64);
+                let now = Instant::now();
+                if next_instant > now {
+                    thread::sleep(next_instant - now);
                 }
             }
             let _ = pipe.flush();
+            #[cfg(windows)]
+            unsafe {
+                let _ = timeEndPeriod(1);
+            }
         });
         (Some(stop_signal), Some(thread_handle))
     } else {
@@ -1421,27 +1454,64 @@ fn capture_system_audio(
         .start_stream()
         .map_err(|error| error.to_string())?;
 
+    let audio_start_time = Instant::now();
+    let mut total_bytes_written: u64 = 0;
+    const BYTES_PER_SAMPLE_FRAME: usize = 8;
+    const BYTES_PER_SEC: usize = 48_000 * BYTES_PER_SAMPLE_FRAME;
+    const SILENCE_MARGIN_BYTES: usize = (48_000 * 20 / 1000) * BYTES_PER_SAMPLE_FRAME;
+    let silence_chunk = [0u8; 8192];
     let mut samples = VecDeque::new();
 
     while !stop.load(Ordering::Acquire) {
-        if capture
-            .get_next_packet_size()
-            .map_err(|error| error.to_string())?
-            .unwrap_or(0)
-            > 0
-        {
+        let _ = event.wait_for_event(20);
+
+        while let Ok(Some(packet_size)) = capture.get_next_packet_size() {
+            if packet_size == 0 {
+                break;
+            }
             capture
                 .read_from_device_to_deque(&mut samples)
                 .map_err(|error| error.to_string())?;
             let (first, second) = samples.as_slices();
-            output.write_all(first).map_err(|error| error.to_string())?;
-            output
-                .write_all(second)
-                .map_err(|error| error.to_string())?;
+            if !first.is_empty() {
+                output.write_all(first).map_err(|error| error.to_string())?;
+                total_bytes_written += first.len() as u64;
+            }
+            if !second.is_empty() {
+                output.write_all(second).map_err(|error| error.to_string())?;
+                total_bytes_written += second.len() as u64;
+            }
             samples.clear();
         }
-        let _ = event.wait_for_event(50);
+
+        let elapsed_micros = audio_start_time.elapsed().as_micros();
+        let expected_bytes = ((elapsed_micros * BYTES_PER_SEC as u128) / 1_000_000) as u64;
+        let expected_bytes = (expected_bytes / BYTES_PER_SAMPLE_FRAME as u64) * BYTES_PER_SAMPLE_FRAME as u64;
+        if expected_bytes > total_bytes_written + SILENCE_MARGIN_BYTES as u64 {
+            let mut gap = (expected_bytes - total_bytes_written) as usize;
+            gap = (gap / BYTES_PER_SAMPLE_FRAME) * BYTES_PER_SAMPLE_FRAME;
+            while gap > 0 {
+                let to_write = gap.min(silence_chunk.len());
+                output.write_all(&silence_chunk[..to_write]).map_err(|error| error.to_string())?;
+                total_bytes_written += to_write as u64;
+                gap -= to_write;
+            }
+        }
     }
+
+    let elapsed_micros = audio_start_time.elapsed().as_micros();
+    let expected_bytes = ((elapsed_micros * BYTES_PER_SEC as u128) / 1_000_000) as u64;
+    let expected_bytes = (expected_bytes / BYTES_PER_SAMPLE_FRAME as u64) * BYTES_PER_SAMPLE_FRAME as u64;
+    if expected_bytes > total_bytes_written {
+        let mut gap = (expected_bytes - total_bytes_written) as usize;
+        gap = (gap / BYTES_PER_SAMPLE_FRAME) * BYTES_PER_SAMPLE_FRAME;
+        while gap > 0 {
+            let to_write = gap.min(silence_chunk.len());
+            let _ = output.write_all(&silence_chunk[..to_write]);
+            gap -= to_write;
+        }
+    }
+
     let _ = audio_client.stop_stream();
     output.flush().map_err(|error| error.to_string())
 }

@@ -1158,7 +1158,9 @@ mod windows_impl {
         d3d_device: ID11Device,
         frame_pool: Direct3D11CaptureFramePool,
         session: GraphicsCaptureSession,
-        staging_texture: Option<(ID3D11Texture2D, u32, u32)>,
+        staging_textures: Option<([ID3D11Texture2D; 2], u32, u32)>,
+        staging_idx: usize,
+        has_copied: bool,
     }
 
     unsafe impl Send for WgcSession {}
@@ -1217,25 +1219,23 @@ mod windows_impl {
             d3d_device,
             frame_pool,
             session,
-            staging_texture: None,
+            staging_textures: None,
+            staging_idx: 0,
+            has_copied: false,
         })
     }
 
     impl WgcSession {
-        pub(crate) fn get_next_frame(&mut self) -> anyhow::Result<ScreenCaptureFrame> {
+        pub(crate) fn poll_next_frame(&mut self) -> anyhow::Result<Option<ScreenCaptureFrame>> {
             let mut frame_opt = None;
-            for _ in 0..20 {
-                if let Ok(frame) = self.frame_pool.TryGetNextFrame() {
-                    frame_opt = Some(frame);
-                    while let Ok(next) = self.frame_pool.TryGetNextFrame() {
-                        frame_opt = Some(next);
-                    }
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1));
+            while let Ok(frame) = self.frame_pool.TryGetNextFrame() {
+                frame_opt = Some(frame);
             }
 
-            let frame = frame_opt.context("No frame available from WGC pool")?;
+            let Some(frame) = frame_opt else {
+                return Ok(None);
+            };
+
             let surface = frame.Surface()?;
             let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
             let texture: ID3D11Texture2D = unsafe { access.GetInterface()? };
@@ -1248,7 +1248,7 @@ mod windows_impl {
             let height = desc.Height;
 
             let mut recreate_staging = true;
-            if let Some((_, st_w, st_h)) = self.staging_texture {
+            if let Some((_, st_w, st_h)) = self.staging_textures {
                 if st_w == width && st_h == height {
                     recreate_staging = false;
                 }
@@ -1261,25 +1261,35 @@ mod windows_impl {
                 staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
                 staging_desc.MiscFlags = 0;
 
-                let mut staging = None;
+                let mut s0 = None;
+                let mut s1 = None;
                 unsafe {
                     self.d3d_device
-                        .CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
+                        .CreateTexture2D(&staging_desc, None, Some(&mut s0))?;
+                    self.d3d_device
+                        .CreateTexture2D(&staging_desc, None, Some(&mut s1))?;
                 }
-                self.staging_texture = Some((staging.unwrap(), width, height));
+                self.staging_textures = Some(([s0.unwrap(), s1.unwrap()], width, height));
+                self.staging_idx = 0;
+                self.has_copied = false;
             }
 
-            let (staging_tex, _, _) = self.staging_texture.as_ref().unwrap();
-
+            let (staging_textures, _, _) = self.staging_textures.as_ref().unwrap();
             let d3d_context = unsafe { self.d3d_device.GetImmediateContext()? };
 
-            unsafe {
-                d3d_context.CopyResource(staging_tex, &texture);
-            }
+            let write_idx = self.staging_idx;
+            let read_idx = if self.has_copied { 1 - write_idx } else { write_idx };
 
+            unsafe {
+                d3d_context.CopyResource(&staging_textures[write_idx], &texture);
+            }
+            self.has_copied = true;
+            self.staging_idx = 1 - write_idx;
+
+            let read_tex = &staging_textures[read_idx];
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             unsafe {
-                d3d_context.Map(staging_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+                d3d_context.Map(read_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
             }
 
             let pitch = mapped.RowPitch as usize;
@@ -1298,19 +1308,29 @@ mod windows_impl {
             }
 
             unsafe {
-                d3d_context.Unmap(staging_tex, 0);
+                d3d_context.Unmap(read_tex, 0);
             }
 
             let mut rect = RECT::default();
             let _ = unsafe { GetWindowRect(self.hwnd, &mut rect) };
 
-            Ok(ScreenCaptureFrame {
+            Ok(Some(ScreenCaptureFrame {
                 screen_x: rect.left,
                 screen_y: rect.top,
                 width: width as usize,
                 height: height as usize,
                 rgba,
-            })
+            }))
+        }
+
+        pub(crate) fn get_next_frame(&mut self) -> anyhow::Result<ScreenCaptureFrame> {
+            for _ in 0..100 {
+                if let Some(frame) = self.poll_next_frame()? {
+                    return Ok(frame);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            anyhow::bail!("No frame available from WGC pool")
         }
     }
 
