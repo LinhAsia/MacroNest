@@ -1,4 +1,4 @@
-﻿use std::ffi::c_void;
+use std::ffi::c_void;
 use std::path::Path;
 use anyhow::{Context, Result, bail};
 use libloading::{Library, Symbol};
@@ -17,11 +17,12 @@ type FnNvencCreate = unsafe extern "C" fn(
 type FnNvencRegisterTexture = unsafe extern "C" fn(
     encoder: *mut c_void,
     texture: *mut c_void,
+    out_err: *mut i32,
 ) -> *mut c_void;
 
 type FnNvencEncodeFrame = unsafe extern "C" fn(
     encoder: *mut c_void,
-    reg_resource: *mut c_void,
+    source_tex: *mut c_void,
     force_idr: i32,
     out_data: *mut *const u8,
     out_size: *mut u32,
@@ -66,10 +67,11 @@ impl NvencHardwareEncoder {
         }
 
         let tex_ptr = texture.as_raw() as *mut c_void;
-        let registered_tex = unsafe { fn_register(encoder, tex_ptr) };
+        let mut reg_err = 0i32;
+        let registered_tex = unsafe { fn_register(encoder, tex_ptr, &mut reg_err) };
         if registered_tex.is_null() {
             unsafe { fn_destroy(encoder) };
-            bail!("Failed to register Direct3D 11 texture with NVENC hardware encoder.");
+            bail!("Failed to register Direct3D 11 texture with NVENC hardware encoder (code: {reg_err}).");
         }
 
         Ok(Self {
@@ -81,13 +83,14 @@ impl NvencHardwareEncoder {
         })
     }
 
-    pub fn encode_frame(&self, force_idr: bool) -> Result<&'static [u8]> {
+    pub fn encode_frame(&self, source_texture: &ID3D11Texture2D, force_idr: bool) -> Result<&'static [u8]> {
         let mut out_data: *const u8 = std::ptr::null();
         let mut out_size = 0u32;
+        let tex_ptr = source_texture.as_raw() as *mut c_void;
         let res = unsafe {
             (self.fn_encode_frame)(
                 self.encoder,
-                self.registered_tex,
+                tex_ptr,
                 if force_idr { 1 } else { 0 },
                 &mut out_data,
                 &mut out_size,

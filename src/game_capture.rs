@@ -697,10 +697,10 @@ impl GameCaptureSession {
     }
 
     pub fn poll_encoded_frame(&mut self, force_idr: bool) -> Result<Option<&'static [u8]>> {
-        if let Some(encoder) = &self.nvenc {
+        if let (Some(encoder), Some(shared_tex)) = (&self.nvenc, &self.shared_texture) {
             unsafe {
                 let _ = WaitForSingleObject(self.hook_ready, 0);
-                let packet = encoder.encode_frame(force_idr)?;
+                let packet = encoder.encode_frame(shared_tex, force_idr)?;
                 Ok(Some(packet))
             }
         } else {
