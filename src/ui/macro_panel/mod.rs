@@ -5243,7 +5243,6 @@ impl CrosshairApp {
         let mut begin_mouse_path_draw_capture_request = None;
         let mut add_mouse_path_preset_request: Option<(u32, u32, usize, Option<u32>)> = None;
         let mut add_hold_stop_mouse_path_preset_request: Option<(u32, u32, Option<u32>)> = None;
-        let mut preview_mouse_path_step_request: Option<Option<u32>> = None;
         let mut hovered_mouse_path_step: Option<u32> = None;
         let mut cancel_mouse_move_absolute_capture = false;
         let mut cancel_mouse_path_draw_capture = false;
@@ -8380,19 +8379,6 @@ impl CrosshairApp {
                                                                 ui.close();
                                                             }
                                                         });
-                                                    if ui
-                                                        .button(Self::tr_lang(language, "Preview", "Preview"))
-                                                        .on_hover_text(Self::tr_lang(language, "Open the same path preview canvas used in the Mouse Path panel.", "Open the same path preview canvas used in the Mouse Path panel."))
-                                                        .clicked()
-                                                    {
-                                                        if let Some(path_preset_id) = selected_id {
-                                                            preview_mouse_path_step_request =
-                                                                Some(Some(path_preset_id));
-                                                        } else {
-                                                            self.status = Self::tr_lang(language, "Select a Mouse Path preset first.", "Select a Mouse Path preset first.")
-                                                            .to_owned();
-                                                        }
-                                                    }
                                                     let wait_label = Self::tr_lang(language, "Wait for completion", "Wait for completion");
                                                     if ui
                                                         .checkbox(
@@ -10713,19 +10699,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                                 ui.close();
                                                             }
                                                         });
-                                                    if ui
-                                                        .button(Self::tr_lang(language, "Preview", "Preview"))
-                                                        .on_hover_text(Self::tr_lang(language, "Open the same path preview canvas used in the Mouse Path panel.", "Open the same path preview canvas used in the Mouse Path panel."))
-                                                        .clicked()
-                                                    {
-                                                        if let Some(path_preset_id) = selected_id {
-                                                            preview_mouse_path_step_request =
-                                                                Some(Some(path_preset_id));
-                                                        } else {
-                                                            self.status = Self::tr_lang(language, "Select a Mouse Path preset first.", "Select a Mouse Path preset first.")
-                                                            .to_owned();
-                                                        }
-                                                    }
                                                     let wait_label = Self::tr_lang(language, "Wait for completion", "Wait for completion");
                                                     if ui
                                                         .checkbox(
@@ -14039,39 +14012,6 @@ if supports_move_mouse || show_detection_tuning {
                                                                 ));
                                                         }
                                                     }
-                                                    let preview_active = !self.mouse_path_hover_preview_active
-                                                        && selected_id.is_some_and(|path_preset_id| {
-                                                            self.mouse_path_step_preview_preset_id
-                                                                == Some(path_preset_id)
-                                                        });
-                                                    let preview_response = ui
-                                                        .button(Self::tr_lang(
-                                                            language,
-                                                            if preview_active {
-                                                                "Hide preview"
-                                                            } else {
-                                                                "Preview"
-                                                            },
-                                                            if preview_active {
-                                                                "Tat preview"
-                                                            } else {
-                                                                "Xem truoc"
-                                                            },
-                                                        ))
-                                                        .on_hover_text(Self::tr_lang(language, "Show this path on the real screen at its recorded size and position.", "Show this path on the real screen at its recorded size and position."));
-                                                    if preview_response.clicked() {
-                                                        if let Some(path_preset_id) = selected_id {
-                                                            preview_mouse_path_step_request =
-                                                                Some(if preview_active {
-                                                                    None
-                                                                } else {
-                                                                    Some(path_preset_id)
-                                                                });
-                                                        } else {
-                                                            self.status = Self::tr_lang(language, "Select a Mouse Path preset first.", "Select a Mouse Path preset first.")
-                                                            .to_owned();
-                                                        }
-                                                    }
                                                     let wait_label = Self::tr_lang(language, "Wait for completion", "Wait for completion");
                                                     if ui
                                                         .checkbox(
@@ -16894,17 +16834,7 @@ if supports_move_mouse || show_detection_tuning {
                     if cancel_mouse_path_draw_capture {
                         self.cancel_mouse_path_draw_capture(ui.ctx());
                     }
-                    if let Some(path_preset_id) = preview_mouse_path_step_request.take() {
-                        self.mouse_path_hover_preview_active = false;
-                        let preview_events = path_preset_id.and_then(|active_id| {
-                            self.state
-                                .mouse_path_presets
-                                .iter()
-                                .find(|preset| preset.id == active_id)
-                                .map(|preset| preset.events.clone())
-                        });
-                        self.sync_mouse_path_preview(path_preset_id, preview_events, None);
-                    } else if let Some(path_id) = hovered_mouse_path_step {
+                    if let Some(path_id) = hovered_mouse_path_step {
                         self.mouse_path_hover_last_seen = Some(Instant::now());
                         if self.mouse_path_step_preview_preset_id != Some(path_id) {
                             let preview_events = self
