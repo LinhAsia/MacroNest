@@ -138,7 +138,7 @@ struct CaptureState {
     paint_dc: Option<HDC>,
     paint_bmp: Option<windows::Win32::Graphics::Gdi::HBITMAP>,
     last_panel_rect: Option<RECT>,
-    last_cursor_near_pill: bool,
+    cursor_near_pill: bool,
     last_pill_rect: Option<RECT>,
 }
 
@@ -203,6 +203,18 @@ fn point_click_panel_rect(width: i32, height: i32, curr: (i32, i32)) -> RECT {
         right: panel_x + panel_w + 4,
         bottom: panel_y + panel_h + 4,
     }
+}
+
+#[inline]
+fn is_cursor_near_pill(point: Option<(i32, i32)>, pill_rect: RECT) -> bool {
+    let Some((cx, cy)) = point else {
+        return false;
+    };
+    let margin = 20;
+    cx >= pill_rect.left - margin
+        && cx <= pill_rect.right + margin
+        && cy >= pill_rect.top - margin
+        && cy <= pill_rect.bottom + margin
 }
 
 impl CaptureState {
@@ -286,7 +298,7 @@ impl CaptureState {
             paint_dc: None,
             paint_bmp: None,
             last_panel_rect: None,
-            last_cursor_near_pill: false,
+            cursor_near_pill: false,
             last_pill_rect: None,
         }
     }
@@ -554,24 +566,24 @@ unsafe extern "system" fn capture_wnd_proc(
                         let new_panel_rect = point_click_panel_rect(state.width, state.height, (rx, ry));
 
                         let pill_rect = state.last_pill_rect.unwrap_or(RECT {
-                            left: (state.width - 750) / 2,
-                            top: 36,
-                            right: (state.width + 750) / 2,
-                            bottom: 84,
+                            left: (state.width - 700) / 2,
+                            top: 35,
+                            right: (state.width + 700) / 2,
+                            bottom: 85,
                         });
-                        let margin_x = 40;
-                        let margin_y = 30;
-                        let is_near_pill = rx >= pill_rect.left - margin_x
-                            && rx <= pill_rect.right + margin_x
-                            && ry >= pill_rect.top - margin_y
-                            && ry <= pill_rect.bottom + margin_y;
-
-                        let pill_transition = is_near_pill != state.last_cursor_near_pill;
-                        state.last_cursor_near_pill = is_near_pill;
+                        let is_near = is_cursor_near_pill(Some((rx, ry)), pill_rect);
+                        let pill_changed = is_near != state.cursor_near_pill;
+                        state.cursor_near_pill = is_near;
 
                         unsafe {
-                            if pill_transition {
-                                InvalidateRect(hwnd, Some(&pill_rect), false);
+                            if pill_changed {
+                                let clear_rect = RECT {
+                                    left: (pill_rect.left - 30).max(0),
+                                    top: (pill_rect.top - 30).max(0),
+                                    right: (pill_rect.right + 30).min(state.width),
+                                    bottom: (pill_rect.bottom + 30).min(state.height),
+                                };
+                                InvalidateRect(hwnd, Some(&clear_rect), false);
                             }
 
                             if let Some((ox, oy)) = old_pt {
@@ -1900,17 +1912,9 @@ unsafe fn draw_capture_to_dc(
         bottom: (pill_y + pill_h + 4).min(state.height),
     };
     state.last_pill_rect = Some(pill_rect);
+    state.cursor_near_pill = is_cursor_near_pill(state.current_point, pill_rect);
 
-    let cursor_near_pill = state.current_point.is_some_and(|(cx, cy)| {
-        let margin_x = 40;
-        let margin_y = 30;
-        cx >= pill_x - margin_x
-            && cx <= pill_x + pill_w + margin_x
-            && cy >= pill_y - margin_y
-            && cy <= pill_y + pill_h + margin_y
-    });
-
-    if !cursor_near_pill {
+    if !state.cursor_near_pill {
         let brush = windows::Win32::Graphics::Gdi::CreateSolidBrush(rgb(12, 18, 28));
         let pen = windows::Win32::Graphics::Gdi::CreatePen(
             windows::Win32::Graphics::Gdi::PS_SOLID,
