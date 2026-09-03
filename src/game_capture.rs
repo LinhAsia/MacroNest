@@ -424,11 +424,16 @@ impl GameCaptureSession {
             use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
             use windows::core::Interface;
 
-            let mut devices: Vec<(ID3D11Device, ID3D11DeviceContext)> = Vec::new();
+            let mut devices: Vec<(ID3D11Device, ID3D11DeviceContext, bool)> = Vec::new();
             if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() {
                 let mut i = 0;
                 while let Ok(adapter) = factory.EnumAdapters1(i) {
                     i += 1;
+                    let is_nvidia = if let Ok(desc1) = adapter.GetDesc1() {
+                        desc1.VendorId == 0x10DE || desc1.DedicatedVideoMemory > 1024 * 1024 * 1024
+                    } else {
+                        false
+                    };
                     if let Ok(adapter0) = adapter.cast::<IDXGIAdapter>() {
                         let mut d3d_device: Option<ID3D11Device> = None;
                         let mut d3d_context: Option<ID3D11DeviceContext> = None;
@@ -445,12 +450,15 @@ impl GameCaptureSession {
                         );
                         if hr.is_ok() {
                             if let (Some(dev), Some(ctx)) = (d3d_device, d3d_context) {
-                                devices.push((dev, ctx));
+                                devices.push((dev, ctx, is_nvidia));
                             }
                         }
                     }
                 }
             }
+            // Prioritize NVIDIA discrete GPU first so NVENC hardware encoding is selected
+            devices.sort_by_key(|(_, _, is_nvidia)| if *is_nvidia { 0 } else { 1 });
+
             let mut def_dev: Option<ID3D11Device> = None;
             let mut def_ctx: Option<ID3D11DeviceContext> = None;
             if D3D11CreateDevice(
@@ -465,7 +473,7 @@ impl GameCaptureSession {
                 Some(&mut def_ctx),
             ).is_ok() {
                 if let (Some(d), Some(c)) = (def_dev, def_ctx) {
-                    devices.push((d, c));
+                    devices.push((d, c, false));
                 }
             }
 
@@ -526,9 +534,9 @@ impl GameCaptureSession {
 
             let shtex = shtex_opt.context("Failed to open CaptureHook_Texture shared memory. Make sure the game is actively rendering.")?;
 
-            // Open shared resource texture across GPU adapters
+            // Open shared resource texture across GPU adapters (prioritizing NVIDIA discrete GPU)
             let mut opened: Option<(ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D)> = None;
-            for (dev, ctx) in devices {
+            for (dev, ctx, _) in devices {
                 let mut shared_texture: Option<ID3D11Texture2D> = None;
                 let res = dev.OpenSharedResource(HANDLE(shtex.tex_handle as usize as *mut _), &mut shared_texture);
                 if res.is_ok() {
@@ -544,21 +552,38 @@ impl GameCaptureSession {
             shared_texture.GetDesc(&mut desc);
 
             let mut nvenc = None;
-            if paths.nvenc_dll.exists() {
+            let dll_candidate = if paths.nvenc_dll.exists() {
+                Some(paths.nvenc_dll.clone())
+            } else if let Ok(exe_path) = std::env::current_exe() {
+                let beside = exe_path.parent().unwrap_or(std::path::Path::new("")).join("nvenc_d3d11.dll");
+                if beside.exists() {
+                    Some(beside)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(dll_path) = dll_candidate {
+                let enc_w = desc.Width & !1;
+                let enc_h = desc.Height & !1;
                 match crate::nvenc::NvencHardwareEncoder::new(
-                    &paths.nvenc_dll,
+                    &dll_path,
                     &d3d_device,
                     &shared_texture,
-                    desc.Width,
-                    desc.Height,
+                    enc_w,
+                    enc_h,
                     60,
                     15000,
                 ) {
                     Ok(encoder) => {
+                        let _ = std::fs::write(paths.root.join("game_capture.log"), "[MacroNest] NVENC hardware encoder active on NVIDIA GPU (100% VRAM zero-copy, 0% CPU)\n");
                         eprintln!("[MacroNest] NVENC hardware encoder active on GPU (100% VRAM zero-copy, 0% CPU)");
                         nvenc = Some(encoder);
                     }
                     Err(e) => {
+                        let _ = std::fs::write(paths.root.join("game_capture.log"), format!("[MacroNest] NVENC init error: {e}\n"));
                         eprintln!("[MacroNest] NVENC init skipped: {e}. Using staging fallback.");
                     }
                 }
@@ -674,13 +699,10 @@ impl GameCaptureSession {
     pub fn poll_encoded_frame(&mut self, force_idr: bool) -> Result<Option<&'static [u8]>> {
         if let Some(encoder) = &self.nvenc {
             unsafe {
-                let wait_res = WaitForSingleObject(self.hook_ready, 0);
-                if wait_res.0 == 0 || force_idr {
-                    let packet = encoder.encode_frame(force_idr)?;
-                    return Ok(Some(packet));
-                }
+                let _ = WaitForSingleObject(self.hook_ready, 0);
+                let packet = encoder.encode_frame(force_idr)?;
+                Ok(Some(packet))
             }
-            Ok(None)
         } else {
             bail!("NVENC hardware encoder not initialized");
         }
