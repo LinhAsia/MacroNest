@@ -525,6 +525,7 @@ fn main() -> Result<()> {
 
     #[cfg(windows)]
     {
+        crate::overlay::unpin_all_interactive_windows();
         unsafe {
             use windows::Win32::UI::HiDpi::GetDpiForSystem;
             use windows::Win32::UI::WindowsAndMessaging::{

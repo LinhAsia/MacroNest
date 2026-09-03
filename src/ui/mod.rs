@@ -5244,37 +5244,41 @@ impl CrosshairApp {
                     vec2(action_width, action_height),
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
+                        let is_active = self.state.interactive_window_pin_enabled;
                         let button_response = self.titlebar_quick_action_button(
                             ui,
                             TitlebarQuickActionKind::WindowPin,
-                            pinned_window_active,
+                            is_active,
                         );
                         if button_response.clicked() {
-                            if pinned_window_active {
-                                self.unpin_all_quick_action_windows();
-                                self.status = Self::tr_lang(
+                            self.state.interactive_window_pin_enabled =
+                                !self.state.interactive_window_pin_enabled;
+                            self.sync_interactive_pin_state();
+                            self.persist();
+                            self.status = if self.state.interactive_window_pin_enabled {
+                                Self::tr_lang(
                                     self.state.ui_language,
-                                    "Unpinned all selected windows.",
-                                    "Đã bỏ ghim tất cả cửa sổ đã chọn.",
+                                    "Interactive window pin enabled. Click pins on windows to toggle Always-on-Top.",
+                                    "Đã bật ghim cửa sổ tương tác. Nhấp vào nút ghim trên cửa sổ để bật/tắt ghim trên cùng.",
                                 )
-                                .to_owned();
+                                .to_owned()
                             } else {
-                                self.status = Self::tr_lang(
+                                Self::tr_lang(
                                     self.state.ui_language,
-                                    "Select windows from the dropdown to pin them.",
-                                    "Chọn cửa sổ trong danh sách để ghim.",
+                                    "Interactive window pin disabled.",
+                                    "Đã tắt ghim cửa sổ tương tác.",
                                 )
-                                .to_owned();
-                            }
+                                .to_owned()
+                            };
                         }
 
                         ui.add_space(6.0);
                         let pin_label = Self::truncate_window_title(
-                            if pinned_window_active {
+                            if self.state.interactive_window_pin_enabled {
                                 Self::tr_lang(
                                     self.state.ui_language,
-                                    "Unpin all",
-                                    "Bỏ ghim tất cả",
+                                    "Hide pins",
+                                    "Ẩn nút ghim",
                                 )
                             } else {
                                 Self::tr_lang(
@@ -18257,6 +18261,9 @@ impl eframe::App for CrosshairApp {
         crate::video_recorder::stop_blocking();
         let _ = crate::platform::show_taskbar();
         self.unpin_all_quick_action_windows();
+        crate::overlay::unpin_all_interactive_windows();
+        self.state.interactive_window_pin_enabled = false;
+        self.sync_interactive_pin_state();
         self.state.reset_session_preset_visibility();
         self.sync_window_presets();
         self.sync_macro_presets();

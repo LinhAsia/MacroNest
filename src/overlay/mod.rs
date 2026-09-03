@@ -1745,6 +1745,8 @@ mod windows_overlay {
     }
     static INTERACTIVE_PIN_BADGES: Lazy<Mutex<Vec<InteractivePinBadge>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
+    pub(crate) static INTERACTIVE_PINNED_HWNDS: Lazy<Mutex<HashSet<isize>>> =
+        Lazy::new(|| Mutex::new(HashSet::new()));
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub(crate) enum OverlayLayer {
@@ -4026,22 +4028,42 @@ mod windows_overlay {
                 WM_LBUTTONDOWN => {
                     let sx = (lparam.0 & 0xFFFF) as i16 as i32;
                     let sy = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
-                    let clicked = {
-                        let badges = INTERACTIVE_PIN_BADGES.lock();
-                        badges
-                            .iter()
-                            .find(|b| {
-                                sx >= b.rect.left - 2
-                                    && sx <= b.rect.right + 2
-                                    && sy >= b.rect.top - 2
-                                    && sy <= b.rect.bottom + 2
-                            })
-                            .map(|b| (b.hwnd, b.is_topmost))
-                    };
-                    if let Some((target_raw, is_topmost)) = clicked {
+                    let mut clicked_info = None;
+                    {
+                        let mut badges = INTERACTIVE_PIN_BADGES.lock();
+                        if let Some(b) = badges.iter_mut().find(|b| {
+                            sx >= b.rect.left - 2
+                                && sx <= b.rect.right + 2
+                                && sy >= b.rect.top - 2
+                                && sy <= b.rect.bottom + 2
+                        }) {
+                            b.is_topmost = !b.is_topmost;
+                            clicked_info = Some((b.hwnd, b.is_topmost));
+                        }
+                    }
+
+                    if let Some((target_raw, new_topmost)) = clicked_info {
+                        if new_topmost {
+                            INTERACTIVE_PINNED_HWNDS.lock().insert(target_raw);
+                        } else {
+                            INTERACTIVE_PINNED_HWNDS.lock().remove(&target_raw);
+                        }
+
+                        let (s_left, s_top, s_w, s_h) = crate::window_list::virtual_screen_bounds();
+                        if s_w > 0 && s_h > 0 {
+                            let badges = INTERACTIVE_PIN_BADGES.lock().clone();
+                            let _ = render_badges_to_layered_window(
+                                hwnd,
+                                &badges,
+                                s_left,
+                                s_top,
+                                s_w as u32,
+                                s_h as u32,
+                            );
+                        }
+
                         let target_hwnd = HWND(target_raw as *mut c_void);
                         if windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(target_hwnd)).as_bool() {
-                            let new_topmost = !is_topmost;
                             let _ = SetWindowPos(
                                 target_hwnd,
                                 Some(if new_topmost {
@@ -4055,13 +4077,6 @@ mod windows_overlay {
                                 0,
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
                             );
-                            let controller =
-                                HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void);
-                            if !controller.0.is_null() {
-                                if let Some(runtime) = runtime_mut(controller) {
-                                    let _ = paint_interactive_pin_overlay(runtime);
-                                }
-                            }
                         }
                     }
                     return LRESULT(0);
@@ -10912,6 +10927,7 @@ mod windows_overlay {
                     } else {
                         let _ = ShowWindow(runtime.interactive_pin_hwnd, SW_HIDE);
                         INTERACTIVE_PIN_BADGES.lock().clear();
+                        unpin_all_interactive_windows();
                     }
                 }
 
@@ -20694,108 +20710,59 @@ mod windows_overlay {
         Ok(())
     }
 
-    unsafe fn paint_interactive_pin_overlay(runtime: &Runtime) -> Result<()> {
-        if !runtime.interactive_pin_enabled {
-            let _ = ShowWindow(runtime.interactive_pin_hwnd, SW_HIDE);
-            INTERACTIVE_PIN_BADGES.lock().clear();
-            return Ok(());
+    pub(crate) fn unpin_all_interactive_windows() {
+        let mut pinned = INTERACTIVE_PINNED_HWNDS.lock();
+        for hwnd_raw in pinned.drain() {
+            let hwnd = HWND(hwnd_raw as *mut c_void);
+            if unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() } {
+                let _ = unsafe {
+                    SetWindowPos(
+                        hwnd,
+                        Some(HWND_NOTOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                    )
+                };
+            }
         }
+    }
 
-        let (screen_left, screen_top, screen_width, screen_height) =
-            crate::window_list::virtual_screen_bounds();
-        if screen_width <= 0 || screen_height <= 0 {
-            return Ok(());
-        }
+    fn draw_interactive_pin_icon(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32,
+        cy: f32,
+        color: [u8; 4],
+    ) {
+        // Basic pushpin icon (identical geometry for on and off states):
+        // Round pin head
+        draw_skia_circle_fill(pixmap, cx, cy - 3.5, 3.2, color);
+        // Horizontal collar guard
+        draw_skia_line(pixmap, cx - 4.2, cy + 0.2, cx + 4.2, cy + 0.2, color, 1.8);
+        // Vertical needle pointing down
+        draw_skia_line(pixmap, cx, cy + 0.2, cx, cy + 6.0, color, 1.8);
+    }
 
-        let width = screen_width as u32;
-        let height = screen_height as u32;
-
-        struct PinTargetWindow {
-            hwnd: HWND,
-            rect: RECT,
-            is_topmost: bool,
-        }
-        let mut targets: Vec<PinTargetWindow> = Vec::new();
-
-        unsafe extern "system" fn enum_pin_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
-            if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool()
-                || IsIconic(hwnd).as_bool()
-            {
-                return true.into();
-            }
-            if window_belongs_to_current_process(hwnd)
-                || is_internal_app_window(hwnd)
-                || looks_like_main_ui_window(hwnd)
-            {
-                return true.into();
-            }
-
-            let mut class_name = [0u16; 64];
-            let len = GetClassNameW(hwnd, &mut class_name);
-            if len > 0 {
-                let name = String::from_utf16_lossy(&class_name[..len as usize]);
-                if name == "Shell_TrayWnd"
-                    || name == "Shell_SecondaryTrayWnd"
-                    || name == "Progman"
-                    || name == "WorkerW"
-                {
-                    return true.into();
-                }
-            }
-
-            let Some(rect) = focus_highlight_rect(hwnd) else {
-                return true.into();
-            };
-
-            let w = rect.right - rect.left;
-            let h = rect.bottom - rect.top;
-            if w < 120 || h < 80 {
-                return true.into();
-            }
-
-            let check_pt = POINT {
-                x: rect.left + 16,
-                y: rect.top + 16,
-            };
-            let top_hwnd = WindowFromPoint(check_pt);
-            if !top_hwnd.0.is_null() {
-                let root = GetAncestor(top_hwnd, GA_ROOT);
-                if root != hwnd && !window_belongs_to_current_process(root) {
-                    return true.into();
-                }
-            }
-
-            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            let is_topmost = (ex_style & WS_EX_TOPMOST.0) != 0;
-
-            let list = &mut *(lparam.0 as *mut Vec<PinTargetWindow>);
-            list.push(PinTargetWindow {
-                hwnd,
-                rect,
-                is_topmost,
-            });
-            true.into()
-        }
-
-        let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
-            Some(enum_pin_proc),
-            LPARAM(&mut targets as *mut Vec<PinTargetWindow> as isize),
-        );
-
+    unsafe fn render_badges_to_layered_window(
+        hwnd: HWND,
+        badges: &[InteractivePinBadge],
+        screen_left: i32,
+        screen_top: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<()> {
         let mut pixmap = match tiny_skia::Pixmap::new(width, height) {
             Some(p) => p,
             None => return Ok(()),
         };
 
         let badge_size: f32 = 24.0;
-        let mut new_badges = Vec::new();
 
-        for target in targets {
-            let badge_screen_x = target.rect.left + 8;
-            let badge_screen_y = target.rect.top + 6;
-
-            let bx = (badge_screen_x - screen_left) as f32;
-            let by = (badge_screen_y - screen_top) as f32;
+        for b in badges {
+            let bx = (b.rect.left - screen_left) as f32;
+            let by = (b.rect.top - screen_top) as f32;
 
             if bx < 0.0
                 || by < 0.0
@@ -20805,61 +20772,22 @@ mod windows_overlay {
                 continue;
             }
 
-            new_badges.push(InteractivePinBadge {
-                hwnd: target.hwnd.0 as isize,
-                rect: RECT {
-                    left: badge_screen_x,
-                    top: badge_screen_y,
-                    right: badge_screen_x + badge_size as i32,
-                    bottom: badge_screen_y + badge_size as i32,
-                },
-                is_topmost: target.is_topmost,
-            });
-
-            // Draw badge background
-            let (bg_color, border_color, icon_color) = if target.is_topmost {
-                ([0, 195, 115, 240], [255, 255, 255, 220], [255, 255, 255, 255])
+            // Both ON and OFF use the same basic pin icon:
+            // When ON: bright emerald green background, white border, bright white icon.
+            // When OFF: dark translucent background, subtle slate border, dark dimmed icon.
+            let (bg_color, border_color, icon_color) = if b.is_topmost {
+                ([16, 185, 129, 245], [255, 255, 255, 230], [255, 255, 255, 255])
             } else {
-                ([20, 26, 38, 205], [130, 155, 185, 140], [210, 225, 245, 230])
+                ([20, 26, 38, 200], [75, 90, 110, 140], [130, 148, 172, 190])
             };
 
             draw_skia_rect_fill(&mut pixmap, bx, by, badge_size, badge_size, bg_color);
             draw_skia_rect_outline(&mut pixmap, bx, by, badge_size, badge_size, border_color, 1.0);
 
-            // Draw pin icon inside badge
             let cx = bx + badge_size * 0.5;
             let cy = by + badge_size * 0.5;
-
-            if target.is_topmost {
-                // Vertical pinned pushpin
-                draw_skia_circle_fill(&mut pixmap, cx, cy - 4.5, 3.2, icon_color);
-                draw_skia_line(&mut pixmap, cx - 4.5, cy, cx + 4.5, cy, icon_color, 2.0);
-                draw_skia_line(&mut pixmap, cx, cy, cx, cy + 5.5, icon_color, 1.8);
-            } else {
-                // Angled unpinned pushpin (tilted ~45 degrees)
-                draw_skia_circle_fill(&mut pixmap, cx - 3.2, cy - 3.2, 2.8, icon_color);
-                draw_skia_line(
-                    &mut pixmap,
-                    cx - 4.8,
-                    cy + 0.8,
-                    cx + 0.8,
-                    cy - 4.8,
-                    icon_color,
-                    1.8,
-                );
-                draw_skia_line(
-                    &mut pixmap,
-                    cx - 0.8,
-                    cy - 0.8,
-                    cx + 4.2,
-                    cy + 4.2,
-                    icon_color,
-                    1.5,
-                );
-            }
+            draw_interactive_pin_icon(&mut pixmap, cx, cy, icon_color);
         }
-
-        *INTERACTIVE_PIN_BADGES.lock() = new_badges;
 
         let screen_dc = GetDC(None);
         if screen_dc.0.is_null() {
@@ -20932,7 +20860,7 @@ mod windows_overlay {
         };
 
         let _ = SetWindowPos(
-            runtime.interactive_pin_hwnd,
+            hwnd,
             Some(HWND_TOPMOST),
             screen_left,
             screen_top,
@@ -20942,7 +20870,7 @@ mod windows_overlay {
         );
 
         let _ = UpdateLayeredWindow(
-            runtime.interactive_pin_hwnd,
+            hwnd,
             Some(screen_dc),
             Some(&destination),
             Some(&sz),
@@ -20959,6 +20887,157 @@ mod windows_overlay {
         let _ = ReleaseDC(None, screen_dc);
 
         Ok(())
+    }
+
+    unsafe fn paint_interactive_pin_overlay(runtime: &Runtime) -> Result<()> {
+        if !runtime.interactive_pin_enabled {
+            let _ = ShowWindow(runtime.interactive_pin_hwnd, SW_HIDE);
+            INTERACTIVE_PIN_BADGES.lock().clear();
+            return Ok(());
+        }
+
+        let (screen_left, screen_top, screen_width, screen_height) =
+            crate::window_list::virtual_screen_bounds();
+        if screen_width <= 0 || screen_height <= 0 {
+            return Ok(());
+        }
+
+        let width = screen_width as u32;
+        let height = screen_height as u32;
+
+        struct PinTargetWindow {
+            hwnd: HWND,
+            rect: RECT,
+            is_topmost: bool,
+        }
+        struct EnumPinState {
+            targets: Vec<PinTargetWindow>,
+            occluders: Vec<RECT>,
+        }
+        let mut enum_state = EnumPinState {
+            targets: Vec::new(),
+            occluders: Vec::new(),
+        };
+
+        unsafe extern "system" fn enum_pin_proc(
+            hwnd: HWND,
+            lparam: LPARAM,
+        ) -> windows::core::BOOL {
+            if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool()
+                || IsIconic(hwnd).as_bool()
+            {
+                return true.into();
+            }
+            if window_belongs_to_current_process(hwnd)
+                || is_internal_app_window(hwnd)
+                || looks_like_main_ui_window(hwnd)
+            {
+                return true.into();
+            }
+
+            let mut class_name = [0u16; 64];
+            let len = GetClassNameW(hwnd, &mut class_name);
+            if len > 0 {
+                let name = String::from_utf16_lossy(&class_name[..len as usize]);
+                if name == "Shell_TrayWnd"
+                    || name == "Shell_SecondaryTrayWnd"
+                    || name == "Progman"
+                    || name == "WorkerW"
+                {
+                    return true.into();
+                }
+            }
+
+            let Some(rect) = focus_highlight_rect(hwnd) else {
+                return true.into();
+            };
+
+            let w = rect.right - rect.left;
+            let h = rect.bottom - rect.top;
+            if w < 120 || h < 80 {
+                return true.into();
+            }
+
+            let st = &mut *(lparam.0 as *mut EnumPinState);
+
+            let badge_screen_x = rect.left + 8;
+            let badge_screen_y = rect.top + 6;
+            let badge_center_x = badge_screen_x + 12;
+            let badge_center_y = badge_screen_y + 12;
+
+            // Check if this badge position is occluded by ANY window higher in Z-order
+            let is_occluded = st.occluders.iter().any(|occ| {
+                badge_center_x >= occ.left
+                    && badge_center_x <= occ.right
+                    && badge_center_y >= occ.top
+                    && badge_center_y <= occ.bottom
+            });
+
+            if is_occluded {
+                st.occluders.push(rect);
+                return true.into();
+            }
+
+            // Check if any existing target already placed a badge at/near this position (within 28px)
+            let badge_collides = st.targets.iter().any(|t| {
+                let t_bx = t.rect.left + 8;
+                let t_by = t.rect.top + 6;
+                (t_bx - badge_screen_x).abs() < 28 && (t_by - badge_screen_y).abs() < 28
+            });
+
+            if badge_collides {
+                st.occluders.push(rect);
+                return true.into();
+            }
+
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let is_topmost_style = (ex_style & WS_EX_TOPMOST.0) != 0;
+            let is_topmost = is_topmost_style
+                || INTERACTIVE_PINNED_HWNDS.lock().contains(&(hwnd.0 as isize));
+
+            st.targets.push(PinTargetWindow {
+                hwnd,
+                rect,
+                is_topmost,
+            });
+            st.occluders.push(rect);
+            true.into()
+        }
+
+        let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
+            Some(enum_pin_proc),
+            LPARAM(&mut enum_state as *mut EnumPinState as isize),
+        );
+
+        let badge_size: f32 = 24.0;
+        let mut new_badges = Vec::new();
+
+        for target in enum_state.targets {
+            let badge_screen_x = target.rect.left + 8;
+            let badge_screen_y = target.rect.top + 6;
+
+            new_badges.push(InteractivePinBadge {
+                hwnd: target.hwnd.0 as isize,
+                rect: RECT {
+                    left: badge_screen_x,
+                    top: badge_screen_y,
+                    right: badge_screen_x + badge_size as i32,
+                    bottom: badge_screen_y + badge_size as i32,
+                },
+                is_topmost: target.is_topmost,
+            });
+        }
+
+        *INTERACTIVE_PIN_BADGES.lock() = new_badges.clone();
+
+        render_badges_to_layered_window(
+            runtime.interactive_pin_hwnd,
+            &new_badges,
+            screen_left,
+            screen_top,
+            width,
+            height,
+        )
     }
 
     unsafe fn focus_highlight_rect(hwnd: HWND) -> Option<RECT> {
@@ -40162,6 +40241,7 @@ mod windows_overlay {
         let _ = unsafe { ShowWindow(runtime.pin_hwnd, SW_HIDE) };
         unsafe { hide_focus_highlight_windows(runtime) };
         unsafe { restore_window_opacity(runtime) };
+        unpin_all_interactive_windows();
         if let Some(active) = &runtime.active_pin_thumbnail {
             if let Some(thumbnail_id) = active.thumbnail_id {
                 let _ = unsafe { DwmUnregisterThumbnail(thumbnail_id) };
@@ -42493,6 +42573,8 @@ mod fallback {
     pub(crate) fn has_active_macro_visual_overlay() -> bool {
         false
     }
+
+    pub(crate) fn unpin_all_interactive_windows() {}
 
     pub(crate) fn enable_crosshair_profile(_spec: &str) -> Result<()> {
         Ok(())

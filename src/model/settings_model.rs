@@ -950,6 +950,11 @@ impl AppState {
             }
         }
 
+        if self.interactive_window_pin_enabled {
+            self.interactive_window_pin_enabled = false;
+            changed = true;
+        }
+
         changed
     }
 }
