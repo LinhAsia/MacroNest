@@ -1,0 +1,493 @@
+use anyhow::{Context, Result, bail};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+use windows::{
+    core::PCWSTR,
+    Win32::{
+        Foundation::{CloseHandle, HANDLE, HMODULE, HWND, RECT},
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_HARDWARE,
+            Direct3D11::{
+                D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+                D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
+                D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+                D3D11_USAGE_STAGING,
+            },
+            Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM,
+        },
+        System::Memory::{
+            CreateFileMappingW, MapViewOfFile, OpenFileMappingW, UnmapViewOfFile,
+            FILE_MAP_ALL_ACCESS, PAGE_READWRITE,
+        },
+        System::Threading::{
+            CreateEventW, CreateMutexW, SetEvent, WaitForSingleObject,
+        },
+        UI::WindowsAndMessaging::GetWindowThreadProcessId,
+    },
+};
+
+pub fn find_game_capture_binaries(paths: &crate::storage::AppPaths) -> Option<(PathBuf, PathBuf, PathBuf)> {
+    // 1. Check local AppData bin/game_capture
+    if paths.graphics_hook64_dll.exists() && paths.inject_helper64_exe.exists() {
+        return Some((
+            paths.graphics_hook64_dll.clone(),
+            paths.inject_helper64_exe.clone(),
+            paths.get_graphics_offsets64_exe.clone(),
+        ));
+    }
+
+    // 2. Check installed OBS Studio
+    let obs_dir = PathBuf::from(r"D:\obs-studio\data\obs-plugins\win-capture");
+    let obs_hook = obs_dir.join("graphics-hook64.dll");
+    let obs_inject = obs_dir.join("inject-helper64.exe");
+    let obs_offsets = obs_dir.join("get-graphics-offsets64.exe");
+    if obs_hook.exists() && obs_inject.exists() {
+        return Some((obs_hook, obs_inject, obs_offsets));
+    }
+
+    // 3. Check Program Files OBS Studio
+    let pf_dir = PathBuf::from(r"C:\Program Files\obs-studio\data\obs-plugins\win-capture");
+    let pf_hook = pf_dir.join("graphics-hook64.dll");
+    let pf_inject = pf_dir.join("inject-helper64.exe");
+    let pf_offsets = pf_dir.join("get-graphics-offsets64.exe");
+    if pf_hook.exists() && pf_inject.exists() {
+        return Some((pf_hook, pf_inject, pf_offsets));
+    }
+
+    None
+}
+
+pub fn is_game_capture_available(paths: &crate::storage::AppPaths) -> bool {
+    find_game_capture_binaries(paths).is_some()
+}
+
+#[repr(C, packed(8))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct D3D8Offsets {
+    pub present: u32,
+}
+
+#[repr(C, packed(8))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct D3D9Offsets {
+    pub present: u32,
+    pub present_ex: u32,
+    pub present_swap: u32,
+    pub d3d9_clsoff: u32,
+    pub is_d3d9ex_clsoff: u32,
+}
+
+#[repr(C, packed(8))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DXGIOffsets {
+    pub present: u32,
+    pub resize: u32,
+    pub present1: u32,
+}
+
+#[repr(C, packed(8))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DDRAWOffsets {
+    pub surface_create: u32,
+    pub surface_restore: u32,
+    pub surface_release: u32,
+    pub surface_unlock: u32,
+    pub surface_blt: u32,
+    pub surface_flip: u32,
+    pub surface_set_palette: u32,
+    pub palette_set_entries: u32,
+}
+
+#[repr(C, packed(8))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DXGIOffsets2 {
+    pub release: u32,
+}
+
+#[repr(C, packed(8))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct D3D12Offsets {
+    pub execute_command_lists: u32,
+}
+
+#[repr(C, packed(8))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GraphicsOffsets {
+    pub d3d8: D3D8Offsets,
+    pub d3d9: D3D9Offsets,
+    pub dxgi: DXGIOffsets,
+    pub ddraw: DDRAWOffsets,
+    pub dxgi2: DXGIOffsets2,
+    pub d3d12: D3D12Offsets,
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureType {
+    Memory = 0,
+    Texture = 1,
+}
+
+#[repr(C, packed(8))]
+pub struct HookInfo {
+    pub hook_ver_major: u32,
+    pub hook_ver_minor: u32,
+    pub capture_type: CaptureType,
+    pub window: u32,
+    pub format: u32,
+    pub cx: u32,
+    pub cy: u32,
+    pub unused_base_cx: u32,
+    pub unused_base_cy: u32,
+    pub pitch: u32,
+    pub map_id: u32,
+    pub map_size: u32,
+    pub flip: bool,
+    pub frame_interval: u64,
+    pub unused_use_scale: bool,
+    pub force_shmem: bool,
+    pub capture_overlay: bool,
+    pub allow_srgb_alias: bool,
+    pub offsets: GraphicsOffsets,
+    pub reserved: [u32; 126],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ShtexData {
+    pub tex_handle: u32,
+}
+
+#[cfg(windows)]
+pub struct GameCaptureSession {
+    pub hwnd: HWND,
+    pub pid: u32,
+    d3d_device: ID3D11Device,
+    d3d_context: ID3D11DeviceContext,
+    shared_texture: Option<ID3D11Texture2D>,
+    staging_textures: Option<([ID3D11Texture2D; 2], u32, u32)>,
+    write_idx: usize,
+    copies_count: usize,
+    hook_info_map: HANDLE,
+    hook_info_ptr: *mut HookInfo,
+    hook_init: HANDLE,
+    hook_ready: HANDLE,
+    hook_exit: HANDLE,
+    hook_restart: HANDLE,
+    hook_stop: HANDLE,
+    tex_mutexes: [HANDLE; 2],
+    keepalive: HANDLE,
+    width: u32,
+    height: u32,
+}
+
+#[cfg(windows)]
+unsafe impl Send for GameCaptureSession {}
+#[cfg(windows)]
+unsafe impl Sync for GameCaptureSession {}
+
+#[cfg(windows)]
+impl Drop for GameCaptureSession {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.hook_stop.0.is_null() {
+                let _ = SetEvent(self.hook_stop);
+            }
+            if !self.hook_info_ptr.is_null() {
+                let _ = UnmapViewOfFile(windows::Win32::System::Memory::MEMORY_MAPPED_VIEW_ADDRESS {
+                    Value: self.hook_info_ptr as *mut _,
+                });
+            }
+            let handles = [
+                self.hook_info_map,
+                self.hook_init,
+                self.hook_ready,
+                self.hook_exit,
+                self.hook_restart,
+                self.hook_stop,
+                self.tex_mutexes[0],
+                self.tex_mutexes[1],
+                self.keepalive,
+            ];
+            for h in handles {
+                if !h.0.is_null() {
+                    let _ = CloseHandle(h);
+                }
+            }
+        }
+    }
+}
+
+pub fn get_graphics_offsets(offsets_exe: &Path) -> GraphicsOffsets {
+    let mut offsets = GraphicsOffsets::default();
+    if offsets_exe.exists() {
+        if let Ok(output) = Command::new(offsets_exe).creation_flags(0x0800_0000).output() {
+            let str_out = String::from_utf8_lossy(&output.stdout);
+            for line in str_out.lines() {
+                let parts: Vec<&str> = line.trim().split('=').collect();
+                if parts.len() == 2 {
+                    let key = parts[0];
+                    let val = u32::from_str_radix(parts[1].trim_start_matches("0x"), 16).unwrap_or(0);
+                    match key {
+                        "present" if offsets.dxgi.present == 0 => offsets.dxgi.present = val,
+                        "present1" => offsets.dxgi.present1 = val,
+                        "resize" => offsets.dxgi.resize = val,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    if offsets.dxgi.present == 0 {
+        offsets.dxgi.present = 0x19960;
+        offsets.dxgi.present1 = 0x19e00;
+        offsets.dxgi.resize = 0x38530;
+    }
+    offsets
+}
+
+#[cfg(windows)]
+fn to_wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+impl GameCaptureSession {
+    pub fn start(hwnd: HWND, paths: &crate::storage::AppPaths) -> Result<Self> {
+        let (hook_dll, inject_helper, offsets_exe) = find_game_capture_binaries(paths)
+            .context("Game Capture binaries not found. Install Game Capture in Settings > Downloaded Tools.")?;
+
+        let mut pid: u32 = 0;
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        }
+        if pid == 0 {
+            bail!("Could not determine target window process ID.");
+        }
+
+        let offsets = get_graphics_offsets(&offsets_exe);
+
+        unsafe {
+            let keepalive_name = to_wide(&format!("CaptureHook_KeepAlive{pid}"));
+            let keepalive = CreateMutexW(None, false, PCWSTR(keepalive_name.as_ptr()))?;
+
+            let hook_init_name = to_wide(&format!("CaptureHook_Initialize{pid}"));
+            let hook_init = CreateEventW(None, false, false, PCWSTR(hook_init_name.as_ptr()))?;
+
+            let hook_ready_name = to_wide(&format!("CaptureHook_HookReady{pid}"));
+            let hook_ready = CreateEventW(None, false, false, PCWSTR(hook_ready_name.as_ptr()))?;
+
+            let hook_exit_name = to_wide(&format!("CaptureHook_Exit{pid}"));
+            let hook_exit = CreateEventW(None, false, false, PCWSTR(hook_exit_name.as_ptr()))?;
+
+            let hook_restart_name = to_wide(&format!("CaptureHook_Restart{pid}"));
+            let hook_restart = CreateEventW(None, false, false, PCWSTR(hook_restart_name.as_ptr()))?;
+
+            let hook_stop_name = to_wide(&format!("CaptureHook_Stop{pid}"));
+            let hook_stop = CreateEventW(None, false, false, PCWSTR(hook_stop_name.as_ptr()))?;
+
+            let tex_m1_name = to_wide(&format!("CaptureHook_TextureMutex1{pid}"));
+            let tex_m1 = CreateMutexW(None, false, PCWSTR(tex_m1_name.as_ptr()))?;
+
+            let tex_m2_name = to_wide(&format!("CaptureHook_TextureMutex2{pid}"));
+            let tex_m2 = CreateMutexW(None, false, PCWSTR(tex_m2_name.as_ptr()))?;
+
+            let hook_info_name = to_wide(&format!("CaptureHook_HookInfo{pid}"));
+            let hook_info_map = CreateFileMappingW(
+                HANDLE(usize::MAX as *mut _),
+                None,
+                PAGE_READWRITE,
+                0,
+                std::mem::size_of::<HookInfo>() as u32,
+                PCWSTR(hook_info_name.as_ptr()),
+            )?;
+
+            let hook_info_view = MapViewOfFile(hook_info_map, FILE_MAP_ALL_ACCESS, 0, 0, std::mem::size_of::<HookInfo>());
+            if hook_info_view.Value.is_null() {
+                bail!("Failed to map hook info shared memory");
+            }
+            let hook_info_ptr = hook_info_view.Value as *mut HookInfo;
+
+            std::ptr::write_bytes(hook_info_ptr, 0, 1);
+            let hi = &mut *hook_info_ptr;
+            hi.hook_ver_major = 1;
+            hi.hook_ver_minor = 8;
+            hi.capture_type = CaptureType::Texture;
+            hi.window = hwnd.0 as usize as u32;
+            hi.format = DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32;
+            hi.offsets = offsets;
+            hi.allow_srgb_alias = true;
+
+            // Spawn inject-helper64.exe to inject graphics-hook64.dll into the game
+            let inject_status = Command::new(&inject_helper)
+                .creation_flags(0x0800_0000)
+                .args([
+                    hook_dll.to_str().unwrap_or_default(),
+                    "0",
+                    &pid.to_string(),
+                ])
+                .status()
+                .context("Failed to spawn inject-helper64.exe")?;
+
+            if !inject_status.success() {
+                let _ = Command::new(&inject_helper)
+                    .creation_flags(0x0800_0000)
+                    .args([
+                        hook_dll.to_str().unwrap_or_default(),
+                        "1",
+                        &pid.to_string(),
+                    ])
+                    .status();
+            }
+
+            // Signal the hook to initialize
+            let _ = SetEvent(hook_init);
+
+            // Create D3D11 Device for MacroNest to open the shared texture
+            let mut d3d_device: Option<ID3D11Device> = None;
+            let mut d3d_context: Option<ID3D11DeviceContext> = None;
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut d3d_device),
+                None,
+                Some(&mut d3d_context),
+            )?;
+            let d3d_device = d3d_device.context("Failed to create D3D11 device")?;
+            let d3d_context = d3d_context.context("Failed to create D3D11 context")?;
+
+            // Wait up to 5 seconds for the game hook to produce the first texture
+            let wait_res = WaitForSingleObject(hook_ready, 5000);
+            if wait_res.0 != 0 {
+                bail!("Game hook did not signal ready within 5 seconds. Make sure the game is actively rendering.");
+            }
+
+            // Read texture handle from CaptureHook_Texture<pid>
+            let tex_map_name = to_wide(&format!("CaptureHook_Texture{pid}"));
+            let tex_map = OpenFileMappingW(FILE_MAP_ALL_ACCESS.0, false, PCWSTR(tex_map_name.as_ptr()))?;
+            let tex_view = MapViewOfFile(tex_map, FILE_MAP_ALL_ACCESS, 0, 0, std::mem::size_of::<ShtexData>());
+            if tex_view.Value.is_null() {
+                bail!("Failed to open CaptureHook_Texture shared memory");
+            }
+            let shtex = *(tex_view.Value as *const ShtexData);
+            let _ = UnmapViewOfFile(tex_view);
+            let _ = CloseHandle(tex_map);
+
+            if shtex.tex_handle == 0 {
+                bail!("Invalid shared texture handle from game hook");
+            }
+
+            // Open shared resource texture on MacroNest D3D11 device
+            let mut shared_texture: Option<ID3D11Texture2D> = None;
+            d3d_device.OpenSharedResource(HANDLE(shtex.tex_handle as usize as *mut _), &mut shared_texture)?;
+            let shared_texture = shared_texture.context("Failed to open shared texture")?;
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            shared_texture.GetDesc(&mut desc);
+
+            Ok(Self {
+                hwnd,
+                pid,
+                d3d_device,
+                d3d_context,
+                shared_texture: Some(shared_texture),
+                staging_textures: None,
+                write_idx: 0,
+                copies_count: 0,
+                hook_info_map,
+                hook_info_ptr,
+                hook_init,
+                hook_ready,
+                hook_exit,
+                hook_restart,
+                hook_stop,
+                tex_mutexes: [tex_m1, tex_m2],
+                keepalive,
+                width: desc.Width,
+                height: desc.Height,
+            })
+        }
+    }
+
+    pub fn poll_into_buffer(&mut self, buffer: &mut Vec<u8>, expected_w: usize, expected_h: usize) -> Result<bool> {
+        let Some(shared_tex) = &self.shared_texture else {
+            return Ok(false);
+        };
+
+        unsafe {
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            shared_tex.GetDesc(&mut desc);
+            let width = desc.Width as usize;
+            let height = desc.Height as usize;
+
+            if expected_w > 0 && expected_h > 0 && (width != expected_w || height != expected_h) {
+                return Ok(false);
+            }
+
+            if self.staging_textures.is_none() {
+                let mut staging_desc = desc;
+                staging_desc.Usage = D3D11_USAGE_STAGING;
+                staging_desc.BindFlags = 0;
+                staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+                staging_desc.MiscFlags = 0;
+
+                let mut s0 = None;
+                let mut s1 = None;
+                self.d3d_device.CreateTexture2D(&staging_desc, None, Some(&mut s0))?;
+                self.d3d_device.CreateTexture2D(&staging_desc, None, Some(&mut s1))?;
+                self.staging_textures = Some(([s0.unwrap(), s1.unwrap()], desc.Width, desc.Height));
+                self.write_idx = 0;
+                self.copies_count = 0;
+            }
+
+            let (staging_textures, _, _) = self.staging_textures.as_ref().unwrap();
+            let write_idx = self.write_idx;
+
+            // Copy directly on GPU VRAM from shared game texture
+            self.d3d_context.CopyResource(&staging_textures[write_idx], shared_tex);
+
+            self.copies_count += 1;
+            let read_idx = if self.copies_count > 1 {
+                1 - write_idx
+            } else {
+                write_idx
+            };
+
+            let read_tex = &staging_textures[read_idx];
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            self.d3d_context.Map(read_tex, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+
+            let pitch = mapped.RowPitch as usize;
+            let row_bytes = width * 4;
+            let total_bytes = row_bytes * height;
+            let src_ptr = mapped.pData as *const u8;
+
+            buffer.resize(total_bytes, 0);
+            let dst_ptr = buffer.as_mut_ptr();
+
+            if pitch == row_bytes {
+                std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, total_bytes);
+            } else {
+                for y in 0..height {
+                    std::ptr::copy_nonoverlapping(src_ptr.add(y * pitch), dst_ptr.add(y * row_bytes), row_bytes);
+                }
+            }
+
+            self.d3d_context.Unmap(read_tex, 0);
+            self.write_idx = 1 - write_idx;
+
+            Ok(true)
+        }
+    }
+
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+}

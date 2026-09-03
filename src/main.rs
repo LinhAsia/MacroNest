@@ -22,6 +22,7 @@ mod storage;
 mod ui;
 mod video_recorder;
 mod window_list;
+mod game_capture;
 
 use anyhow::Result;
 use crossbeam_channel::unbounded;

@@ -813,6 +813,20 @@ fn start_recording_inner() -> Result<(), String> {
     start_recording_with_config(CONFIG.lock().clone())
 }
 
+enum ActiveCaptureSession {
+    Wgc(crate::window_list::WgcSession),
+    Game(crate::game_capture::GameCaptureSession),
+}
+
+impl ActiveCaptureSession {
+    fn poll_into_buffer(&mut self, buffer: &mut Vec<u8>, w: usize, h: usize) -> anyhow::Result<bool> {
+        match self {
+            Self::Wgc(s) => s.poll_into_buffer(buffer, w, h),
+            Self::Game(s) => s.poll_into_buffer(buffer, w, h),
+        }
+    }
+}
+
 fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String> {
     if !config.ffmpeg_exe.exists() {
         return Err(
@@ -853,7 +867,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 bottom: top + height,
             })
         }
-        CaptureSource::WgcWindow { hwnd, .. } => {
+        CaptureSource::WgcWindow { hwnd, .. } | CaptureSource::GameCapture { hwnd, .. } => {
             let mut r = RECT::default();
             unsafe {
                 if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
@@ -893,7 +907,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));
 
-    let (mut wgc_session_opt, initial_frame_opt) = match &source {
+    let (mut session_opt, initial_frame_opt) = match &source {
         CaptureSource::WgcWindow { hwnd, .. } => {
             let mut session = match crate::window_list::init_wgc_session(*hwnd) {
                 Ok(s) => s,
@@ -915,7 +929,37 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                     return Err(format!("Could not capture initial window frame: {err}"));
                 }
             };
-            (Some(session), Some(initial_frame))
+            (Some(ActiveCaptureSession::Wgc(session)), Some(initial_frame))
+        }
+        CaptureSource::GameCapture { hwnd, .. } => {
+            let paths = crate::storage::AppPaths::discover().map_err(|e| format!("{e}"))?;
+            let mut session = match crate::game_capture::GameCaptureSession::start(*hwnd, &paths) {
+                Ok(s) => s,
+                Err(err) => {
+                    audio_stop.store(true, Ordering::Release);
+                    let _ = audio_start.send(());
+                    let _ = audio_thread.join();
+                    let _ = fs::remove_file(&audio_path);
+                    return Err(format!("Could not initialize Game Capture (OBS Hook): {err}"));
+                }
+            };
+            let (width, height) = session.dimensions();
+            let mut initial_rgba = Vec::new();
+            if let Err(err) = session.poll_into_buffer(&mut initial_rgba, width as usize, height as usize) {
+                audio_stop.store(true, Ordering::Release);
+                let _ = audio_start.send(());
+                let _ = audio_thread.join();
+                let _ = fs::remove_file(&audio_path);
+                return Err(format!("Could not capture initial game frame: {err}"));
+            }
+            let initial_frame = crate::window_list::ScreenCaptureFrame {
+                screen_x: 0,
+                screen_y: 0,
+                width: width as usize,
+                height: height as usize,
+                rgba: initial_rgba,
+            };
+            (Some(ActiveCaptureSession::Game(session)), Some(initial_frame))
         }
         _ => (None, None),
     };
@@ -969,7 +1013,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 "desktop",
             ]);
         }
-        CaptureSource::WgcWindow { fps, .. } => {
+        CaptureSource::WgcWindow { fps, .. } | CaptureSource::GameCapture { fps, .. } => {
             let initial = initial_frame_opt.as_ref().unwrap();
             let width = initial.width;
             let height = initial.height;
@@ -1085,12 +1129,12 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         }
     };
 
-    let (stream_stop, stream_thread) = if let Some(session) = wgc_session_opt.take() {
+    let (stream_stop, stream_thread) = if let Some(session) = session_opt.take() {
         let initial = initial_frame_opt.unwrap();
         let width = initial.width;
         let height = initial.height;
         let fps = match source {
-            CaptureSource::WgcWindow { fps, .. } => fps,
+            CaptureSource::WgcWindow { fps, .. } | CaptureSource::GameCapture { fps, .. } => fps,
             _ => 60,
         };
         let stdin = match child.stdin.take() {
@@ -1113,7 +1157,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 let _ = timeBeginPeriod(1);
             }
             let mut last_frame = initial.rgba;
-            let mut wgc = session;
+            let mut active_session = session;
             let mut pipe = std::io::BufWriter::with_capacity(1024 * 1024, stdin);
 
             if pipe.write_all(&last_frame).is_ok() && pipe.flush().is_ok() {
@@ -1138,7 +1182,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 }
                 next_frame_time += frame_duration;
 
-                let _ = wgc.poll_into_buffer(&mut last_frame, width, height);
+                let _ = active_session.poll_into_buffer(&mut last_frame, width, height);
 
                 if pipe.write_all(&last_frame).is_err() {
                     break 'feeder;
@@ -1644,6 +1688,7 @@ enum CaptureSource {
     Desktop { fps: u32 },
     Region { region: RECT, fps: u32 },
     WgcWindow { hwnd: HWND, fps: u32 },
+    GameCapture { hwnd: HWND, fps: u32 },
 }
 
 fn capture_source(config: &VideoRecorderConfig) -> Result<CaptureSource, String> {
@@ -1664,6 +1709,18 @@ fn capture_source(config: &VideoRecorderConfig) -> Result<CaptureSource, String>
                 return Err("The selected window is no longer available.".to_owned());
             }
             Ok(CaptureSource::WgcWindow { hwnd, fps })
+        }
+        QuickVideoRecordMode::GameCapture => {
+            let hwnd = if let Some(hwnd) = selector_hwnd(&config.target_window) {
+                hwnd
+            } else {
+                let hwnd = unsafe { GetForegroundWindow() };
+                if hwnd.0.is_null() || !unsafe { IsWindow(Some(hwnd)).as_bool() } {
+                    return Err("No active game window found. Focus the game or select its window first.".to_owned());
+                }
+                hwnd
+            };
+            Ok(CaptureSource::GameCapture { hwnd, fps })
         }
         QuickVideoRecordMode::Region => {
             let (x, y, width, height) = config

@@ -844,6 +844,9 @@ pub struct CrosshairApp {
     ffmpeg_download_job: Option<JoinHandle<Result<()>>>,
     ffmpeg_download_progress: Arc<AtomicU32>,
     ffmpeg_installed: bool,
+    game_capture_download_job: Option<JoinHandle<Result<()>>>,
+    game_capture_download_progress: Arc<AtomicU32>,
+    game_capture_installed: bool,
     frida_download_job: Option<JoinHandle<Result<()>>>,
     frida_download_progress: Arc<AtomicU32>,
     frida_installed: bool,
@@ -1010,6 +1013,7 @@ impl CrosshairApp {
 
         let opencv_installed = paths.opencv_dll.exists();
         let ffmpeg_installed = paths.ffmpeg_exe.exists();
+        let game_capture_installed = crate::game_capture::is_game_capture_available(&paths);
         let frida_installed = paths.frida_helper_exe.exists();
         let interception_pending_marker = paths.bin_dir.join("interception.install.pending");
         if interception_pending_marker.exists() {
@@ -1220,6 +1224,9 @@ impl CrosshairApp {
             ffmpeg_download_job: None,
             ffmpeg_download_progress: Arc::new(AtomicU32::new(0)),
             ffmpeg_installed,
+            game_capture_download_job: None,
+            game_capture_download_progress: Arc::new(AtomicU32::new(0)),
+            game_capture_installed,
             frida_download_job: None,
             frida_download_progress: Arc::new(AtomicU32::new(0)),
             frida_installed,
@@ -7100,6 +7107,11 @@ impl CrosshairApp {
                                                 "Selected window",
                                                 "Cửa sổ đã chọn",
                                             ),
+                                            QuickVideoRecordMode::GameCapture => Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Game Capture (OBS Hook)",
+                                                "Quay game (OBS Game Capture)",
+                                            ),
                                             QuickVideoRecordMode::Region => Self::tr_lang(
                                                 self.state.ui_language,
                                                 "Screen region",
@@ -7114,6 +7126,15 @@ impl CrosshairApp {
                                                     self.state.ui_language,
                                                     "Full screen",
                                                     "Toàn màn hình",
+                                                ),
+                                            );
+                                            ui.selectable_value(
+                                                &mut self.state.quick_video_record_mode,
+                                                QuickVideoRecordMode::GameCapture,
+                                                Self::tr_lang(
+                                                    self.state.ui_language,
+                                                    "Game Capture (OBS)",
+                                                    "Quay game (OBS Game Capture)",
                                                 ),
                                             );
                                             ui.selectable_value(
@@ -16990,6 +17011,31 @@ impl eframe::App for CrosshairApp {
             }
         }
 
+        if let Some(job) = &self.game_capture_download_job
+            && job.is_finished()
+        {
+            let job = self.game_capture_download_job.take().unwrap();
+            match job.join() {
+                Ok(Ok(())) => {
+                    self.game_capture_installed = true;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Game Capture (OBS Hook) installed successfully.",
+                        "Đã cài đặt công cụ Game Capture (OBS Hook).",
+                    )
+                    .to_owned();
+                }
+                Ok(Err(error)) => {
+                    self.status = format!("Game capture download failed: {error}");
+                    let _ = fs::remove_dir_all(&self.paths.game_capture_dir);
+                    let _ = fs::remove_file(&self.paths.game_capture_zip);
+                }
+                Err(_) => {
+                    self.status = "Game capture download thread panicked.".to_owned();
+                }
+            }
+        }
+
         if let Some(job) = &self.frida_download_job
             && job.is_finished()
         {
@@ -17035,6 +17081,7 @@ impl eframe::App for CrosshairApp {
         self.poll_mouse_tool_jobs();
 
         if self.ffmpeg_download_job.is_some()
+            || self.game_capture_download_job.is_some()
             || self.frida_download_job.is_some()
             || self.arduino_download_job.is_some()
             || self.interception_download_job.is_some()

@@ -704,6 +704,11 @@ impl CrosshairApp {
             .ffmpeg_download_job
             .as_ref()
             .map(|_| self.ffmpeg_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
+        let game_capture_progress = self
+            .game_capture_download_job
+            .as_ref()
+            .map(|_| self.game_capture_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
+        let game_capture_path = self.paths.graphics_hook64_dll.clone();
         let frida_progress = self
             .frida_download_job
             .as_ref()
@@ -756,6 +761,23 @@ impl CrosshairApp {
                         ),
                         Self::start_ffmpeg_download,
                         Self::delete_ffmpeg_tool,
+                    );
+                    ui.add_space(10.0);
+                    self.render_downloaded_tool_entry(
+                        ui,
+                        language,
+                        "Game Capture (OBS Hook)",
+                        &game_capture_path,
+                        self.game_capture_installed,
+                        game_capture_progress,
+                        538 * 1024,
+                        Self::tr_lang(
+                            language,
+                            "Game capture tool deleted.",
+                            "Đã xóa công cụ Game Capture.",
+                        ),
+                        Self::start_game_capture_download,
+                        Self::delete_game_capture_tool,
                     );
                     ui.add_space(10.0);
                     self.render_downloaded_tool_entry(
@@ -1850,6 +1872,51 @@ impl CrosshairApp {
         }));
     }
 
+    pub(crate) fn start_game_capture_download(&mut self) {
+        if self.game_capture_download_job.is_some() || self.game_capture_installed {
+            return;
+        }
+
+        let paths = self.paths.clone();
+        let progress = self.game_capture_download_progress.clone();
+        progress.store(0, Ordering::SeqCst);
+        self.status = Self::tr_lang(
+            self.state.ui_language,
+            "Downloading Game Capture (OBS Hook)...",
+            "Đang tải công cụ Game Capture...",
+        )
+        .to_owned();
+
+        self.game_capture_download_job = Some(std::thread::spawn(move || -> Result<()> {
+            let url = "https://github.com/LinhAsia/MacroNest/releases/download/tools/game-capture.zip";
+            let mut response = reqwest::blocking::get(url)?.error_for_status()?;
+            let total_size = response.content_length().unwrap_or(538 * 1024);
+            let mut file = fs::File::create(&paths.game_capture_zip)?;
+            let mut downloaded = 0_u64;
+            let mut buffer = [0_u8; 64 * 1024];
+
+            use std::io::{Read, Write};
+            loop {
+                let count = response.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                file.write_all(&buffer[..count])?;
+                downloaded += count as u64;
+                progress.store(
+                    ((downloaded as f64 / total_size.max(1) as f64) * 980.0) as u32,
+                    Ordering::SeqCst,
+                );
+            }
+            drop(file);
+            let _ = fs::create_dir_all(&paths.game_capture_dir);
+            Self::extract_zip_archive(&paths.game_capture_zip, &paths.game_capture_dir)?;
+            let _ = fs::remove_file(&paths.game_capture_zip);
+            progress.store(1000, Ordering::SeqCst);
+            Ok(())
+        }));
+    }
+
     pub(crate) fn start_frida_download(&mut self) {
         if self.frida_download_job.is_some() || self.frida_installed {
             return;
@@ -1992,6 +2059,21 @@ impl CrosshairApp {
         let _ = fs::remove_file(&self.paths.ffmpeg_exe);
         let _ = fs::remove_file(&self.paths.ffmpeg_zip);
         self.ffmpeg_installed = false;
+    }
+
+    fn delete_game_capture_tool(&mut self) {
+        if crate::video_recorder::is_recording() || crate::video_recorder::is_busy() {
+            self.status = Self::tr_lang(
+                self.state.ui_language,
+                "Stop recording before deleting Game Capture.",
+                "Hãy dừng quay trước khi xóa Game Capture.",
+            )
+            .to_owned();
+            return;
+        }
+        let _ = fs::remove_dir_all(&self.paths.game_capture_dir);
+        let _ = fs::remove_file(&self.paths.game_capture_zip);
+        self.game_capture_installed = false;
     }
 
     fn delete_frida_tool(&mut self) {

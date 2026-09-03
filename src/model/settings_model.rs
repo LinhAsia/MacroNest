@@ -100,6 +100,7 @@ pub enum QuickVideoRecordMode {
     FullScreen,
     FocusedWindow,
     SelectedWindow,
+    GameCapture,
     Region,
 }
 
