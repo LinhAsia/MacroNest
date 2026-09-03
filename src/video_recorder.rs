@@ -40,12 +40,6 @@ unsafe extern "system" {
     fn timeEndPeriod(uPeriod: u32) -> u32;
 }
 
-#[cfg(windows)]
-#[link(name = "user32")]
-unsafe extern "system" {
-    fn MessageBeep(uType: u32) -> i32;
-}
-
 #[derive(Clone)]
 pub struct VideoRecorderConfig {
     pub enabled: bool,
@@ -859,7 +853,16 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 bottom: top + height,
             })
         }
-        CaptureSource::WgcWindow { .. } => None,
+        CaptureSource::WgcWindow { hwnd, .. } => {
+            let mut r = RECT::default();
+            unsafe {
+                if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
+                    Some(r)
+                } else {
+                    None
+                }
+            }
+        }
         CaptureSource::Region { region, .. } => Some(*region),
     };
     let (region_border, recording_active_signal) = match border_rect {
@@ -885,7 +888,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     let gop_size = (config.fps.clamp(1, 240) * 2).to_string();
     let mut command = Command::new(&config.ffmpeg_exe);
     command
-        .creation_flags(CREATE_NO_WINDOW)
+        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::from(log));
@@ -1111,11 +1114,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
         let thread_handle = thread::spawn(move || {
             #[cfg(windows)]
             unsafe {
-                use windows::Win32::System::Threading::{
-                    GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
-                };
                 let _ = timeBeginPeriod(1);
-                let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
             }
             let mut last_frame = initial.rgba;
             let mut wgc = session;
@@ -1183,10 +1182,6 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     ACTIVE.store(true, Ordering::Release);
     crate::platform::update_native_taskbar_recording_state(true);
     crate::overlay::request_ui_repaint();
-    #[cfg(windows)]
-    unsafe {
-        let _ = MessageBeep(0);
-    }
     *STATUS.lock() = format!("Recording: {}", output_path.display());
     spawn_exit_watchdog(session_id);
     Ok(())
@@ -1203,10 +1198,6 @@ fn stop_recording_inner() {
     ACTIVE.store(false, Ordering::Release);
     crate::platform::update_native_taskbar_recording_state(false);
     crate::overlay::request_ui_repaint();
-    #[cfg(windows)]
-    unsafe {
-        let _ = MessageBeep(0x40);
-    }
     *STATUS.lock() = "Finishing video...".to_owned();
     recording.audio_stop.store(true, Ordering::Release);
     if let Some(stop) = recording.stream_stop.take() {
