@@ -969,6 +969,10 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 "-hide_banner",
                 "-loglevel",
                 "error",
+                "-thread_queue_size",
+                "1024",
+                "-rtbufsize",
+                "512M",
                 "-f",
                 "rawvideo",
                 "-pix_fmt",
@@ -1073,7 +1077,7 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
             }
             let mut last_frame = initial.rgba;
             let mut wgc = session;
-            let mut pipe = std::io::BufWriter::with_capacity(2 * 1024 * 1024, stdin);
+            let mut pipe = std::io::BufWriter::with_capacity(16 * 1024 * 1024, stdin);
 
             if pipe.write_all(&last_frame).is_ok() {
                 let _ = audio_start_clone.send(());

@@ -1155,12 +1155,12 @@ mod windows_impl {
     pub(crate) struct WgcSession {
         pub(crate) hwnd: HWND,
         dxgi_device: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice,
-        d3d_device: ID11Device,
+        d3d_device: ID3D11Device,
         frame_pool: Direct3D11CaptureFramePool,
         session: GraphicsCaptureSession,
-        staging_textures: Option<([ID3D11Texture2D; 2], u32, u32)>,
-        staging_idx: usize,
-        has_copied: bool,
+        staging_textures: Option<([ID3D11Texture2D; 3], u32, u32)>,
+        write_idx: usize,
+        copies_count: usize,
     }
 
     unsafe impl Send for WgcSession {}
@@ -1220,8 +1220,8 @@ mod windows_impl {
             frame_pool,
             session,
             staging_textures: None,
-            staging_idx: 0,
-            has_copied: false,
+            write_idx: 0,
+            copies_count: 0,
         })
     }
 
@@ -1272,28 +1272,35 @@ mod windows_impl {
 
                 let mut s0 = None;
                 let mut s1 = None;
+                let mut s2 = None;
                 unsafe {
                     self.d3d_device
                         .CreateTexture2D(&staging_desc, None, Some(&mut s0))?;
                     self.d3d_device
                         .CreateTexture2D(&staging_desc, None, Some(&mut s1))?;
+                    self.d3d_device
+                        .CreateTexture2D(&staging_desc, None, Some(&mut s2))?;
                 }
-                self.staging_textures = Some(([s0.unwrap(), s1.unwrap()], desc.Width, desc.Height));
-                self.staging_idx = 0;
-                self.has_copied = false;
+                self.staging_textures = Some(([s0.unwrap(), s1.unwrap(), s2.unwrap()], desc.Width, desc.Height));
+                self.write_idx = 0;
+                self.copies_count = 0;
             }
 
             let (staging_textures, _, _) = self.staging_textures.as_ref().unwrap();
             let d3d_context = unsafe { self.d3d_device.GetImmediateContext()? };
 
-            let write_idx = self.staging_idx;
-            let read_idx = if self.has_copied { 1 - write_idx } else { write_idx };
-
+            let current_write = self.write_idx;
             unsafe {
-                d3d_context.CopyResource(&staging_textures[write_idx], &texture);
+                d3d_context.CopyResource(&staging_textures[current_write], &texture);
             }
-            self.has_copied = true;
-            self.staging_idx = 1 - write_idx;
+            self.write_idx = (self.write_idx + 1) % 3;
+            self.copies_count += 1;
+
+            let read_idx = if self.copies_count >= 2 {
+                (current_write + 1) % 3
+            } else {
+                current_write
+            };
 
             let read_tex = &staging_textures[read_idx];
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
