@@ -419,22 +419,54 @@ impl GameCaptureSession {
             let _ = SetEvent(hook_init);
             let _ = SetEvent(hook_restart);
 
-            // Create D3D11 Device for MacroNest to open the shared texture
-            let mut d3d_device: Option<ID3D11Device> = None;
-            let mut d3d_context: Option<ID3D11DeviceContext> = None;
-            D3D11CreateDevice(
+            use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter};
+            use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
+            use windows::core::Interface;
+
+            let mut devices: Vec<(ID3D11Device, ID3D11DeviceContext)> = Vec::new();
+            if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() {
+                let mut i = 0;
+                while let Ok(adapter) = factory.EnumAdapters1(i) {
+                    i += 1;
+                    if let Ok(adapter0) = adapter.cast::<IDXGIAdapter>() {
+                        let mut d3d_device: Option<ID3D11Device> = None;
+                        let mut d3d_context: Option<ID3D11DeviceContext> = None;
+                        let hr = D3D11CreateDevice(
+                            Some(&adapter0),
+                            D3D_DRIVER_TYPE_UNKNOWN,
+                            HMODULE::default(),
+                            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                            None,
+                            D3D11_SDK_VERSION,
+                            Some(&mut d3d_device),
+                            None,
+                            Some(&mut d3d_context),
+                        );
+                        if hr.is_ok() {
+                            if let (Some(dev), Some(ctx)) = (d3d_device, d3d_context) {
+                                devices.push((dev, ctx));
+                            }
+                        }
+                    }
+                }
+            }
+            let mut def_dev: Option<ID3D11Device> = None;
+            let mut def_ctx: Option<ID3D11DeviceContext> = None;
+            if D3D11CreateDevice(
                 None,
                 D3D_DRIVER_TYPE_HARDWARE,
                 HMODULE::default(),
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                 None,
                 D3D11_SDK_VERSION,
-                Some(&mut d3d_device),
+                Some(&mut def_dev),
                 None,
-                Some(&mut d3d_context),
-            )?;
-            let d3d_device = d3d_device.context("Failed to create D3D11 device")?;
-            let d3d_context = d3d_context.context("Failed to create D3D11 context")?;
+                Some(&mut def_ctx),
+            ).is_ok() {
+                if let (Some(d), Some(c)) = (def_dev, def_ctx) {
+                    devices.push((d, c));
+                }
+            }
 
             // Wait up to 10 seconds for the game hook to produce the first texture
             let start_wait = Instant::now();
@@ -493,10 +525,20 @@ impl GameCaptureSession {
 
             let shtex = shtex_opt.context("Failed to open CaptureHook_Texture shared memory. Make sure the game is actively rendering.")?;
 
-            // Open shared resource texture on MacroNest D3D11 device
-            let mut shared_texture: Option<ID3D11Texture2D> = None;
-            d3d_device.OpenSharedResource(HANDLE(shtex.tex_handle as usize as *mut _), &mut shared_texture)?;
-            let shared_texture = shared_texture.context("Failed to open shared texture")?;
+            // Open shared resource texture across GPU adapters
+            let mut opened: Option<(ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D)> = None;
+            for (dev, ctx) in devices {
+                let mut shared_texture: Option<ID3D11Texture2D> = None;
+                let res = dev.OpenSharedResource(HANDLE(shtex.tex_handle as usize as *mut _), &mut shared_texture);
+                if res.is_ok() {
+                    if let Some(tex) = shared_texture {
+                        opened = Some((dev, ctx, tex));
+                        break;
+                    }
+                }
+            }
+
+            let (d3d_device, d3d_context, shared_texture) = opened.context("Failed to open shared texture across GPU adapters (matching game GPU).")?;
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             shared_texture.GetDesc(&mut desc);
 
