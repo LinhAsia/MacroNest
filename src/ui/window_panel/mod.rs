@@ -545,12 +545,35 @@ impl CrosshairApp {
                 .button(Self::tr_lang(
                     language,
                     "+ Add pin preset",
-                    "+ Add pin preset",
+                    "+ Thêm preset ghim",
                 ))
                 .clicked()
             {
                 self.add_pin_preset();
                 self.persist_window_presets();
+            }
+
+            ui.add_space(16.0);
+            let mut interactive_pin = self.state.interactive_window_pin_enabled;
+            if ui
+                .checkbox(
+                    &mut interactive_pin,
+                    Self::tr_lang(
+                        language,
+                        "Show pin button on window titlebars",
+                        "Hiện nút ghim trên thanh tiêu đề cửa sổ",
+                    ),
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Displays a clickable pin icon in the corner of every window to quickly toggle Always-on-Top",
+                    "Hiển thị biểu tượng ghim có thể nhấp ở góc của mọi cửa sổ để bật/tắt ghim trên cùng nhanh chóng",
+                ))
+                .changed()
+            {
+                self.state.interactive_window_pin_enabled = interactive_pin;
+                self.sync_interactive_pin_state();
+                self.persist();
             }
         });
 

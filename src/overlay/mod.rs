@@ -130,13 +130,13 @@ mod windows_overlay {
                 WindowsAndMessaging::{
                     AppendMenuW, CREATESTRUCTW, CallNextHookEx, ClipCursor, CreateIconIndirect,
                     CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyCursor, DestroyIcon,
-                    DestroyMenu, DestroyWindow, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
+                    DestroyMenu, DestroyWindow, DispatchMessageW, EnumWindows, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
                     GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor, GetClassNameW,
                     GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
                     GetWindowThreadProcessId, HC_ACTION, HCURSOR, HHOOK, HMENU, HTCLIENT,
-                    HTTRANSPARENT, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS, IMAGE_ICON,
-                    IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LWA_ALPHA, LoadCursorW,
+                    HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS, IMAGE_ICON,
+                    IsIconic, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LWA_ALPHA, LoadCursorW,
                     LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
                     PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN,
                     SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -230,6 +230,7 @@ mod windows_overlay {
     const WMAPP_WINDOW_FOCUS_CHANGED: u32 = WM_APP + 3;
     const WMAPP_WINDOW_LOCATION_CHANGED: u32 = WM_APP + 4;
     const WMAPP_SCREEN_DRAW_SYNC: u32 = WM_APP + 5;
+    const WMAPP_INTERACTIVE_PIN_UPDATE: u32 = WM_APP + 6;
     const SCREEN_DRAW_HIGHLIGHT_ALPHA: u8 = 88;
     const SCREEN_DRAW_BLUR_PREVIEW_ALPHA: u8 = 46;
     const SCREEN_DRAW_BLUR_RADIUS: f32 = 6.0;
@@ -1732,6 +1733,18 @@ mod windows_overlay {
     // ESP is refreshed by its worker thread, so it does not have to wait for
     // the general overlay command queue or repaint the geometry canvas.
     static ESP_OVERLAY_HWND: AtomicIsize = AtomicIsize::new(0);
+    static INTERACTIVE_PIN_OVERLAY_HWND: AtomicIsize = AtomicIsize::new(0);
+    static INTERACTIVE_PIN_ENABLED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    #[derive(Clone, Copy, Debug)]
+    struct InteractivePinBadge {
+        hwnd: isize,
+        rect: RECT,
+        is_topmost: bool,
+    }
+    static INTERACTIVE_PIN_BADGES: Lazy<Mutex<Vec<InteractivePinBadge>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     pub(crate) enum OverlayLayer {
@@ -1931,6 +1944,7 @@ mod windows_overlay {
             target_window: String,
             opacity_percent: u8,
         },
+        SetInteractivePinEnabled(bool),
         SetProtractorEnabled(bool),
         UpdateProtractorConfig {
             scale: f32,
@@ -2539,6 +2553,7 @@ mod windows_overlay {
             match_duplicate_window_titles: bool,
             frame: Option<crate::window_list::WindowPreviewFrame>,
         },
+        SetInteractivePinEnabled(bool),
         SetProtractorEnabled(bool),
         UpdateProtractorConfig {
             scale: f32,
@@ -3053,6 +3068,8 @@ mod windows_overlay {
         window_opacity_target_window: String,
         window_opacity_percent: u8,
         window_opacity_restore: Option<WindowOpacityRestore>,
+        interactive_pin_hwnd: HWND,
+        interactive_pin_enabled: bool,
         protractor_hwnd: HWND,
         active_focus_highlight_hwnd: Option<HWND>,
         cached_search_overlay_regions: Vec<VisionRegion>,
@@ -3823,6 +3840,21 @@ mod windows_overlay {
                 None,
             )?;
             PROTRACTOR_HWND.store(protractor_hwnd.0 as isize, Ordering::Relaxed);
+            let interactive_pin_hwnd = CreateWindowExW(
+                WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+                w!("CrosshairOverlay"),
+                w!("CrosshairInteractivePin"),
+                WS_POPUP,
+                0,
+                0,
+                32,
+                32,
+                None,
+                None,
+                Some(instance),
+                None,
+            )?;
+            INTERACTIVE_PIN_OVERLAY_HWND.store(interactive_pin_hwnd.0 as isize, Ordering::Relaxed);
             let tray_menu = CreatePopupMenu()?;
             let _ = AppendMenuW(tray_menu, MF_STRING, MENU_SHOW, w!("Open settings"));
             let _ = AppendMenuW(tray_menu, MF_SEPARATOR, 0, PCWSTR::null());
@@ -3911,6 +3943,8 @@ mod windows_overlay {
                 window_opacity_target_window: String::new(),
                 window_opacity_percent: 75,
                 window_opacity_restore: None,
+                interactive_pin_hwnd,
+                interactive_pin_enabled: false,
                 protractor_hwnd,
                 active_focus_highlight_hwnd: None,
                 cached_search_overlay_regions: Vec::new(),
@@ -3971,6 +4005,74 @@ mod windows_overlay {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        let interactive_pin_hwnd = INTERACTIVE_PIN_OVERLAY_HWND.load(Ordering::Relaxed);
+        if interactive_pin_hwnd != 0 && hwnd.0 as isize == interactive_pin_hwnd {
+            match msg {
+                WM_NCHITTEST => {
+                    let sx = (lparam.0 & 0xFFFF) as i16 as i32;
+                    let sy = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+                    let badges = INTERACTIVE_PIN_BADGES.lock();
+                    for b in badges.iter() {
+                        if sx >= b.rect.left - 2
+                            && sx <= b.rect.right + 2
+                            && sy >= b.rect.top - 2
+                            && sy <= b.rect.bottom + 2
+                        {
+                            return LRESULT(HTCLIENT as isize);
+                        }
+                    }
+                    return LRESULT(HTTRANSPARENT as isize);
+                }
+                WM_LBUTTONDOWN => {
+                    let sx = (lparam.0 & 0xFFFF) as i16 as i32;
+                    let sy = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
+                    let clicked = {
+                        let badges = INTERACTIVE_PIN_BADGES.lock();
+                        badges
+                            .iter()
+                            .find(|b| {
+                                sx >= b.rect.left - 2
+                                    && sx <= b.rect.right + 2
+                                    && sy >= b.rect.top - 2
+                                    && sy <= b.rect.bottom + 2
+                            })
+                            .map(|b| (b.hwnd, b.is_topmost))
+                    };
+                    if let Some((target_raw, is_topmost)) = clicked {
+                        let target_hwnd = HWND(target_raw as *mut c_void);
+                        if windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(target_hwnd)).as_bool() {
+                            let new_topmost = !is_topmost;
+                            let _ = SetWindowPos(
+                                target_hwnd,
+                                Some(if new_topmost {
+                                    HWND_TOPMOST
+                                } else {
+                                    HWND_NOTOPMOST
+                                }),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                            );
+                            let controller =
+                                HWND(CONTROLLER_HWND.load(Ordering::Relaxed) as *mut c_void);
+                            if !controller.0.is_null() {
+                                if let Some(runtime) = runtime_mut(controller) {
+                                    let _ = paint_interactive_pin_overlay(runtime);
+                                }
+                            }
+                        }
+                    }
+                    return LRESULT(0);
+                }
+                WM_MOUSEACTIVATE => {
+                    return LRESULT(MA_NOACTIVATE as isize);
+                }
+                _ => return DefWindowProcW(hwnd, msg, wparam, lparam),
+            }
+        }
+
         let protractor_hwnd = PROTRACTOR_HWND.load(Ordering::Relaxed);
         if protractor_hwnd != 0 && hwnd.0 as isize == protractor_hwnd {
             match msg {
@@ -4461,6 +4563,10 @@ mod windows_overlay {
                         let _ = paint_focus_highlight_overlay(runtime, target_hwnd);
                     }
 
+                    if runtime.interactive_pin_enabled {
+                        let _ = paint_interactive_pin_overlay(runtime);
+                    }
+
                     refresh_overlay_timer(hwnd, runtime);
                 }
 
@@ -4477,6 +4583,9 @@ mod windows_overlay {
                     let ui_foreground = is_app_ui_currently_foreground();
                     UI_WINDOW_FOREGROUND.store(ui_foreground, Ordering::Relaxed);
                     apply_ui_foreground_state(runtime, ui_foreground);
+                    if runtime.interactive_pin_enabled {
+                        let _ = paint_interactive_pin_overlay(runtime);
+                    }
                     refresh_overlay_timer(hwnd, runtime);
                 }
                 handle_window_focus_event(hwnd, foreground);
@@ -4509,6 +4618,19 @@ mod windows_overlay {
 
                     if pin_source_hwnd != 0 && target_hwnd.0 as isize == pin_source_hwnd {
                         let _ = refresh_pin_overlay(runtime);
+                    }
+
+                    if runtime.interactive_pin_enabled {
+                        let _ = paint_interactive_pin_overlay(runtime);
+                    }
+                }
+                LRESULT(0)
+            }
+
+            WMAPP_INTERACTIVE_PIN_UPDATE => {
+                if let Some(runtime) = runtime_mut(hwnd) {
+                    if runtime.interactive_pin_enabled {
+                        let _ = paint_interactive_pin_overlay(runtime);
                     }
                 }
                 LRESULT(0)
@@ -10777,6 +10899,20 @@ mod windows_overlay {
                         );
                     }
                     let _ = refresh_screen_draw_overlay(runtime);
+                }
+
+                OverlayCommand::SetInteractivePinEnabled(enabled) => {
+                    runtime.interactive_pin_enabled = enabled;
+                    INTERACTIVE_PIN_ENABLED.store(enabled, Ordering::Relaxed);
+                    sync_window_location_hook_state(runtime);
+                    refresh_overlay_timer(hwnd, runtime);
+                    if enabled {
+                        let _ = ShowWindow(runtime.interactive_pin_hwnd, SW_SHOWNA);
+                        let _ = paint_interactive_pin_overlay(runtime);
+                    } else {
+                        let _ = ShowWindow(runtime.interactive_pin_hwnd, SW_HIDE);
+                        INTERACTIVE_PIN_BADGES.lock().clear();
+                    }
                 }
 
                 OverlayCommand::SetProtractorEnabled(enabled) => {
@@ -19279,6 +19415,10 @@ mod windows_overlay {
     }
 
     fn desired_timer_interval_ms(runtime: &Runtime) -> u32 {
+        if runtime.interactive_pin_enabled {
+            return 30;
+        }
+
         if runtime.native_focus_highlight_enabled
             && focus_highlight_decoration_is_animated(runtime.focus_highlight_decoration)
             && runtime.active_focus_highlight_hwnd.is_some()
@@ -20551,6 +20691,273 @@ mod windows_overlay {
         let _ = DeleteObject(HGDIOBJ(bitmap.0));
         let _ = DeleteDC(mem_dc);
         let _ = ReleaseDC(None, screen_dc);
+        Ok(())
+    }
+
+    unsafe fn paint_interactive_pin_overlay(runtime: &Runtime) -> Result<()> {
+        if !runtime.interactive_pin_enabled {
+            let _ = ShowWindow(runtime.interactive_pin_hwnd, SW_HIDE);
+            INTERACTIVE_PIN_BADGES.lock().clear();
+            return Ok(());
+        }
+
+        let (screen_left, screen_top, screen_width, screen_height) =
+            crate::window_list::virtual_screen_bounds();
+        if screen_width <= 0 || screen_height <= 0 {
+            return Ok(());
+        }
+
+        let width = screen_width as u32;
+        let height = screen_height as u32;
+
+        struct PinTargetWindow {
+            hwnd: HWND,
+            rect: RECT,
+            is_topmost: bool,
+        }
+        let mut targets: Vec<PinTargetWindow> = Vec::new();
+
+        unsafe extern "system" fn enum_pin_proc(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+            if !windows::Win32::UI::WindowsAndMessaging::IsWindowVisible(hwnd).as_bool()
+                || IsIconic(hwnd).as_bool()
+            {
+                return true.into();
+            }
+            if window_belongs_to_current_process(hwnd)
+                || is_internal_app_window(hwnd)
+                || looks_like_main_ui_window(hwnd)
+            {
+                return true.into();
+            }
+
+            let mut class_name = [0u16; 64];
+            let len = GetClassNameW(hwnd, &mut class_name);
+            if len > 0 {
+                let name = String::from_utf16_lossy(&class_name[..len as usize]);
+                if name == "Shell_TrayWnd"
+                    || name == "Shell_SecondaryTrayWnd"
+                    || name == "Progman"
+                    || name == "WorkerW"
+                {
+                    return true.into();
+                }
+            }
+
+            let Some(rect) = focus_highlight_rect(hwnd) else {
+                return true.into();
+            };
+
+            let w = rect.right - rect.left;
+            let h = rect.bottom - rect.top;
+            if w < 120 || h < 80 {
+                return true.into();
+            }
+
+            let check_pt = POINT {
+                x: rect.left + 16,
+                y: rect.top + 16,
+            };
+            let top_hwnd = WindowFromPoint(check_pt);
+            if !top_hwnd.0.is_null() {
+                let root = GetAncestor(top_hwnd, GA_ROOT);
+                if root != hwnd && !window_belongs_to_current_process(root) {
+                    return true.into();
+                }
+            }
+
+            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            let is_topmost = (ex_style & WS_EX_TOPMOST.0) != 0;
+
+            let list = &mut *(lparam.0 as *mut Vec<PinTargetWindow>);
+            list.push(PinTargetWindow {
+                hwnd,
+                rect,
+                is_topmost,
+            });
+            true.into()
+        }
+
+        let _ = windows::Win32::UI::WindowsAndMessaging::EnumWindows(
+            Some(enum_pin_proc),
+            LPARAM(&mut targets as *mut Vec<PinTargetWindow> as isize),
+        );
+
+        let mut pixmap = match tiny_skia::Pixmap::new(width, height) {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        let badge_size: f32 = 24.0;
+        let mut new_badges = Vec::new();
+
+        for target in targets {
+            let badge_screen_x = target.rect.left + 8;
+            let badge_screen_y = target.rect.top + 6;
+
+            let bx = (badge_screen_x - screen_left) as f32;
+            let by = (badge_screen_y - screen_top) as f32;
+
+            if bx < 0.0
+                || by < 0.0
+                || bx + badge_size > width as f32
+                || by + badge_size > height as f32
+            {
+                continue;
+            }
+
+            new_badges.push(InteractivePinBadge {
+                hwnd: target.hwnd.0 as isize,
+                rect: RECT {
+                    left: badge_screen_x,
+                    top: badge_screen_y,
+                    right: badge_screen_x + badge_size as i32,
+                    bottom: badge_screen_y + badge_size as i32,
+                },
+                is_topmost: target.is_topmost,
+            });
+
+            // Draw badge background
+            let (bg_color, border_color, icon_color) = if target.is_topmost {
+                ([0, 195, 115, 240], [255, 255, 255, 220], [255, 255, 255, 255])
+            } else {
+                ([20, 26, 38, 205], [130, 155, 185, 140], [210, 225, 245, 230])
+            };
+
+            draw_skia_rect_fill(&mut pixmap, bx, by, badge_size, badge_size, bg_color);
+            draw_skia_rect_outline(&mut pixmap, bx, by, badge_size, badge_size, border_color, 1.0);
+
+            // Draw pin icon inside badge
+            let cx = bx + badge_size * 0.5;
+            let cy = by + badge_size * 0.5;
+
+            if target.is_topmost {
+                // Vertical pinned pushpin
+                draw_skia_circle_fill(&mut pixmap, cx, cy - 4.5, 3.2, icon_color);
+                draw_skia_line(&mut pixmap, cx - 4.5, cy, cx + 4.5, cy, icon_color, 2.0);
+                draw_skia_line(&mut pixmap, cx, cy, cx, cy + 5.5, icon_color, 1.8);
+            } else {
+                // Angled unpinned pushpin (tilted ~45 degrees)
+                draw_skia_circle_fill(&mut pixmap, cx - 3.2, cy - 3.2, 2.8, icon_color);
+                draw_skia_line(
+                    &mut pixmap,
+                    cx - 4.8,
+                    cy + 0.8,
+                    cx + 0.8,
+                    cy - 4.8,
+                    icon_color,
+                    1.8,
+                );
+                draw_skia_line(
+                    &mut pixmap,
+                    cx - 0.8,
+                    cy - 0.8,
+                    cx + 4.2,
+                    cy + 4.2,
+                    icon_color,
+                    1.5,
+                );
+            }
+        }
+
+        *INTERACTIVE_PIN_BADGES.lock() = new_badges;
+
+        let screen_dc = GetDC(None);
+        if screen_dc.0.is_null() {
+            return Ok(());
+        }
+        let mem_dc = CreateCompatibleDC(Some(screen_dc));
+        if mem_dc.0.is_null() {
+            let _ = ReleaseDC(None, screen_dc);
+            return Ok(());
+        }
+
+        let mut bitmap_info = BITMAPINFO::default();
+        bitmap_info.bmiHeader = BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width as i32,
+            biHeight: -(height as i32),
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+        let mut bits: *mut c_void = null_mut();
+        let bitmap = match CreateDIBSection(
+            Some(screen_dc),
+            &bitmap_info,
+            DIB_RGB_COLORS,
+            &mut bits,
+            None,
+            0,
+        ) {
+            Ok(b) => b,
+            Err(_) => {
+                let _ = DeleteDC(mem_dc);
+                let _ = ReleaseDC(None, screen_dc);
+                return Ok(());
+            }
+        };
+
+        let old_bitmap = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
+
+        let pixmap_data = pixmap.data();
+        let bits_ptr = bits as *mut u8;
+        let total_pixels = width as usize * height as usize;
+        for i in 0..total_pixels {
+            let offset = i * 4;
+            let r = pixmap_data[offset];
+            let g = pixmap_data[offset + 1];
+            let b = pixmap_data[offset + 2];
+            let a = pixmap_data[offset + 3];
+            *bits_ptr.add(offset) = b;
+            *bits_ptr.add(offset + 1) = g;
+            *bits_ptr.add(offset + 2) = r;
+            *bits_ptr.add(offset + 3) = a;
+        }
+
+        let destination = POINT {
+            x: screen_left,
+            y: screen_top,
+        };
+        let source = POINT { x: 0, y: 0 };
+        let sz = SIZE {
+            cx: width as i32,
+            cy: height as i32,
+        };
+        let blend = BLENDFUNCTION {
+            BlendOp: AC_SRC_OVER as u8,
+            BlendFlags: 0,
+            SourceConstantAlpha: 255,
+            AlphaFormat: AC_SRC_ALPHA as u8,
+        };
+
+        let _ = SetWindowPos(
+            runtime.interactive_pin_hwnd,
+            Some(HWND_TOPMOST),
+            screen_left,
+            screen_top,
+            width as i32,
+            height as i32,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+
+        let _ = UpdateLayeredWindow(
+            runtime.interactive_pin_hwnd,
+            Some(screen_dc),
+            Some(&destination),
+            Some(&sz),
+            Some(mem_dc),
+            Some(&source),
+            COLORREF(0),
+            Some(&blend),
+            ULW_ALPHA,
+        );
+
+        let _ = SelectObject(mem_dc, old_bitmap);
+        let _ = DeleteObject(HGDIOBJ(bitmap.0));
+        let _ = DeleteDC(mem_dc);
+        let _ = ReleaseDC(None, screen_dc);
+
         Ok(())
     }
 
@@ -22006,7 +22413,10 @@ mod windows_overlay {
         let active_highlight = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
         let active_focus_mode = ACTIVE_FOCUS_MODE_HWND.load(Ordering::Relaxed);
         let active_pin = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
-        let need_hook = active_highlight != 0 || active_focus_mode != 0 || active_pin != 0;
+        let need_hook = active_highlight != 0
+            || active_focus_mode != 0
+            || active_pin != 0
+            || runtime.interactive_pin_enabled;
         let _ = set_window_location_event_hook_enabled(runtime, need_hook);
     }
 
@@ -22053,8 +22463,10 @@ mod windows_overlay {
         let active_hwnd = ACTIVE_HIGHLIGHT_HWND.load(Ordering::Relaxed);
         let focus_mode_hwnd = ACTIVE_FOCUS_MODE_HWND.load(Ordering::Relaxed);
         let pin_source_hwnd = ACTIVE_PIN_SOURCE_HWND.load(Ordering::Relaxed);
+        let interactive_pin = INTERACTIVE_PIN_ENABLED.load(Ordering::Relaxed);
 
-        let is_target = (active_hwnd != 0 && hwnd.0 as isize == active_hwnd)
+        let is_target = interactive_pin
+            || (active_hwnd != 0 && hwnd.0 as isize == active_hwnd)
             || (focus_mode_hwnd != 0 && hwnd.0 as isize == focus_mode_hwnd)
             || (pin_source_hwnd != 0 && hwnd.0 as isize == pin_source_hwnd);
 

@@ -46,6 +46,7 @@ impl CrosshairApp {
         self.sync_focus_highlight_config();
         self.sync_focus_mode_config();
         self.sync_window_opacity_config();
+        self.sync_interactive_pin_state();
         self.sync_protractor_state();
         self.sync_quick_key_display_config();
         self.sync_quick_screen_draw_config();
@@ -275,6 +276,16 @@ impl CrosshairApp {
                 opacity_percent: config.3,
             },
         );
+    }
+
+    pub(crate) fn sync_interactive_pin_state(&mut self) {
+        let enabled = self.state.interactive_window_pin_enabled;
+        if self.last_synced_interactive_pin_enabled != Some(enabled) {
+            self.last_synced_interactive_pin_enabled = Some(enabled);
+            let _ = self
+                .overlay_tx
+                .send(OverlayCommand::SetInteractivePinEnabled(enabled));
+        }
     }
 
     pub(crate) fn sync_protractor_state(&mut self) {

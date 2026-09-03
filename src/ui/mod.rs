@@ -711,6 +711,7 @@ pub struct CrosshairApp {
     screen_draw_color_picker_open: bool,
     screen_draw_color_pick_pending_at: Option<Instant>,
     last_synced_active_macro_folder_scope: Option<crate::overlay::MacroFolderScope>,
+    last_synced_interactive_pin_enabled: Option<bool>,
     last_synced_protractor_enabled: Option<bool>,
     last_synced_protractor_config: Option<(f32, f32, f32, i32, i32, f32, bool, UiLanguage)>,
     sound_preset_clip_duration_ms: HashMap<u32, Option<u64>>,
@@ -1087,6 +1088,7 @@ impl CrosshairApp {
             screen_draw_color_picker_open: false,
             screen_draw_color_pick_pending_at: None,
             last_synced_active_macro_folder_scope: None,
+            last_synced_interactive_pin_enabled: None,
             last_synced_protractor_enabled: None,
             last_synced_protractor_config: None,
             sound_preset_clip_duration_ms: HashMap::new(),
@@ -5419,6 +5421,34 @@ impl CrosshairApp {
                                     ui.ctx().data_mut(|data| {
                                         data.insert_temp(selector_popup_id, selector_popup_open);
                                     });
+
+                                    ui.add_space(4.0);
+                                    ui.separator();
+                                    ui.add_space(4.0);
+                                    let mut interactive_pin =
+                                        self.state.interactive_window_pin_enabled;
+                                    if ui
+                                        .checkbox(
+                                            &mut interactive_pin,
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Pin button on windows",
+                                                "Nút ghim trên cửa sổ",
+                                            ),
+                                        )
+                                        .on_hover_text(Self::tr_lang(
+                                            self.state.ui_language,
+                                            "Show a clickable pin icon in the corner of all windows",
+                                            "Hiện nút ghim có thể nhấp ở góc của các cửa sổ",
+                                        ))
+                                        .changed()
+                                    {
+                                        self.state.interactive_window_pin_enabled =
+                                            interactive_pin;
+                                        self.sync_interactive_pin_state();
+                                        self.persist();
+                                    }
+
                                     selector_popup_open
                                 })
                                 .inner
@@ -16955,6 +16985,13 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::PersistFailed(error) => {
                     self.status = error;
+                    ctx.request_repaint();
+                }
+
+                UiCommand::SetInteractivePinEnabled(enabled) => {
+                    self.state.interactive_window_pin_enabled = enabled;
+                    self.sync_interactive_pin_state();
+                    self.persist();
                     ctx.request_repaint();
                 }
 

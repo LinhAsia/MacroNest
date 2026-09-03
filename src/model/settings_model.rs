@@ -621,6 +621,8 @@ pub struct AppState {
     #[serde(default = "default_window_opacity_percent")]
     pub window_opacity_percent: u8,
     #[serde(default)]
+    pub interactive_window_pin_enabled: bool,
+    #[serde(default)]
     pub protractor_enabled: bool,
     #[serde(default = "default_protractor_scale")]
     pub protractor_scale: f32,
@@ -1036,6 +1038,7 @@ impl Default for AppState {
             window_opacity_follow_focused_window: true,
             window_opacity_target_window: String::new(),
             window_opacity_percent: default_window_opacity_percent(),
+            interactive_window_pin_enabled: false,
             protractor_enabled: false,
             protractor_scale: 1.0,
             protractor_needle1_angle: 0.0,
