@@ -27467,6 +27467,8 @@ mod windows_overlay {
             let mut last_sample_at = Instant::now();
             let mut last_had_extra = false;
             let mut last_shapes_empty = false;
+            let mut last_painted_shapes: Vec<GeometryRenderShape> = Vec::new();
+            let mut paint_cooldown_frames: u32 = 0;
             loop {
                 if ESP_WORKER_GENERATION.load(Ordering::Acquire) != generation {
                     break;
@@ -27549,9 +27551,18 @@ mod windows_overlay {
                 let has_extra = !extra_shapes.is_empty();
                 shapes.extend(extra_shapes);
 
-                // ponytail: present only while coordinates are moving, extra shapes are active,
-                // or a new sample changed visibility.
-                if !sample_received && !animation_changed && !has_extra && !last_had_extra {
+                let shapes_changed = shapes != last_painted_shapes;
+                if shapes_changed {
+                    last_painted_shapes = shapes.clone();
+                    paint_cooldown_frames = 2;
+                }
+
+                // ponytail: present only while coordinates are moving, animations are updating,
+                // or shapes changed (needs 2 frames to paint both swap chain buffers).
+                if !sample_received && !animation_changed && paint_cooldown_frames == 0 && !has_extra && !last_had_extra {
+                    continue;
+                }
+                if !sample_received && !animation_changed && paint_cooldown_frames == 0 && has_extra && last_had_extra {
                     continue;
                 }
                 last_had_extra = has_extra;
@@ -27561,6 +27572,7 @@ mod windows_overlay {
                         continue;
                     }
                     last_shapes_empty = true;
+                    paint_cooldown_frames = 0;
                     let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
                     if hwnd_value != 0 {
                         let hwnd = HWND(hwnd_value as _);
@@ -27589,6 +27601,9 @@ mod windows_overlay {
                 }
                 if let Some(gpu) = renderer.as_mut() {
                     if gpu.paint(&shapes).is_ok() {
+                        if paint_cooldown_frames > 0 {
+                            paint_cooldown_frames -= 1;
+                        }
                         if !visible {
                             unsafe {
                                 let _ = ShowWindow(hwnd, SW_SHOWNA);

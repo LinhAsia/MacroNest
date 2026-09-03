@@ -43,7 +43,7 @@ use windows::{
                 },
                 DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
                 DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice,
-                IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1,
+                IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1, IDXGISwapChain3,
             },
         },
         UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos},
@@ -59,7 +59,7 @@ pub(super) struct EspGpuRenderer {
     _d3d: ID3D11Device,
     swap_chain: IDXGISwapChain1,
     d2d: ID2D1DeviceContext,
-    _target_bitmap: ID2D1Bitmap1,
+    target_bitmaps: Vec<ID2D1Bitmap1>,
     round_stroke_style: ID2D1StrokeStyle,
     dwrite: IDWriteFactory,
     _composition: IDCompositionDevice,
@@ -123,7 +123,6 @@ impl EspGpuRenderer {
 
             let d2d_device = D2D1CreateDevice(&dxgi_device, None)?;
             let d2d = d2d_device.CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?;
-            let surface: IDXGISurface = swap_chain.GetBuffer(0)?;
             let bitmap_properties = D2D1_BITMAP_PROPERTIES1 {
                 pixelFormat: D2D1_PIXEL_FORMAT {
                     format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -134,9 +133,15 @@ impl EspGpuRenderer {
                 bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
                 colorContext: Default::default(),
             };
-            let target_bitmap =
-                d2d.CreateBitmapFromDxgiSurface(&surface, Some(&bitmap_properties))?;
-            d2d.SetTarget(&target_bitmap);
+            let mut target_bitmaps = Vec::with_capacity(desc.BufferCount as usize);
+            for i in 0..desc.BufferCount {
+                let surface: IDXGISurface = swap_chain.GetBuffer(i)?;
+                let target = d2d.CreateBitmapFromDxgiSurface(&surface, Some(&bitmap_properties))?;
+                target_bitmaps.push(target);
+            }
+            if let Some(first) = target_bitmaps.first() {
+                d2d.SetTarget(first);
+            }
 
             let d2d_factory: ID2D1Factory = d2d.GetFactory()?;
             let stroke_props = D2D1_STROKE_STYLE_PROPERTIES {
@@ -157,7 +162,7 @@ impl EspGpuRenderer {
                 _d3d: d3d,
                 swap_chain,
                 d2d,
-                _target_bitmap: target_bitmap,
+                target_bitmaps,
                 round_stroke_style,
                 dwrite: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?,
                 _composition: composition,
@@ -176,6 +181,15 @@ impl EspGpuRenderer {
             let (left, top, width, height) = super::window_list::virtual_screen_bounds();
             if (left, top) != self.origin || (width as u32, height as u32) != self.size {
                 bail!("display layout changed");
+            }
+
+            let buffer_idx = if let Ok(sc3) = self.swap_chain.cast::<IDXGISwapChain3>() {
+                sc3.GetCurrentBackBufferIndex() as usize
+            } else {
+                0
+            };
+            if let Some(target) = self.target_bitmaps.get(buffer_idx) {
+                self.d2d.SetTarget(target);
             }
 
             self.d2d.BeginDraw();

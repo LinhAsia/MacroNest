@@ -131,6 +131,76 @@ struct CaptureState {
     // Result
     result: NativeCaptureResult,
     created_at: std::time::Instant,
+
+    // GDI caching to avoid per-frame allocations & full screen blits
+    bg_dc: Option<HDC>,
+    bg_bmp: Option<windows::Win32::Graphics::Gdi::HBITMAP>,
+    paint_dc: Option<HDC>,
+    paint_bmp: Option<windows::Win32::Graphics::Gdi::HBITMAP>,
+    last_panel_rect: Option<RECT>,
+}
+
+impl Drop for CaptureState {
+    fn drop(&mut self) {
+        unsafe {
+            use windows::Win32::Graphics::Gdi::{DeleteDC, DeleteObject, HGDIOBJ};
+            if let Some(dc) = self.bg_dc.take() {
+                let _ = DeleteDC(dc);
+            }
+            if let Some(bmp) = self.bg_bmp.take() {
+                let _ = DeleteObject(HGDIOBJ(bmp.0));
+            }
+            if let Some(dc) = self.paint_dc.take() {
+                let _ = DeleteDC(dc);
+            }
+            if let Some(bmp) = self.paint_bmp.take() {
+                let _ = DeleteObject(HGDIOBJ(bmp.0));
+            }
+        }
+    }
+}
+
+fn point_click_panel_rect(width: i32, height: i32, curr: (i32, i32)) -> RECT {
+    let panel_w = 184i32;
+    let panel_h = 246i32;
+    let margin = 24i32;
+
+    let pointer_x = curr.0;
+    let pointer_y = curr.1;
+    let safe_r = 70i32;
+    let safe_left = pointer_x - safe_r;
+    let safe_right = pointer_x + safe_r;
+    let safe_top = pointer_y - safe_r;
+    let safe_bottom = pointer_y + safe_r;
+
+    let candidates = [
+        (width - panel_w - margin, margin),
+        (margin, margin),
+        (width - panel_w - margin, height - panel_h - margin),
+        (margin, height - panel_h - margin),
+    ];
+
+    let mut panel_x = candidates[0].0;
+    let mut panel_y = candidates[0].1;
+
+    for &(cx, cy) in &candidates {
+        let intersects = !(cx + panel_w < safe_left
+            || cx > safe_right
+            || cy + panel_h < safe_top
+            || cy > safe_bottom);
+        if !intersects {
+            panel_x = cx;
+            panel_y = cy;
+            break;
+        }
+    }
+
+    RECT {
+        left: panel_x - 2,
+        top: panel_y - 2,
+        right: panel_x + panel_w + 4,
+        bottom: panel_y + panel_h + 4,
+    }
 }
 
 impl CaptureState {
@@ -209,6 +279,11 @@ impl CaptureState {
             adjust_rect_origin: RECT::default(),
             result: NativeCaptureResult::Cancelled,
             created_at: std::time::Instant::now(),
+            bg_dc: None,
+            bg_bmp: None,
+            paint_dc: None,
+            paint_bmp: None,
+            last_panel_rect: None,
         }
     }
 }
@@ -279,7 +354,7 @@ pub fn run_capture_overlay(
             DispatchMessageW(&msg);
         }
 
-        state.result
+        state.result.clone()
     }
 }
 
@@ -402,8 +477,12 @@ unsafe extern "system" fn capture_wnd_proc(
             if let Some(state) = get_state(hwnd)
                 && matches!(state.mode, NativeCaptureMode::PointClick { .. })
             {
-                SetCursor(None);
-                return LRESULT(1);
+                unsafe {
+                    if let Ok(cursor) = LoadCursorW(None, IDC_CROSS) {
+                        SetCursor(Some(cursor));
+                        return LRESULT(1);
+                    }
+                }
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
@@ -466,6 +545,22 @@ unsafe extern "system" fn capture_wnd_proc(
                         }
                         unsafe {
                             InvalidateRect(hwnd, None, false);
+                        }
+                    } else if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
+                        state.current_point = Some((rx, ry));
+                        let new_panel_rect = point_click_panel_rect(state.width, state.height, (rx, ry));
+                        unsafe {
+                            if let Some(old_rect) = state.last_panel_rect {
+                                if old_rect != new_panel_rect {
+                                    InvalidateRect(hwnd, Some(&old_rect), false);
+                                    InvalidateRect(hwnd, Some(&new_panel_rect), false);
+                                } else {
+                                    InvalidateRect(hwnd, Some(&new_panel_rect), false);
+                                }
+                            } else {
+                                InvalidateRect(hwnd, Some(&new_panel_rect), false);
+                            }
+                            state.last_panel_rect = Some(new_panel_rect);
                         }
                     } else {
                         state.current_point =
@@ -1192,31 +1287,99 @@ unsafe fn draw_capture_to_dc(
         return Ok(());
     }
 
-    // Use memory DC double-buffering to eliminate all flicker during selection & painting
-    let mem_dc = CreateCompatibleDC(Some(hdc));
-    let mem_bmp = CreateCompatibleBitmap(hdc, state.width, state.height);
-    let old_bmp = SelectObject(mem_dc, HGDIOBJ(mem_bmp.0));
+    // Use cached memory DC double-buffering to eliminate allocations & lag during painting
+    if state.paint_dc.is_none() {
+        let mem_dc = CreateCompatibleDC(Some(hdc));
+        let mem_bmp = CreateCompatibleBitmap(hdc, state.width, state.height);
+        SelectObject(mem_dc, HGDIOBJ(mem_bmp.0));
+        state.paint_dc = Some(mem_dc);
+        state.paint_bmp = Some(mem_bmp);
+    }
+    let mem_dc = state.paint_dc.unwrap();
 
     let w = state.width as usize;
     let h = state.height as usize;
+    let is_point_click = matches!(state.mode, NativeCaptureMode::PointClick { .. });
 
-    if matches!(
-        state.mode,
-        NativeCaptureMode::RegionSelect { .. } | NativeCaptureMode::PointClick { .. }
-    ) {
-        let is_dimmed = match state.mode {
-            NativeCaptureMode::PointClick { dim_background, .. } => dim_background,
-            _ => true,
-        };
-        if is_dimmed {
-            state.render_bgra.copy_from_slice(&state.dimmed_bgra);
-        } else {
-            state.render_bgra.copy_from_slice(&state.original_bgra);
+    if is_point_click {
+        // Cache background DC with pre-rendered dimmed image in VRAM
+        if state.bg_dc.is_none() {
+            let bg_dc = CreateCompatibleDC(Some(hdc));
+            let bg_bmp = CreateCompatibleBitmap(hdc, state.width, state.height);
+            SelectObject(bg_dc, HGDIOBJ(bg_bmp.0));
+
+            let is_dimmed = match state.mode {
+                NativeCaptureMode::PointClick { dim_background, .. } => dim_background,
+                _ => true,
+            };
+            let src = if is_dimmed {
+                &state.dimmed_bgra
+            } else {
+                &state.original_bgra
+            };
+
+            let mut bmi = BITMAPINFO::default();
+            bmi.bmiHeader = BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: state.width,
+                biHeight: -state.height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            };
+
+            let _ = StretchDIBits(
+                bg_dc,
+                0,
+                0,
+                state.width,
+                state.height,
+                0,
+                0,
+                state.width,
+                state.height,
+                Some(src.as_ptr() as *const std::ffi::c_void),
+                &bmi,
+                DIB_RGB_COLORS,
+                SRCCOPY,
+            );
+
+            state.bg_dc = Some(bg_dc);
+            state.bg_bmp = Some(bg_bmp);
         }
 
-        if let (Some(start), Some(curr)) = (state.start_point, state.current_point)
-            && matches!(state.mode, NativeCaptureMode::RegionSelect { .. })
-        {
+        let bg_dc = state.bg_dc.unwrap();
+        let (dirty_x, dirty_y, dirty_w, dirty_h) = if let Some(r) = _dirty {
+            let l = r.left.clamp(0, state.width);
+            let t = r.top.clamp(0, state.height);
+            let rw = (r.right - l).clamp(0, state.width - l);
+            let rh = (r.bottom - t).clamp(0, state.height - t);
+            (l, t, rw, rh)
+        } else {
+            (0, 0, state.width, state.height)
+        };
+
+        if dirty_w > 0 && dirty_h > 0 {
+            let _ = BitBlt(
+                mem_dc,
+                dirty_x,
+                dirty_y,
+                dirty_w,
+                dirty_h,
+                Some(bg_dc),
+                dirty_x,
+                dirty_y,
+                SRCCOPY,
+            );
+        }
+    } else if matches!(
+        state.mode,
+        NativeCaptureMode::RegionSelect { .. }
+    ) {
+        state.render_bgra.copy_from_slice(&state.dimmed_bgra);
+
+        if let (Some(start), Some(curr)) = (state.start_point, state.current_point) {
             let x = start.0.min(curr.0).clamp(0, state.width) as usize;
             let y = start.1.min(curr.1).clamp(0, state.height) as usize;
             let rw = (start.0 - curr.0).abs() as usize;
@@ -1264,21 +1427,6 @@ unsafe fn draw_capture_to_dc(
             DIB_RGB_COLORS,
             SRCCOPY,
         );
-
-        if matches!(state.mode, NativeCaptureMode::PointClick { .. })
-            && let Some(curr) = state.current_point
-        {
-            let cx = curr.0;
-            let cy = curr.1;
-            let cross_pen = CreatePen(PS_SOLID, 2, rgb(0, 160, 255));
-            let old_pen = SelectObject(mem_dc, HGDIOBJ(cross_pen.0));
-            let _ = MoveToEx(mem_dc, cx - 14, cy, None);
-            let _ = LineTo(mem_dc, cx + 15, cy);
-            let _ = MoveToEx(mem_dc, cx, cy - 14, None);
-            let _ = LineTo(mem_dc, cx, cy + 15);
-            let _ = SelectObject(mem_dc, old_pen);
-            let _ = DeleteObject(HGDIOBJ(cross_pen.0));
-        }
 
         if let (Some(start), Some(curr)) = (state.start_point, state.current_point) {
             let x = start.0.min(curr.0);
@@ -2133,21 +2281,42 @@ unsafe fn draw_capture_to_dc(
     }
 
     // Finally: atomic BitBlt of completed frame from mem_dc to window hdc
-    let _ = BitBlt(
-        hdc,
-        0,
-        0,
-        state.width,
-        state.height,
-        Some(mem_dc),
-        0,
-        0,
-        SRCCOPY,
-    );
-
-    let _ = SelectObject(mem_dc, old_bmp);
-    let _ = DeleteObject(HGDIOBJ(mem_bmp.0));
-    let _ = DeleteDC(mem_dc);
+    if is_point_click {
+        let (dirty_x, dirty_y, dirty_w, dirty_h) = if let Some(r) = _dirty {
+            let l = r.left.clamp(0, state.width);
+            let t = r.top.clamp(0, state.height);
+            let rw = (r.right - l).clamp(0, state.width - l);
+            let rh = (r.bottom - t).clamp(0, state.height - t);
+            (l, t, rw, rh)
+        } else {
+            (0, 0, state.width, state.height)
+        };
+        if dirty_w > 0 && dirty_h > 0 {
+            let _ = BitBlt(
+                hdc,
+                dirty_x,
+                dirty_y,
+                dirty_w,
+                dirty_h,
+                Some(mem_dc),
+                dirty_x,
+                dirty_y,
+                SRCCOPY,
+            );
+        }
+    } else {
+        let _ = BitBlt(
+            hdc,
+            0,
+            0,
+            state.width,
+            state.height,
+            Some(mem_dc),
+            0,
+            0,
+            SRCCOPY,
+        );
+    }
 
     Ok(())
 }

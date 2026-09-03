@@ -14030,8 +14030,8 @@ if supports_move_mouse || show_detection_tuning {
                                                                 ));
                                                         }
                                                     }
-                                                    let preview_active = selected_id
-                                                        .is_some_and(|path_preset_id| {
+                                                    let preview_active = !self.mouse_path_hover_preview_active
+                                                        && selected_id.is_some_and(|path_preset_id| {
                                                             self.mouse_path_step_preview_preset_id
                                                                 == Some(path_preset_id)
                                                         });
