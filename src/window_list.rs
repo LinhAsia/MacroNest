@@ -40,14 +40,14 @@ mod windows_impl {
         },
         Win32::{
             Graphics::{
-                Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN},
+                Direct3D::D3D_DRIVER_TYPE_HARDWARE,
                 Direct3D11::{
                     D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                     D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_FLAG,
                     D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
                     D3D11CreateDevice, ID3D11Device, ID3D11Texture2D,
                 },
-                Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIDevice, IDXGIFactory1},
+                Dxgi::IDXGIDevice,
             },
             System::WinRT::{
                 Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess},
@@ -1178,55 +1178,19 @@ mod windows_impl {
     static WGC_MANAGER: Lazy<Mutex<Option<WgcSession>>> = Lazy::new(|| Mutex::new(None));
 
     pub(crate) fn init_wgc_session(hwnd: HWND) -> anyhow::Result<WgcSession> {
-        let mut best_adapter: Option<IDXGIAdapter> = None;
-        if let Ok(factory) = unsafe { CreateDXGIFactory1::<IDXGIFactory1>() } {
-            let mut i = 0;
-            let mut max_vram = 0;
-            while let Ok(adapter1) = unsafe { factory.EnumAdapters1(i) } {
-                if let Ok(desc) = unsafe { adapter1.GetDesc1() } {
-                    // Ignore software adapters (0x2 = DXGI_ADAPTER_FLAG_SOFTWARE)
-                    if (desc.Flags & 2) == 0 && desc.DedicatedVideoMemory > max_vram {
-                        max_vram = desc.DedicatedVideoMemory;
-                        if let Ok(adapter) = adapter1.cast::<IDXGIAdapter>() {
-                            best_adapter = Some(adapter);
-                        }
-                    }
-                }
-                i += 1;
-            }
-        }
-
         let mut d3d_device: Option<ID3D11Device> = None;
-        if let Some(ref adapter) = best_adapter {
-            unsafe {
-                let _ = D3D11CreateDevice(
-                    Some(adapter),
-                    D3D_DRIVER_TYPE_UNKNOWN,
-                    HMODULE::default(),
-                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                    None,
-                    D3D11_SDK_VERSION,
-                    Some(&mut d3d_device),
-                    None,
-                    None,
-                );
-            }
-        }
-
-        if d3d_device.is_none() {
-            unsafe {
-                D3D11CreateDevice(
-                    None,
-                    D3D_DRIVER_TYPE_HARDWARE,
-                    HMODULE::default(),
-                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                    None,
-                    D3D11_SDK_VERSION,
-                    Some(&mut d3d_device),
-                    None,
-                    None,
-                )?;
-            }
+        unsafe {
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut d3d_device),
+                None,
+                None,
+            )?;
         }
         let d3d_device = d3d_device.context("Failed to create D3D11 Device")?;
         let dxgi_device: IDXGIDevice = d3d_device.cast()?;
@@ -1288,7 +1252,7 @@ mod windows_impl {
             let width = desc.Width as usize;
             let height = desc.Height as usize;
 
-            if width != expected_w || height != expected_h {
+            if expected_w > 0 && expected_h > 0 && (width != expected_w || height != expected_h) {
                 return Ok(false);
             }
 
@@ -1365,15 +1329,14 @@ mod windows_impl {
         pub(crate) fn poll_next_frame(&mut self) -> anyhow::Result<Option<ScreenCaptureFrame>> {
             let mut rect = RECT::default();
             let _ = unsafe { GetWindowRect(self.hwnd, &mut rect) };
-            let width = ((rect.right - rect.left).max(2)) as usize;
-            let height = ((rect.bottom - rect.top).max(2)) as usize;
             let mut buf = Vec::new();
-            if self.poll_into_buffer(&mut buf, width, height)? {
+            if self.poll_into_buffer(&mut buf, 0, 0)? {
+                let (_, w, h) = self.staging_textures.as_ref().unwrap();
                 Ok(Some(ScreenCaptureFrame {
                     screen_x: rect.left,
                     screen_y: rect.top,
-                    width,
-                    height,
+                    width: *w as usize,
+                    height: *h as usize,
                     rgba: buf,
                 }))
             } else {
@@ -1386,30 +1349,17 @@ mod windows_impl {
             let _ = unsafe { GetWindowRect(self.hwnd, &mut rect) };
             let mut buf = Vec::new();
             for _ in 0..100 {
-                let mut frame_opt = None;
-                while let Ok(frame) = self.frame_pool.TryGetNextFrame() {
-                    frame_opt = Some(frame);
+                if self.poll_into_buffer(&mut buf, 0, 0)? {
+                    let (_, w, h) = self.staging_textures.as_ref().unwrap();
+                    return Ok(ScreenCaptureFrame {
+                        screen_x: rect.left,
+                        screen_y: rect.top,
+                        width: *w as usize,
+                        height: *h as usize,
+                        rgba: buf,
+                    });
                 }
-                if let Some(frame) = frame_opt {
-                    let surface = frame.Surface()?;
-                    let access: IDirect3DDxgiInterfaceAccess = surface.cast()?;
-                    let texture: ID3D11Texture2D = unsafe { access.GetInterface()? };
-                    let mut desc = D3D11_TEXTURE2D_DESC::default();
-                    unsafe { texture.GetDesc(&mut desc); }
-                    let w = desc.Width as usize;
-                    let h = desc.Height as usize;
-                    let _ = self.poll_into_buffer(&mut buf, w, h);
-                    if !buf.is_empty() {
-                        return Ok(ScreenCaptureFrame {
-                            screen_x: rect.left,
-                            screen_y: rect.top,
-                            width: w,
-                            height: h,
-                            rgba: buf,
-                        });
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
             anyhow::bail!("No frame available from WGC pool")
         }
