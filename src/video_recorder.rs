@@ -844,7 +844,16 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
                 bottom: top + height,
             })
         }
-        CaptureSource::WgcWindow { .. } => None,
+        CaptureSource::WgcWindow { hwnd, .. } => {
+            let mut r = RECT::default();
+            unsafe {
+                if windows::Win32::UI::WindowsAndMessaging::GetWindowRect(*hwnd, &mut r).is_ok() {
+                    Some(r)
+                } else {
+                    None
+                }
+            }
+        }
         CaptureSource::Region { region, .. } => Some(*region),
     };
     let (region_border, recording_active_signal) = match border_rect {
@@ -978,10 +987,14 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
     if use_hw {
         command.args([
             "-vf",
-            "format=yuv420p",
+            "format=nv12",
             "-an",
             "-c:v",
             "h264_mf",
+            "-hw_encoding",
+            "1",
+            "-scenario",
+            "display_remoting",
             "-b:v",
             "12M",
             "-g",
@@ -1080,6 +1093,10 @@ fn start_recording_with_config(config: VideoRecorderConfig) -> Result<(), String
 
                 let elapsed_micros = start_time.elapsed().as_micros();
                 let target_frames = ((elapsed_micros * feeder_fps as u128) / 1_000_000) as u64 + 1;
+
+                if target_frames > frames_written + 2 {
+                    frames_written = target_frames - 1;
+                }
 
                 while frames_written < target_frames {
                     if pipe.write_all(&last_frame).is_err() {
