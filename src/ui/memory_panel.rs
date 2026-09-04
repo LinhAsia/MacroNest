@@ -619,6 +619,7 @@ struct CodeAccessDialog {
     value_filter_min: String,
     value_filter_max: String,
     feedback_message: Option<(String, Instant)>,
+    last_value_refresh: Instant,
 }
 
 struct AobCompareEntry {
@@ -6485,6 +6486,7 @@ impl CrosshairApp {
                 value_filter_min: String::new(),
                 value_filter_max: String::new(),
                 feedback_message: None,
+                last_value_refresh: Instant::now(),
             });
             return;
         }
@@ -6526,6 +6528,7 @@ impl CrosshairApp {
             value_filter_min: String::new(),
             value_filter_max: String::new(),
             feedback_message: None,
+            last_value_refresh: Instant::now(),
         });
     }
 
@@ -11892,32 +11895,40 @@ impl CrosshairApp {
                 WatchEvent::AddressHit { .. } | WatchEvent::BatchProgress { .. } => {}
             }
         }
-        if addresses_updated {
-            dialog
-                .addresses
-                .sort_unstable_by_key(|(address, _)| *address);
+        let now = Instant::now();
+        let should_refresh_periodically =
+            now.duration_since(dialog.last_value_refresh) >= Duration::from_millis(150);
+        if addresses_updated || should_refresh_periodically {
+            if should_refresh_periodically {
+                dialog.last_value_refresh = now;
+            }
+            if addresses_updated {
+                dialog
+                    .addresses
+                    .sort_unstable_by_key(|(address, _)| *address);
+            }
             if let Some(pid) = self.memory_panel.process_pid {
                 for (data_address, _) in &dialog.addresses {
-                    if !dialog.values.contains_key(data_address) {
-                        if let Ok(value) = read_scan_value(pid, *data_address, dialog.value_type) {
-                            dialog.values.insert(
-                                *data_address,
-                                format_scan_value(value, self.memory_panel.hex),
-                            );
-                        }
+                    if let Ok(value) = read_scan_value(pid, *data_address, dialog.value_type) {
+                        dialog.values.insert(
+                            *data_address,
+                            format_scan_value(value, self.memory_panel.hex),
+                        );
                     }
                 }
             }
-            dialog.selected = selected_address.and_then(|address| {
-                dialog
-                    .addresses
-                    .iter()
-                    .position(|(candidate, _)| *candidate == address)
-            });
-            let total: usize = dialog.addresses.iter().map(|(_, count)| count).sum();
-            if !dialog.status.starts_with("First address captured") {
-                dialog.status =
-                    format!("{total} hit(s), {} address(es)", dialog.addresses.len());
+            if addresses_updated {
+                dialog.selected = selected_address.and_then(|address| {
+                    dialog
+                        .addresses
+                        .iter()
+                        .position(|(candidate, _)| *candidate == address)
+                });
+                let total: usize = dialog.addresses.iter().map(|(_, count)| count).sum();
+                if !dialog.status.starts_with("First address captured") {
+                    dialog.status =
+                        format!("{total} hit(s), {} address(es)", dialog.addresses.len());
+                }
             }
         }
         let entry = self.state.memory_code_list.get(dialog.code_index);

@@ -1343,12 +1343,14 @@ impl CrosshairApp {
                                         .on_hover_text("Reverse only camera rotation.");
                                     ui.checkbox(&mut preset.invert_camera_pitch, "Reverse pitch")
                                         .on_hover_text("Reverse only camera pitch angle.");
-                                    ui.checkbox(&mut preset.invert_direction_a, "Invert A (X)")
-                                        .on_hover_text("Invert horizontal axis A (X). Use this when 2 opposite directions show ESP but 2 perpendicular directions disappear.");
-                                    ui.checkbox(&mut preset.invert_direction_b, "Invert B (Y)")
-                                        .on_hover_text("Invert horizontal axis B (Y).");
-                                    ui.checkbox(&mut preset.swap_direction_pair, "Swap A/B")
-                                        .on_hover_text("Swap horizontal axes A and B.");
+                                    if preset.orientation_source == EspOrientationSource::Angles {
+                                        ui.checkbox(&mut preset.invert_direction_a, "Invert A (X)")
+                                            .on_hover_text("Invert horizontal axis A (X). Use this when 2 opposite directions show ESP but 2 perpendicular directions disappear.");
+                                        ui.checkbox(&mut preset.invert_direction_b, "Invert B (Y)")
+                                            .on_hover_text("Invert horizontal axis B (Y).");
+                                        ui.checkbox(&mut preset.swap_direction_pair, "Swap A/B")
+                                            .on_hover_text("Swap horizontal axes A and B.");
+                                    }
                                     ui.checkbox(&mut preset.invert_vertical, "Invert height (Z)")
                                         .on_hover_text("Invert target elevation difference.");
                                     ui.checkbox(&mut preset.invert_yaw, "Mirror X")
@@ -1553,10 +1555,10 @@ impl CrosshairApp {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.checkbox(
                                         &mut preset.permutation_debug_mode,
-                                        "Render 128 combinations (Single target)",
+                                        "Render combination matrix (Single target)",
                                     )
                                     .on_hover_text(
-                                        "Simultaneously renders all 128 combinations with numbered labels. Look at target in-game to see which # lands on it, then apply!",
+                                        "Simultaneously renders combination matrix with numbered labels. Look at target in-game to see which # lands on it, then apply! Tip: Tilt view slightly up/down in-game if numbers overlap at neutral pitch.",
                                     );
 
                                     if preset.permutation_debug_mode {

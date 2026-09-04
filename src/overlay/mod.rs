@@ -29160,7 +29160,14 @@ mod windows_overlay {
         let mut shapes = Vec::new();
         let aspect = width as f32 / height as f32;
         let perms = crate::model::esp_debug_permutations();
-        let mut drawn_positions: Vec<(i32, i32)> = Vec::new();
+        struct PermCluster {
+            px: i32,
+            py: i32,
+            color: [u8; 4],
+            indices: Vec<usize>,
+        }
+
+        let mut clusters: Vec<PermCluster> = Vec::new();
 
         for perm in perms {
             let mut test_preset = preset.clone();
@@ -29173,8 +29180,8 @@ mod windows_overlay {
             test_preset.invert_vertical = perm.invert_vertical;
             test_preset.pitch_input = perm.pitch_input;
             test_preset.pitch_unit = perm.pitch_unit;
-            test_preset.invert_yaw = preset.invert_yaw;
-            test_preset.invert_pitch = preset.invert_pitch;
+            test_preset.invert_yaw = false;
+            test_preset.invert_pitch = false;
 
             let perm_orientation = match test_preset.orientation_source {
                 crate::model::EspOrientationSource::Angles => Some((raw_yaw, pitch)),
@@ -29217,15 +29224,25 @@ mod windows_overlay {
                     + preset.marker_offset_y)
                     .round() as i32;
 
-            if drawn_positions
-                .iter()
-                .any(|&(ox, oy)| (ox - px).abs() <= 8 && (oy - py).abs() <= 8)
+            if let Some(existing) = clusters
+                .iter_mut()
+                .find(|c| (c.px - px).abs() <= 6 && (c.py - py).abs() <= 6)
             {
-                continue;
+                existing.indices.push(perm.index);
+            } else {
+                clusters.push(PermCluster {
+                    px,
+                    py,
+                    color: perm.color,
+                    indices: vec![perm.index],
+                });
             }
-            drawn_positions.push((px, py));
+        }
 
-            let color = perm.color;
+        for cluster in clusters {
+            let px = cluster.px;
+            let py = cluster.py;
+            let color = cluster.color;
             let half_w = 10;
             let half_h = 10;
             let points = vec![
@@ -29245,7 +29262,11 @@ mod windows_overlay {
             });
 
             let text_y = py - 14;
-            let label = format!("#{}", perm.index);
+            let label = match cluster.indices.len() {
+                1 => format!("#{}", cluster.indices[0]),
+                2..=3 => cluster.indices.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(" "),
+                _ => format!("#{}, #{} (+{}x)", cluster.indices[0], cluster.indices[1], cluster.indices.len() - 2),
+            };
             shapes.push(GeometryRenderShape {
                 bounds: geometry_label_bounds(px, text_y, 12, &label, 0.0),
                 draw: GeometryRenderDraw::Label(GeometryRenderText {

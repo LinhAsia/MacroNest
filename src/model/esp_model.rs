@@ -894,17 +894,17 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
                                 for &(p_in, p_unit, p_tag) in &pitch_modes {
                                     let swap_str = if swap { "Swap" } else { "Norm" };
                                     let inv_str = match (inv_a, inv_b) {
-                                        (false, false) => "+A+B",
-                                        (true, false) => "-A+B",
-                                        (false, true) => "+A-B",
-                                        (true, true) => "-A-B",
+                                        (false, false) => "NormA NormB",
+                                        (true, false) => "InvA NormB",
+                                        (false, true) => "NormA InvB",
+                                        (true, true) => "InvA InvB",
                                     };
                                     let rev_y_str = if rev_yaw { "RevY" } else { "NormY" };
                                     let yaw_str = format!("{yaw_off:+.0}°");
                                     let rev_p_str = if rev_pitch { "RevP" } else { "NormP" };
                                     let elev_str = if inv_elev { "InvElev" } else { "NormElev" };
 
-                                    let short_desc = format!("{swap_str} {inv_str} {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {p_tag}");
+                                    let short_desc = format!("{swap_str} | {inv_str} | {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {p_tag}");
                                     let label = format!("#{idx}: {swap_str} {inv_str} {rev_y_str} {yaw_str} {rev_p_str} {elev_str} {p_tag}");
 
                                     configs.push(EspPermutationConfig {
@@ -954,14 +954,16 @@ pub(crate) fn esp_calibration_sample(
         1.0
     };
     let (mut forward_a, mut forward_b, mut vertical) = (dx, dy, (dz + preset.target_vertical_offset) * h_mult);
-    if preset.swap_direction_pair {
-        std::mem::swap(&mut forward_a, &mut forward_b);
-    }
-    if preset.invert_direction_a {
-        forward_a = -forward_a;
-    }
-    if preset.invert_direction_b {
-        forward_b = -forward_b;
+    if preset.orientation_source == EspOrientationSource::Angles {
+        if preset.swap_direction_pair {
+            std::mem::swap(&mut forward_a, &mut forward_b);
+        }
+        if preset.invert_direction_a {
+            forward_a = -forward_a;
+        }
+        if preset.invert_direction_b {
+            forward_b = -forward_b;
+        }
     }
     if preset.invert_vertical {
         vertical = -vertical;
@@ -1084,14 +1086,16 @@ pub(crate) fn project_esp(
         1.0
     };
     let (mut forward_a, mut forward_b, mut vertical) = (dx, dy, (dz + preset.target_vertical_offset) * h_mult);
-    if preset.swap_direction_pair {
-        std::mem::swap(&mut forward_a, &mut forward_b);
-    }
-    if preset.invert_direction_a {
-        forward_a = -forward_a;
-    }
-    if preset.invert_direction_b {
-        forward_b = -forward_b;
+    if preset.orientation_source == EspOrientationSource::Angles {
+        if preset.swap_direction_pair {
+            std::mem::swap(&mut forward_a, &mut forward_b);
+        }
+        if preset.invert_direction_a {
+            forward_a = -forward_a;
+        }
+        if preset.invert_direction_b {
+            forward_b = -forward_b;
+        }
     }
     if preset.invert_vertical {
         vertical = -vertical;
@@ -1493,6 +1497,19 @@ mod tests {
         let loaded: EspPreset = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.entity_auto_scan_mode, EspAutoScanMode::AllHits);
         assert_eq!(loaded.entity_auto_scan_duration_secs, 1.0);
+    }
+
+    #[test]
+    fn permutations_cover_inversion_of_both_direction_axes() {
+        let perms = esp_debug_permutations();
+        assert_eq!(perms.len(), 1024);
+        let has_inv_a = perms.iter().any(|p| p.invert_direction_a && !p.invert_direction_b);
+        let has_inv_b = perms.iter().any(|p| !p.invert_direction_a && p.invert_direction_b);
+        let has_both = perms.iter().any(|p| p.invert_direction_a && p.invert_direction_b);
+        let has_none = perms.iter().any(|p| !p.invert_direction_a && !p.invert_direction_b);
+        assert!(has_inv_a && has_inv_b && has_both && has_none);
+        assert!(perms.iter().any(|p| p.short_desc.contains("InvA")));
+        assert!(perms.iter().any(|p| p.short_desc.contains("InvB")));
     }
 }
 
