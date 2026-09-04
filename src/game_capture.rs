@@ -229,64 +229,157 @@ impl Drop for GameCaptureSession {
     }
 }
 
-pub fn get_graphics_offsets(offsets_exe: &Path) -> GraphicsOffsets {
-    let mut offsets = GraphicsOffsets::default();
-    if offsets_exe.exists() {
-        if let Ok(output) = Command::new(offsets_exe).creation_flags(0x0800_0000).output() {
-            let str_out = String::from_utf8_lossy(&output.stdout);
-            let mut section = "";
-            for line in str_out.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with('[') && trimmed.ends_with(']') {
-                    section = &trimmed[1..trimmed.len() - 1];
-                    continue;
-                }
-                let parts: Vec<&str> = trimmed.split('=').collect();
-                if parts.len() == 2 {
-                    let key = parts[0].trim();
-                    let val = u32::from_str_radix(parts[1].trim().trim_start_matches("0x"), 16).unwrap_or(0);
-                    match section {
-                        "d3d8" => match key {
-                            "present" => offsets.d3d8.present = val,
+static OFFSETS_64_CACHE: std::sync::OnceLock<GraphicsOffsets> = std::sync::OnceLock::new();
+static OFFSETS_32_CACHE: std::sync::OnceLock<GraphicsOffsets> = std::sync::OnceLock::new();
+
+pub fn get_graphics_offsets(offsets_exe: &Path, is_32bit: bool) -> GraphicsOffsets {
+    let cache = if is_32bit {
+        &OFFSETS_32_CACHE
+    } else {
+        &OFFSETS_64_CACHE
+    };
+    *cache.get_or_init(|| {
+        let mut offsets = GraphicsOffsets::default();
+        if offsets_exe.exists() {
+            if let Ok(output) = Command::new(offsets_exe).creation_flags(0x0800_0000).output() {
+                let str_out = String::from_utf8_lossy(&output.stdout);
+                let mut section = "";
+                for line in str_out.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                        section = &trimmed[1..trimmed.len() - 1];
+                        continue;
+                    }
+                    let parts: Vec<&str> = trimmed.split('=').collect();
+                    if parts.len() == 2 {
+                        let key = parts[0].trim();
+                        let val = u32::from_str_radix(parts[1].trim().trim_start_matches("0x"), 16).unwrap_or(0);
+                        match section {
+                            "d3d8" => match key {
+                                "present" => offsets.d3d8.present = val,
+                                _ => {}
+                            },
+                            "d3d9" => match key {
+                                "present" => offsets.d3d9.present = val,
+                                "present_ex" => offsets.d3d9.present_ex = val,
+                                "present_swap" => offsets.d3d9.present_swap = val,
+                                "d3d9_clsoff" => offsets.d3d9.d3d9_clsoff = val,
+                                "is_d3d9ex_clsoff" => offsets.d3d9.is_d3d9ex_clsoff = val,
+                                _ => {}
+                            },
+                            "dxgi" => match key {
+                                "present" => offsets.dxgi.present = val,
+                                "present1" => offsets.dxgi.present1 = val,
+                                "resize" => offsets.dxgi.resize = val,
+                                "release" => offsets.dxgi2.release = val,
+                                _ => {}
+                            },
+                            "d3d12" => match key {
+                                "execute_command_lists" => offsets.d3d12.execute_command_lists = val,
+                                _ => {}
+                            },
                             _ => {}
-                        },
-                        "d3d9" => match key {
-                            "present" => offsets.d3d9.present = val,
-                            "present_ex" => offsets.d3d9.present_ex = val,
-                            "present_swap" => offsets.d3d9.present_swap = val,
-                            "d3d9_clsoff" => offsets.d3d9.d3d9_clsoff = val,
-                            "is_d3d9ex_clsoff" => offsets.d3d9.is_d3d9ex_clsoff = val,
-                            _ => {}
-                        },
-                        "dxgi" => match key {
-                            "present" => offsets.dxgi.present = val,
-                            "present1" => offsets.dxgi.present1 = val,
-                            "resize" => offsets.dxgi.resize = val,
-                            "release" => offsets.dxgi2.release = val,
-                            _ => {}
-                        },
-                        "d3d12" => match key {
-                            "execute_command_lists" => offsets.d3d12.execute_command_lists = val,
-                            _ => {}
-                        },
-                        _ => {}
+                        }
                     }
                 }
             }
         }
-    }
-    if offsets.dxgi.present == 0 {
-        offsets.dxgi.present = 0x19960;
-        offsets.dxgi.present1 = 0x19e00;
-        offsets.dxgi.resize = 0x38530;
-        offsets.dxgi2.release = 0x34460;
-    }
-    offsets
+        if offsets.dxgi.present == 0 {
+            offsets.dxgi.present = 0x19960;
+            offsets.dxgi.present1 = 0x19e00;
+            offsets.dxgi.resize = 0x38530;
+            offsets.dxgi2.release = 0x34460;
+        }
+        offsets
+    })
 }
 
 #[cfg(windows)]
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+unsafe fn open_shared_texture_on_best_device(
+    tex_handle: u32,
+) -> Result<(ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D)> {
+    unsafe {
+        use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter};
+        use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
+        use windows::core::Interface;
+
+        let handle = HANDLE(tex_handle as usize as *mut _);
+
+        // 1. Enumerate adapters and prioritize discrete / NVIDIA GPU first
+        if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() {
+            let mut i = 0;
+            let mut adapters = Vec::new();
+            while let Ok(adapter) = factory.EnumAdapters1(i) {
+                i += 1;
+                let is_dgpu = if let Ok(desc1) = adapter.GetDesc1() {
+                    desc1.VendorId == 0x10DE || desc1.DedicatedVideoMemory > 1024 * 1024 * 1024
+                } else {
+                    false
+                };
+                adapters.push((adapter, is_dgpu));
+            }
+            adapters.sort_by_key(|(_, is_dgpu)| if *is_dgpu { 0 } else { 1 });
+
+            for (adapter, _) in adapters {
+                if let Ok(adapter0) = adapter.cast::<IDXGIAdapter>() {
+                    let mut dev: Option<ID3D11Device> = None;
+                    let mut ctx: Option<ID3D11DeviceContext> = None;
+                    let hr = D3D11CreateDevice(
+                        Some(&adapter0),
+                        D3D_DRIVER_TYPE_UNKNOWN,
+                        HMODULE::default(),
+                        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                        None,
+                        D3D11_SDK_VERSION,
+                        Some(&mut dev),
+                        None,
+                        Some(&mut ctx),
+                    );
+                    if hr.is_ok() {
+                        if let (Some(d), Some(c)) = (dev, ctx) {
+                            let mut shared_tex: Option<ID3D11Texture2D> = None;
+                            if d.OpenSharedResource(handle, &mut shared_tex).is_ok() {
+                                if let Some(tex) = shared_tex {
+                                    return Ok((d, c, tex));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback to default hardware device
+        let mut def_dev: Option<ID3D11Device> = None;
+        let mut def_ctx: Option<ID3D11DeviceContext> = None;
+        if D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            HMODULE::default(),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut def_dev),
+            None,
+            Some(&mut def_ctx),
+        ).is_ok() {
+            if let (Some(d), Some(c)) = (def_dev, def_ctx) {
+                let mut shared_tex: Option<ID3D11Texture2D> = None;
+                if d.OpenSharedResource(handle, &mut shared_tex).is_ok() {
+                    if let Some(tex) = shared_tex {
+                        return Ok((d, c, tex));
+                    }
+                }
+            }
+        }
+
+        bail!("Failed to open shared texture across GPU adapters (matching game GPU).");
+    }
 }
 
 #[cfg(windows)]
@@ -318,7 +411,7 @@ impl GameCaptureSession {
         let (hook_dll, inject_helper, offsets_exe) = find_game_capture_binaries(paths, is_32bit)
             .context("Game Capture binaries not found. Install Game Capture in Settings > Downloaded Tools.")?;
 
-        let offsets = get_graphics_offsets(&offsets_exe);
+        let offsets = get_graphics_offsets(&offsets_exe, is_32bit);
 
         unsafe {
             use windows::Win32::Security::{
@@ -420,74 +513,18 @@ impl GameCaptureSession {
             let _ = SetEvent(hook_init);
             let _ = SetEvent(hook_restart);
 
-            use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter};
-            use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
-            use windows::core::Interface;
-
-            let mut devices: Vec<(ID3D11Device, ID3D11DeviceContext, bool)> = Vec::new();
-            if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() {
-                let mut i = 0;
-                while let Ok(adapter) = factory.EnumAdapters1(i) {
-                    i += 1;
-                    let is_nvidia = if let Ok(desc1) = adapter.GetDesc1() {
-                        desc1.VendorId == 0x10DE || desc1.DedicatedVideoMemory > 1024 * 1024 * 1024
-                    } else {
-                        false
-                    };
-                    if let Ok(adapter0) = adapter.cast::<IDXGIAdapter>() {
-                        let mut d3d_device: Option<ID3D11Device> = None;
-                        let mut d3d_context: Option<ID3D11DeviceContext> = None;
-                        let hr = D3D11CreateDevice(
-                            Some(&adapter0),
-                            D3D_DRIVER_TYPE_UNKNOWN,
-                            HMODULE::default(),
-                            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                            None,
-                            D3D11_SDK_VERSION,
-                            Some(&mut d3d_device),
-                            None,
-                            Some(&mut d3d_context),
-                        );
-                        if hr.is_ok() {
-                            if let (Some(dev), Some(ctx)) = (d3d_device, d3d_context) {
-                                devices.push((dev, ctx, is_nvidia));
-                            }
-                        }
-                    }
-                }
-            }
-            // Prioritize NVIDIA discrete GPU first so NVENC hardware encoding is selected
-            devices.sort_by_key(|(_, _, is_nvidia)| if *is_nvidia { 0 } else { 1 });
-
-            let mut def_dev: Option<ID3D11Device> = None;
-            let mut def_ctx: Option<ID3D11DeviceContext> = None;
-            if D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut def_dev),
-                None,
-                Some(&mut def_ctx),
-            ).is_ok() {
-                if let (Some(d), Some(c)) = (def_dev, def_ctx) {
-                    devices.push((d, c, false));
-                }
-            }
-
-            // Wait up to 10 seconds for the game hook to produce the first texture
+            // Wait up to 10 seconds for the game hook to produce the first texture.
+            // ponytail: Do NOT call SetEvent(hook_restart) in this wait loop. Spamming hook_restart
+            // forces the game hook to repeatedly tear down and recreate DirectX capture resources on every frame,
+            // causing severe lag in the game. Firing once above is sufficient.
             let start_wait = Instant::now();
             let mut ready = false;
             while start_wait.elapsed() < Duration::from_secs(10) {
-                let wait_res = WaitForSingleObject(hook_ready, 100);
+                let wait_res = WaitForSingleObject(hook_ready, 50);
                 if wait_res.0 == 0 {
                     ready = true;
                     break;
                 }
-                // Keep signaling restart if needed
-                let _ = SetEvent(hook_restart);
                 if !windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
                     bail!("Target game window closed.");
                 }
@@ -534,20 +571,8 @@ impl GameCaptureSession {
 
             let shtex = shtex_opt.context("Failed to open CaptureHook_Texture shared memory. Make sure the game is actively rendering.")?;
 
-            // Open shared resource texture across GPU adapters (prioritizing NVIDIA discrete GPU)
-            let mut opened: Option<(ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D)> = None;
-            for (dev, ctx, _) in devices {
-                let mut shared_texture: Option<ID3D11Texture2D> = None;
-                let res = dev.OpenSharedResource(HANDLE(shtex.tex_handle as usize as *mut _), &mut shared_texture);
-                if res.is_ok() {
-                    if let Some(tex) = shared_texture {
-                        opened = Some((dev, ctx, tex));
-                        break;
-                    }
-                }
-            }
-
-            let (d3d_device, d3d_context, shared_texture) = opened.context("Failed to open shared texture across GPU adapters (matching game GPU).")?;
+            // Open shared resource texture on best matching GPU device
+            let (d3d_device, d3d_context, shared_texture) = open_shared_texture_on_best_device(shtex.tex_handle)?;
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             shared_texture.GetDesc(&mut desc);
 
