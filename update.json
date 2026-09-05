@@ -1,5 +1,5 @@
 {
-  "version": "1.2.6",
-  "notes": "Added memory scanning optimizations (disabled EcoQoS power throttling, raised worker priorities, and eliminated working set eviction), auto-update download resilience, and bug fixes.",
-  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.6/MacroNest.exe"
+  "version": "1.2.7",
+  "notes": "Added multi-threaded SIMD memory scanner, Cheat Engine snapshot scans, 2-sample AOB signature generator, OBS Game Capture with NVENC zero-copy encoder, GPU DirectComposition overlay, interactive Window Pin overlay, macro recording improvements, and bug fixes.",
+  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.7/MacroNest.exe"
 }
