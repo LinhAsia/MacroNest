@@ -23,6 +23,7 @@ struct MousePathTimelineOutcome {
     preview_selection: Option<Vec<MousePathEvent>>,
     preview_from_ms: Option<u64>,
     sync_preview: bool,
+    clear_preview: bool,
     selected_merge_source: u32,
     trim_range: Option<(u64, u64)>,
     split_at_ms: Option<u64>,
@@ -46,10 +47,9 @@ impl CrosshairApp {
     }
 
     pub(crate) fn clear_mouse_path_preview(&mut self) {
-        if self.mouse_path_step_preview_preset_id.take().is_some() {
-            let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
-            crate::overlay::wake_command_queue();
-        }
+        self.mouse_path_step_preview_preset_id = None;
+        let _ = self.overlay_tx.send(OverlayCommand::PreviewMousePath(None));
+        crate::overlay::wake_command_queue();
     }
 
     fn selected_mouse_input_backend_mode(&self) -> MouseInputBackendMode {
@@ -139,6 +139,7 @@ impl CrosshairApp {
             .collect();
         let mut preview_mouse_path_selection: Option<(u32, Vec<MousePathEvent>, Option<u64>)> =
             None;
+        let mut clear_mouse_path_preview_requested = false;
         let mut trim_mouse_path_request: Option<(u32, u64, u64)> = None;
         let mut split_mouse_path_request: Option<(u32, u64)> = None;
         let mut merge_mouse_path_request: Option<(u32, u32)> = None;
@@ -962,6 +963,9 @@ impl CrosshairApp {
                             );
                         });
                         if preset.collapsed {
+                            if self.mouse_path_step_preview_preset_id == Some(preset.id) {
+                                clear_mouse_path_preview_requested = true;
+                            }
                             return;
                         }
                         egui::Grid::new((preset.id, "mouse-path-grid"))
@@ -1056,6 +1060,8 @@ impl CrosshairApp {
                         Self::render_mouse_path_preview(ui, language, &preview_events, 240.0);
                         ui.add_space(8.0);
                         let preset_hovered = ui.rect_contains_pointer(ui.min_rect());
+                        let is_previewing =
+                            self.mouse_path_step_preview_preset_id == Some(preset.id);
                         let timeline_outcome = Self::render_mouse_path_timeline_editor(
                             ui,
                             language,
@@ -1068,6 +1074,7 @@ impl CrosshairApp {
                                 .get(&preset.id)
                                 .copied()
                                 .unwrap_or(0),
+                            is_previewing,
                         );
                         if timeline_outcome.selected_merge_source == 0 {
                             self.mouse_path_merge_selection.remove(&preset.id);
@@ -1075,7 +1082,9 @@ impl CrosshairApp {
                             self.mouse_path_merge_selection
                                 .insert(preset.id, timeline_outcome.selected_merge_source);
                         }
-                        if let Some(events) = timeline_outcome.preview_selection {
+                        if timeline_outcome.clear_preview {
+                            clear_mouse_path_preview_requested = true;
+                        } else if let Some(events) = timeline_outcome.preview_selection {
                             preview_mouse_path_selection =
                                 Some((preset.id, events, timeline_outcome.preview_from_ms));
                         }
@@ -1166,7 +1175,9 @@ impl CrosshairApp {
 
         self.trim_timeline_zoom = mouse_path_timeline_zoom;
 
-        if let Some((preset_id, events, preview_from_ms)) = preview_mouse_path_selection {
+        if clear_mouse_path_preview_requested {
+            self.clear_mouse_path_preview();
+        } else if let Some((preset_id, events, preview_from_ms)) = preview_mouse_path_selection {
             let has_move = events
                 .iter()
                 .any(|event| matches!(event.kind, MousePathEventKind::Move));
@@ -1519,6 +1530,7 @@ impl CrosshairApp {
         timeline_zoom: &mut f32,
         preset_hovered: bool,
         initial_merge_source: u32,
+        is_previewing: bool,
     ) -> MousePathTimelineOutcome {
         let mut outcome = MousePathTimelineOutcome::default();
         if events.is_empty() {
@@ -1745,12 +1757,16 @@ impl CrosshairApp {
                 }
                 let preview_hotkeys_active = preset_hovered || hovered_timeline;
                 if preview_hotkeys_active && ui.input(|input| input.key_pressed(egui::Key::Space)) {
-                    outcome.preview_selection = Some(Self::slice_mouse_path_events(
-                        events,
-                        trim_start_ms,
-                        trim_end_ms,
-                    ));
-                    outcome.preview_from_ms = Some(playhead_ms.saturating_sub(trim_start_ms));
+                    if is_previewing {
+                        outcome.clear_preview = true;
+                    } else {
+                        outcome.preview_selection = Some(Self::slice_mouse_path_events(
+                            events,
+                            trim_start_ms,
+                            trim_end_ms,
+                        ));
+                        outcome.preview_from_ms = Some(playhead_ms.saturating_sub(trim_start_ms));
+                    }
                 }
                 if preview_hotkeys_active && ui.input(|input| input.key_pressed(egui::Key::S)) {
                     outcome.preview_selection = Some(Self::slice_mouse_path_events(
@@ -1796,6 +1812,21 @@ impl CrosshairApp {
 
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
+            if is_previewing {
+                if ui
+                    .button(
+                        RichText::new(Self::tr_lang(
+                            language,
+                            "Clear preview",
+                            "Xóa preview",
+                        ))
+                        .color(Color32::from_rgb(255, 110, 110)),
+                    )
+                    .clicked()
+                {
+                    outcome.clear_preview = true;
+                }
+            }
             if ui
                 .button(Self::tr_lang(
                     language,
@@ -3374,3 +3405,32 @@ fn patch_arduino_firmware_hex(hex_content: &str, spoof_type: u32) -> anyhow::Res
 
     Ok(modified_lines.join("\n"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mouse_path_timeline_outcome_defaults() {
+        let outcome = MousePathTimelineOutcome::default();
+        assert!(!outcome.clear_preview);
+        assert!(outcome.preview_selection.is_none());
+    }
+
+    #[test]
+    fn mouse_path_preview_keep_condition() {
+        let should_keep = |viewport_focused: bool, active_panel: AppPanel, hover_active: bool| -> bool {
+            viewport_focused
+                && (active_panel == AppPanel::Mouse
+                    || (active_panel == AppPanel::Macros && hover_active))
+        };
+
+        assert!(should_keep(true, AppPanel::Mouse, false));
+        assert!(!should_keep(true, AppPanel::Pin, false));
+        assert!(!should_keep(true, AppPanel::WindowPresets, false));
+        assert!(!should_keep(true, AppPanel::Macros, false));
+        assert!(should_keep(true, AppPanel::Macros, true));
+        assert!(!should_keep(false, AppPanel::Mouse, false));
+    }
+}
+

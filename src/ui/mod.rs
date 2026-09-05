@@ -17052,6 +17052,15 @@ impl eframe::App for CrosshairApp {
             self.clear_geometry_spec_preview();
             self.clear_geometry_preset_preview();
         }
+        let keep_mouse_path_preview = viewport_focused
+            && (self.state.active_panel == AppPanel::Mouse
+                || (self.state.active_panel == AppPanel::Macros
+                    && self.mouse_path_hover_preview_active));
+        if !keep_mouse_path_preview && self.mouse_path_step_preview_preset_id.is_some() {
+            self.clear_mouse_path_preview();
+            self.mouse_path_hover_preview_active = false;
+            self.mouse_path_hover_last_seen = None;
+        }
 
         let keep_macro_geometry_preview =
             viewport_focused && self.state.active_panel == AppPanel::Macros;
