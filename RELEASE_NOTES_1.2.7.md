@@ -1,4 +1,4 @@
-﻿# MacroNest 1.2.7
+# MacroNest v1.2.7
 
 ## New features
 
