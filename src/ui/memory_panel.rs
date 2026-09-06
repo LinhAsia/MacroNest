@@ -435,6 +435,7 @@ enum MemoryDisplayType {
     I64Decimal,
     Float,
     Double,
+    Text,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -446,10 +447,11 @@ enum StructureElementType {
     Float,
     Double,
     Pointer,
+    Text,
 }
 
 impl StructureElementType {
-    const ALL: [(Self, &'static str); 7] = [
+    const ALL: [(Self, &'static str); 8] = [
         (Self::Byte, "Byte"),
         (Self::I16, "2 Bytes"),
         (Self::I32, "4 Bytes"),
@@ -457,6 +459,7 @@ impl StructureElementType {
         (Self::Float, "Float"),
         (Self::Double, "Double"),
         (Self::Pointer, "Pointer"),
+        (Self::Text, "Text"),
     ];
 
     fn label(self) -> &'static str {
@@ -473,6 +476,7 @@ impl StructureElementType {
             Self::I32 | Self::Float => 4,
             Self::I64 | Self::Double => 8,
             Self::Pointer => pointer_width,
+            Self::Text => 16,
         }
     }
 
@@ -483,7 +487,7 @@ impl StructureElementType {
             Self::I64 => ScanValueType::I64,
             Self::Pointer if pointer_width == 4 => ScanValueType::I32,
             Self::Pointer => ScanValueType::I64,
-            Self::Byte => ScanValueType::I8,
+            Self::Byte | Self::Text => ScanValueType::I8,
             Self::I16 => ScanValueType::I16,
             Self::I32 => ScanValueType::I32,
         }
@@ -495,10 +499,21 @@ struct StructureElement {
     offset: usize,
     value_type: StructureElementType,
     name: String,
+    text_len: usize,
+    edit_text: String,
     /// Cached RTTI class name for Pointer fields (None = not yet resolved, Some("") = not found)
     detected_class: Option<String>,
     expanded: bool,
     child_elements: Vec<StructureElement>,
+}
+
+impl StructureElement {
+    fn width(&self, pointer_width: usize) -> usize {
+        match self.value_type {
+            StructureElementType::Text => self.text_len.max(1),
+            other => other.width(pointer_width),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -516,7 +531,7 @@ struct MemoryViewDialog {
     relative_addresses: bool,
     pinned: bool,
     elements: Vec<StructureElement>,
-    pending_add: Option<(usize, ScanValueType)>,
+    pending_add: Option<(usize, ScanValueType, Option<TextEncoding>, usize)>,
     pending_track: Option<usize>,
     pointer_width: usize,
     previous_bytes: Vec<u8>,
@@ -12293,7 +12308,7 @@ impl CrosshairApp {
                 tracked_base: Some(address),
                 kind: MemoryViewKind::Bytes,
                 display_type: if dialog.text_encoding.is_some() {
-                    MemoryDisplayType::ByteHex
+                    MemoryDisplayType::Text
                 } else {
                     memory_display_type_for_scan_type(dialog.value_type)
                 },
@@ -13703,9 +13718,12 @@ impl CrosshairApp {
                         .copy_text(format_prefixed_memory_address(row_address));
                 }
                 if address_cell.clicked_by(egui::PointerButton::Middle) {
+                    let is_text = dialog.display_type == MemoryDisplayType::Text;
                     dialog.pending_add = Some((
                         row_address,
                         memory_display_scan_type(dialog.display_type),
+                        is_text.then_some(TextEncoding::Utf8),
+                        if is_text { 16 } else { 0 },
                     ));
                 }
                 address_cell.context_menu(|ui| {
@@ -13735,6 +13753,7 @@ impl CrosshairApp {
                             MemoryDisplayType::I64Decimal => "????????????????????".to_owned(),
                             MemoryDisplayType::Float => "?.??????".to_owned(),
                             MemoryDisplayType::Double => "?.??????????????".to_owned(),
+                            MemoryDisplayType::Text => "?".to_owned(),
                         }
                     };
 
@@ -13768,9 +13787,12 @@ impl CrosshairApp {
                         );
                     }
                     if is_valid && cell.clicked_by(egui::PointerButton::Middle) {
+                        let is_text = dialog.display_type == MemoryDisplayType::Text;
                         dialog.pending_add = Some((
                             cell_address,
                             memory_display_scan_type(dialog.display_type),
+                            is_text.then_some(TextEncoding::Utf8),
+                            if is_text { 16 } else { 0 },
                         ));
                     }
                     cell.context_menu(|ui| {
@@ -13786,9 +13808,12 @@ impl CrosshairApp {
                                 "Thêm địa chỉ này vào danh sách",
                             );
                             if ui.button(add_label).clicked() {
+                                let is_text = dialog.display_type == MemoryDisplayType::Text;
                                 dialog.pending_add = Some((
                                     cell_address,
                                     memory_display_scan_type(dialog.display_type),
+                                    is_text.then_some(TextEncoding::Utf8),
+                                    if is_text { 16 } else { 0 },
                                 ));
                                 ui.close();
                             }
@@ -13896,7 +13921,7 @@ impl CrosshairApp {
             .striped(true)
             .show(ui, |ui| {
                 for element in &mut dialog.elements {
-                    let width = element.value_type.width(dialog.pointer_width);
+                    let width = element.width(dialog.pointer_width);
                     let Some(raw) = bytes.get(element.offset..element.offset.saturating_add(width))
                     else {
                         // Still need to advance all 3 columns so the grid stays consistent
@@ -14054,9 +14079,12 @@ impl CrosshairApp {
                     if desc_resp.clicked_by(egui::PointerButton::Middle)
                         || av.clicked_by(egui::PointerButton::Middle)
                     {
+                        let is_text = element.value_type == StructureElementType::Text;
                         add_request = Some((
                             element_address,
                             element.value_type.scan_type(dialog.pointer_width),
+                            is_text.then_some(TextEncoding::Utf8),
+                            if is_text { element.text_len.max(1) } else { 0 },
                         ));
                     }
                     if av.double_clicked() {
@@ -14073,9 +14101,12 @@ impl CrosshairApp {
                                 }
                             }
                         } else if !is_ptr {
+                            let is_text = element.value_type == StructureElementType::Text;
                             add_request = Some((
                                 element_address,
                                 element.value_type.scan_type(dialog.pointer_width),
+                                is_text.then_some(TextEncoding::Utf8),
+                                if is_text { element.text_len.max(1) } else { 0 },
                             ));
                         }
                     }
@@ -14086,6 +14117,7 @@ impl CrosshairApp {
                             ui,
                             element,
                             element_address,
+                            process_pid,
                             &mut add_request,
                         )
                     });
@@ -14094,6 +14126,7 @@ impl CrosshairApp {
                             ui,
                             element,
                             element_address,
+                            process_pid,
                             &mut add_request,
                         )
                     });
@@ -14115,7 +14148,7 @@ impl CrosshairApp {
                                         auto_structure_elements(&child_bytes, dialog.pointer_width);
                                 }
                                 for child in &mut element.child_elements {
-                                    let child_w = child.value_type.width(dialog.pointer_width);
+                                    let child_w = child.width(dialog.pointer_width);
                                     let Some(c_raw) = child_bytes
                                         .get(child.offset..child.offset.saturating_add(child_w))
                                     else {
@@ -14221,7 +14254,8 @@ impl CrosshairApp {
         ui: &mut egui::Ui,
         element: &mut StructureElement,
         element_address: usize,
-        add_request: &mut Option<(usize, ScanValueType)>,
+        process_pid: Option<u32>,
+        add_request: &mut Option<(usize, ScanValueType, Option<TextEncoding>, usize)>,
     ) {
         ui.horizontal(|ui| {
             ui.label("Name:");
@@ -14242,6 +14276,16 @@ impl CrosshairApp {
                 }
             }
         });
+        if element.value_type == StructureElementType::Text {
+            ui.horizontal(|ui| {
+                ui.label("Length:");
+                ui.add(
+                    egui::DragValue::new(&mut element.text_len)
+                        .range(1..=256)
+                        .speed(1),
+                );
+            });
+        }
         ui.horizontal(|ui| {
             ui.label("Offset:");
             ui.add(
@@ -14251,38 +14295,72 @@ impl CrosshairApp {
             );
         });
         if ui.button("Add to address list").clicked() {
+            let is_text = element.value_type == StructureElementType::Text;
             *add_request = Some((
                 element_address,
                 element.value_type.scan_type(std::mem::size_of::<usize>()),
+                is_text.then_some(TextEncoding::Utf8),
+                if is_text { element.text_len.max(1) } else { 0 },
             ));
             ui.close();
+        }
+        if let Some(pid) = process_pid {
+            if element.value_type == StructureElementType::Text {
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Write text:");
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut element.edit_text)
+                            .desired_width(120.0)
+                            .hint_text("new text"),
+                    );
+                    let enter_pressed = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if ui.button("Write").clicked() || enter_pressed {
+                        let _ = write_text_memory(
+                            pid,
+                            element_address,
+                            &element.edit_text,
+                            TextEncoding::Utf8,
+                            element.text_len.max(1),
+                        );
+                        ui.close();
+                    }
+                });
+            }
         }
     }
 
     fn add_pending_structure_address(&mut self, dialog: &mut MemoryViewDialog) {
-        let Some((address, value_type)) = dialog.pending_add.take() else {
+        let Some((address, value_type, text_encoding, text_byte_len)) = dialog.pending_add.take() else {
             return;
         };
         if self
             .memory_panel
             .saved
             .iter()
-            .any(|saved| saved.address == address && saved.value_type == value_type)
+            .any(|saved| saved.address == address && saved.value_type == value_type && saved.text_encoding == text_encoding)
         {
             return;
         }
-        let current = self
-            .memory_panel
-            .process_pid
-            .and_then(|pid| read_scan_value(pid, address, value_type).ok());
+        let (current, current_text) = if let Some(enc) = text_encoding {
+            let text = self.memory_panel.process_pid.and_then(|pid| {
+                read_text_memory(pid, address, text_byte_len.max(1), enc).ok()
+            });
+            (None, text)
+        } else {
+            let current = self.memory_panel.process_pid.and_then(|pid| {
+                read_scan_value(pid, address, value_type).ok()
+            });
+            (current, None)
+        };
         self.memory_panel.saved.push(SavedMemoryAddress {
             address,
             value_type,
             current,
-            text_encoding: None,
-            text_byte_len: 0,
-            current_text: None,
-            description: String::new(),
+            text_encoding,
+            text_byte_len,
+            current_text,
+            description: if text_encoding.is_some() { "Text (UTF-8)".to_owned() } else { String::new() },
             group: String::new(),
             hexadecimal: false,
             pointer: None,
@@ -17242,6 +17320,8 @@ fn default_structure_elements() -> Vec<StructureElement> {
             offset,
             value_type: StructureElementType::I32,
             name: format!("field_{offset:04X}"),
+            text_len: 16,
+            edit_text: String::new(),
             detected_class: None,
             expanded: false,
             child_elements: Vec::new(),
@@ -17263,6 +17343,7 @@ fn ce_element_description(element: &StructureElement) -> String {
         StructureElementType::I64 => "8 Bytes".to_owned(),
         StructureElementType::Float => "Float".to_owned(),
         StructureElementType::Double => "Double".to_owned(),
+        StructureElementType::Text => format!("Text[{}]", element.text_len.max(1)),
     };
     // Include user-set name if it's not the default generated name
     let name_part =
@@ -17495,6 +17576,8 @@ fn auto_structure_elements(bytes: &[u8], pointer_width: usize) -> Vec<StructureE
                 offset,
                 value_type,
                 name: format!("field_{offset:04X}"),
+                text_len: 16,
+                edit_text: String::new(),
                 detected_class: None,
                 expanded: false,
                 child_elements: Vec::new(),
@@ -17526,12 +17609,17 @@ fn format_structure_value(bytes: &[u8], value_type: StructureElementType) -> Str
         StructureElementType::Pointer => {
             decode_pointer(bytes).map_or_else(|| "P->?".to_owned(), |value| format!("P->{value:X}"))
         }
+        StructureElementType::Text => {
+            let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+            let s = String::from_utf8_lossy(&bytes[..end]);
+            format!("\"{}\"", s)
+        }
     }
 }
 
 fn memory_display_width(display_type: MemoryDisplayType) -> usize {
     match display_type {
-        MemoryDisplayType::ByteHex | MemoryDisplayType::ByteDecimal => 1,
+        MemoryDisplayType::ByteHex | MemoryDisplayType::ByteDecimal | MemoryDisplayType::Text => 1,
         MemoryDisplayType::I16Hex | MemoryDisplayType::I16Decimal => 2,
         MemoryDisplayType::I32Hex | MemoryDisplayType::I32Decimal | MemoryDisplayType::Float => 4,
         MemoryDisplayType::I64Hex | MemoryDisplayType::I64Decimal | MemoryDisplayType::Double => 8,
@@ -17540,7 +17628,7 @@ fn memory_display_width(display_type: MemoryDisplayType) -> usize {
 
 fn memory_display_scan_type(display_type: MemoryDisplayType) -> ScanValueType {
     match display_type {
-        MemoryDisplayType::ByteHex | MemoryDisplayType::ByteDecimal => ScanValueType::I8,
+        MemoryDisplayType::ByteHex | MemoryDisplayType::ByteDecimal | MemoryDisplayType::Text => ScanValueType::I8,
         MemoryDisplayType::I16Hex | MemoryDisplayType::I16Decimal => ScanValueType::I16,
         MemoryDisplayType::I32Hex | MemoryDisplayType::I32Decimal => ScanValueType::I32,
         MemoryDisplayType::I64Hex | MemoryDisplayType::I64Decimal => ScanValueType::I64,
@@ -17551,7 +17639,7 @@ fn memory_display_scan_type(display_type: MemoryDisplayType) -> ScanValueType {
 
 fn memory_display_type_for_saved(saved: &SavedMemoryAddress) -> MemoryDisplayType {
     if saved.text_encoding.is_some() {
-        MemoryDisplayType::ByteHex
+        MemoryDisplayType::Text
     } else {
         memory_display_type_for_scan_type(saved.value_type)
     }
@@ -17570,7 +17658,7 @@ fn memory_display_type_for_scan_type(value_type: ScanValueType) -> MemoryDisplay
 
 fn memory_display_cell_width(display_type: MemoryDisplayType) -> f32 {
     match display_type {
-        MemoryDisplayType::ByteHex => 32.0,
+        MemoryDisplayType::ByteHex | MemoryDisplayType::Text => 32.0,
         MemoryDisplayType::ByteDecimal => 42.0,
         MemoryDisplayType::I16Hex => 54.0,
         MemoryDisplayType::I16Decimal => 66.0,
@@ -17595,7 +17683,7 @@ fn format_memory_protection(protect: u32) -> &'static str {
     }
 }
 
-fn memory_display_types() -> [(MemoryDisplayType, &'static str); 10] {
+fn memory_display_types() -> [(MemoryDisplayType, &'static str); 11] {
     [
         (MemoryDisplayType::ByteHex, "Byte hex"),
         (MemoryDisplayType::ByteDecimal, "Byte decimal"),
@@ -17607,6 +17695,7 @@ fn memory_display_types() -> [(MemoryDisplayType, &'static str); 10] {
         (MemoryDisplayType::I64Decimal, "8 Byte decimal"),
         (MemoryDisplayType::Float, "Float"),
         (MemoryDisplayType::Double, "Double"),
+        (MemoryDisplayType::Text, "Text (ASCII)"),
     ]
 }
 
@@ -17670,6 +17759,17 @@ fn format_memory_display(bytes: &[u8], display_type: MemoryDisplayType) -> Strin
         MemoryDisplayType::Double => bytes
             .chunks_exact(8)
             .map(|chunk| format_compact_float(f64::from_le_bytes(chunk.try_into().unwrap()), 10))
+            .collect::<Vec<_>>()
+            .join(" "),
+        MemoryDisplayType::Text => bytes
+            .iter()
+            .map(|&byte| {
+                if byte.is_ascii_graphic() || byte == b' ' {
+                    (byte as char).to_string()
+                } else {
+                    ".".to_owned()
+                }
+            })
             .collect::<Vec<_>>()
             .join(" "),
     }
@@ -18365,6 +18465,33 @@ mod tests {
         let elements = auto_structure_elements(&bytes, 4);
         assert_eq!(elements[0].value_type, StructureElementType::Pointer);
         assert_eq!(elements[0].value_type.width(4), 4);
+    }
+
+    #[test]
+    fn structure_and_memory_view_supports_text() {
+        let text_bytes = b"Hello\x00World";
+        let display = format_memory_display(text_bytes, MemoryDisplayType::Text);
+        assert_eq!(display, "H e l l o . W o r l d");
+
+        let val_str = format_structure_value(b"PlayerOne\0extra", StructureElementType::Text);
+        assert_eq!(val_str, "\"PlayerOne\"");
+
+        let mut element = StructureElement {
+            offset: 0x10,
+            value_type: StructureElementType::Text,
+            name: "player_name".to_owned(),
+            text_len: 32,
+            edit_text: String::new(),
+            detected_class: None,
+            expanded: false,
+            child_elements: Vec::new(),
+        };
+        assert_eq!(element.width(8), 32);
+        assert_eq!(ce_element_description(&element), "+0010 - Text[32] (player_name)");
+
+        element.text_len = 8;
+        assert_eq!(element.width(4), 8);
+        assert_eq!(ce_element_description(&element), "+0010 - Text[8] (player_name)");
     }
 
     #[test]
