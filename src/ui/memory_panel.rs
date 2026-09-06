@@ -166,6 +166,7 @@ struct PointerSpec {
 struct StablePointerCandidate {
     source_address: usize,
     expected_value: ScanValue,
+    expected_text: Option<String>,
     path: PointerPath,
     valid: Option<bool>,
     resolved_base: Option<usize>,
@@ -173,6 +174,8 @@ struct StablePointerCandidate {
     observed_value: Option<ScanValue>,
     live_value: Option<ScanValue>,
     filter_value: Option<ScanValue>,
+    observed_text: Option<String>,
+    live_text: Option<String>,
 }
 
 struct StablePointerJobResult {
@@ -213,6 +216,9 @@ struct StablePointerDialog {
     source_selector: String,
     value_type: ScanValueType,
     expected_values: HashMap<usize, ScanValue>,
+    expected_text_values: HashMap<usize, String>,
+    text_encoding: Option<TextEncoding>,
+    text_byte_len: usize,
     status: String,
     candidates: Vec<StablePointerCandidate>,
     selected: HashSet<usize>,
@@ -257,6 +263,8 @@ struct DeepPointerDialog {
     source_pid: u32,
     source_addresses: Vec<usize>,
     value_type: ScanValueType,
+    text_encoding: Option<TextEncoding>,
+    text_byte_len: usize,
     status: String,
     rx: Option<Receiver<DeepPointerJobResult>>,
     progress: Arc<AtomicUsize>,
@@ -309,6 +317,7 @@ fn expand_entity_slot_targets(
 struct DeepPointerResolvedRow {
     address: Option<usize>,
     value: Option<ScanValue>,
+    text_value: Option<String>,
     updated_at: Instant,
 }
 
@@ -414,7 +423,7 @@ enum MemoryViewKind {
     Structure,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MemoryDisplayType {
     ByteHex,
     ByteDecimal,
@@ -607,6 +616,8 @@ struct CodeAccessDialog {
     selected_indices: HashSet<usize>,
     selection_anchor: Option<usize>,
     value_type: ScanValueType,
+    text_encoding: Option<TextEncoding>,
+    text_byte_len: usize,
     values: HashMap<usize, String>,
     tracked_name: String,
     tracked_offset: String,
@@ -2843,7 +2854,9 @@ impl CrosshairApp {
         let (full_row_rect, mut response) =
             ui.allocate_exact_size(vec2(pane_width, 22.0), Sense::click());
         response = response.on_hover_cursor(egui::CursorIcon::Default);
-        if let Some(pid) = self.memory_panel.process_pid {
+        if self.memory_panel.text_encoding.is_none()
+            && let Some(pid) = self.memory_panel.process_pid
+        {
             let read_f32 = |addr: usize| -> Option<f32> {
                 let bytes = crate::process_memory::read_memory_bytes(pid, addr, 4).ok()?;
                 Some(f32::from_le_bytes(bytes.try_into().ok()?))
@@ -4040,7 +4053,7 @@ impl CrosshairApp {
                                         address: saved.address,
                                         tracked_base: None,
                                         kind: MemoryViewKind::Bytes,
-                                        display_type: MemoryDisplayType::Float,
+                                        display_type: memory_display_type_for_saved(&saved),
                                         relative_addresses: false,
                                         pinned: true,
                                         elements: default_structure_elements(),
@@ -4336,7 +4349,7 @@ impl CrosshairApp {
                                         address: saved.address,
                                         tracked_base: None,
                                         kind: MemoryViewKind::Bytes,
-                                        display_type: MemoryDisplayType::Float,
+                                        display_type: memory_display_type_for_saved(&saved),
                                         relative_addresses: false,
                                         pinned: true,
                                         elements: default_structure_elements(),
@@ -6453,6 +6466,25 @@ impl CrosshairApp {
         .ok()
         .and_then(|mut lines| lines.pop())
         .map(|(_, _, instruction)| instruction);
+        let text_encoding = self
+            .memory_panel
+            .selected_saved
+            .iter()
+            .find_map(|&idx| self.memory_panel.saved.get(idx).and_then(|s| s.text_encoding))
+            .or(self.memory_panel.text_encoding);
+        let text_byte_len = self
+            .memory_panel
+            .selected_saved
+            .iter()
+            .find_map(|&idx| {
+                self.memory_panel
+                    .saved
+                    .get(idx)
+                    .filter(|s| s.text_encoding.is_some())
+                    .map(|s| s.text_byte_len)
+            })
+            .unwrap_or(32)
+            .max(1);
         if current_instruction
             .as_ref()
             .is_none_or(|current| !is_instruction_compatible(&entry.instruction, current))
@@ -6474,6 +6506,8 @@ impl CrosshairApp {
                 selected_indices: HashSet::new(),
                 selection_anchor: None,
                 value_type: self.memory_panel.value_type,
+                text_encoding,
+                text_byte_len,
                 values: HashMap::new(),
                 tracked_name: String::new(),
                 tracked_offset: "0".to_owned(),
@@ -6516,6 +6550,8 @@ impl CrosshairApp {
             selected_indices: HashSet::new(),
             selection_anchor: None,
             value_type: self.memory_panel.value_type,
+            text_encoding,
+            text_byte_len,
             values: HashMap::new(),
             tracked_name: String::new(),
             tracked_offset: "0".to_owned(),
@@ -6548,6 +6584,9 @@ impl CrosshairApp {
                 source_selector: String::new(),
                 value_type: saved.value_type,
                 expected_values: HashMap::new(),
+                expected_text_values: HashMap::new(),
+                text_encoding: saved.text_encoding,
+                text_byte_len: saved.text_byte_len,
                 status,
                 candidates: Vec::new(),
                 selected: HashSet::new(),
@@ -6599,37 +6638,54 @@ impl CrosshairApp {
             .find(|w| w.process_id == pid || w.selector == source_selector)
             .map(|w| w.title.clone())
             .unwrap_or_default();
-        let mut targets = if self.memory_panel.selected_saved.len() > 1 {
-            self.memory_panel
-                .selected_saved
-                .iter()
-                .filter_map(|&index| self.memory_panel.saved.get(index))
-                .filter(|entry| {
-                    entry.text_encoding.is_none() && entry.value_type == saved.value_type
-                })
-                .map(|entry| {
+        let is_text = saved.text_encoding.is_some();
+        let mut text_targets = Vec::new();
+        let mut numeric_targets = Vec::new();
+        if self.memory_panel.selected_saved.len() > 1 {
+            for &index in &self.memory_panel.selected_saved {
+                let Some(entry) = self.memory_panel.saved.get(index) else { continue; };
+                if is_text {
+                    if entry.text_encoding == saved.text_encoding {
+                        let text_val = entry.current_text.clone().or_else(|| {
+                            saved.text_encoding.and_then(|enc| read_text_memory(pid, entry.address, entry.text_byte_len.max(16), enc).ok())
+                        }).unwrap_or_default();
+                        text_targets.push((entry.address, text_val));
+                    }
+                } else if entry.text_encoding.is_none() && entry.value_type == saved.value_type {
                     let val = entry.current.or_else(|| {
                         read_scan_value(pid, entry.address, entry.value_type).ok()
                     }).unwrap_or(ScanValue::I64(0));
-                    (entry.address, val)
-                })
-                .collect::<Vec<_>>()
+                    numeric_targets.push((entry.address, val));
+                }
+            }
+        } else if is_text {
+            let text_val = saved.current_text.clone().or_else(|| {
+                saved.text_encoding.and_then(|enc| read_text_memory(pid, saved.address, saved.text_byte_len.max(16), enc).ok())
+            }).unwrap_or_default();
+            text_targets.push((saved.address, text_val));
         } else {
             let val = saved.current.or_else(|| {
                 read_scan_value(pid, saved.address, saved.value_type).ok()
             }).unwrap_or(ScanValue::I64(0));
-            vec![(saved.address, val)]
-        };
-        targets.sort_unstable_by_key(|(address, _)| *address);
-        targets.dedup_by_key(|(address, _)| *address);
-        if targets.is_empty() {
-            targets.push((saved.address, ScanValue::I64(0)));
+            numeric_targets.push((saved.address, val));
         }
-        let source_addresses = targets
-            .iter()
-            .map(|(address, _)| *address)
-            .collect::<Vec<_>>();
-        let expected_values = targets.iter().copied().collect::<HashMap<_, _>>();
+        let source_addresses = if is_text {
+            text_targets.sort_unstable_by_key(|(address, _)| *address);
+            text_targets.dedup_by_key(|(address, _)| *address);
+            if text_targets.is_empty() {
+                text_targets.push((saved.address, String::new()));
+            }
+            text_targets.iter().map(|(address, _)| *address).collect::<Vec<_>>()
+        } else {
+            numeric_targets.sort_unstable_by_key(|(address, _)| *address);
+            numeric_targets.dedup_by_key(|(address, _)| *address);
+            if numeric_targets.is_empty() {
+                numeric_targets.push((saved.address, ScanValue::I64(0)));
+            }
+            numeric_targets.iter().map(|(address, _)| *address).collect::<Vec<_>>()
+        };
+        let expected_values = numeric_targets.into_iter().collect::<HashMap<_, _>>();
+        let expected_text_values = text_targets.into_iter().collect::<HashMap<_, _>>();
         let progress = Arc::new(AtomicUsize::new(0));
         let limits = self.pointer_scan_limits();
         let modules = match process_modules(pid) {
@@ -6646,6 +6702,9 @@ impl CrosshairApp {
                     source_selector: source_selector.clone(),
                     value_type: saved.value_type,
                     expected_values,
+                    expected_text_values,
+                    text_encoding: saved.text_encoding,
+                    text_byte_len: saved.text_byte_len,
                     status,
                     candidates: Vec::new(),
                     selected: HashSet::new(),
@@ -6686,7 +6745,7 @@ impl CrosshairApp {
             let _ = tx.send(StablePointerJobResult { pid, result });
         });
         self.memory_panel.stable_pointer_dialog = Some(StablePointerDialog {
-            source_addresses,
+            source_addresses: source_addresses.clone(),
             source_pid: pid,
             source_process_name,
             source_process_path,
@@ -6694,10 +6753,13 @@ impl CrosshairApp {
             source_selector,
             value_type: saved.value_type,
             expected_values,
-            status: if targets.len() == 1 {
-                format!("Scanning pointer paths for target 0x{:X}…", targets[0].0)
+            expected_text_values,
+            text_encoding: saved.text_encoding,
+            text_byte_len: saved.text_byte_len,
+            status: if source_addresses.len() == 1 {
+                format!("Scanning pointer paths for target 0x{:X}…", source_addresses[0])
             } else {
-                format!("Scanning pointer paths for {} target(s)…", targets.len())
+                format!("Scanning pointer paths for {} target(s)…", source_addresses.len())
             },
             candidates: Vec::new(),
             selected: HashSet::new(),
@@ -6751,6 +6813,8 @@ impl CrosshairApp {
                         source_pid: pid,
                         source_addresses,
                         value_type: saved.value_type,
+                        text_encoding: saved.text_encoding,
+                        text_byte_len: saved.text_byte_len,
                         status,
                         rx: None,
                         progress: Arc::new(AtomicUsize::new(0)),
@@ -6872,6 +6936,8 @@ impl CrosshairApp {
             });
             let dialog = self.memory_panel.deep_pointer_dialog.as_mut().unwrap();
             dialog.value_type = saved.value_type;
+            dialog.text_encoding = saved.text_encoding;
+            dialog.text_byte_len = saved.text_byte_len;
             dialog.status =
                 format!("Capturing map B and comparing {target_count} address(es) with map A...");
             dialog.rx = Some(rx);
@@ -6900,6 +6966,8 @@ impl CrosshairApp {
                 source_pid: pid,
                 source_addresses,
                 value_type: saved.value_type,
+                text_encoding: saved.text_encoding,
+                text_byte_len: saved.text_byte_len,
                 status: "Capturing pointer map A...".to_owned(),
                 rx: Some(rx),
                 progress,
@@ -9016,16 +9084,20 @@ impl CrosshairApp {
                         dialog.candidates = paths_by_target
                             .into_iter()
                             .flat_map(|(source_address, paths)| {
-                                let expected_value = dialog.expected_values[&source_address];
+                                let expected_value = dialog.expected_values.get(&source_address).copied().unwrap_or(ScanValue::I32(0));
+                                let expected_text = dialog.expected_text_values.get(&source_address).cloned();
                                 paths.into_iter().map(move |path| StablePointerCandidate {
                                     source_address,
                                     expected_value,
+                                    expected_text: expected_text.clone(),
                                     path,
                                     valid: None,
                                     resolved_base: None,
                                     resolved_address: None,
                                     observed_value: None,
+                                    observed_text: None,
                                     live_value: None,
+                                    live_text: None,
                                     filter_value: None,
                                 })
                             })
@@ -9256,7 +9328,12 @@ impl CrosshairApp {
                     }
                 }
                 let can_set_base = !dialog.candidates.is_empty()
-                    && dialog.candidates.iter().any(|c| c.live_value.is_some() || c.observed_value.is_some());
+                    && dialog.candidates.iter().any(|c| {
+                        c.live_value.is_some()
+                            || c.observed_value.is_some()
+                            || c.live_text.is_some()
+                            || c.observed_text.is_some()
+                    });
                 if ui
                     .add_enabled(
                         can_set_base && dialog.validation_rx.is_none() && dialog.filter_rx.is_none(),
@@ -9270,15 +9347,28 @@ impl CrosshairApp {
                 {
                     let mut updated = 0;
                     for candidate in &mut dialog.candidates {
-                        if let Some(live) = candidate.live_value.or(candidate.observed_value) {
+                        if let Some(_enc) = dialog.text_encoding {
+                            if let Some(live) = candidate.live_text.as_ref().or(candidate.observed_text.as_ref()) {
+                                candidate.expected_text = Some(live.clone());
+                                updated += 1;
+                            }
+                        } else if let Some(live) = candidate.live_value.or(candidate.observed_value) {
                             candidate.expected_value = live;
                             updated += 1;
                         }
                     }
                     if let Some(pid) = self.memory_panel.process_pid {
-                        for (addr, expected) in &mut dialog.expected_values {
-                            if let Ok(live) = read_scan_value(pid, *addr, dialog.value_type) {
-                                *expected = live;
+                        if let Some(enc) = dialog.text_encoding {
+                            for (addr, expected) in &mut dialog.expected_text_values {
+                                if let Ok(live) = read_text_memory(pid, *addr, dialog.text_byte_len.max(1), enc) {
+                                    *expected = live;
+                                }
+                            }
+                        } else {
+                            for (addr, expected) in &mut dialog.expected_values {
+                                if let Ok(live) = read_scan_value(pid, *addr, dialog.value_type) {
+                                    *expected = live;
+                                }
                             }
                         }
                     }
@@ -9442,7 +9532,9 @@ impl CrosshairApp {
                                     }
                                 }
                                 StablePointerStatusFilter::ValueChangedOnly => {
-                                    if candidate.valid.is_some() || candidate.observed_value.is_none() {
+                                    if candidate.valid.is_some()
+                                        || (candidate.observed_value.is_none() && candidate.observed_text.is_none())
+                                    {
                                         return None;
                                     }
                                 }
@@ -9472,25 +9564,41 @@ impl CrosshairApp {
                             }
 
                             if !filter_val.is_empty() {
-                                let observed_match = candidate.observed_value.is_some_and(|v| {
-                                    editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
-                                        || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
-                                });
-                                let live_match = candidate.live_value.is_some_and(|v| {
-                                    editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
-                                        || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
-                                });
-                                let has_evaluated = candidate.observed_value.is_some() || candidate.live_value.is_some();
-                                let expected_match = !has_evaluated && (
-                                    editable_scan_value(candidate.expected_value, false)
-                                        .to_ascii_lowercase()
-                                        .contains(&filter_val)
-                                    || format_scan_value(candidate.expected_value, true)
-                                        .to_ascii_lowercase()
-                                        .contains(&filter_val)
-                                );
-                                if !(observed_match || live_match || expected_match) {
-                                    return None;
+                                if let Some(_enc) = dialog.text_encoding {
+                                    let observed_match = candidate.observed_text.as_deref().is_some_and(|t| {
+                                        t.to_ascii_lowercase().contains(&filter_val)
+                                    });
+                                    let live_match = candidate.live_text.as_deref().is_some_and(|t| {
+                                        t.to_ascii_lowercase().contains(&filter_val)
+                                    });
+                                    let has_evaluated = candidate.observed_text.is_some() || candidate.live_text.is_some();
+                                    let expected_match = !has_evaluated && candidate.expected_text.as_deref().is_some_and(|t| {
+                                        t.to_ascii_lowercase().contains(&filter_val)
+                                    });
+                                    if !(observed_match || live_match || expected_match) {
+                                        return None;
+                                    }
+                                } else {
+                                    let observed_match = candidate.observed_value.is_some_and(|v| {
+                                        editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
+                                            || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
+                                    });
+                                    let live_match = candidate.live_value.is_some_and(|v| {
+                                        editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
+                                            || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
+                                    });
+                                    let has_evaluated = candidate.observed_value.is_some() || candidate.live_value.is_some();
+                                    let expected_match = !has_evaluated && (
+                                        editable_scan_value(candidate.expected_value, false)
+                                            .to_ascii_lowercase()
+                                            .contains(&filter_val)
+                                        || format_scan_value(candidate.expected_value, true)
+                                            .to_ascii_lowercase()
+                                            .contains(&filter_val)
+                                    );
+                                    if !(observed_match || live_match || expected_match) {
+                                        return None;
+                                    }
                                 }
                             }
 
@@ -9534,8 +9642,13 @@ impl CrosshairApp {
                                     }
                                 }
                                 if let Some(address) = candidate.resolved_address {
-                                    candidate.live_value =
-                                        read_scan_value(pid, address, dialog.value_type).ok();
+                                    if let Some(enc) = dialog.text_encoding {
+                                        candidate.live_text =
+                                            read_text_memory(pid, address, dialog.text_byte_len.max(1), enc).ok();
+                                    } else {
+                                        candidate.live_value =
+                                            read_scan_value(pid, address, dialog.value_type).ok();
+                                    }
                                 }
                             }
                         }
@@ -9556,7 +9669,7 @@ impl CrosshairApp {
                         let state = match candidate.valid {
                             Some(true) => "VERIFIED",
                             Some(false) => "BROKEN",
-                            None if candidate.observed_value.is_some() => "VALUE CHANGED",
+                            None if candidate.observed_value.is_some() || candidate.observed_text.is_some() => "VALUE CHANGED",
                             None => "NOT CHECKED",
                         };
                         let offsets = candidate
@@ -9573,14 +9686,22 @@ impl CrosshairApp {
                         let address = candidate
                             .resolved_address
                             .map_or_else(|| "—".to_owned(), format_prefixed_memory_address);
-                        let value = candidate.observed_value.map_or_else(
-                            || "—".to_owned(),
-                            |value| editable_scan_value(value, false),
-                        );
-                        let current = candidate.live_value.map_or_else(
-                            || "—".to_owned(),
-                            |value| editable_scan_value(value, false),
-                        );
+                        let value = if dialog.text_encoding.is_some() {
+                            candidate.observed_text.clone().unwrap_or_else(|| "—".to_owned())
+                        } else {
+                            candidate.observed_value.map_or_else(
+                                || "—".to_owned(),
+                                |value| editable_scan_value(value, false),
+                            )
+                        };
+                        let current = if dialog.text_encoding.is_some() {
+                            candidate.live_text.clone().unwrap_or_else(|| "—".to_owned())
+                        } else {
+                            candidate.live_value.map_or_else(
+                                || "—".to_owned(),
+                                |value| editable_scan_value(value, false),
+                            )
+                        };
                         let row_rect = egui::Rect::from_min_size(
                             ui.next_widget_position(),
                             vec2(ui.available_width(), 24.0),
@@ -9900,13 +10021,23 @@ impl CrosshairApp {
                     offsets: path.offsets,
                 };
                 if let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) {
+                    let current = if dialog.text_encoding.is_none() {
+                        read_scan_value(pid, address, dialog.display_type).ok()
+                    } else {
+                        None
+                    };
+                    let current_text = if let Some(enc) = dialog.text_encoding {
+                        read_text_memory(pid, address, dialog.text_byte_len.max(1), enc).ok()
+                    } else {
+                        None
+                    };
                     self.memory_panel.saved.push(SavedMemoryAddress {
                         address,
                         value_type: dialog.display_type,
-                        current: read_scan_value(pid, address, dialog.display_type).ok(),
-                        text_encoding: None,
-                        text_byte_len: 0,
-                        current_text: None,
+                        current,
+                        text_encoding: dialog.text_encoding,
+                        text_byte_len: if dialog.text_encoding.is_some() { dialog.text_byte_len.max(1) } else { 0 },
+                        current_text,
                         description: format!("{}+{:X}", path.module, path.module_offset),
                         group: String::new(),
                         hexadecimal: false,
@@ -10159,16 +10290,21 @@ impl CrosshairApp {
                             resolve_memory_address(pid, base, Some(&pointer)).ok()
                         }),
                     };
-                    let value = process_pid
-                        .zip(resolved)
-                        .and_then(|(pid, address)| {
-                            read_scan_value(pid, address, dialog.display_type).ok()
-                        });
+                    let (value, text_value) = if let Some((pid, address)) = process_pid.zip(resolved) {
+                        if let Some(enc) = dialog.text_encoding {
+                            (None, read_text_memory(pid, address, dialog.text_byte_len.max(1), enc).ok())
+                        } else {
+                            (read_scan_value(pid, address, dialog.display_type).ok(), None)
+                        }
+                    } else {
+                        (None, None)
+                    };
                     dialog.resolved_rows.insert(
                         index,
                         DeepPointerResolvedRow {
                             address: resolved,
                             value,
+                            text_value,
                             updated_at: Instant::now(),
                         },
                     );
@@ -10177,14 +10313,24 @@ impl CrosshairApp {
                     dialog.resolved_rows.get(&index).and_then(|row| row.address);
                 let address_text = resolved
                     .map_or_else(|| "-".to_owned(), format_prefixed_memory_address);
-                let value_text = dialog
-                    .resolved_rows
-                    .get(&index)
-                    .and_then(|row| row.value)
-                    .map_or_else(
-                        || "-".to_owned(),
-                        |value| editable_scan_value(value, false),
-                    );
+                let value_text = if dialog.text_encoding.is_some() {
+                    dialog
+                        .resolved_rows
+                        .get(&index)
+                        .and_then(|row| row.text_value.as_ref())
+                        .map(|s| s.as_str())
+                        .unwrap_or("-")
+                        .to_owned()
+                } else {
+                    dialog
+                        .resolved_rows
+                        .get(&index)
+                        .and_then(|row| row.value)
+                        .map_or_else(
+                            || "-".to_owned(),
+                            |value| editable_scan_value(value, false),
+                        )
+                };
                 let response = ui
                     .interact(
                         row_rect,
@@ -10288,16 +10434,33 @@ impl CrosshairApp {
                         ScanValueType::F64,
                     ] {
                         if ui
-                            .selectable_value(
-                                &mut dialog.display_type,
-                                value_type,
+                            .selectable_label(
+                                dialog.text_encoding.is_none() && dialog.display_type == value_type,
                                 memory_type_label(value_type),
                             )
                             .clicked()
                         {
+                            dialog.display_type = value_type;
+                            dialog.text_encoding = None;
                             dialog.resolved_rows.clear();
                             ui.close();
                         }
+                    }
+                    if ui
+                        .selectable_label(dialog.text_encoding == Some(TextEncoding::Utf8), "Text (UTF-8)")
+                        .clicked()
+                    {
+                        dialog.text_encoding = Some(TextEncoding::Utf8);
+                        dialog.resolved_rows.clear();
+                        ui.close();
+                    }
+                    if ui
+                        .selectable_label(dialog.text_encoding == Some(TextEncoding::Utf16), "Text (UTF-16)")
+                        .clicked()
+                    {
+                        dialog.text_encoding = Some(TextEncoding::Utf16);
+                        dialog.resolved_rows.clear();
+                        ui.close();
                     }
                 });
             }
@@ -10311,6 +10474,8 @@ impl CrosshairApp {
         };
         let mut candidates = dialog.candidates.clone();
         let value_type = dialog.value_type;
+        let text_encoding = dialog.text_encoding;
+        let text_byte_len = dialog.text_byte_len;
         let (tx, rx) = mpsc::channel();
         dialog.validation_rx = Some(rx);
         dialog.status = format!(
@@ -10334,6 +10499,7 @@ impl CrosshairApp {
             let _ = crate::process_memory::with_cached_read_process(pid, |process| {
                 let mut ptr_buf = [0u8; 8];
                 let mut val_buf = [0u8; 8];
+                let mut text_buf = vec![0u8; text_byte_len.max(1)];
 
                 for candidate in &mut candidates {
                     let module_lower = candidate.path.module.to_ascii_lowercase();
@@ -10342,7 +10508,9 @@ impl CrosshairApp {
                         candidate.resolved_base = None;
                         candidate.resolved_address = None;
                         candidate.observed_value = None;
+                        candidate.observed_text = None;
                         candidate.live_value = None;
+                        candidate.live_text = None;
                         candidate.filter_value = None;
                         broken += 1;
                         continue;
@@ -10376,37 +10544,74 @@ impl CrosshairApp {
                         candidate.valid = Some(false);
                         candidate.resolved_address = None;
                         candidate.observed_value = None;
+                        candidate.observed_text = None;
                         candidate.live_value = None;
+                        candidate.live_text = None;
                         candidate.filter_value = None;
                         broken += 1;
                         continue;
                     }
                     candidate.resolved_address = Some(curr_addr);
-                    if process.read(curr_addr, &mut val_buf[..val_width]).is_err() {
-                        candidate.valid = Some(false);
-                        candidate.observed_value = None;
-                        candidate.live_value = None;
-                        candidate.filter_value = None;
-                        broken += 1;
-                        continue;
-                    }
-                    let Some(observed) = value_type.decode(&val_buf[..val_width]) else {
-                        candidate.valid = Some(false);
-                        candidate.observed_value = None;
-                        candidate.live_value = None;
-                        candidate.filter_value = None;
-                        broken += 1;
-                        continue;
-                    };
-                    candidate.observed_value = Some(observed);
-                    candidate.live_value = Some(observed);
-                    candidate.filter_value = Some(observed);
-                    if observed == candidate.expected_value {
-                        candidate.valid = Some(true);
-                        verified += 1;
+                    if let Some(enc) = text_encoding {
+                        if process.read(curr_addr, &mut text_buf).is_err() {
+                            candidate.valid = Some(false);
+                            candidate.observed_text = None;
+                            candidate.live_text = None;
+                            candidate.filter_value = None;
+                            broken += 1;
+                            continue;
+                        }
+                        let text = match enc {
+                            TextEncoding::Utf8 => {
+                                let end = text_buf.iter().position(|b| *b == 0).unwrap_or(text_buf.len());
+                                String::from_utf8_lossy(&text_buf[..end]).into_owned()
+                            }
+                            TextEncoding::Utf16 => {
+                                let units = text_buf
+                                    .chunks_exact(2)
+                                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                                    .take_while(|unit| *unit != 0)
+                                    .collect::<Vec<_>>();
+                                String::from_utf16_lossy(&units)
+                            }
+                        };
+                        let is_match = candidate.expected_text.as_deref() == Some(&text);
+                        candidate.observed_text = Some(text.clone());
+                        candidate.live_text = Some(text);
+                        if is_match {
+                            candidate.valid = Some(true);
+                            verified += 1;
+                        } else {
+                            candidate.valid = None;
+                            changed += 1;
+                        }
                     } else {
-                        candidate.valid = None;
-                        changed += 1;
+                        if process.read(curr_addr, &mut val_buf[..val_width]).is_err() {
+                            candidate.valid = Some(false);
+                            candidate.observed_value = None;
+                            candidate.live_value = None;
+                            candidate.filter_value = None;
+                            broken += 1;
+                            continue;
+                        }
+                        let Some(observed) = value_type.decode(&val_buf[..val_width]) else {
+                            candidate.valid = Some(false);
+                            candidate.observed_value = None;
+                            candidate.live_value = None;
+                            candidate.filter_value = None;
+                            broken += 1;
+                            continue;
+                        };
+                        candidate.observed_value = Some(observed);
+                        candidate.live_value = Some(observed);
+                        candidate.filter_value = Some(observed);
+                        if observed == candidate.expected_value {
+                            candidate.valid = Some(true);
+                            verified += 1;
+                        } else {
+                            candidate.valid = None;
+                            changed += 1;
+                        }
                     }
                 }
                 Ok(())
@@ -10414,7 +10619,7 @@ impl CrosshairApp {
 
             candidates.sort_by_key(|candidate| match candidate.valid {
                 Some(true) => 0,
-                None if candidate.observed_value.is_some() => 1,
+                None if candidate.observed_value.is_some() || candidate.observed_text.is_some() => 1,
                 _ => 2,
             });
 
@@ -10479,9 +10684,20 @@ impl CrosshairApp {
                 .resolved_address
                 .or_else(|| resolve_memory_address(pid, base, Some(&pointer)).ok())
                 .unwrap_or(candidate.source_address);
-            let current = candidate
-                .live_value
-                .or_else(|| read_scan_value(pid, address, dialog.value_type).ok());
+            let current = if dialog.text_encoding.is_none() {
+                candidate
+                    .live_value
+                    .or_else(|| read_scan_value(pid, address, dialog.value_type).ok())
+            } else {
+                None
+            };
+            let current_text = if let Some(enc) = dialog.text_encoding {
+                candidate.live_text.clone().or_else(|| {
+                    read_text_memory(pid, address, dialog.text_byte_len.max(1), enc).ok()
+                })
+            } else {
+                None
+            };
             let desc = format!(
                 "{}+{:X}",
                 candidate.path.module, candidate.path.module_offset
@@ -10490,9 +10706,9 @@ impl CrosshairApp {
                 address,
                 value_type: dialog.value_type,
                 current,
-                text_encoding: None,
-                text_byte_len: 0,
-                current_text: None,
+                text_encoding: dialog.text_encoding,
+                text_byte_len: if dialog.text_encoding.is_some() { dialog.text_byte_len.max(1) } else { 0 },
+                current_text,
                 description: desc,
                 group: String::new(),
                 hexadecimal: false,
@@ -11909,7 +12125,11 @@ impl CrosshairApp {
             }
             if let Some(pid) = self.memory_panel.process_pid {
                 for (data_address, _) in &dialog.addresses {
-                    if let Ok(value) = read_scan_value(pid, *data_address, dialog.value_type) {
+                    if let Some(enc) = dialog.text_encoding {
+                        if let Ok(text) = read_text_memory(pid, *data_address, dialog.text_byte_len.max(1), enc) {
+                            dialog.values.insert(*data_address, text);
+                        }
+                    } else if let Ok(value) = read_scan_value(pid, *data_address, dialog.value_type) {
                         dialog.values.insert(
                             *data_address,
                             format_scan_value(value, self.memory_panel.hex),
@@ -12050,7 +12270,7 @@ impl CrosshairApp {
             let total_count = addresses.len();
             let mut newly_added_count = 0;
             for address in &addresses {
-                if self.add_code_access_address(*address, dialog.value_type) {
+                if self.add_code_access_address(*address, dialog.value_type, dialog.text_encoding, dialog.text_byte_len) {
                     newly_added_count += 1;
                 }
             }
@@ -12072,7 +12292,11 @@ impl CrosshairApp {
                 address,
                 tracked_base: Some(address),
                 kind: MemoryViewKind::Bytes,
-                display_type: MemoryDisplayType::Float,
+                display_type: if dialog.text_encoding.is_some() {
+                    MemoryDisplayType::ByteHex
+                } else {
+                    memory_display_type_for_scan_type(dialog.value_type)
+                },
                 relative_addresses: false,
                 pinned: true,
                 elements: default_structure_elements(),
@@ -12246,11 +12470,16 @@ impl CrosshairApp {
                     .map(|(address, _)| *address);
             }
         });
-        let previous_type = dialog.value_type;
+        let previous_type = (dialog.value_type, dialog.text_encoding);
         ui.horizontal(|ui| {
             ui.label("Display type");
+            let current_label = match dialog.text_encoding {
+                Some(TextEncoding::Utf8) => "Text (UTF-8)",
+                Some(TextEncoding::Utf16) => "Text (UTF-16)",
+                None => memory_type_label(dialog.value_type),
+            };
             egui::ComboBox::from_id_salt("code-access-value-type")
-                .selected_text(memory_type_label(dialog.value_type))
+                .selected_text(current_label)
                 .show_ui(ui, |ui| {
                     for value_type in [
                         ScanValueType::I8,
@@ -12260,15 +12489,32 @@ impl CrosshairApp {
                         ScanValueType::F32,
                         ScanValueType::F64,
                     ] {
-                        ui.selectable_value(
-                            &mut dialog.value_type,
-                            value_type,
-                            memory_type_label(value_type),
-                        );
+                        if ui
+                            .selectable_label(
+                                dialog.text_encoding.is_none() && dialog.value_type == value_type,
+                                memory_type_label(value_type),
+                            )
+                            .clicked()
+                        {
+                            dialog.value_type = value_type;
+                            dialog.text_encoding = None;
+                        }
+                    }
+                    if ui
+                        .selectable_label(dialog.text_encoding == Some(TextEncoding::Utf8), "Text (UTF-8)")
+                        .clicked()
+                    {
+                        dialog.text_encoding = Some(TextEncoding::Utf8);
+                    }
+                    if ui
+                        .selectable_label(dialog.text_encoding == Some(TextEncoding::Utf16), "Text (UTF-16)")
+                        .clicked()
+                    {
+                        dialog.text_encoding = Some(TextEncoding::Utf16);
                     }
                 });
         });
-        if dialog.value_type != previous_type {
+        if (dialog.value_type, dialog.text_encoding) != previous_type {
             refresh_values = true;
         }
         ui.horizontal_wrapped(|ui| {
@@ -12381,6 +12627,9 @@ impl CrosshairApp {
             if !dialog.value_filter_enabled || (filter_min.is_none() && filter_max.is_none()) {
                 return true;
             }
+            if dialog.text_encoding.is_some() {
+                return true;
+            }
             let Some(value) = parse_code_access_number(displayed, dialog.value_type) else {
                 return false;
             };
@@ -12397,6 +12646,7 @@ impl CrosshairApp {
                     dialog.values.get(left).map(String::as_str),
                     dialog.values.get(right).map(String::as_str),
                     dialog.value_type,
+                    dialog.text_encoding.is_some(),
                     dialog.value_sort == 2,
                 )
             });
@@ -12579,7 +12829,11 @@ impl CrosshairApp {
         };
         dialog.values.clear();
         for &(address, _) in &dialog.addresses {
-            if let Ok(value) = read_scan_value(pid, address, dialog.value_type) {
+            if let Some(enc) = dialog.text_encoding {
+                if let Ok(text) = read_text_memory(pid, address, dialog.text_byte_len.max(1), enc) {
+                    dialog.values.insert(address, text);
+                }
+            } else if let Ok(value) = read_scan_value(pid, address, dialog.value_type) {
                 dialog
                     .values
                     .insert(address, format_scan_value(value, self.memory_panel.hex));
@@ -12588,12 +12842,18 @@ impl CrosshairApp {
     }
 
     #[cfg(windows)]
-    fn add_code_access_address(&mut self, address: usize, value_type: ScanValueType) -> bool {
+    fn add_code_access_address(
+        &mut self,
+        address: usize,
+        value_type: ScanValueType,
+        text_encoding: Option<TextEncoding>,
+        text_byte_len: usize,
+    ) -> bool {
         if self
             .memory_panel
             .saved
             .iter()
-            .any(|saved| saved.address == address && saved.value_type == value_type)
+            .any(|saved| saved.address == address && saved.value_type == value_type && saved.text_encoding == text_encoding)
         {
             self.memory_panel.status = format!(
                 "Address {} is already in Address list",
@@ -12601,18 +12861,32 @@ impl CrosshairApp {
             );
             return false;
         }
-        let current = self
-            .memory_panel
-            .process_pid
-            .and_then(|pid| read_scan_value(pid, address, value_type).ok());
+        let pid = self.memory_panel.process_pid;
+        let current = if text_encoding.is_none() {
+            pid.and_then(|pid| read_scan_value(pid, address, value_type).ok())
+        } else {
+            None
+        };
+        let current_text = if let Some(enc) = text_encoding {
+            pid.and_then(|pid| read_text_memory(pid, address, text_byte_len.max(1), enc).ok())
+        } else {
+            None
+        };
         self.memory_panel.saved.push(SavedMemoryAddress {
             address,
             value_type,
             current,
-            text_encoding: None,
-            text_byte_len: 0,
-            current_text: None,
-            description: String::new(),
+            text_encoding,
+            text_byte_len: if text_encoding.is_some() { text_byte_len.max(1) } else { 0 },
+            current_text,
+            description: if let Some(enc) = text_encoding {
+                match enc {
+                    TextEncoding::Utf16 => "Text (UTF-16)".to_owned(),
+                    TextEncoding::Utf8 => "Text (UTF-8)".to_owned(),
+                }
+            } else {
+                String::new()
+            },
             group: String::new(),
             hexadecimal: false,
             pointer: None,
@@ -12700,7 +12974,7 @@ impl CrosshairApp {
         }
         crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
         self.persist();
-        self.add_code_access_address(address, dialog.value_type);
+        self.add_code_access_address(address, dialog.value_type, dialog.text_encoding, dialog.text_byte_len);
         dialog.status = format!(
             "Tracked address @{name} saved - {}+{:X} @ {offset:+X}{}",
             code_module,
@@ -14525,16 +14799,29 @@ impl CrosshairApp {
         if action == MemoryScanAction::SetBase {
             let mut updated = 0;
             for candidate in &mut dialog.candidates {
-                if let Some(live) = candidate.live_value.or(candidate.observed_value) {
+                if let Some(_enc) = dialog.text_encoding {
+                    if let Some(live) = candidate.live_text.as_ref().or(candidate.observed_text.as_ref()) {
+                        candidate.expected_text = Some(live.clone());
+                        updated += 1;
+                    }
+                } else if let Some(live) = candidate.live_value.or(candidate.observed_value) {
                     candidate.expected_value = live;
                     candidate.filter_value = Some(live);
                     updated += 1;
                 }
             }
             if let Some(pid) = self.memory_panel.process_pid {
-                for (addr, expected) in &mut dialog.expected_values {
-                    if let Ok(live) = read_scan_value(pid, *addr, dialog.value_type) {
-                        *expected = live;
+                if let Some(enc) = dialog.text_encoding {
+                    for (addr, expected) in &mut dialog.expected_text_values {
+                        if let Ok(live) = read_text_memory(pid, *addr, dialog.text_byte_len.max(1), enc) {
+                            *expected = live;
+                        }
+                    }
+                } else {
+                    for (addr, expected) in &mut dialog.expected_values {
+                        if let Ok(live) = read_scan_value(pid, *addr, dialog.value_type) {
+                            *expected = live;
+                        }
                     }
                 }
             }
@@ -16034,9 +16321,28 @@ impl CrosshairApp {
                     if rendered_at.elapsed() > Duration::from_millis(100) {
                         continue;
                     }
-                    let end = end.min(self.memory_panel.candidates.len());
-                    if start < end {
-                        let mut visible = self.memory_panel.candidates[start..end].to_vec();
+                    let text_end = end.min(self.memory_panel.text_candidates.len());
+                    if start < text_end {
+                        let encoding = self.memory_panel.text_encoding.unwrap_or(TextEncoding::Utf8);
+                        for candidate in &mut self.memory_panel.text_candidates[start..text_end] {
+                            let base_len = match encoding {
+                                TextEncoding::Utf16 => candidate.current.encode_utf16().count() * 2,
+                                _ => candidate.current.len(),
+                            };
+                            let probe_len = base_len.max(if encoding == TextEncoding::Utf16 { 64 } else { 32 });
+                            if let Ok(new_text) = read_text_memory(pid, candidate.address, probe_len, encoding)
+                                .or_else(|_| read_text_memory(pid, candidate.address, base_len, encoding))
+                            {
+                                if new_text != candidate.current {
+                                    candidate.previous = candidate.current.clone();
+                                    candidate.current = new_text;
+                                }
+                            }
+                        }
+                    }
+                    let num_end = end.min(self.memory_panel.candidates.len());
+                    if start < num_end {
+                        let mut visible = self.memory_panel.candidates[start..num_end].to_vec();
                         if refresh_scan_candidates(pid, &mut visible, self.memory_panel.value_type)
                             .is_ok()
                         {
@@ -16841,8 +17147,18 @@ fn compare_code_access_values(
     left: Option<&str>,
     right: Option<&str>,
     value_type: ScanValueType,
+    is_text: bool,
     descending: bool,
 ) -> std::cmp::Ordering {
+    if is_text {
+        return match (left, right) {
+            (Some(left), Some(right)) if descending => right.cmp(left),
+            (Some(left), Some(right)) => left.cmp(right),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+    }
     match (
         left.and_then(|value| parse_code_access_number(value, value_type)),
         right.and_then(|value| parse_code_access_number(value, value_type)),
@@ -17230,6 +17546,25 @@ fn memory_display_scan_type(display_type: MemoryDisplayType) -> ScanValueType {
         MemoryDisplayType::I64Hex | MemoryDisplayType::I64Decimal => ScanValueType::I64,
         MemoryDisplayType::Float => ScanValueType::F32,
         MemoryDisplayType::Double => ScanValueType::F64,
+    }
+}
+
+fn memory_display_type_for_saved(saved: &SavedMemoryAddress) -> MemoryDisplayType {
+    if saved.text_encoding.is_some() {
+        MemoryDisplayType::ByteHex
+    } else {
+        memory_display_type_for_scan_type(saved.value_type)
+    }
+}
+
+fn memory_display_type_for_scan_type(value_type: ScanValueType) -> MemoryDisplayType {
+    match value_type {
+        ScanValueType::I8 => MemoryDisplayType::ByteDecimal,
+        ScanValueType::I16 => MemoryDisplayType::I16Decimal,
+        ScanValueType::I32 => MemoryDisplayType::I32Decimal,
+        ScanValueType::I64 => MemoryDisplayType::I64Decimal,
+        ScanValueType::F32 => MemoryDisplayType::Float,
+        ScanValueType::F64 => MemoryDisplayType::Double,
     }
 }
 
@@ -17971,11 +18306,11 @@ mod tests {
             Some(-1.0)
         );
         assert_eq!(
-            compare_code_access_values(Some("2"), Some("10"), ScanValueType::I32, false),
+            compare_code_access_values(Some("2"), Some("10"), ScanValueType::I32, false, false),
             std::cmp::Ordering::Less
         );
         assert_eq!(
-            compare_code_access_values(Some("2"), Some("10"), ScanValueType::I32, true),
+            compare_code_access_values(Some("2"), Some("10"), ScanValueType::I32, false, true),
             std::cmp::Ordering::Greater
         );
     }
@@ -18259,5 +18594,57 @@ mod tests {
         let p = pt.unwrap();
         assert!((p[0] - 960.0).abs() < 1.0);
         assert!((p[1] - 540.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_text_display_type_and_code_access_sort() {
+        let text_saved = SavedMemoryAddress {
+            address: 0x1234,
+            value_type: ScanValueType::I8,
+            current: None,
+            text_encoding: Some(TextEncoding::Utf8),
+            text_byte_len: 16,
+            current_text: Some("hero".to_owned()),
+            description: "Text (UTF-8)".to_owned(),
+            group: String::new(),
+            hexadecimal: false,
+            pointer: None,
+            frozen: None,
+            saved_to_library: false,
+            aob_sample_1: None,
+            aob_pattern: None,
+        };
+        assert_eq!(
+            memory_display_type_for_saved(&text_saved),
+            MemoryDisplayType::ByteHex
+        );
+
+        let float_saved = SavedMemoryAddress {
+            address: 0x5678,
+            value_type: ScanValueType::F32,
+            current: None,
+            text_encoding: None,
+            text_byte_len: 0,
+            current_text: None,
+            description: "Health".to_owned(),
+            group: String::new(),
+            hexadecimal: false,
+            pointer: None,
+            frozen: None,
+            saved_to_library: false,
+            aob_sample_1: None,
+            aob_pattern: None,
+        };
+        assert_eq!(
+            memory_display_type_for_saved(&float_saved),
+            MemoryDisplayType::Float
+        );
+
+        // Code access text comparisons
+        let cmp_asc = compare_code_access_values(Some("alpha"), Some("beta"), ScanValueType::I8, true, false);
+        assert_eq!(cmp_asc, std::cmp::Ordering::Less);
+
+        let cmp_desc = compare_code_access_values(Some("alpha"), Some("beta"), ScanValueType::I8, true, true);
+        assert_eq!(cmp_desc, std::cmp::Ordering::Greater);
     }
 }
