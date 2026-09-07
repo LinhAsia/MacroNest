@@ -683,6 +683,7 @@ struct CodeCompareDialog {
     pinned: bool,
 }
 
+#[derive(Clone)]
 struct ProximityFinderMatch {
     addr_a: usize,
     addr_b: usize,
@@ -690,6 +691,7 @@ struct ProximityFinderMatch {
     distance: usize,
 }
 
+#[derive(Clone)]
 struct ProximityFinderDialog {
     set_a_name: String,
     set_a: Vec<usize>,
@@ -697,6 +699,23 @@ struct ProximityFinderDialog {
     set_b: Vec<usize>,
     max_distance_str: String,
     status: String,
+    set_a_custom: String,
+    set_b_custom: String,
+}
+
+impl Default for ProximityFinderDialog {
+    fn default() -> Self {
+        Self {
+            set_a_name: "Group A (Coord)".to_string(),
+            set_a: Vec::new(),
+            set_b_name: "Group B (Stats)".to_string(),
+            set_b: Vec::new(),
+            max_distance_str: "0x1000".to_string(),
+            status: String::new(),
+            set_a_custom: String::new(),
+            set_b_custom: String::new(),
+        }
+    }
 }
 
 
@@ -930,7 +949,8 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     code_compare_dialog: Option<CodeCompareDialog>,
     aob_compare_dialog: Option<AobCompareDialog>,
-    proximity_finder_dialog: Option<ProximityFinderDialog>,
+    pub(super) show_proximity_finder: bool,
+    proximity_finder_dialog: ProximityFinderDialog,
     last_refresh: Instant,
     last_saved_refresh: Instant,
     visible_scan_ranges: [Option<(usize, usize, Instant)>; 2],
@@ -1056,7 +1076,8 @@ impl Default for MemoryPanelState {
             #[cfg(windows)]
             code_compare_dialog: None,
             aob_compare_dialog: None,
-            proximity_finder_dialog: None,
+            show_proximity_finder: false,
+            proximity_finder_dialog: ProximityFinderDialog::default(),
             last_refresh: Instant::now(),
             last_saved_refresh: Instant::now(),
             visible_scan_ranges: [None, None],
@@ -1850,7 +1871,7 @@ impl CrosshairApp {
                                 }
                             ));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.small_button(self.tr("Add ↓", "Thêm ↓")).clicked() {
+                                if ui.small_button(self.tr("Add +", "Thêm +")).clicked() {
                                     self.add_selected_memory_results();
                                 }
                             });
@@ -3103,7 +3124,7 @@ impl CrosshairApp {
                     ui.label(RichText::new(self.tr("Scan results", "Scan results")).strong());
                     ui.label(result_count.to_string());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button(self.tr("Add ↓", "Thêm ↓")).clicked() {
+                        if ui.small_button(self.tr("Add +", "Thêm +")).clicked() {
                             self.add_selected_memory_results();
                         }
                     });
@@ -3251,7 +3272,7 @@ impl CrosshairApp {
                             .max(self.memory_panel.text_candidates.len())
                     ));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button(self.tr("Add ↓", "Add ↓")).clicked() {
+                        if ui.small_button(self.tr("Add +", "Add +")).clicked() {
                             self.add_selected_memory_results();
                         }
                     });
@@ -3460,7 +3481,7 @@ impl CrosshairApp {
                                 ui.close();
                             }
                             ui.menu_button(
-                                self.tr("AOB Actions ⏵", "Thao tác AOB ⏵"),
+                                self.tr("AOB Actions >", "Thao tác AOB >"),
                                 |ui| {
                                     if ui.button(self.tr("Copy AOB (32 bytes)", "Sao chép AOB (32 byte)")).clicked() {
                                         if let Some(pid) = self.memory_panel.process_pid {
@@ -3513,7 +3534,7 @@ impl CrosshairApp {
                                 },
                             );
                             ui.menu_button(
-                                self.tr("Object Proximity ⏵", "So sánh cụm Object ⏵"),
+                                self.tr("Object Proximity >", "So sánh cụm Object >"),
                                 |ui| {
                                     if ui.button(self.tr("Set as Group A (e.g. Location)", "Gán vào Nhóm A (ví dụ Tọa độ)")).clicked() {
                                         let addrs = self.selected_memory_result_addresses();
@@ -4284,7 +4305,7 @@ impl CrosshairApp {
                                     }
                                 });
                                 ui.menu_button(
-                                    self.tr("Object Proximity ⏵", "So sánh cụm Object ⏵"),
+                                    self.tr("Object Proximity >", "So sánh cụm Object >"),
                                     |ui| {
                                         if ui.button(self.tr("Set as Group A (e.g. Location)", "Gán vào Nhóm A (ví dụ Tọa độ)")).clicked() {
                                             let addrs = self.selected_saved_memory_addresses();
@@ -4609,7 +4630,7 @@ impl CrosshairApp {
                                 }
                                 ui.separator();
                                 ui.menu_button(
-                                    self.tr("AOB Actions ⏵", "Thao tác AOB ⏵"),
+                                    self.tr("AOB Actions >", "Thao tác AOB >"),
                                     |ui| {
                                         if ui
                                             .add_enabled(
@@ -10873,9 +10894,9 @@ impl CrosshairApp {
         self.sync_memory_freeze_targets();
         self.persist_memory_pointers();
         let msg = if total > MAX_BATCH_ADD {
-            format!("✔ Added {added} pointer(s) to Address list (capped at {MAX_BATCH_ADD} of {total} selected)!")
+            format!("[OK] Added {added} pointer(s) to Address list (capped at {MAX_BATCH_ADD} of {total} selected)!")
         } else {
-            format!("✔ Added {added} pointer(s) to Address list!")
+            format!("[OK] Added {added} pointer(s) to Address list!")
         };
         self.memory_panel.status = msg.clone();
         dialog.status = msg;
@@ -12427,12 +12448,12 @@ impl CrosshairApp {
             dialog.feedback_message = Some((
                 if total_count == 1 {
                     if newly_added_count == 1 {
-                        format!("✓ Address {} added to Address list", format_prefixed_memory_address(addresses[0]))
+                        format!("[OK] Address {} added to Address list", format_prefixed_memory_address(addresses[0]))
                     } else {
                         format!("Address {} is already in Address list", format_prefixed_memory_address(addresses[0]))
                     }
                 } else {
-                    format!("✓ Added {newly_added_count} of {total_count} address(es) to Address list")
+                    format!("[OK] Added {newly_added_count} of {total_count} address(es) to Address list")
                 },
                 Instant::now(),
             ));
@@ -12586,7 +12607,7 @@ impl CrosshairApp {
                 }
                 ui.ctx().copy_text(text);
                 dialog.feedback_message = Some((
-                    format!("✓ Copied {} addresses to clipboard", dialog.addresses.len()),
+                    format!("[OK] Copied {} addresses to clipboard", dialog.addresses.len()),
                     Instant::now(),
                 ));
             }
@@ -13046,7 +13067,7 @@ impl CrosshairApp {
             aob_pattern: None,
         });
         self.memory_panel.status =
-            format!("✓ Address {} added to Address list", format_prefixed_memory_address(address));
+            format!("[OK] Address {} added to Address list", format_prefixed_memory_address(address));
         true
     }
 
@@ -15795,7 +15816,7 @@ impl CrosshairApp {
                     entry.current = read_scan_value(pid, new_addr, entry.value_type).ok();
                 }
                 self.memory_panel.status = format!(
-                    "✔ AOB matched ({} match)! Address updated to 0x{:X}",
+                    "[OK] AOB matched ({} match)! Address updated to 0x{:X}",
                     candidates.len(),
                     new_addr
                 );
@@ -15987,7 +16008,7 @@ impl CrosshairApp {
                     }
                     if let Some((msg, time)) = &dialog.feedback_message {
                         if time.elapsed() < Duration::from_secs(4) {
-                            ui.label(RichText::new(format!("✓ {msg}")).color(Color32::from_rgb(100, 220, 130)).strong());
+                            ui.label(RichText::new(format!("[OK] {msg}")).color(Color32::from_rgb(100, 220, 130)).strong());
                         }
                     }
                 });
@@ -16225,7 +16246,7 @@ impl CrosshairApp {
                 if tokens1.len() != tokens2.len() && !tokens1.is_empty() && !tokens2.is_empty() {
                     ui.label(
                         RichText::new(format!(
-                            "⚠ {}: {} {} ≠ {} {} ({} {})",
+                            "[!] {}: {} {} != {} {} ({} {})",
                             self.tr("Length mismatch", "Độ dài 2 mẫu không bằng nhau"),
                             tokens1.len(),
                             self.tr("bytes in Sample 1", "byte ở Mẫu 1"),
@@ -16330,7 +16351,7 @@ impl CrosshairApp {
                     if let Some((msg, time)) = &self.memory_panel.manual_aob_feedback {
                         if time.elapsed() < Duration::from_secs(4) {
                             ui.label(
-                                RichText::new(format!("✓ {msg}"))
+                                RichText::new(format!("[OK] {msg}"))
                                     .color(Color32::from_rgb(100, 220, 130))
                                     .strong(),
                             );
@@ -16448,36 +16469,25 @@ impl CrosshairApp {
     }
 
     fn open_proximity_finder_dialog(&mut self) {
-        if self.memory_panel.proximity_finder_dialog.is_none() {
-            self.memory_panel.proximity_finder_dialog = Some(ProximityFinderDialog {
-                set_a_name: "Group A (Coord)".to_string(),
-                set_a: Vec::new(),
-                set_b_name: "Group B (Stats)".to_string(),
-                set_b: Vec::new(),
-                max_distance_str: "0x1000".to_string(),
-                status: String::new(),
-            });
-        }
+        self.memory_panel.show_proximity_finder = true;
     }
 
     fn set_proximity_finder_group_a(&mut self, addrs: Vec<usize>) {
-        self.open_proximity_finder_dialog();
-        if let Some(dialog) = &mut self.memory_panel.proximity_finder_dialog {
-            dialog.set_a = addrs;
-            dialog.set_a.sort_unstable();
-            dialog.set_a.dedup();
-            dialog.status = format!("Loaded {} unique address(es) into Group A", dialog.set_a.len());
-        }
+        let dialog = &mut self.memory_panel.proximity_finder_dialog;
+        dialog.set_a = addrs;
+        dialog.set_a.sort_unstable();
+        dialog.set_a.dedup();
+        dialog.status = format!("Loaded {} unique address(es) into Group A", dialog.set_a.len());
+        self.memory_panel.show_proximity_finder = true;
     }
 
     fn set_proximity_finder_group_b(&mut self, addrs: Vec<usize>) {
-        self.open_proximity_finder_dialog();
-        if let Some(dialog) = &mut self.memory_panel.proximity_finder_dialog {
-            dialog.set_b = addrs;
-            dialog.set_b.sort_unstable();
-            dialog.set_b.dedup();
-            dialog.status = format!("Loaded {} unique address(es) into Group B", dialog.set_b.len());
-        }
+        let dialog = &mut self.memory_panel.proximity_finder_dialog;
+        dialog.set_b = addrs;
+        dialog.set_b.sort_unstable();
+        dialog.set_b.dedup();
+        dialog.status = format!("Loaded {} unique address(es) into Group B", dialog.set_b.len());
+        self.memory_panel.show_proximity_finder = true;
     }
 
     fn save_proximity_matched_address(&mut self, address: usize, description: String, group: String) {
@@ -16559,9 +16569,10 @@ impl CrosshairApp {
     }
 
     fn render_proximity_finder_dialog(&mut self, ctx: &egui::Context) {
-        let Some(mut dialog) = self.memory_panel.proximity_finder_dialog.take() else {
+        if !self.memory_panel.show_proximity_finder {
             return;
-        };
+        }
+        let mut dialog = std::mem::take(&mut self.memory_panel.proximity_finder_dialog);
         let mut open = true;
         let mut request_close = false;
 
@@ -16571,6 +16582,7 @@ impl CrosshairApp {
         let mut action_load_b_saved = false;
         let mut action_clear_a = false;
         let mut action_clear_b = false;
+        let mut action_clear_all = false;
         let mut action_save_pair: Option<(usize, usize, isize)> = None;
         let mut action_save_all = false;
         let mut action_open_hex: Option<usize> = None;
@@ -16583,8 +16595,8 @@ impl CrosshairApp {
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(screen_rect.center())
             .constrain_to(inset_bounds)
-            .default_width(760.0)
-            .default_height(540.0)
+            .default_width(780.0)
+            .default_height(560.0)
             .min_width(560.0)
             .min_height(380.0);
 
@@ -16653,6 +16665,19 @@ impl CrosshairApp {
                             action_clear_a = true;
                         }
                     });
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut dialog.set_a_custom).desired_width(100.0).hint_text("0x..."));
+                        if ui.button(self.tr("+ Add Hex", "+ Thêm Hex")).clicked() {
+                            if let Some(addr) = parse_memory_address(&dialog.set_a_custom) {
+                                if !dialog.set_a.contains(&addr) {
+                                    dialog.set_a.push(addr);
+                                    dialog.set_a.sort_unstable();
+                                    dialog.status = format!("Added 0x{:X} to Group A", addr);
+                                }
+                                dialog.set_a_custom.clear();
+                            }
+                        }
+                    });
                     if !dialog.set_a.is_empty() {
                         ui.add_space(2.0);
                         egui::ScrollArea::vertical()
@@ -16681,6 +16706,19 @@ impl CrosshairApp {
                         }
                         if !dialog.set_b.is_empty() && ui.button(self.tr("Clear", "Xóa")).clicked() {
                             action_clear_b = true;
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut dialog.set_b_custom).desired_width(100.0).hint_text("0x..."));
+                        if ui.button(self.tr("+ Add Hex", "+ Thêm Hex")).clicked() {
+                            if let Some(addr) = parse_memory_address(&dialog.set_b_custom) {
+                                if !dialog.set_b.contains(&addr) {
+                                    dialog.set_b.push(addr);
+                                    dialog.set_b.sort_unstable();
+                                    dialog.status = format!("Added 0x{:X} to Group B", addr);
+                                }
+                                dialog.set_b_custom.clear();
+                            }
                         }
                     });
                     if !dialog.set_b.is_empty() {
@@ -16717,6 +16755,9 @@ impl CrosshairApp {
                 if ui.button("0x10000 (64KB)").clicked() {
                     dialog.max_distance_str = "0x10000".to_string();
                 }
+                if ui.button(self.tr("Clear All", "Xóa toàn bộ")).clicked() {
+                    action_clear_all = true;
+                }
             });
 
             ui.add_space(4.0);
@@ -16739,7 +16780,7 @@ impl CrosshairApp {
                     }),
                 );
                 if !matches.is_empty() {
-                    if ui.button(RichText::new(self.tr("Save All Matched Pairs to Saved Addresses ↓", "Lưu tất cả cặp vào Danh sách đã lưu ↓")).strong()).clicked() {
+                    if ui.button(RichText::new(self.tr("Save All Matched Pairs to Saved Addresses", "Lưu tất cả cặp vào Danh sách đã lưu")).strong()).clicked() {
                         action_save_all = true;
                     }
                 }
@@ -16848,6 +16889,11 @@ impl CrosshairApp {
             dialog.set_b.clear();
             dialog.status = "Cleared Group B".to_string();
         }
+        if action_clear_all {
+            dialog.set_a.clear();
+            dialog.set_b.clear();
+            dialog.status = "Cleared all groups".to_string();
+        }
         if let Some((addr_a, addr_b, offset)) = action_save_pair {
             let group = format!("Cluster (diff 0x{:X})", addr_a.abs_diff(addr_b));
             let name_a = dialog.set_a_name.clone();
@@ -16887,9 +16933,11 @@ impl CrosshairApp {
             self.open_memory_view_dialog_at_address(addr);
         }
 
-        if open && !request_close {
-            self.memory_panel.proximity_finder_dialog = Some(dialog);
+        if !open || request_close {
+            self.memory_panel.show_proximity_finder = false;
         }
+
+        self.memory_panel.proximity_finder_dialog = dialog;
     }
 
     fn navigate_open_memory_view(&mut self, address: usize) -> bool {
