@@ -52,7 +52,7 @@ use super::CrosshairApp;
 use super::{GetCursorPos, POINT};
 
 const DEFAULT_SCAN_LIMIT: usize = usize::MAX;
-const DEFAULT_OBJECT_LIMIT: usize = 5_000;
+const DEFAULT_OBJECT_LIMIT: usize = 20_000;
 const MEMORY_VIEW_READ_BYTES: usize = 4096;
 // ponytail: keep live polling bounded; add paged candidate refresh before raising this ceiling.
 const MAX_VISIBLE_RESULTS: usize = 1_000;
@@ -950,7 +950,7 @@ impl Default for MemoryPanelState {
             between_open: false,
             scan_modules: Vec::new(),
             hex: false,
-            result_limit_input: "5000".to_owned(),
+            result_limit_input: "20000".to_owned(),
             scan_writable: true,
             scan_executable: false,
             scan_copy_on_write: false,
@@ -1065,6 +1065,14 @@ impl MemoryPanelState {
             })
             .collect();
         state
+    }
+
+    pub(crate) fn total_result_count(&self) -> usize {
+        if let Some(snap) = self.raw_snapshot.as_ref() {
+            snap.total_slots
+        } else {
+            self.candidates.len().max(self.text_candidates.len())
+        }
     }
 }
 
@@ -1766,7 +1774,13 @@ impl CrosshairApp {
                             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                 ui.label(Self::material_icon_text(0xe30c, 17.0));
                                 ui.label(RichText::new("MacroNest").strong());
-                                ui.add(egui::Label::new(RichText::new("Scan results").weak().small()).truncate());
+                                let total_count = self.memory_panel.total_result_count();
+                                let title_text = if total_count > 0 {
+                                    format!("Scan results ({total_count})")
+                                } else {
+                                    "Scan results".to_owned()
+                                };
+                                ui.add(egui::Label::new(RichText::new(title_text).weak().small()).truncate());
                                 let drag = ui.allocate_response(
                                     ui.available_size(),
                                     Sense::click_and_drag(),
@@ -1795,21 +1809,25 @@ impl CrosshairApp {
                         } else {
                             format!(
                                 "{} address(es)",
-                                self.memory_panel
-                                    .candidates
-                                    .len()
-                                    .max(self.memory_panel.text_candidates.len())
+                                self.memory_panel.total_result_count()
                             )
                         };
-                        ui.label(format!(
-                            "{}  •  {progress}{}",
-                            self.memory_panel.last_action,
-                            if self.memory_panel.scanning {
-                                "  •  Loading…"
-                            } else {
-                                ""
-                            }
-                        ));
+                        ui.horizontal(|ui| {
+                            ui.label(format!(
+                                "{}  •  {progress}{}",
+                                self.memory_panel.last_action,
+                                if self.memory_panel.scanning {
+                                    "  •  Loading…"
+                                } else {
+                                    ""
+                                }
+                            ));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.small_button(self.tr("Add ↓", "Thêm ↓")).clicked() {
+                                    self.add_selected_memory_results();
+                                }
+                            });
+                        });
                         ui.separator();
                         self.render_memory_scan_results(ui, true);
                     });
@@ -2505,8 +2523,8 @@ impl CrosshairApp {
                         egui::TextEdit::singleline(&mut self.memory_panel.result_limit_input)
                             .desired_width(90.0),
                     ).on_hover_text(self.tr(
-                        "Threshold to create candidate objects. Scans with more matches stay in fast snapshot mode (default: 5000).",
-                        "Ngưỡng số lượng kết quả để tạo đối tượng danh sách. Nếu nhiều hơn ngưỡng này, scan sẽ giữ ở chế độ snapshot siêu nhanh (mặc định: 5000).",
+                        "Threshold to create candidate objects. Scans with more matches stay in fast snapshot mode (default: 20000).",
+                        "Ngưỡng số lượng kết quả để tạo đối tượng danh sách. Nếu nhiều hơn ngưỡng này, scan sẽ giữ ở chế độ snapshot siêu nhanh (mặc định: 20000).",
                     ));
                     Self::apply_vietnamese_input_if_changed(
                         &limit_resp,
@@ -3044,14 +3062,7 @@ impl CrosshairApp {
         let frame = Frame::group(ui.style()).inner_margin(egui::Margin::same(5));
         frame.show(ui, |ui| {
             ui.set_min_size(size - vec2(12.0, 12.0));
-            let result_count = if let Some(snap) = self.memory_panel.raw_snapshot.as_ref() {
-                snap.total_slots
-            } else {
-                self.memory_panel
-                    .candidates
-                    .len()
-                    .max(self.memory_panel.text_candidates.len())
-            };
+            let result_count = self.memory_panel.total_result_count();
             let visible_count = self
                 .memory_panel
                 .candidates
@@ -18759,5 +18770,29 @@ mod tests {
 
         let cmp_desc = compare_code_access_values(Some("alpha"), Some("beta"), ScanValueType::I8, true, true);
         assert_eq!(cmp_desc, std::cmp::Ordering::Greater);
+    }
+
+    #[test]
+    fn default_object_limit_and_total_result_count() {
+        assert_eq!(DEFAULT_OBJECT_LIMIT, 20_000);
+        let mut state = MemoryPanelState::default();
+        assert_eq!(state.result_limit_input, "20000");
+        assert_eq!(state.total_result_count(), 0);
+
+        // When snapshot is active with 50_000 slots and candidates empty
+        state.raw_snapshot = Some(std::sync::Arc::new(crate::process_memory::RawMemorySnapshot {
+            chunks: Vec::new(),
+            total_slots: 50_000,
+            value_type: ScanValueType::I32,
+            alignment: 4,
+        }));
+        assert_eq!(state.total_result_count(), 50_000);
+
+        // When snapshot is cleared and candidates has 1 item
+        state.raw_snapshot = None;
+        state.candidates = vec![
+            ScanCandidate::new(0x1000, ScanValue::I32(1)),
+        ];
+        assert_eq!(state.total_result_count(), 1);
     }
 }
