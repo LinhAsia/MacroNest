@@ -6,9 +6,9 @@ use windows::Win32::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleBitmap,
         CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush,
         DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
-        DrawTextW, EndPaint, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
+        DrawTextW, Ellipse, EndPaint, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
         FONT_QUALITY, FW_BOLD, FW_NORMAL, FW_SEMIBOLD, FillRect, GetDC, HDC, HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT,
-        PS_SOLID, Rectangle, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetPixel, SetTextColor,
+        PS_DASH, PS_SOLID, Rectangle, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetPixel, SetTextColor,
         SetViewportOrgEx, StretchDIBits, TRANSPARENT, UpdateWindow,
     },
     UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN, VK_SHIFT},
@@ -30,8 +30,6 @@ use windows::core::w;
 fn rgb(r: u8, g: u8, b: u8) -> COLORREF {
     COLORREF(r as u32 | ((g as u32) << 8) | ((b as u32) << 16))
 }
-
-use tiny_skia::{Color, Paint, PathBuilder, Pixmap, PixmapPaint, Rect, Stroke};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionSelectKind {
@@ -784,10 +782,18 @@ unsafe extern "system" fn capture_wnd_proc(
             if !hdc.0.is_null() {
                 let state = get_state(hwnd);
                 if let Some(state) = state {
-                    if matches!(state.mode, NativeCaptureMode::PointClick { .. }) {
+                    if matches!(
+                        state.mode,
+                        NativeCaptureMode::PointClick { .. }
+                            | NativeCaptureMode::ProtractorCalibration { .. }
+                            | NativeCaptureMode::DistanceMeasure { .. }
+                    ) {
                         let mut pt = POINT::default();
                         if GetCursorPos(&mut pt).is_ok() {
-                            state.current_point = Some((pt.x - state.left, pt.y - state.top));
+                            let rx = pt.x - state.left;
+                            let ry = pt.y - state.top;
+                            state.current_point =
+                                Some(distance_measure_constrained_local_point(state, (rx, ry)));
                         }
                     }
                     let _ = draw_capture_to_dc(hdc, state, Some(ps.rcPaint));
@@ -1293,45 +1299,96 @@ fn distance_measure_status_text(
     }
 }
 
-fn draw_rounded_rect(
-    pixmap: &mut Pixmap,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    radius: f32,
-    fill_paint: &Paint,
-    stroke: Option<(&Paint, &Stroke)>,
+unsafe fn draw_gdi_point_marker(
+    hdc: HDC,
+    x: i32,
+    y: i32,
+    color: COLORREF,
+    index_label: Option<usize>,
 ) {
-    let mut pb = PathBuilder::new();
-    pb.move_to(x + radius, y);
-    pb.line_to(x + w - radius, y);
-    pb.quad_to(x + w, y, x + w, y + radius);
-    pb.line_to(x + w, y + h - radius);
-    pb.quad_to(x + w, y + h, x + w - radius, y + h);
-    pb.line_to(x + radius, y + h);
-    pb.quad_to(x, y + h, x, y + h - radius);
-    pb.line_to(x, y + radius);
-    pb.quad_to(x, y, x + radius, y);
-    pb.close();
+    // 1. Outer white ring (radius 8, diameter 17)
+    let white_pen = CreatePen(PS_SOLID, 2, rgb(255, 255, 255));
+    let null_brush = windows::Win32::Graphics::Gdi::GetStockObject(
+        windows::Win32::Graphics::Gdi::NULL_BRUSH,
+    );
+    let old_pen = SelectObject(hdc, HGDIOBJ(white_pen.0));
+    let old_brush = SelectObject(hdc, null_brush);
+    let _ = Ellipse(hdc, x - 8, y - 8, x + 9, y + 9);
 
-    if let Some(path) = pb.finish() {
-        pixmap.fill_path(
-            &path,
-            fill_paint,
-            tiny_skia::FillRule::Winding,
-            tiny_skia::Transform::identity(),
-            None,
+    // 2. Inner filled circle (radius 5, diameter 11)
+    let inner_brush = CreateSolidBrush(color);
+    let inner_pen = CreatePen(PS_SOLID, 1, color);
+    let _ = SelectObject(hdc, HGDIOBJ(inner_brush.0));
+    let _ = SelectObject(hdc, HGDIOBJ(inner_pen.0));
+    let _ = Ellipse(hdc, x - 5, y - 5, x + 6, y + 6);
+
+    let _ = SelectObject(hdc, old_brush);
+    let _ = SelectObject(hdc, old_pen);
+    let _ = DeleteObject(HGDIOBJ(white_pen.0));
+    let _ = DeleteObject(HGDIOBJ(inner_brush.0));
+    let _ = DeleteObject(HGDIOBJ(inner_pen.0));
+
+    // 3. Optional index badge (e.g. 1, 2)
+    if let Some(idx) = index_label {
+        let badge_size = 18i32;
+        let bx = x + 10;
+        let by = y - 20;
+
+        let badge_brush = CreateSolidBrush(rgb(15, 23, 42));
+        let badge_pen = CreatePen(PS_SOLID, 1, rgb(255, 255, 255));
+        let old_b = SelectObject(hdc, HGDIOBJ(badge_brush.0));
+        let old_p = SelectObject(hdc, HGDIOBJ(badge_pen.0));
+        let _ = windows::Win32::Graphics::Gdi::RoundRect(
+            hdc,
+            bx,
+            by,
+            bx + badge_size,
+            by + badge_size,
+            6,
+            6,
         );
-        if let Some((stroke_paint, stroke_val)) = stroke {
-            pixmap.stroke_path(
-                &path,
-                stroke_paint,
-                stroke_val,
-                tiny_skia::Transform::identity(),
-                None,
-            );
-        }
+
+        let font = CreateFontW(
+            13,
+            0,
+            0,
+            0,
+            FW_BOLD.0 as i32,
+            0,
+            0,
+            0,
+            FONT_CHARSET(0),
+            FONT_OUTPUT_PRECISION(0),
+            FONT_CLIP_PRECISION(0),
+            FONT_QUALITY(0),
+            0,
+            w!("Segoe UI"),
+        );
+        let old_f = SelectObject(hdc, HGDIOBJ(font.0));
+        let _ = SetBkMode(hdc, TRANSPARENT);
+        let _ = SetTextColor(hdc, rgb(255, 255, 255));
+
+        let text = format!("{idx}");
+        let mut u16_text: Vec<u16> = text.encode_utf16().collect();
+        let mut rect = RECT {
+            left: bx,
+            top: by,
+            right: bx + badge_size,
+            bottom: by + badge_size,
+        };
+        let _ = DrawTextW(
+            hdc,
+            &mut u16_text,
+            &mut rect,
+            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+        );
+
+        let _ = SelectObject(hdc, old_f);
+        let _ = SelectObject(hdc, old_b);
+        let _ = SelectObject(hdc, old_p);
+        let _ = DeleteObject(HGDIOBJ(font.0));
+        let _ = DeleteObject(HGDIOBJ(badge_brush.0));
+        let _ = DeleteObject(HGDIOBJ(badge_pen.0));
     }
 }
 
@@ -1402,8 +1459,14 @@ unsafe fn draw_capture_to_dc(
     let w = state.width as usize;
     let h = state.height as usize;
     let is_point_click = matches!(state.mode, NativeCaptureMode::PointClick { .. });
+    let is_fast_mode = matches!(
+        state.mode,
+        NativeCaptureMode::PointClick { .. }
+            | NativeCaptureMode::ProtractorCalibration { .. }
+            | NativeCaptureMode::DistanceMeasure { .. }
+    );
 
-    if is_point_click {
+    if is_fast_mode {
         // Cache background DC with pre-rendered dimmed image in VRAM
         if state.bg_dc.is_none() {
             let bg_dc = CreateCompatibleDC(Some(hdc));
@@ -1452,28 +1515,133 @@ unsafe fn draw_capture_to_dc(
         }
 
         let bg_dc = state.bg_dc.unwrap();
-        let (dirty_x, dirty_y, dirty_w, dirty_h) = if let Some(r) = _dirty {
-            let l = r.left.clamp(0, state.width);
-            let t = r.top.clamp(0, state.height);
-            let rw = (r.right - l).clamp(0, state.width - l);
-            let rh = (r.bottom - t).clamp(0, state.height - t);
-            (l, t, rw, rh)
-        } else {
-            (0, 0, state.width, state.height)
-        };
 
-        if dirty_w > 0 && dirty_h > 0 {
+        if is_point_click {
+            let (dirty_x, dirty_y, dirty_w, dirty_h) = if let Some(r) = _dirty {
+                let l = r.left.clamp(0, state.width);
+                let t = r.top.clamp(0, state.height);
+                let rw = (r.right - l).clamp(0, state.width - l);
+                let rh = (r.bottom - t).clamp(0, state.height - t);
+                (l, t, rw, rh)
+            } else {
+                (0, 0, state.width, state.height)
+            };
+
+            if dirty_w > 0 && dirty_h > 0 {
+                let _ = BitBlt(
+                    mem_dc,
+                    dirty_x,
+                    dirty_y,
+                    dirty_w,
+                    dirty_h,
+                    Some(bg_dc),
+                    dirty_x,
+                    dirty_y,
+                    SRCCOPY,
+                );
+            }
+        } else {
+            // Full BitBlt from cached VRAM surface to mem_dc (< 0.05 ms)
             let _ = BitBlt(
                 mem_dc,
-                dirty_x,
-                dirty_y,
-                dirty_w,
-                dirty_h,
+                0,
+                0,
+                state.width,
+                state.height,
                 Some(bg_dc),
-                dirty_x,
-                dirty_y,
+                0,
+                0,
                 SRCCOPY,
             );
+
+            match state.mode {
+                NativeCaptureMode::ProtractorCalibration { .. } => {
+                    for (i, pt) in state.protractor_points.iter().enumerate() {
+                        let rx = pt.0 - state.left;
+                        let ry = pt.1 - state.top;
+                        draw_gdi_point_marker(mem_dc, rx, ry, rgb(255, 60, 60), Some(i + 1));
+                    }
+
+                    if let Some(curr) = state.current_point {
+                        let count = state.protractor_points.len();
+                        if count == 1 {
+                            let pt1 = state.protractor_points[0];
+                            let r1x = pt1.0 - state.left;
+                            let r1y = pt1.1 - state.top;
+
+                            let line_pen = CreatePen(PS_DASH, 1, rgb(255, 80, 80));
+                            let old_pen = SelectObject(mem_dc, HGDIOBJ(line_pen.0));
+                            let _ = MoveToEx(mem_dc, r1x, r1y, None);
+                            let _ = LineTo(mem_dc, curr.0, curr.1);
+                            let _ = SelectObject(mem_dc, old_pen);
+                            let _ = DeleteObject(HGDIOBJ(line_pen.0));
+                        } else if count == 2 {
+                            let pt1 = state.protractor_points[0];
+                            let pt2 = state.protractor_points[1];
+                            let curr_abs = (curr.0 + state.left, curr.1 + state.top);
+
+                            if let Some((center, radius)) =
+                                crate::protractor::circle_from_3_points(pt1, pt2, curr_abs)
+                            {
+                                let rcx = center.0 - state.left;
+                                let rcy = center.1 - state.top;
+                                let r = radius.round() as i32;
+
+                                if r > 0 && r < 30_000 {
+                                    let circle_pen = CreatePen(PS_DASH, 1, rgb(255, 80, 80));
+                                    let null_brush = windows::Win32::Graphics::Gdi::GetStockObject(
+                                        windows::Win32::Graphics::Gdi::NULL_BRUSH,
+                                    );
+                                    let old_pen = SelectObject(mem_dc, HGDIOBJ(circle_pen.0));
+                                    let old_brush = SelectObject(mem_dc, null_brush);
+                                    let _ = Ellipse(
+                                        mem_dc,
+                                        rcx - r,
+                                        rcy - r,
+                                        rcx + r + 1,
+                                        rcy + r + 1,
+                                    );
+                                    let _ = SelectObject(mem_dc, old_brush);
+                                    let _ = SelectObject(mem_dc, old_pen);
+                                    let _ = DeleteObject(HGDIOBJ(circle_pen.0));
+
+                                    // Center crosshair marker
+                                    let center_pen = CreatePen(PS_SOLID, 1, rgb(255, 120, 120));
+                                    let old_pen = SelectObject(mem_dc, HGDIOBJ(center_pen.0));
+                                    let _ = MoveToEx(mem_dc, rcx - 5, rcy, None);
+                                    let _ = LineTo(mem_dc, rcx + 6, rcy);
+                                    let _ = MoveToEx(mem_dc, rcx, rcy - 5, None);
+                                    let _ = LineTo(mem_dc, rcx, rcy + 6);
+                                    let _ = SelectObject(mem_dc, old_pen);
+                                    let _ = DeleteObject(HGDIOBJ(center_pen.0));
+                                }
+                            }
+                        }
+                    }
+                }
+                NativeCaptureMode::DistanceMeasure { .. } => {
+                    for (i, pt) in state.protractor_points.iter().enumerate() {
+                        let rx = pt.0 - state.left;
+                        let ry = pt.1 - state.top;
+                        draw_gdi_point_marker(mem_dc, rx, ry, rgb(255, 196, 0), Some(i + 1));
+                    }
+
+                    if let Some(curr) = state.current_point
+                        && let Some(pt1) = state.protractor_points.first()
+                    {
+                        let r1x = pt1.0 - state.left;
+                        let r1y = pt1.1 - state.top;
+
+                        let line_pen = CreatePen(PS_DASH, 1, rgb(255, 196, 0));
+                        let old_pen = SelectObject(mem_dc, HGDIOBJ(line_pen.0));
+                        let _ = MoveToEx(mem_dc, r1x, r1y, None);
+                        let _ = LineTo(mem_dc, curr.0, curr.1);
+                        let _ = SelectObject(mem_dc, old_pen);
+                        let _ = DeleteObject(HGDIOBJ(line_pen.0));
+                    }
+                }
+                _ => {}
+            }
         }
 
         if let Some(curr) = state.current_point {
@@ -1626,217 +1794,6 @@ unsafe fn draw_capture_to_dc(
                 let _ = DeleteObject(HGDIOBJ(font_size.0));
             }
         }
-    } else {
-        let mut pixmap = Pixmap::new(state.width as u32, state.height as u32)
-            .ok_or_else(|| anyhow::anyhow!("Failed to create tiny-skia Pixmap"))?;
-
-        // 1. Draw the screenshot onto the pixmap
-        pixmap.data_mut().copy_from_slice(&state.capture_frame.rgba);
-
-        // 2. Draw a dark overlay over the whole screen
-        let mut paint = Paint::default();
-        paint.set_color_rgba8(0, 0, 0, 128); // 50% opacity
-        let screen_rect =
-            Rect::from_xywh(0.0, 0.0, state.width as f32, state.height as f32).unwrap();
-        pixmap.fill_rect(screen_rect, &paint, tiny_skia::Transform::identity(), None);
-
-        // 3. Render specific overlay elements based on capture mode
-        match state.mode {
-            NativeCaptureMode::ProtractorCalibration { .. } => {
-                let mut pt_paint = Paint::default();
-                pt_paint.set_color_rgba8(255, 50, 50, 255);
-                let mut stroke = Stroke::default();
-                stroke.width = 2.0;
-
-                let mut white_paint = Paint::default();
-                white_paint.set_color_rgba8(255, 255, 255, 255);
-
-                for pt in &state.protractor_points {
-                    let rx = pt.0 - state.left;
-                    let ry = pt.1 - state.top;
-
-                    let mut pb = PathBuilder::new();
-                    pb.push_circle(rx as f32, ry as f32, 6.0);
-                    let path = pb.finish().unwrap();
-                    pixmap.fill_path(
-                        &path,
-                        &pt_paint,
-                        tiny_skia::FillRule::Winding,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
-
-                    let mut pb = PathBuilder::new();
-                    pb.push_circle(rx as f32, ry as f32, 10.0);
-                    let path = pb.finish().unwrap();
-                    pixmap.stroke_path(
-                        &path,
-                        &white_paint,
-                        &stroke,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
-                }
-
-                if let Some(curr) = state.current_point {
-                    let count = state.protractor_points.len();
-                    if count == 1 {
-                        let pt1 = state.protractor_points[0];
-                        let r1x = pt1.0 - state.left;
-                        let r1y = pt1.1 - state.top;
-
-                        let mut line_paint = Paint::default();
-                        line_paint.set_color_rgba8(255, 50, 50, 180);
-                        let mut dashed_stroke = Stroke::default();
-                        dashed_stroke.width = 1.5;
-                        dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![4.0, 4.0], 0.0);
-
-                        let mut pb = PathBuilder::new();
-                        pb.move_to(r1x as f32, r1y as f32);
-                        pb.line_to(curr.0 as f32, curr.1 as f32);
-                        let path = pb.finish().unwrap();
-                        pixmap.stroke_path(
-                            &path,
-                            &line_paint,
-                            &dashed_stroke,
-                            tiny_skia::Transform::identity(),
-                            None,
-                        );
-                    } else if count == 2 {
-                        let pt1 = state.protractor_points[0];
-                        let pt2 = state.protractor_points[1];
-                        let curr_abs = (curr.0 + state.left, curr.1 + state.top);
-
-                        if let Some((center, radius)) =
-                            crate::protractor::circle_from_3_points(pt1, pt2, curr_abs)
-                        {
-                            let rcx = center.0 - state.left;
-                            let rcy = center.1 - state.top;
-
-                            let mut circle_paint = Paint::default();
-                            circle_paint.set_color_rgba8(255, 50, 50, 180);
-                            let mut dashed_stroke = Stroke::default();
-                            dashed_stroke.width = 1.5;
-                            dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![4.0, 4.0], 0.0);
-
-                            let mut pb = PathBuilder::new();
-                            pb.push_circle(rcx as f32, rcy as f32, radius);
-                            let path = pb.finish().unwrap();
-                            pixmap.stroke_path(
-                                &path,
-                                &circle_paint,
-                                &dashed_stroke,
-                                tiny_skia::Transform::identity(),
-                                None,
-                            );
-                        }
-                    }
-                }
-            }
-            NativeCaptureMode::DistanceMeasure { .. } => {
-                let mut pt_paint = Paint::default();
-                pt_paint.set_color_rgba8(255, 196, 0, 255);
-                let mut stroke = Stroke::default();
-                stroke.width = 2.0;
-
-                let mut white_paint = Paint::default();
-                white_paint.set_color_rgba8(255, 255, 255, 255);
-
-                for pt in &state.protractor_points {
-                    let rx = pt.0 - state.left;
-                    let ry = pt.1 - state.top;
-
-                    let mut pb = PathBuilder::new();
-                    pb.push_circle(rx as f32, ry as f32, 6.0);
-                    let path = pb.finish().unwrap();
-                    pixmap.fill_path(
-                        &path,
-                        &pt_paint,
-                        tiny_skia::FillRule::Winding,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
-
-                    let mut pb = PathBuilder::new();
-                    pb.push_circle(rx as f32, ry as f32, 10.0);
-                    let path = pb.finish().unwrap();
-                    pixmap.stroke_path(
-                        &path,
-                        &white_paint,
-                        &stroke,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
-                }
-
-                if let Some(curr) = state.current_point
-                    && let Some(pt1) = state.protractor_points.first()
-                {
-                    let r1x = pt1.0 - state.left;
-                    let r1y = pt1.1 - state.top;
-
-                    let mut line_paint = Paint::default();
-                    line_paint.set_color_rgba8(255, 196, 0, 220);
-                    let mut dashed_stroke = Stroke::default();
-                    dashed_stroke.width = 1.8;
-                    dashed_stroke.dash = tiny_skia::StrokeDash::new(vec![6.0, 4.0], 0.0);
-
-                    let mut pb = PathBuilder::new();
-                    pb.move_to(r1x as f32, r1y as f32);
-                    pb.line_to(curr.0 as f32, curr.1 as f32);
-                    let path = pb.finish().unwrap();
-                    pixmap.stroke_path(
-                        &path,
-                        &line_paint,
-                        &dashed_stroke,
-                        tiny_skia::Transform::identity(),
-                        None,
-                    );
-                }
-            }
-            _ => {}
-        }
-
-        let mut bmi = BITMAPINFO::default();
-        bmi.bmiHeader = BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: state.width,
-            biHeight: -state.height,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        };
-
-        let mut bgra = pixmap.data().to_vec();
-        for pixel in bgra.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
-        }
-
-        let _ = StretchDIBits(
-            mem_dc,
-            0,
-            0,
-            state.width,
-            state.height,
-            0,
-            0,
-            state.width,
-            state.height,
-            Some(bgra.as_ptr() as *const std::ffi::c_void),
-            &bmi,
-            DIB_RGB_COLORS,
-            SRCCOPY,
-        );
-    }
-
-    if matches!(
-        state.mode,
-        NativeCaptureMode::DistanceMeasure { .. }
-            | NativeCaptureMode::ProtractorCalibration { .. }
-    ) && let Some(curr) = state.current_point
-    {
-        draw_precision_crosshair(mem_dc, curr.0, curr.1);
     }
 
     // Draw status bar & instructions pill using GDI DrawTextW on mem_dc
