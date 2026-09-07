@@ -683,6 +683,23 @@ struct CodeCompareDialog {
     pinned: bool,
 }
 
+struct ProximityFinderMatch {
+    addr_a: usize,
+    addr_b: usize,
+    offset: isize,
+    distance: usize,
+}
+
+struct ProximityFinderDialog {
+    set_a_name: String,
+    set_a: Vec<usize>,
+    set_b_name: String,
+    set_b: Vec<usize>,
+    max_distance_str: String,
+    status: String,
+}
+
+
 #[cfg(windows)]
 struct CodeCompareCandidate {
     start: usize,
@@ -913,6 +930,7 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     code_compare_dialog: Option<CodeCompareDialog>,
     aob_compare_dialog: Option<AobCompareDialog>,
+    proximity_finder_dialog: Option<ProximityFinderDialog>,
     last_refresh: Instant,
     last_saved_refresh: Instant,
     visible_scan_ranges: [Option<(usize, usize, Instant)>; 2],
@@ -1038,6 +1056,7 @@ impl Default for MemoryPanelState {
             #[cfg(windows)]
             code_compare_dialog: None,
             aob_compare_dialog: None,
+            proximity_finder_dialog: None,
             last_refresh: Instant::now(),
             last_saved_refresh: Instant::now(),
             visible_scan_ranges: [None, None],
@@ -1342,6 +1361,9 @@ impl CrosshairApp {
                 if ui.button("Find entity list").clicked() {
                     self.open_entity_list_dialog();
                 }
+                if ui.button(self.tr("Object proximity finder", "So sánh cụm Object")).clicked() {
+                    self.open_proximity_finder_dialog();
+                }
                 if ui
                     .button(self.tr("Advanced options", "Advanced options"))
                     .clicked()
@@ -1453,6 +1475,7 @@ impl CrosshairApp {
         self.render_memory_view_dialog(ui.ctx());
         self.render_aob_compare_dialog(ui.ctx());
         self.render_manual_aob_compare_dialog(ui.ctx());
+        self.render_proximity_finder_dialog(ui.ctx());
         #[cfg(windows)]
         {
             let active = self.memory_panel.module_list_dialog.is_some();
@@ -1640,6 +1663,7 @@ impl CrosshairApp {
         self.render_memory_view_dialog(ctx);
         self.render_aob_compare_dialog(ctx);
         self.render_manual_aob_compare_dialog(ctx);
+        self.render_proximity_finder_dialog(ctx);
         #[cfg(windows)]
         {
             let active = self.memory_panel.module_list_dialog.is_some();
@@ -3488,6 +3512,25 @@ impl CrosshairApp {
                                     }
                                 },
                             );
+                            ui.menu_button(
+                                self.tr("Object Proximity ⏵", "So sánh cụm Object ⏵"),
+                                |ui| {
+                                    if ui.button(self.tr("Set as Group A (e.g. Location)", "Gán vào Nhóm A (ví dụ Tọa độ)")).clicked() {
+                                        let addrs = self.selected_memory_result_addresses();
+                                        self.set_proximity_finder_group_a(addrs);
+                                        ui.close();
+                                    }
+                                    if ui.button(self.tr("Set as Group B (e.g. Health/Money)", "Gán vào Nhóm B (ví dụ Máu/Tiền)")).clicked() {
+                                        let addrs = self.selected_memory_result_addresses();
+                                        self.set_proximity_finder_group_b(addrs);
+                                        ui.close();
+                                    }
+                                    if ui.button(self.tr("Open Proximity Finder", "Mở bảng So sánh cụm Object")).clicked() {
+                                        self.open_proximity_finder_dialog();
+                                        ui.close();
+                                    }
+                                },
+                            );
                             ui.separator();
                             let label = if marked {
                                 "Remove not-relevant mark"
@@ -4240,6 +4283,25 @@ impl CrosshairApp {
                                         ui.close();
                                     }
                                 });
+                                ui.menu_button(
+                                    self.tr("Object Proximity ⏵", "So sánh cụm Object ⏵"),
+                                    |ui| {
+                                        if ui.button(self.tr("Set as Group A (e.g. Location)", "Gán vào Nhóm A (ví dụ Tọa độ)")).clicked() {
+                                            let addrs = self.selected_saved_memory_addresses();
+                                            self.set_proximity_finder_group_a(addrs);
+                                            ui.close();
+                                        }
+                                        if ui.button(self.tr("Set as Group B (e.g. Health/Money)", "Gán vào Nhóm B (ví dụ Máu/Tiền)")).clicked() {
+                                            let addrs = self.selected_saved_memory_addresses();
+                                            self.set_proximity_finder_group_b(addrs);
+                                            ui.close();
+                                        }
+                                        if ui.button(self.tr("Open Proximity Finder", "Mở bảng So sánh cụm Object")).clicked() {
+                                            self.open_proximity_finder_dialog();
+                                            ui.close();
+                                        }
+                                    },
+                                );
                                 if !single_target {
                                     ui.label(
                                         RichText::new(format!(
@@ -16338,6 +16400,495 @@ impl CrosshairApp {
 
         if !open || request_close {
             self.memory_panel.show_manual_aob_compare = false;
+        }
+    }
+
+    fn selected_memory_result_addresses(&self) -> Vec<usize> {
+        let mut addrs = Vec::new();
+        if !self.memory_panel.selected_results.is_empty() {
+            let mut indices = self.memory_panel.selected_results.iter().copied().collect::<Vec<_>>();
+            indices.sort_unstable();
+            for index in indices {
+                if let Some(candidate) = self.memory_panel.text_candidates.get(index) {
+                    addrs.push(candidate.address);
+                } else if let Some(candidate) = self.memory_panel.candidates.get(index) {
+                    addrs.push(candidate.address);
+                }
+            }
+        } else {
+            let total = self.memory_panel.text_candidates.len().max(self.memory_panel.candidates.len());
+            let limit = total.min(500);
+            for index in 0..limit {
+                if let Some(candidate) = self.memory_panel.text_candidates.get(index) {
+                    addrs.push(candidate.address);
+                } else if let Some(candidate) = self.memory_panel.candidates.get(index) {
+                    addrs.push(candidate.address);
+                }
+            }
+        }
+        addrs
+    }
+
+    fn selected_saved_memory_addresses(&self) -> Vec<usize> {
+        let mut addrs = Vec::new();
+        if !self.memory_panel.selected_saved.is_empty() {
+            let mut indices = self.memory_panel.selected_saved.iter().copied().collect::<Vec<_>>();
+            indices.sort_unstable();
+            for index in indices {
+                if let Some(saved) = self.memory_panel.saved.get(index) {
+                    addrs.push(saved.address);
+                }
+            }
+        } else {
+            for saved in &self.memory_panel.saved {
+                addrs.push(saved.address);
+            }
+        }
+        addrs
+    }
+
+    fn open_proximity_finder_dialog(&mut self) {
+        if self.memory_panel.proximity_finder_dialog.is_none() {
+            self.memory_panel.proximity_finder_dialog = Some(ProximityFinderDialog {
+                set_a_name: "Group A (Coord)".to_string(),
+                set_a: Vec::new(),
+                set_b_name: "Group B (Stats)".to_string(),
+                set_b: Vec::new(),
+                max_distance_str: "0x1000".to_string(),
+                status: String::new(),
+            });
+        }
+    }
+
+    fn set_proximity_finder_group_a(&mut self, addrs: Vec<usize>) {
+        self.open_proximity_finder_dialog();
+        if let Some(dialog) = &mut self.memory_panel.proximity_finder_dialog {
+            dialog.set_a = addrs;
+            dialog.set_a.sort_unstable();
+            dialog.set_a.dedup();
+            dialog.status = format!("Loaded {} unique address(es) into Group A", dialog.set_a.len());
+        }
+    }
+
+    fn set_proximity_finder_group_b(&mut self, addrs: Vec<usize>) {
+        self.open_proximity_finder_dialog();
+        if let Some(dialog) = &mut self.memory_panel.proximity_finder_dialog {
+            dialog.set_b = addrs;
+            dialog.set_b.sort_unstable();
+            dialog.set_b.dedup();
+            dialog.status = format!("Loaded {} unique address(es) into Group B", dialog.set_b.len());
+        }
+    }
+
+    fn save_proximity_matched_address(&mut self, address: usize, description: String, group: String) {
+        if let Some(existing) = self.memory_panel.saved.iter_mut().find(|s| s.address == address) {
+            if existing.description.is_empty() {
+                existing.description = description;
+            }
+            if existing.group.is_empty() {
+                existing.group = group;
+            }
+            return;
+        }
+        let current = self.memory_panel.process_pid.and_then(|pid| {
+            read_scan_value(pid, address, self.memory_panel.value_type).ok()
+        });
+        self.memory_panel.saved.push(SavedMemoryAddress {
+            address,
+            value_type: self.memory_panel.value_type,
+            current,
+            text_encoding: None,
+            text_byte_len: 0,
+            current_text: None,
+            description,
+            group,
+            hexadecimal: self.memory_panel.hex,
+            pointer: None,
+            frozen: None,
+            saved_to_library: false,
+            aob_sample_1: None,
+            aob_pattern: None,
+        });
+    }
+
+    fn open_memory_view_dialog_at_address(&mut self, address: usize) {
+        if !self.navigate_open_memory_view(address) {
+            let elements = default_structure_elements();
+            self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
+                address,
+                tracked_base: None,
+                kind: MemoryViewKind::Bytes,
+                display_type: MemoryDisplayType::ByteHex,
+                relative_addresses: false,
+                pinned: true,
+                elements: elements.clone(),
+                pending_add: None,
+                pending_track: None,
+                pointer_width: self
+                    .memory_panel
+                    .process_pid
+                    .and_then(|pid| process_pointer_width(pid).ok())
+                    .unwrap_or(8),
+                previous_bytes: Vec::new(),
+                previous_byte_map: HashMap::new(),
+                track_changes: false,
+                changed_addresses: HashSet::new(),
+                classes: vec![StructureClass {
+                    name: "Class_0".to_owned(),
+                    address,
+                    elements,
+                }],
+                selected_class: 0,
+                class_detection_status: String::new(),
+                class_detection_attempted: false,
+                auto_dissected: false,
+                history: Vec::new(),
+                structure_back_step: "10".to_owned(),
+                structure_forward_step: "C".to_owned(),
+                selected_structure_address: None,
+                scroll_offset: 0,
+                memory_columns: 3,
+                reset_memory_scroll: true,
+                memory_scroll_override: None,
+                memory_region_override: None,
+                fit_memory_columns: true,
+                stride_address_a: String::new(),
+                stride_address_b: String::new(),
+            });
+        }
+    }
+
+    fn render_proximity_finder_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.memory_panel.proximity_finder_dialog.take() else {
+            return;
+        };
+        let mut open = true;
+        let mut request_close = false;
+
+        let mut action_load_a_results = false;
+        let mut action_load_a_saved = false;
+        let mut action_load_b_results = false;
+        let mut action_load_b_saved = false;
+        let mut action_clear_a = false;
+        let mut action_clear_b = false;
+        let mut action_save_pair: Option<(usize, usize, isize)> = None;
+        let mut action_save_all = false;
+        let mut action_open_hex: Option<usize> = None;
+
+        let screen_rect = ctx.screen_rect();
+        let inset_bounds = screen_rect.shrink2(vec2(32.0, 32.0));
+        let window = egui::Window::new(self.tr("Object Proximity Finder / Struct Correlator", "So sánh cụm Object (Tìm Struct chung)"))
+            .open(&mut open)
+            .resizable(true)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(screen_rect.center())
+            .constrain_to(inset_bounds)
+            .default_width(760.0)
+            .default_height(540.0)
+            .min_width(560.0)
+            .min_height(380.0);
+
+        let trimmed_dist = dialog.max_distance_str.trim();
+        let max_dist: usize = if let Some(hex_str) = trimmed_dist.strip_prefix("0x").or_else(|| trimmed_dist.strip_prefix("0X")) {
+            usize::from_str_radix(hex_str.trim(), 16).unwrap_or(0x1000)
+        } else {
+            trimmed_dist.parse::<usize>().unwrap_or_else(|_| {
+                usize::from_str_radix(trimmed_dist, 16).unwrap_or(0x1000)
+            })
+        };
+
+        let mut matches: Vec<ProximityFinderMatch> = Vec::new();
+        if !dialog.set_a.is_empty() && !dialog.set_b.is_empty() {
+            for &a in &dialog.set_a {
+                for &b in &dialog.set_b {
+                    let dist = a.abs_diff(b);
+                    if dist <= max_dist {
+                        let offset = (b as isize) - (a as isize);
+                        matches.push(ProximityFinderMatch {
+                            addr_a: a,
+                            addr_b: b,
+                            offset,
+                            distance: dist,
+                        });
+                    }
+                }
+            }
+            matches.sort_by_key(|m| m.distance);
+        }
+
+        window.show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(self.tr(
+                        "Correlate variables belonging to the same entity by comparing memory address distance |A - B| <= threshold.",
+                        "Tìm các biến thuộc cùng một Object/Struct bằng cách tính khoảng cách địa chỉ bộ nhớ |A - B| <= ngưỡng.",
+                    ))
+                    .color(Color32::from_rgb(180, 180, 180)),
+                );
+            });
+            if !dialog.status.is_empty() {
+                ui.label(
+                    RichText::new(&dialog.status)
+                        .color(Color32::from_rgb(100, 220, 130))
+                        .strong(),
+                );
+            }
+            ui.separator();
+
+            ui.columns(2, |columns| {
+                columns[0].group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(self.tr("Group A:", "Nhóm A:")).strong());
+                        ui.text_edit_singleline(&mut dialog.set_a_name);
+                    });
+                    ui.label(format!("{}: {}", self.tr("Addresses", "Số địa chỉ"), dialog.set_a.len()));
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(self.tr("From Scan Results", "Lấy từ kết quả scan")).clicked() {
+                            action_load_a_results = true;
+                        }
+                        if ui.button(self.tr("From Saved", "Lấy từ DS đã lưu")).clicked() {
+                            action_load_a_saved = true;
+                        }
+                        if !dialog.set_a.is_empty() && ui.button(self.tr("Clear", "Xóa")).clicked() {
+                            action_clear_a = true;
+                        }
+                    });
+                    if !dialog.set_a.is_empty() {
+                        ui.add_space(2.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("prox_group_a_scroll")
+                            .max_height(70.0)
+                            .show(ui, |ui| {
+                                for addr in &dialog.set_a {
+                                    ui.label(RichText::new(format!("0x{:08X}", addr)).monospace().size(11.0));
+                                }
+                            });
+                    }
+                });
+
+                columns[1].group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(self.tr("Group B:", "Nhóm B:")).strong());
+                        ui.text_edit_singleline(&mut dialog.set_b_name);
+                    });
+                    ui.label(format!("{}: {}", self.tr("Addresses", "Số địa chỉ"), dialog.set_b.len()));
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(self.tr("From Scan Results", "Lấy từ kết quả scan")).clicked() {
+                            action_load_b_results = true;
+                        }
+                        if ui.button(self.tr("From Saved", "Lấy từ DS đã lưu")).clicked() {
+                            action_load_b_saved = true;
+                        }
+                        if !dialog.set_b.is_empty() && ui.button(self.tr("Clear", "Xóa")).clicked() {
+                            action_clear_b = true;
+                        }
+                    });
+                    if !dialog.set_b.is_empty() {
+                        ui.add_space(2.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("prox_group_b_scroll")
+                            .max_height(70.0)
+                            .show(ui, |ui| {
+                                for addr in &dialog.set_b {
+                                    ui.label(RichText::new(format!("0x{:08X}", addr)).monospace().size(11.0));
+                                }
+                            });
+                    }
+                });
+            });
+
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(self.tr("Max Struct Distance:", "Khoảng cách tối đa:")).strong());
+                ui.add(egui::TextEdit::singleline(&mut dialog.max_distance_str).desired_width(80.0));
+                ui.label(self.tr("Presets:", "Nhanh:"));
+                if ui.button("0x100 (256B)").clicked() {
+                    dialog.max_distance_str = "0x100".to_string();
+                }
+                if ui.button("0x400 (1KB)").clicked() {
+                    dialog.max_distance_str = "0x400".to_string();
+                }
+                if ui.button("0x1000 (4KB)").clicked() {
+                    dialog.max_distance_str = "0x1000".to_string();
+                }
+                if ui.button("0x4000 (16KB)").clicked() {
+                    dialog.max_distance_str = "0x4000".to_string();
+                }
+                if ui.button("0x10000 (64KB)").clicked() {
+                    dialog.max_distance_str = "0x10000".to_string();
+                }
+            });
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{}: {} {} (<= 0x{:X} / {} B)",
+                        self.tr("Matched Pairs", "Cặp địa chỉ gần nhau"),
+                        matches.len(),
+                        self.tr("pair(s)", "cặp"),
+                        max_dist,
+                        max_dist
+                    ))
+                    .strong()
+                    .color(if matches.is_empty() {
+                        Color32::from_rgb(180, 180, 180)
+                    } else {
+                        Color32::from_rgb(90, 215, 130)
+                    }),
+                );
+                if !matches.is_empty() {
+                    if ui.button(RichText::new(self.tr("Save All Matched Pairs to Saved Addresses ↓", "Lưu tất cả cặp vào Danh sách đã lưu ↓")).strong()).clicked() {
+                        action_save_all = true;
+                    }
+                }
+            });
+
+            if matches.is_empty() {
+                ui.add_space(8.0);
+                if dialog.set_a.is_empty() || dialog.set_b.is_empty() {
+                    ui.label(
+                        RichText::new(self.tr(
+                            "Please load addresses into both Group A and Group B (via scan results or context menu).",
+                            "Vui lòng nạp địa chỉ vào cả Nhóm A và Nhóm B (qua kết quả scan hoặc menu chuột phải).",
+                        ))
+                        .color(Color32::from_rgb(200, 170, 90)),
+                    );
+                } else {
+                    ui.label(
+                        RichText::new(self.tr(
+                            "No pairs found within the current distance threshold. Try increasing the Max Distance preset (e.g. 0x4000 or 0x10000).",
+                            "Không tìm thấy cặp nào trong ngưỡng khoảng cách hiện tại. Hãy thử tăng ngưỡng (ví dụ 0x4000 hoặc 0x10000).",
+                        ))
+                        .color(Color32::from_rgb(200, 170, 90)),
+                    );
+                }
+            } else {
+                egui::ScrollArea::vertical()
+                    .id_salt("prox_matches_scroll")
+                    .auto_shrink([false, false])
+                    .max_height(ui.available_height().max(160.0))
+                    .show(ui, |ui| {
+                        egui::Grid::new("prox_matches_grid")
+                            .striped(true)
+                            .min_col_width(55.0)
+                            .spacing([10.0, 4.0])
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("#").strong());
+                                ui.label(RichText::new(format!("Address A ({})", dialog.set_a_name)).strong());
+                                ui.label(RichText::new(format!("Address B ({})", dialog.set_b_name)).strong());
+                                ui.label(RichText::new("Offset (B - A)").strong());
+                                ui.label(RichText::new("Distance").strong());
+                                ui.label(RichText::new(self.tr("Actions", "Thao tác")).strong());
+                                ui.end_row();
+
+                                for (idx, m) in matches.iter().enumerate() {
+                                    ui.label(format!("{}", idx + 1));
+                                    ui.label(RichText::new(format!("0x{:08X}", m.addr_a)).monospace());
+                                    ui.label(RichText::new(format!("0x{:08X}", m.addr_b)).monospace());
+                                    let offset_sign = if m.offset >= 0 { "+" } else { "-" };
+                                    ui.label(
+                                        RichText::new(format!("{}0x{:X} ({:+})", offset_sign, m.offset.abs(), m.offset))
+                                            .monospace()
+                                            .color(Color32::from_rgb(100, 200, 255)),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!("0x{:X} ({} B)", m.distance, m.distance))
+                                            .monospace()
+                                            .color(Color32::from_rgb(255, 210, 100)),
+                                    );
+                                    ui.horizontal(|ui| {
+                                        if ui.small_button(self.tr("Save Pair", "Lưu cặp")).clicked() {
+                                            action_save_pair = Some((m.addr_a, m.addr_b, m.offset));
+                                        }
+                                        if ui.small_button("Hex A").clicked() {
+                                            action_open_hex = Some(m.addr_a);
+                                        }
+                                        if ui.small_button("Hex B").clicked() {
+                                            action_open_hex = Some(m.addr_b);
+                                        }
+                                    });
+                                    ui.end_row();
+                                }
+                            });
+                    });
+            }
+        });
+
+        if action_load_a_results {
+            dialog.set_a = self.selected_memory_result_addresses();
+            dialog.set_a.sort_unstable();
+            dialog.set_a.dedup();
+            dialog.status = format!("Loaded {} address(es) into Group A", dialog.set_a.len());
+        }
+        if action_load_a_saved {
+            dialog.set_a = self.selected_saved_memory_addresses();
+            dialog.set_a.sort_unstable();
+            dialog.set_a.dedup();
+            dialog.status = format!("Loaded {} address(es) into Group A", dialog.set_a.len());
+        }
+        if action_load_b_results {
+            dialog.set_b = self.selected_memory_result_addresses();
+            dialog.set_b.sort_unstable();
+            dialog.set_b.dedup();
+            dialog.status = format!("Loaded {} address(es) into Group B", dialog.set_b.len());
+        }
+        if action_load_b_saved {
+            dialog.set_b = self.selected_saved_memory_addresses();
+            dialog.set_b.sort_unstable();
+            dialog.set_b.dedup();
+            dialog.status = format!("Loaded {} address(es) into Group B", dialog.set_b.len());
+        }
+        if action_clear_a {
+            dialog.set_a.clear();
+            dialog.status = "Cleared Group A".to_string();
+        }
+        if action_clear_b {
+            dialog.set_b.clear();
+            dialog.status = "Cleared Group B".to_string();
+        }
+        if let Some((addr_a, addr_b, offset)) = action_save_pair {
+            let group = format!("Cluster (diff 0x{:X})", addr_a.abs_diff(addr_b));
+            let name_a = dialog.set_a_name.clone();
+            let name_b = dialog.set_b_name.clone();
+            self.save_proximity_matched_address(
+                addr_a,
+                format!("{} [Pair]", name_a),
+                group.clone(),
+            );
+            self.save_proximity_matched_address(
+                addr_b,
+                format!("{} [Offset {:+X}]", name_b, offset),
+                group,
+            );
+            dialog.status = format!("Saved pair 0x{:X} & 0x{:X} to Saved Addresses", addr_a, addr_b);
+        }
+        if action_save_all {
+            let name_a = dialog.set_a_name.clone();
+            let name_b = dialog.set_b_name.clone();
+            let count = matches.len();
+            for (idx, m) in matches.iter().enumerate() {
+                let group = format!("Cluster #{}", idx + 1);
+                self.save_proximity_matched_address(
+                    m.addr_a,
+                    format!("{} [Cluster #{}]", name_a, idx + 1),
+                    group.clone(),
+                );
+                self.save_proximity_matched_address(
+                    m.addr_b,
+                    format!("{} [Offset {:+X}]", name_b, m.offset),
+                    group,
+                );
+            }
+            dialog.status = format!("Saved {} matched pair(s) to Saved Addresses", count);
+        }
+        if let Some(addr) = action_open_hex {
+            self.open_memory_view_dialog_at_address(addr);
+        }
+
+        if open && !request_close {
+            self.memory_panel.proximity_finder_dialog = Some(dialog);
         }
     }
 
