@@ -3268,6 +3268,7 @@ fn scan_region_bucket(
 pub struct RawMemorySnapshotChunk {
     pub base: usize,
     pub data: Vec<u8>,
+    pub mask: Option<Vec<u64>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -3276,6 +3277,12 @@ pub struct RawMemorySnapshot {
     pub total_slots: usize,
     pub value_type: ScanValueType,
     pub alignment: usize,
+}
+
+#[derive(Clone, Debug)]
+pub enum SnapshotFilterResult {
+    Snapshot(RawMemorySnapshot),
+    Candidates(Vec<ScanCandidate>),
 }
 
 pub fn capture_memory_snapshot(
@@ -3306,6 +3313,7 @@ pub fn capture_memory_snapshot(
                     chunks.push(RawMemorySnapshotChunk {
                         base: chunk_base,
                         data: buffer[..count].to_vec(),
+                        mask: None,
                     });
                 }
             }
@@ -3321,6 +3329,26 @@ pub fn capture_memory_snapshot(
     })
 }
 
+pub fn update_snapshot_baseline(
+    pid: u32,
+    snapshot: &RawMemorySnapshot,
+) -> io::Result<RawMemorySnapshot> {
+    let process = ScanProcess::open(pid, false)?;
+    let mut updated = snapshot.clone();
+    for chunk in &mut updated.chunks {
+        let len = chunk.data.len();
+        let _ = process.read(chunk.base, &mut chunk.data[..len]);
+    }
+    Ok(updated)
+}
+
+struct FilteredChunk {
+    base: usize,
+    fresh_data: Vec<u8>,
+    mask: Vec<u64>,
+    matches: usize,
+}
+
 pub fn filter_memory_snapshot_with_progress(
     pid: u32,
     snapshot: &RawMemorySnapshot,
@@ -3328,11 +3356,11 @@ pub fn filter_memory_snapshot_with_progress(
     comparison: ScanComparison,
     exact: Option<ScanValue>,
     range: Option<(ScanValue, ScanValue)>,
-    result_limit: usize,
+    object_threshold: usize,
     progress: Option<Arc<AtomicUsize>>,
-) -> io::Result<Vec<ScanCandidate>> {
+) -> io::Result<SnapshotFilterResult> {
     if snapshot.chunks.is_empty() {
-        return Ok(Vec::new());
+        return Ok(SnapshotFilterResult::Candidates(Vec::new()));
     }
     let max_threads = thread::available_parallelism()
         .map(|count| count.get())
@@ -3341,7 +3369,6 @@ pub fn filter_memory_snapshot_with_progress(
     let worker_count = max_threads.min(snapshot.chunks.len().max(1));
     let chunk_len = snapshot.chunks.len().div_ceil(worker_count);
     let alignment = snapshot.alignment.max(1);
-    let claimed_results = Arc::new(AtomicUsize::new(0));
 
     let results = thread::scope(|scope| {
         snapshot
@@ -3349,14 +3376,13 @@ pub fn filter_memory_snapshot_with_progress(
             .chunks(chunk_len)
             .map(|chunk_slice| {
                 let progress = progress.clone();
-                let claimed = Arc::clone(&claimed_results);
                 scope.spawn(move || {
                     crate::platform::set_current_thread_high_priority();
                     let process = ScanProcess::open(pid, false)?;
-                    let mut found = Vec::with_capacity(4096);
+                    let mut worker_chunks = Vec::new();
                     let mut fresh_buffer = vec![0u8; SCAN_CHUNK_BYTES];
 
-                    'outer: for snap_chunk in chunk_slice {
+                    for snap_chunk in chunk_slice {
                         let len = snap_chunk.data.len();
                         if len < value_type.width() {
                             continue;
@@ -3368,30 +3394,37 @@ pub fn filter_memory_snapshot_with_progress(
                             if let Some(p) = progress.as_ref() {
                                 p.fetch_add(count, Ordering::Relaxed);
                             }
-                            let chunk_start = found.len();
-                            filter_snapshot_chunk_fast(
-                                snap_chunk.base,
-                                &fresh_buffer[..count],
-                                &snap_chunk.data[..count],
-                                count,
+                            let width = value_type.width();
+                            let valid_len = count.min(snap_chunk.data.len());
+                            if valid_len < width {
+                                continue;
+                            }
+                            let slots_count = (valid_len - width) / alignment + 1;
+                            let words = slots_count.div_ceil(64);
+                            let mut new_mask = vec![0u64; words];
+                            let chunk_matches = filter_snapshot_chunk_mask(
+                                &fresh_buffer[..valid_len],
+                                &snap_chunk.data[..valid_len],
+                                snap_chunk.mask.as_deref(),
+                                &mut new_mask,
+                                slots_count,
+                                alignment,
                                 value_type,
                                 comparison,
                                 exact,
                                 range,
-                                alignment,
-                                &mut found,
                             );
-                            let matches = found.len() - chunk_start;
-                            if matches > 0 {
-                                let allowed = claim_result_slots(&claimed, matches, result_limit);
-                                found.truncate(chunk_start + allowed);
-                                if allowed < matches {
-                                    break 'outer;
-                                }
+                            if chunk_matches > 0 {
+                                worker_chunks.push(FilteredChunk {
+                                    base: snap_chunk.base,
+                                    fresh_data: fresh_buffer[..valid_len].to_vec(),
+                                    mask: new_mask,
+                                    matches: chunk_matches,
+                                });
                             }
                         }
                     }
-                    Ok(found)
+                    Ok(worker_chunks)
                 })
             })
             .collect::<Vec<_>>()
@@ -3400,204 +3433,331 @@ pub fn filter_memory_snapshot_with_progress(
             .collect::<io::Result<Vec<_>>>()
     })?;
 
-    Ok(merge_scan_buckets(results, result_limit))
+    let all_chunks = results.into_iter().flatten().collect::<Vec<_>>();
+    let total_matches: usize = all_chunks.iter().map(|c| c.matches).sum();
+
+    // ponytail: if matches > object_threshold, keep in fast snapshot bitmask mode without materializing objects.
+    // When matches drop <= object_threshold, materialize into Vec<ScanCandidate>.
+    if total_matches > object_threshold {
+        let chunks = all_chunks
+            .into_iter()
+            .map(|c| RawMemorySnapshotChunk {
+                base: c.base,
+                data: c.fresh_data,
+                mask: Some(c.mask),
+            })
+            .collect();
+        Ok(SnapshotFilterResult::Snapshot(RawMemorySnapshot {
+            chunks,
+            total_slots: total_matches,
+            value_type,
+            alignment,
+        }))
+    } else {
+        let mut candidates = Vec::with_capacity(total_matches);
+        for c in all_chunks {
+            extract_candidates_from_chunk(
+                c.base,
+                &c.fresh_data,
+                &c.mask,
+                value_type,
+                alignment,
+                &mut candidates,
+            );
+        }
+        Ok(SnapshotFilterResult::Candidates(candidates))
+    }
 }
 
-#[inline]
-fn filter_snapshot_chunk_fast(
-    chunk_base: usize,
+#[inline(always)]
+fn run_mask_loop<F: Fn(usize) -> bool>(
+    old_mask: Option<&[u64]>,
+    new_mask: &mut [u64],
+    slots_count: usize,
+    alignment: usize,
+    check: F,
+) -> usize {
+    let words = slots_count.div_ceil(64);
+    let mut total_matches = 0usize;
+    if let Some(old) = old_mask {
+        for word_idx in 0..words {
+            let mut active_bits = if word_idx < old.len() { old[word_idx] } else { 0 };
+            if active_bits == 0 {
+                new_mask[word_idx] = 0;
+                continue;
+            }
+            let mut word_matches = 0u64;
+            while active_bits != 0 {
+                let bit_idx = active_bits.trailing_zeros() as usize;
+                let slot_idx = word_idx * 64 + bit_idx;
+                if slot_idx < slots_count {
+                    let offset = slot_idx * alignment;
+                    if check(offset) {
+                        word_matches |= 1u64 << bit_idx;
+                        total_matches += 1;
+                    }
+                }
+                active_bits &= active_bits - 1;
+            }
+            new_mask[word_idx] = word_matches;
+        }
+    } else {
+        for word_idx in 0..words {
+            let start_slot = word_idx * 64;
+            let end_slot = (start_slot + 64).min(slots_count);
+            let mut word_matches = 0u64;
+            for slot_idx in start_slot..end_slot {
+                let bit_idx = slot_idx - start_slot;
+                let offset = slot_idx * alignment;
+                if check(offset) {
+                    word_matches |= 1u64 << bit_idx;
+                    total_matches += 1;
+                }
+            }
+            new_mask[word_idx] = word_matches;
+        }
+    }
+    total_matches
+}
+
+fn filter_snapshot_chunk_mask(
     fresh: &[u8],
     snap: &[u8],
-    count: usize,
+    old_mask: Option<&[u64]>,
+    new_mask: &mut [u64],
+    slots_count: usize,
+    alignment: usize,
     value_type: ScanValueType,
     comparison: ScanComparison,
     exact: Option<ScanValue>,
     range: Option<(ScanValue, ScanValue)>,
-    alignment: usize,
-    found: &mut Vec<ScanCandidate>,
-) {
+) -> usize {
     let width = value_type.width();
-    let step = alignment.max(1);
-    if count < width {
-        return;
+    let count = fresh.len().min(snap.len());
+    if count < width || slots_count == 0 {
+        return 0;
     }
     let fresh_ptr = fresh.as_ptr();
     let snap_ptr = snap.as_ptr();
 
     match value_type {
         ScanValueType::I32 => {
-            let exact_i32 = match exact {
+            let exact_val = match exact {
                 Some(ScanValue::I32(v)) => Some(v),
                 _ => None,
             };
-            let (min_i32, max_i32) = match range {
+            let (min_val, max_val) = match range {
                 Some((ScanValue::I32(min), ScanValue::I32(max))) => (Some(min), Some(max)),
                 _ => (None, None),
             };
-            for offset in (0..=count - 4).step_by(step) {
+            let check = |offset: usize| -> bool {
                 let cur = unsafe { (fresh_ptr.add(offset) as *const i32).read_unaligned() };
                 let prev = unsafe { (snap_ptr.add(offset) as *const i32).read_unaligned() };
-                let matches = match comparison {
-                    ScanComparison::Exact => exact_i32.is_some_and(|e| cur == e),
-                    ScanComparison::Less => exact_i32.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_i32.is_some_and(|e| cur > e),
+                match comparison {
+                    ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
+                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
                     ScanComparison::Changed => cur != prev,
                     ScanComparison::Unchanged => cur == prev,
                     ScanComparison::Increased => cur > prev,
                     ScanComparison::Decreased => cur < prev,
                     ScanComparison::Between => {
-                        min_i32.is_some_and(|min| max_i32.is_some_and(|max| cur >= min && cur <= max))
+                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
                     }
-                };
-                if matches {
-                    found.push(ScanCandidate::new_i32(chunk_base + offset, cur));
                 }
-            }
+            };
+            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
         }
         ScanValueType::F32 => {
-            let exact_f32 = match exact {
+            let exact_val = match exact {
                 Some(ScanValue::F32(v)) => Some(v),
                 _ => None,
             };
-            let (min_f32, max_f32) = match range {
+            let (min_val, max_val) = match range {
                 Some((ScanValue::F32(min), ScanValue::F32(max))) => (Some(min), Some(max)),
                 _ => (None, None),
             };
-            for offset in (0..=count - 4).step_by(step) {
+            let check = |offset: usize| -> bool {
                 let cur = unsafe { (fresh_ptr.add(offset) as *const f32).read_unaligned() };
                 let prev = unsafe { (snap_ptr.add(offset) as *const f32).read_unaligned() };
-                let matches = match comparison {
-                    ScanComparison::Exact => exact_f32.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-6).max(1e-5)),
-                    ScanComparison::Less => exact_f32.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_f32.is_some_and(|e| cur > e),
+                match comparison {
+                    ScanComparison::Exact => exact_val.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-6).max(1e-5)),
+                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
                     ScanComparison::Changed => cur.to_bits() != prev.to_bits(),
                     ScanComparison::Unchanged => cur.to_bits() == prev.to_bits(),
                     ScanComparison::Increased => cur > prev,
                     ScanComparison::Decreased => cur < prev,
                     ScanComparison::Between => {
-                        min_f32.is_some_and(|min| max_f32.is_some_and(|max| cur >= min && cur <= max))
+                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
                     }
-                };
-                if matches {
-                    found.push(ScanCandidate::new_f32(chunk_base + offset, cur));
                 }
-            }
+            };
+            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
         }
         ScanValueType::I64 => {
-            let exact_i64 = match exact {
+            let exact_val = match exact {
                 Some(ScanValue::I64(v)) => Some(v),
                 _ => None,
             };
-            let (min_i64, max_i64) = match range {
+            let (min_val, max_val) = match range {
                 Some((ScanValue::I64(min), ScanValue::I64(max))) => (Some(min), Some(max)),
                 _ => (None, None),
             };
-            for offset in (0..=count - 8).step_by(step) {
+            let check = |offset: usize| -> bool {
                 let cur = unsafe { (fresh_ptr.add(offset) as *const i64).read_unaligned() };
                 let prev = unsafe { (snap_ptr.add(offset) as *const i64).read_unaligned() };
-                let matches = match comparison {
-                    ScanComparison::Exact => exact_i64.is_some_and(|e| cur == e),
-                    ScanComparison::Less => exact_i64.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_i64.is_some_and(|e| cur > e),
+                match comparison {
+                    ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
+                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
                     ScanComparison::Changed => cur != prev,
                     ScanComparison::Unchanged => cur == prev,
                     ScanComparison::Increased => cur > prev,
                     ScanComparison::Decreased => cur < prev,
                     ScanComparison::Between => {
-                        min_i64.is_some_and(|min| max_i64.is_some_and(|max| cur >= min && cur <= max))
+                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
                     }
-                };
-                if matches {
-                    found.push(ScanCandidate::new_i64(chunk_base + offset, cur));
                 }
-            }
+            };
+            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
         }
         ScanValueType::F64 => {
-            let exact_f64 = match exact {
+            let exact_val = match exact {
                 Some(ScanValue::F64(v)) => Some(v),
                 _ => None,
             };
-            let (min_f64, max_f64) = match range {
+            let (min_val, max_val) = match range {
                 Some((ScanValue::F64(min), ScanValue::F64(max))) => (Some(min), Some(max)),
                 _ => (None, None),
             };
-            for offset in (0..=count - 8).step_by(step) {
+            let check = |offset: usize| -> bool {
                 let cur = unsafe { (fresh_ptr.add(offset) as *const f64).read_unaligned() };
                 let prev = unsafe { (snap_ptr.add(offset) as *const f64).read_unaligned() };
-                let matches = match comparison {
-                    ScanComparison::Exact => exact_f64.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-12).max(1e-9)),
-                    ScanComparison::Less => exact_f64.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_f64.is_some_and(|e| cur > e),
+                match comparison {
+                    ScanComparison::Exact => exact_val.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-12).max(1e-9)),
+                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
                     ScanComparison::Changed => cur.to_bits() != prev.to_bits(),
                     ScanComparison::Unchanged => cur.to_bits() == prev.to_bits(),
                     ScanComparison::Increased => cur > prev,
                     ScanComparison::Decreased => cur < prev,
                     ScanComparison::Between => {
-                        min_f64.is_some_and(|min| max_f64.is_some_and(|max| cur >= min && cur <= max))
+                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
                     }
-                };
-                if matches {
-                    found.push(ScanCandidate::new_f64(chunk_base + offset, cur));
                 }
-            }
+            };
+            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
         }
         ScanValueType::I16 => {
-            let exact_i16 = match exact {
+            let exact_val = match exact {
                 Some(ScanValue::I16(v)) => Some(v),
                 _ => None,
             };
-            let (min_i16, max_i16) = match range {
+            let (min_val, max_val) = match range {
                 Some((ScanValue::I16(min), ScanValue::I16(max))) => (Some(min), Some(max)),
                 _ => (None, None),
             };
-            for offset in (0..=count - 2).step_by(step) {
+            let check = |offset: usize| -> bool {
                 let cur = unsafe { (fresh_ptr.add(offset) as *const i16).read_unaligned() };
                 let prev = unsafe { (snap_ptr.add(offset) as *const i16).read_unaligned() };
-                let matches = match comparison {
-                    ScanComparison::Exact => exact_i16.is_some_and(|e| cur == e),
-                    ScanComparison::Less => exact_i16.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_i16.is_some_and(|e| cur > e),
+                match comparison {
+                    ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
+                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
                     ScanComparison::Changed => cur != prev,
                     ScanComparison::Unchanged => cur == prev,
                     ScanComparison::Increased => cur > prev,
                     ScanComparison::Decreased => cur < prev,
                     ScanComparison::Between => {
-                        min_i16.is_some_and(|min| max_i16.is_some_and(|max| cur >= min && cur <= max))
+                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
                     }
-                };
-                if matches {
-                    found.push(ScanCandidate::new_i16(chunk_base + offset, cur));
                 }
-            }
+            };
+            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
         }
         ScanValueType::I8 => {
-            let exact_i8 = match exact {
+            let exact_val = match exact {
                 Some(ScanValue::I8(v)) => Some(v),
                 _ => None,
             };
-            let (min_i8, max_i8) = match range {
+            let (min_val, max_val) = match range {
                 Some((ScanValue::I8(min), ScanValue::I8(max))) => (Some(min), Some(max)),
                 _ => (None, None),
             };
-            for offset in (0..count).step_by(step) {
+            let check = |offset: usize| -> bool {
                 let cur = unsafe { *fresh_ptr.add(offset) as i8 };
                 let prev = unsafe { *snap_ptr.add(offset) as i8 };
-                let matches = match comparison {
-                    ScanComparison::Exact => exact_i8.is_some_and(|e| cur == e),
-                    ScanComparison::Less => exact_i8.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_i8.is_some_and(|e| cur > e),
+                match comparison {
+                    ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
+                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
                     ScanComparison::Changed => cur != prev,
                     ScanComparison::Unchanged => cur == prev,
                     ScanComparison::Increased => cur > prev,
                     ScanComparison::Decreased => cur < prev,
                     ScanComparison::Between => {
-                        min_i8.is_some_and(|min| max_i8.is_some_and(|max| cur >= min && cur <= max))
+                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
+                    }
+                }
+            };
+            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
+        }
+    }
+}
+
+fn extract_candidates_from_chunk(
+    chunk_base: usize,
+    data: &[u8],
+    mask: &[u64],
+    value_type: ScanValueType,
+    alignment: usize,
+    found: &mut Vec<ScanCandidate>,
+) {
+    let width = value_type.width();
+    let data_ptr = data.as_ptr();
+    let data_len = data.len();
+
+    for (word_idx, &word) in mask.iter().enumerate() {
+        if word == 0 {
+            continue;
+        }
+        let mut bits = word;
+        while bits != 0 {
+            let bit_idx = bits.trailing_zeros() as usize;
+            let slot_idx = word_idx * 64 + bit_idx;
+            let offset = slot_idx * alignment;
+            if offset + width <= data_len {
+                let address = chunk_base + offset;
+                let candidate = match value_type {
+                    ScanValueType::I8 => {
+                        let val = unsafe { *data_ptr.add(offset) as i8 };
+                        ScanCandidate::new_i8(address, val)
+                    }
+                    ScanValueType::I16 => {
+                        let val = unsafe { (data_ptr.add(offset) as *const i16).read_unaligned() };
+                        ScanCandidate::new_i16(address, val)
+                    }
+                    ScanValueType::I32 => {
+                        let val = unsafe { (data_ptr.add(offset) as *const i32).read_unaligned() };
+                        ScanCandidate::new_i32(address, val)
+                    }
+                    ScanValueType::F32 => {
+                        let val = unsafe { (data_ptr.add(offset) as *const f32).read_unaligned() };
+                        ScanCandidate::new_f32(address, val)
+                    }
+                    ScanValueType::I64 => {
+                        let val = unsafe { (data_ptr.add(offset) as *const i64).read_unaligned() };
+                        ScanCandidate::new_i64(address, val)
+                    }
+                    ScanValueType::F64 => {
+                        let val = unsafe { (data_ptr.add(offset) as *const f64).read_unaligned() };
+                        ScanCandidate::new_f64(address, val)
                     }
                 };
-                if matches {
-                    found.push(ScanCandidate::new_i8(chunk_base + offset, cur));
-                }
+                found.push(candidate);
             }
+            bits &= bits - 1;
         }
     }
 }
@@ -4067,5 +4227,66 @@ mod tests {
         assert_eq!(paths[0].module, "game.exe");
         assert_eq!(paths[0].module_offset, 0x10);
         assert_eq!(paths[0].offsets, vec![0x10, 0x20]);
+    }
+
+    #[test]
+    fn snapshot_mask_filtering_and_candidate_extraction() {
+        let mut snap_bytes = Vec::new();
+        for v in [100i32, 200, 300, 400] {
+            snap_bytes.extend_from_slice(&v.to_le_bytes());
+        }
+
+        let mut fresh_bytes = Vec::new();
+        for v in [100i32, 250, 290, 400] {
+            fresh_bytes.extend_from_slice(&v.to_le_bytes());
+        }
+
+        // Round 1: Changed (from None mask -> all 4 slots active)
+        let mut mask_1 = vec![0u64; 1];
+        let matches_1 = filter_snapshot_chunk_mask(
+            &fresh_bytes,
+            &snap_bytes,
+            None,
+            &mut mask_1,
+            4,
+            4,
+            ScanValueType::I32,
+            ScanComparison::Changed,
+            None,
+            None,
+        );
+        assert_eq!(matches_1, 2);
+        assert_eq!(mask_1[0], (1 << 1) | (1 << 2));
+
+        // Round 2: Increased (using mask_1 as old_mask)
+        let mut mask_2 = vec![0u64; 1];
+        let matches_2 = filter_snapshot_chunk_mask(
+            &fresh_bytes,
+            &snap_bytes,
+            Some(&mask_1),
+            &mut mask_2,
+            4,
+            4,
+            ScanValueType::I32,
+            ScanComparison::Increased,
+            None,
+            None,
+        );
+        assert_eq!(matches_2, 1);
+        assert_eq!(mask_2[0], 1 << 1);
+
+        // Candidate extraction from mask_2
+        let mut candidates = Vec::new();
+        extract_candidates_from_chunk(
+            0x1000,
+            &fresh_bytes,
+            &mask_2,
+            ScanValueType::I32,
+            4,
+            &mut candidates,
+        );
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].address, 0x1000 + 4);
+        assert_eq!(candidates[0].get_i32(), 250);
     }
 }

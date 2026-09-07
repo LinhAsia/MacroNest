@@ -21,7 +21,7 @@ use crate::{
         EntityListCandidate, EntityListScanResult, EntityListValidation, MemoryRegionInfo,
         MemoryScanOptions, PausedProcess, PointerMap, PointerPath, PointerPathComparison,
         PointerScanLimits, RawMemorySnapshot, ScanCandidate, ScanComparison, ScanValue,
-        ScanValueType, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
+        ScanValueType, SnapshotFilterResult, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
         adjacent_readable_memory_region, capture_memory_snapshot, capture_pointer_map_with_budget,
         compare_pointer_paths, filter_aob_scan_candidates, filter_aob_scan_candidates_numeric,
         filter_memory_snapshot_with_progress, filter_scan_candidates,
@@ -31,7 +31,7 @@ use crate::{
         scan_aob_memory_with_progress, scan_entity_lists_with_progress,
         scan_memory_range_with_progress, scan_pointer_paths_to_targets_with_budget,
         scan_pointer_paths_with_budget_options, scan_text_memory_with_progress,
-        scan_view_projection_candidates, validate_entity_list, write_code_bytes,
+        scan_view_projection_candidates, update_snapshot_baseline, validate_entity_list, write_code_bytes,
         write_scan_value, write_text_memory,
     },
     window_list,
@@ -52,6 +52,7 @@ use super::CrosshairApp;
 use super::{GetCursorPos, POINT};
 
 const DEFAULT_SCAN_LIMIT: usize = usize::MAX;
+const DEFAULT_OBJECT_LIMIT: usize = 5_000;
 const MEMORY_VIEW_READ_BYTES: usize = 4096;
 // ponytail: keep live polling bounded; add paged candidate refresh before raising this ceiling.
 const MAX_VISIBLE_RESULTS: usize = 1_000;
@@ -949,7 +950,7 @@ impl Default for MemoryPanelState {
             between_open: false,
             scan_modules: Vec::new(),
             hex: false,
-            result_limit_input: "Unlimited".to_owned(),
+            result_limit_input: "5000".to_owned(),
             scan_writable: true,
             scan_executable: false,
             scan_copy_on_write: false,
@@ -2499,11 +2500,14 @@ impl CrosshairApp {
                 ui.add_space(5.0);
                 ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label(self.tr("Limit", "Limit"));
+                    ui.label(self.tr("Object limit", "Giới hạn object"));
                     let limit_resp = ui.add(
                         egui::TextEdit::singleline(&mut self.memory_panel.result_limit_input)
-                            .desired_width(110.0),
-                    );
+                            .desired_width(90.0),
+                    ).on_hover_text(self.tr(
+                        "Threshold to create candidate objects. Scans with more matches stay in fast snapshot mode (default: 5000).",
+                        "Ngưỡng số lượng kết quả để tạo đối tượng danh sách. Nếu nhiều hơn ngưỡng này, scan sẽ giữ ở chế độ snapshot siêu nhanh (mặc định: 5000).",
+                    ));
                     Self::apply_vietnamese_input_if_changed(
                         &limit_resp,
                         self.state.vietnamese_input_enabled,
@@ -3082,8 +3086,8 @@ impl CrosshairApp {
                 ui.centered_and_justified(|ui| {
                     ui.label(
                         RichText::new(self.tr(
-                            "Snapshot active. Perform a Next scan to narrow down results.",
-                            "Đã chụp snapshot bộ nhớ. Hãy thực hiện Next scan để lọc địa chỉ.",
+                            "Snapshot active (> object limit). Perform Next scan to narrow down results.",
+                            "Đang lưu dạng snapshot (> giới hạn object). Hãy Next scan tiếp để thu hẹp kết quả.",
                         ))
                         .weak(),
                     );
@@ -15107,21 +15111,23 @@ impl CrosshairApp {
             }
         };
         let limit_input = self.memory_panel.result_limit_input.trim();
-        let result_limit =
-            if limit_input.is_empty() || limit_input.eq_ignore_ascii_case("unlimited") {
-                DEFAULT_SCAN_LIMIT
-            } else {
-                limit_input
-                    .replace(['.', ',', '_'], "")
-                    .parse::<usize>()
-                    .unwrap_or(DEFAULT_SCAN_LIMIT)
-                    .max(1_000)
-            };
-        self.memory_panel.result_limit_input = if result_limit == DEFAULT_SCAN_LIMIT {
+        let object_limit = if limit_input.is_empty() {
+            DEFAULT_OBJECT_LIMIT
+        } else if limit_input.eq_ignore_ascii_case("unlimited") {
+            usize::MAX
+        } else {
+            limit_input
+                .replace(['.', ',', '_'], "")
+                .parse::<usize>()
+                .unwrap_or(DEFAULT_OBJECT_LIMIT)
+                .max(1)
+        };
+        self.memory_panel.result_limit_input = if object_limit == usize::MAX {
             "Unlimited".to_owned()
         } else {
-            result_limit.to_string()
+            object_limit.to_string()
         };
+        let result_limit = DEFAULT_SCAN_LIMIT;
         let alignment = self
             .memory_panel
             .fast_scan_alignment
@@ -15253,10 +15259,13 @@ impl CrosshairApp {
                         comparison,
                         exact,
                         range,
-                        result_limit,
+                        object_limit,
                         Some(progress),
                     )
-                    .map(ScanJobCandidates::Numeric)
+                    .map(|outcome| match outcome {
+                        SnapshotFilterResult::Snapshot(snap) => ScanJobCandidates::Snapshot(Arc::new(snap)),
+                        SnapshotFilterResult::Candidates(cands) => ScanJobCandidates::Numeric(cands),
+                    })
                 } else {
                     filter_scan_candidates_with_progress(
                         pid,
@@ -15391,34 +15400,11 @@ impl CrosshairApp {
                 updated += 1;
             }
         }
-        if self.memory_panel.raw_snapshot.is_some() {
-            let scan_options = if self.memory_panel.is_aob_scan || self.memory_panel.scan_scope_all {
-                MemoryScanOptions {
-                    writable: false,
-                    executable: true,
-                    copy_on_write: true,
-                    active_memory_only: false,
-                    mem_private: true,
-                    mem_image: true,
-                    mem_mapped: true,
-                    alignment: (!self.memory_panel.is_aob_scan && self.memory_panel.fast_scan)
-                        .then_some(self.memory_panel.fast_scan_alignment.trim().parse::<usize>().unwrap_or(value_type.width()).clamp(1, 4096)),
-                }
-            } else {
-                MemoryScanOptions {
-                    writable: self.memory_panel.scan_writable,
-                    executable: self.memory_panel.scan_executable,
-                    copy_on_write: self.memory_panel.scan_copy_on_write,
-                    active_memory_only: self.memory_panel.scan_active_memory_only,
-                    mem_private: self.memory_panel.scan_mem_private,
-                    mem_image: self.memory_panel.scan_mem_image,
-                    mem_mapped: self.memory_panel.scan_mem_mapped,
-                    alignment: self.memory_panel.fast_scan
-                        .then_some(self.memory_panel.fast_scan_alignment.trim().parse::<usize>().unwrap_or(value_type.width()).clamp(1, 4096)),
-                }
-            };
-            if let Ok(snap) = crate::process_memory::capture_memory_snapshot(pid, value_type, scan_options, Arc::new(AtomicUsize::new(0))) {
-                self.memory_panel.raw_snapshot = Some(Arc::new(snap));
+        if let Some(snap) = self.memory_panel.raw_snapshot.as_ref() {
+            if let Ok(new_snap) = update_snapshot_baseline(pid, snap) {
+                let count = new_snap.total_slots;
+                self.memory_panel.raw_snapshot = Some(Arc::new(new_snap));
+                updated += count;
             }
         }
         self.memory_panel.candidate_value_changes.clear();
