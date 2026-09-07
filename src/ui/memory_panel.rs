@@ -24,10 +24,11 @@ use crate::{
         ScanValueType, SnapshotFilterResult, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
         adjacent_readable_memory_region, capture_memory_snapshot, capture_pointer_map_with_budget,
         compare_pointer_paths, filter_aob_scan_candidates, filter_aob_scan_candidates_numeric,
-        filter_memory_snapshot_with_progress, filter_scan_candidates,
+        filter_aob_scan_candidates_text, filter_memory_snapshot_with_progress, filter_scan_candidates,
         filter_scan_candidates_with_progress, filter_text_scan_candidates, is_aob_pattern_input,
         query_memory_region, read_memory_bytes, read_scan_value, read_text_memory,
-        refresh_scan_candidates, scan_aob_memory_as_numeric, scan_aob_memory_range_with_progress,
+        refresh_scan_candidates, scan_aob_memory_as_numeric, scan_aob_memory_as_text,
+        scan_aob_memory_range_with_progress,
         scan_aob_memory_with_progress, scan_entity_lists_with_progress,
         scan_memory_range_with_progress, scan_pointer_paths_to_targets_with_budget,
         scan_pointer_paths_with_budget_options, scan_text_memory_with_progress,
@@ -408,6 +409,8 @@ struct AddressDialog {
     pointer: bool,
     description: String,
     value_type: ScanValueType,
+    text_encoding: Option<TextEncoding>,
+    text_byte_len: usize,
     hexadecimal: bool,
     position: egui::Pos2,
     rect: Option<egui::Rect>,
@@ -2372,6 +2375,7 @@ impl CrosshairApp {
                                     self.memory_panel.value_type = value_type;
                                     self.memory_panel.text_encoding = None;
                                     self.memory_panel.is_aob_scan = false;
+                                    self.memory_panel.hex = false;
                                     self.reset_memory_scan("Value type changed");
                                 }
                             }
@@ -2404,6 +2408,7 @@ impl CrosshairApp {
                             {
                                 self.memory_panel.is_aob_scan = true;
                                 self.memory_panel.text_encoding = None;
+                                self.memory_panel.value_type = ScanValueType::I8;
                                 self.memory_panel.hex = true;
                                 self.reset_memory_scan("Value type changed");
                             }
@@ -3958,11 +3963,31 @@ impl CrosshairApp {
                                                 (ScanValueType::F64, "Double"),
                                             ];
                                             for (vtype, label) in types {
-                                                if ui.selectable_value(&mut selected_type, vtype, label).clicked() {
+                                                let is_selected = saved.text_encoding.is_none() && saved.value_type == vtype;
+                                                if ui.selectable_label(is_selected, label).clicked() {
                                                     self.memory_panel.saved[index].value_type = vtype;
                                                     self.memory_panel.saved[index].text_encoding = None;
                                                     persist_pointer_changes = true;
                                                 }
+                                            }
+                                            ui.separator();
+                                            let is_utf8 = saved.text_encoding == Some(TextEncoding::Utf8);
+                                            if ui.selectable_label(is_utf8, "Text (UTF-8)").clicked() {
+                                                self.memory_panel.saved[index].value_type = ScanValueType::I8;
+                                                self.memory_panel.saved[index].text_encoding = Some(TextEncoding::Utf8);
+                                                if self.memory_panel.saved[index].text_byte_len == 0 {
+                                                    self.memory_panel.saved[index].text_byte_len = 32;
+                                                }
+                                                persist_pointer_changes = true;
+                                            }
+                                            let is_utf16 = saved.text_encoding == Some(TextEncoding::Utf16);
+                                            if ui.selectable_label(is_utf16, "Text (UTF-16)").clicked() {
+                                                self.memory_panel.saved[index].value_type = ScanValueType::I8;
+                                                self.memory_panel.saved[index].text_encoding = Some(TextEncoding::Utf16);
+                                                if self.memory_panel.saved[index].text_byte_len == 0 {
+                                                    self.memory_panel.saved[index].text_byte_len = 64;
+                                                }
+                                                persist_pointer_changes = true;
                                             }
                                         }).response;
                                     let type_response = type_cell_resp.union(combo_resp);
@@ -4186,6 +4211,33 @@ impl CrosshairApp {
                                             persist_pointer_changes = true;
                                             ui.close();
                                         }
+                                    }
+                                    ui.separator();
+                                    if ui.button("Text (UTF-8)").clicked() {
+                                        for sel_idx in self.memory_panel.selected_saved.clone() {
+                                            if let Some(entry) = self.memory_panel.saved.get_mut(sel_idx) {
+                                                entry.value_type = ScanValueType::I8;
+                                                entry.text_encoding = Some(TextEncoding::Utf8);
+                                                if entry.text_byte_len == 0 {
+                                                    entry.text_byte_len = 32;
+                                                }
+                                            }
+                                        }
+                                        persist_pointer_changes = true;
+                                        ui.close();
+                                    }
+                                    if ui.button("Text (UTF-16)").clicked() {
+                                        for sel_idx in self.memory_panel.selected_saved.clone() {
+                                            if let Some(entry) = self.memory_panel.saved.get_mut(sel_idx) {
+                                                entry.value_type = ScanValueType::I8;
+                                                entry.text_encoding = Some(TextEncoding::Utf16);
+                                                if entry.text_byte_len == 0 {
+                                                    entry.text_byte_len = 64;
+                                                }
+                                            }
+                                        }
+                                        persist_pointer_changes = true;
+                                        ui.close();
                                     }
                                 });
                                 if !single_target {
@@ -4791,6 +4843,12 @@ impl CrosshairApp {
                                     pointer,
                                     description: saved.description.clone(),
                                     value_type: saved.value_type,
+                                    text_encoding: saved.text_encoding,
+                                    text_byte_len: if saved.text_byte_len == 0 {
+                                        if saved.text_encoding == Some(TextEncoding::Utf16) { 64 } else { 32 }
+                                    } else {
+                                        saved.text_byte_len
+                                    },
                                     hexadecimal: saved.hexadecimal,
                                     position: ui
                                         .ctx()
@@ -14528,16 +14586,48 @@ impl CrosshairApp {
                     ui.label("Description");
                     ui.text_edit_singleline(&mut dialog.description);
                 });
+                let type_label = match dialog.text_encoding {
+                    Some(TextEncoding::Utf8) => "Text (UTF-8)",
+                    Some(TextEncoding::Utf16) => "Text (UTF-16)",
+                    None => memory_type_label(dialog.value_type),
+                };
                 ui.horizontal(|ui| {
                     ui.label("Type");
                     egui::ComboBox::from_id_salt("change-address-type")
-                        .selected_text(memory_type_label(dialog.value_type))
+                        .selected_text(type_label)
                         .show_ui(ui, |ui| {
                             for (value_type, label) in memory_value_types() {
-                                ui.selectable_value(&mut dialog.value_type, value_type, label);
+                                let is_selected = dialog.text_encoding.is_none() && dialog.value_type == value_type;
+                                if ui.selectable_label(is_selected, label).clicked() {
+                                    dialog.value_type = value_type;
+                                    dialog.text_encoding = None;
+                                }
+                            }
+                            ui.separator();
+                            let is_utf8 = dialog.text_encoding == Some(TextEncoding::Utf8);
+                            if ui.selectable_label(is_utf8, "Text (UTF-8)").clicked() {
+                                dialog.value_type = ScanValueType::I8;
+                                dialog.text_encoding = Some(TextEncoding::Utf8);
+                                if dialog.text_byte_len == 0 {
+                                    dialog.text_byte_len = 32;
+                                }
+                            }
+                            let is_utf16 = dialog.text_encoding == Some(TextEncoding::Utf16);
+                            if ui.selectable_label(is_utf16, "Text (UTF-16)").clicked() {
+                                dialog.value_type = ScanValueType::I8;
+                                dialog.text_encoding = Some(TextEncoding::Utf16);
+                                if dialog.text_byte_len == 0 {
+                                    dialog.text_byte_len = 64;
+                                }
                             }
                         });
                 });
+                if dialog.text_encoding.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.label("Length");
+                        ui.add(egui::DragValue::new(&mut dialog.text_byte_len).range(1..=4096));
+                    });
+                }
                 ui.checkbox(&mut dialog.hexadecimal, "Hexadecimal")
                     .on_hover_text("Display this value as hexadecimal; the stored type is unchanged");
                 if dialog.pointer {
@@ -14644,23 +14734,34 @@ impl CrosshairApp {
                                         );
                                     }
                                     if valid {
-                                        match read_scan_value(pid, current, dialog.value_type) {
-                                            Ok(value) => {
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "Value: {}",
-                                                        format_scan_value(value, dialog.hexadecimal)
-                                                    ))
+                                        if let Some(encoding) = dialog.text_encoding {
+                                            let text_len = dialog.text_byte_len.max(if encoding == TextEncoding::Utf16 { 64 } else { 32 });
+                                            let preview = read_text_memory(pid, current, text_len, encoding)
+                                                .unwrap_or_else(|_| "cannot read memory".to_owned());
+                                            ui.label(
+                                                RichText::new(format!("Value: {preview}"))
                                                     .monospace()
                                                     .color(Color32::from_rgb(100, 220, 130)),
-                                                );
-                                            }
-                                            Err(_) => {
-                                                ui.label(
-                                                    RichText::new("Value: cannot read memory")
+                                            );
+                                        } else {
+                                            match read_scan_value(pid, current, dialog.value_type) {
+                                                Ok(value) => {
+                                                    ui.label(
+                                                        RichText::new(format!(
+                                                            "Value: {}",
+                                                            format_scan_value(value, dialog.hexadecimal)
+                                                        ))
                                                         .monospace()
-                                                        .color(Color32::from_rgb(220, 80, 80)),
-                                                );
+                                                        .color(Color32::from_rgb(100, 220, 130)),
+                                                    );
+                                                }
+                                                Err(_) => {
+                                                    ui.label(
+                                                        RichText::new("Value: cannot read memory")
+                                                            .monospace()
+                                                            .color(Color32::from_rgb(220, 80, 80)),
+                                                    );
+                                                }
                                             }
                                         }
                                     }
@@ -14686,9 +14787,15 @@ impl CrosshairApp {
                         &dialog.address,
                     )
                 {
-                    let preview = read_scan_value(pid, address, dialog.value_type)
-                        .map(|value| format_scan_value(value, dialog.hexadecimal))
-                        .unwrap_or_else(|_| "cannot read memory".to_owned());
+                    let preview = if let Some(encoding) = dialog.text_encoding {
+                        let text_len = dialog.text_byte_len.max(if encoding == TextEncoding::Utf16 { 64 } else { 32 });
+                        read_text_memory(pid, address, text_len, encoding)
+                            .unwrap_or_else(|_| "cannot read memory".to_owned())
+                    } else {
+                        read_scan_value(pid, address, dialog.value_type)
+                            .map(|value| format_scan_value(value, dialog.hexadecimal))
+                            .unwrap_or_else(|_| "cannot read memory".to_owned())
+                    };
                     ui.label(RichText::new(format!("Value: {preview}")).monospace());
                 }
                 ui.horizontal(|ui| {
@@ -14797,7 +14904,10 @@ impl CrosshairApp {
         if let Some(saved) = self.memory_panel.saved.get_mut(dialog.index) {
             saved.description = dialog.description.clone();
             saved.value_type = dialog.value_type;
-            saved.text_encoding = None;
+            saved.text_encoding = dialog.text_encoding;
+            if dialog.text_encoding.is_some() {
+                saved.text_byte_len = dialog.text_byte_len.max(1);
+            }
             saved.hexadecimal = dialog.hexadecimal;
         }
         let pointer = if dialog.pointer {
@@ -15231,12 +15341,21 @@ impl CrosshairApp {
                 None
             };
             let result = if is_aob {
-                if action == MemoryScanAction::Exact && !candidates.is_empty() {
-                    filter_aob_scan_candidates_numeric(pid, candidates, &text, value_type)
+                if let Some(encoding) = text_encoding {
+                    if action == MemoryScanAction::Exact && !text_candidates.is_empty() {
+                        filter_aob_scan_candidates_text(pid, text_candidates, &text, encoding)
+                    } else {
+                        scan_aob_memory_as_text(pid, &text, encoding, result_limit, scan_options, progress)
+                    }
+                    .map(ScanJobCandidates::Text)
                 } else {
-                    scan_aob_memory_as_numeric(pid, &text, value_type, result_limit, scan_options, progress)
+                    if action == MemoryScanAction::Exact && !candidates.is_empty() {
+                        filter_aob_scan_candidates_numeric(pid, candidates, &text, value_type)
+                    } else {
+                        scan_aob_memory_as_numeric(pid, &text, value_type, result_limit, scan_options, progress)
+                    }
+                    .map(ScanJobCandidates::Numeric)
                 }
-                .map(ScanJobCandidates::Numeric)
             } else if let Some(encoding) = text_encoding {
                 if action == MemoryScanAction::Exact && !text_candidates.is_empty() {
                     filter_text_scan_candidates(
@@ -15450,10 +15569,10 @@ impl CrosshairApp {
                     address,
                     value_type: ScanValueType::I8,
                     current: None,
-                    text_encoding: self.memory_panel.text_encoding,
+                    text_encoding: self.memory_panel.text_encoding.or(Some(TextEncoding::Utf8)),
                     text_byte_len: match self.memory_panel.text_encoding {
-                        Some(TextEncoding::Utf16) => candidate.current.encode_utf16().count() * 2,
-                        _ => candidate.current.len(),
+                        Some(TextEncoding::Utf16) => (candidate.current.encode_utf16().count() * 2).max(64),
+                        _ => candidate.current.len().max(32),
                     },
                     current_text: Some(candidate.current.clone()),
                     description: match self.memory_panel.text_encoding {
@@ -15466,7 +15585,11 @@ impl CrosshairApp {
                     frozen: None,
                     saved_to_library: false,
                     aob_sample_1: None,
-                    aob_pattern: None,
+                    aob_pattern: if self.memory_panel.is_aob_scan || is_aob_pattern_input(&self.memory_panel.value_input) {
+                        Some(self.memory_panel.value_input.clone())
+                    } else {
+                        None
+                    },
                 });
                 continue;
             }
@@ -15489,12 +15612,16 @@ impl CrosshairApp {
                 current_text: None,
                 description: String::new(),
                 group: String::new(),
-                hexadecimal: false,
+                hexadecimal: self.memory_panel.hex,
                 pointer: None,
                 frozen: None,
                 saved_to_library: false,
                 aob_sample_1: None,
-                aob_pattern: None,
+                aob_pattern: if self.memory_panel.is_aob_scan || is_aob_pattern_input(&self.memory_panel.value_input) {
+                    Some(self.memory_panel.value_input.clone())
+                } else {
+                    None
+                },
             });
         }
         self.memory_panel.status = format!("{} address(es) saved", self.memory_panel.saved.len());
@@ -15527,21 +15654,29 @@ impl CrosshairApp {
             return;
         };
         let value_type = self.memory_panel.value_type;
-        let current = read_scan_value(pid, address, value_type).ok();
+        let text_encoding = self.memory_panel.text_encoding;
+        let (current, current_text, text_byte_len) = if let Some(encoding) = text_encoding {
+            let byte_len = if encoding == TextEncoding::Utf16 { 64 } else { 32 };
+            let text = read_text_memory(pid, address, byte_len, encoding).ok();
+            (None, text, byte_len)
+        } else {
+            let current = read_scan_value(pid, address, value_type).ok();
+            (current, None, 0)
+        };
         let description = pointer
             .as_ref()
             .map(format_pointer_expression)
             .unwrap_or_default();
         self.memory_panel.saved.push(SavedMemoryAddress {
             address,
-            value_type,
+            value_type: if text_encoding.is_some() { ScanValueType::I8 } else { value_type },
             current,
-            text_encoding: None,
-            text_byte_len: 0,
-            current_text: None,
+            text_encoding,
+            text_byte_len,
+            current_text,
             description,
             group: String::new(),
-            hexadecimal: false,
+            hexadecimal: self.memory_panel.hex,
             pointer,
             frozen: None,
             saved_to_library: false,
@@ -16513,21 +16648,28 @@ impl CrosshairApp {
             let Some(saved) = self.memory_panel.saved.get_mut(index) else {
                 continue;
             };
+            let address = if let Some(pointer) = saved.pointer.as_ref() {
+                if let Ok(addr) = resolve_memory_address(pid, pointer.base, Some(pointer)) {
+                    saved.address = addr;
+                    addr
+                } else {
+                    0
+                }
+            } else {
+                saved.address
+            };
+            if address == 0 {
+                saved.current = None;
+                saved.current_text = None;
+                continue;
+            }
             if let Some(encoding) = saved.text_encoding {
+                let byte_len = saved.text_byte_len.max(if encoding == TextEncoding::Utf16 { 64 } else { 32 });
                 saved.current_text =
-                    read_text_memory(pid, saved.address, saved.text_byte_len, encoding).ok();
+                    read_text_memory(pid, address, byte_len, encoding).ok();
                 saved.current = None;
             } else {
-                let mut value = if let Some(pointer) = saved.pointer.as_ref() {
-                    if let Ok(address) = resolve_memory_address(pid, pointer.base, Some(pointer)) {
-                        saved.address = address;
-                        read_scan_value(pid, address, saved.value_type).ok()
-                    } else {
-                        None
-                    }
-                } else {
-                    read_scan_value(pid, saved.address, saved.value_type).ok()
-                };
+                let value = read_scan_value(pid, address, saved.value_type).ok();
                 saved.current = value;
                 saved.current_text = None;
             }
@@ -16569,7 +16711,7 @@ impl CrosshairApp {
             .or_else(|| {
                 saved
                     .current
-                    .map(|value| editable_scan_value(value, self.memory_panel.hex))
+                    .map(|value| editable_scan_value(value, saved.hexadecimal))
             })
             .unwrap_or_default();
         self.memory_panel.edit_value_position = Some(position);
@@ -16691,7 +16833,7 @@ impl CrosshairApp {
             let Some(value) = parse_scan_value(
                 &self.memory_panel.edit_value_input,
                 saved.value_type,
-                self.memory_panel.hex,
+                saved.hexadecimal,
             ) else {
                 self.memory_panel.status = "Invalid value".to_owned();
                 return;

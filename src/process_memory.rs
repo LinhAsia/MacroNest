@@ -2075,6 +2075,28 @@ pub fn scan_aob_memory_as_numeric(
     Ok(candidates)
 }
 
+pub fn scan_aob_memory_as_text(
+    pid: u32,
+    pattern_str: &str,
+    encoding: TextEncoding,
+    result_limit: usize,
+    options: MemoryScanOptions,
+    total: Arc<AtomicUsize>,
+) -> io::Result<Vec<TextScanCandidate>> {
+    let addrs = scan_aob_memory_addresses(pid, pattern_str, result_limit, options, total)?;
+    let mut candidates = Vec::with_capacity(addrs.len());
+    let read_len = if encoding == TextEncoding::Utf16 { 64 } else { 32 };
+    for address in addrs {
+        let text = read_text_memory(pid, address, read_len, encoding).unwrap_or_default();
+        candidates.push(TextScanCandidate {
+            address,
+            previous: text.clone(),
+            current: text,
+        });
+    }
+    Ok(candidates)
+}
+
 pub fn scan_aob_memory_addresses(
     pid: u32,
     pattern_str: &str,
@@ -2326,6 +2348,33 @@ pub fn filter_aob_scan_candidates_numeric(
             let current = read_scan_value(pid, candidate.address, value_type)
                 .unwrap_or(ScanValue::I32(0));
             kept.push(ScanCandidate::new(candidate.address, current));
+        }
+    }
+    Ok(kept)
+}
+
+pub fn filter_aob_scan_candidates_text(
+    pid: u32,
+    candidates: Vec<TextScanCandidate>,
+    pattern_str: &str,
+    encoding: TextEncoding,
+) -> io::Result<Vec<TextScanCandidate>> {
+    let pattern = parse_aob_pattern(pattern_str)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid AOB pattern format"))?;
+    let process = ScanProcess::open(pid, false)?;
+    let mut bytes = vec![0; pattern.len()];
+    let mut kept = Vec::new();
+    let read_len = if encoding == TextEncoding::Utf16 { 64 } else { 32 };
+    for candidate in candidates {
+        if process.read(candidate.address, &mut bytes).ok() == Some(pattern.len())
+            && aob_bytes_equal(&bytes, &pattern)
+        {
+            let text = read_text_memory(pid, candidate.address, read_len, encoding).unwrap_or_default();
+            kept.push(TextScanCandidate {
+                address: candidate.address,
+                previous: candidate.current,
+                current: text,
+            });
         }
     }
     Ok(kept)
@@ -4289,4 +4338,27 @@ mod tests {
         assert_eq!(candidates[0].address, 0x1000 + 4);
         assert_eq!(candidates[0].get_i32(), 250);
     }
+
+    #[test]
+    fn aob_pattern_matching_and_text_decoding() {
+        let pattern = parse_aob_pattern("48 65 ?? 6C 6F").expect("valid pattern");
+        let data = b"Hello";
+        assert!(aob_bytes_equal(data, &pattern));
+
+        let data_wildcard = b"Hexlo";
+        assert!(aob_bytes_equal(data_wildcard, &pattern));
+
+        let data_bad = b"Hxllo";
+        assert!(!aob_bytes_equal(data_bad, &pattern));
+
+        let utf8_str = String::from_utf8_lossy(b"PlayerOne\0\0\0");
+        assert_eq!(utf8_str.trim_matches(char::from(0)), "PlayerOne");
+
+        let u16_data: Vec<u16> = "PlayerTwo\0".encode_utf16().collect();
+        let u8_bytes: Vec<u8> = u16_data.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let u16_decoded: Vec<u16> = u8_bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let decoded = String::from_utf16_lossy(&u16_decoded);
+        assert_eq!(decoded.trim_matches(char::from(0)), "PlayerTwo");
+    }
 }
+
