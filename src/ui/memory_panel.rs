@@ -6901,17 +6901,20 @@ impl CrosshairApp {
         let worker_targets = source_addresses.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = scan_pointer_paths_to_targets_with_budget(
-                pid,
-                &worker_targets,
-                &modules,
-                pointer_width,
-                limits.max_offset,
-                limits.max_depth,
-                limits.result_limit,
-                limits.max_bytes,
-                worker_progress,
-            )
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scan_pointer_paths_to_targets_with_budget(
+                    pid,
+                    &worker_targets,
+                    &modules,
+                    pointer_width,
+                    limits.max_offset,
+                    limits.max_depth,
+                    limits.result_limit,
+                    limits.max_bytes,
+                    worker_progress,
+                )
+            }))
+            .unwrap_or_else(|_| Err(std::io::Error::other("Pointer scan thread encountered an error")))
             .map_err(|error| error.to_string());
             let _ = tx.send(StablePointerJobResult { pid, result });
         });
@@ -9274,7 +9277,7 @@ impl CrosshairApp {
                             })
                             .collect();
                         dialog.candidates.sort_by_key(|candidate| {
-                            !candidate.path.module.to_ascii_lowercase().ends_with(".exe")
+                            !candidate.path.module.ends_with(".exe") && !candidate.path.module.ends_with(".EXE")
                         });
                         dialog.selected = (!dialog.candidates.is_empty()).then(|| [0].into_iter().collect()).unwrap_or_default();
                         dialog.selection_anchor = (!dialog.candidates.is_empty()).then_some(0);
@@ -9373,8 +9376,7 @@ impl CrosshairApp {
             let scanned = dialog.progress.load(Ordering::Relaxed);
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(format!("Scanning memory... read {:.1} MB", scanned as f64 / 1_048_576.0));
-                ui.spinner();
+                ui.label(RichText::new(format!("⏳ Scanning memory... read {:.1} MB", scanned as f64 / 1_048_576.0)).strong());
             });
         } else {
             // Keep window list fresh to detect when game/app restarts
@@ -9791,16 +9793,13 @@ impl CrosshairApp {
                             for visible_row in rows.clone() {
                                 let candidate =
                                     &mut dialog.candidates[visible_indices[visible_row]];
-                                if candidate.resolved_address.is_none() {
+                                if candidate.resolved_address.is_none() && candidate.valid != Some(false) {
                                     let base = match module_cache.get(&candidate.path.module) {
                                         Some(&b) => b,
                                         None => {
-                                            if let Ok(b) = resolve_module_offset(pid, &candidate.path.module, 0) {
-                                                module_cache.insert(candidate.path.module.clone(), b);
-                                                b
-                                            } else {
-                                                0
-                                            }
+                                            let b = resolve_module_offset(pid, &candidate.path.module, 0).unwrap_or(0);
+                                            module_cache.insert(candidate.path.module.clone(), b);
+                                            b
                                         }
                                     };
                                     if base != 0 {
@@ -9810,6 +9809,9 @@ impl CrosshairApp {
                                             offsets: candidate.path.offsets.clone(),
                                         };
                                         candidate.resolved_address = resolve_memory_address(pid, base, Some(&pointer)).ok();
+                                    }
+                                    if candidate.resolved_address.is_none() {
+                                        candidate.valid = Some(false);
                                     }
                                 }
                                 if let Some(address) = candidate.resolved_address {
@@ -9998,8 +10000,10 @@ impl CrosshairApp {
             self.add_stable_pointer_candidates(&mut dialog, indices);
         }
         if dialog.validation_rx.is_some() || dialog.filter_rx.is_some() {
-            ctx.request_repaint_after(Duration::from_millis(16));
-        } else if dialog.rx.is_some() || !dialog.candidates.is_empty() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        } else if dialog.rx.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        } else if !dialog.candidates.is_empty() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
         self.memory_panel.stable_pointer_dialog = Some(dialog);
@@ -10654,145 +10658,152 @@ impl CrosshairApp {
             candidates.len()
         );
         thread::spawn(move || {
-            let modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(name, base, _)| (name.to_ascii_lowercase(), base))
-                .collect();
+            let candidates_fallback = candidates.clone();
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                let modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(name, base, _)| (name.to_ascii_lowercase(), base))
+                    .collect();
 
-            let pointer_width = process_pointer_width(pid).unwrap_or(8);
-            let val_width = value_type.width();
+                let pointer_width = process_pointer_width(pid).unwrap_or(8);
+                let val_width = value_type.width();
 
-            let mut verified = 0;
-            let mut changed = 0;
-            let mut broken = 0;
+                let mut verified = 0;
+                let mut changed = 0;
+                let mut broken = 0;
 
-            let _ = crate::process_memory::with_cached_read_process(pid, |process| {
-                let mut ptr_buf = [0u8; 8];
-                let mut val_buf = [0u8; 8];
-                let mut text_buf = vec![0u8; text_byte_len.max(1)];
+                let _ = crate::process_memory::with_cached_read_process(pid, |process| {
+                    let mut ptr_buf = [0u8; 8];
+                    let mut val_buf = [0u8; 8];
+                    let mut text_buf = vec![0u8; text_byte_len.max(1)];
 
-                for candidate in &mut candidates {
-                    let module_lower = candidate.path.module.to_ascii_lowercase();
-                    let Some(&mod_base) = modules_map.get(&module_lower) else {
-                        candidate.valid = Some(false);
-                        candidate.resolved_base = None;
-                        candidate.resolved_address = None;
-                        candidate.observed_value = None;
-                        candidate.observed_text = None;
-                        candidate.live_value = None;
-                        candidate.live_text = None;
-                        candidate.filter_value = None;
-                        broken += 1;
-                        continue;
-                    };
-                    let base = mod_base.wrapping_add(candidate.path.module_offset);
-                    candidate.resolved_base = Some(base);
-                    let mut curr_addr = base;
-                    let mut broken_path = false;
-                    for &offset in &candidate.path.offsets {
-                        let read_res = if pointer_width == 4 {
-                            process.read(curr_addr, &mut ptr_buf[..4])
-                        } else {
-                            process.read(curr_addr, &mut ptr_buf[..8])
-                        };
-                        if read_res.is_err() {
-                            broken_path = true;
-                            break;
-                        }
-                        let next_ptr = if pointer_width == 4 {
-                            u32::from_le_bytes(ptr_buf[..4].try_into().unwrap()) as usize
-                        } else {
-                            u64::from_le_bytes(ptr_buf[..8].try_into().unwrap()) as usize
-                        };
-                        if next_ptr == 0 {
-                            broken_path = true;
-                            break;
-                        }
-                        curr_addr = next_ptr.wrapping_add(offset);
-                    }
-                    if broken_path {
-                        candidate.valid = Some(false);
-                        candidate.resolved_address = None;
-                        candidate.observed_value = None;
-                        candidate.observed_text = None;
-                        candidate.live_value = None;
-                        candidate.live_text = None;
-                        candidate.filter_value = None;
-                        broken += 1;
-                        continue;
-                    }
-                    candidate.resolved_address = Some(curr_addr);
-                    if let Some(enc) = text_encoding {
-                        if process.read(curr_addr, &mut text_buf).is_err() {
+                    for candidate in &mut candidates {
+                        let module_lower = candidate.path.module.to_ascii_lowercase();
+                        let Some(&mod_base) = modules_map.get(&module_lower) else {
                             candidate.valid = Some(false);
+                            candidate.resolved_base = None;
+                            candidate.resolved_address = None;
+                            candidate.observed_value = None;
                             candidate.observed_text = None;
+                            candidate.live_value = None;
+                            candidate.live_text = None;
+                            candidate.filter_value = None;
+                            broken += 1;
+                            continue;
+                        };
+                        let base = mod_base.wrapping_add(candidate.path.module_offset);
+                        candidate.resolved_base = Some(base);
+                        let mut curr_addr = base;
+                        let mut broken_path = false;
+                        for &offset in &candidate.path.offsets {
+                            let read_res = if pointer_width == 4 {
+                                process.read(curr_addr, &mut ptr_buf[..4])
+                            } else {
+                                process.read(curr_addr, &mut ptr_buf[..8])
+                            };
+                            if read_res.is_err() {
+                                broken_path = true;
+                                break;
+                            }
+                            let next_ptr = if pointer_width == 4 {
+                                u32::from_le_bytes(ptr_buf[..4].try_into().unwrap()) as usize
+                            } else {
+                                u64::from_le_bytes(ptr_buf[..8].try_into().unwrap()) as usize
+                            };
+                            if next_ptr == 0 {
+                                broken_path = true;
+                                break;
+                            }
+                            curr_addr = next_ptr.wrapping_add(offset);
+                        }
+                        if broken_path {
+                            candidate.valid = Some(false);
+                            candidate.resolved_address = None;
+                            candidate.observed_value = None;
+                            candidate.observed_text = None;
+                            candidate.live_value = None;
                             candidate.live_text = None;
                             candidate.filter_value = None;
                             broken += 1;
                             continue;
                         }
-                        let text = match enc {
-                            TextEncoding::Utf8 => {
-                                let end = text_buf.iter().position(|b| *b == 0).unwrap_or(text_buf.len());
-                                String::from_utf8_lossy(&text_buf[..end]).into_owned()
+                        candidate.resolved_address = Some(curr_addr);
+                        if let Some(enc) = text_encoding {
+                            if process.read(curr_addr, &mut text_buf).is_err() {
+                                candidate.valid = Some(false);
+                                candidate.observed_text = None;
+                                candidate.live_text = None;
+                                candidate.filter_value = None;
+                                broken += 1;
+                                continue;
                             }
-                            TextEncoding::Utf16 => {
-                                let units = text_buf
-                                    .chunks_exact(2)
-                                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-                                    .take_while(|unit| *unit != 0)
-                                    .collect::<Vec<_>>();
-                                String::from_utf16_lossy(&units)
+                            let text = match enc {
+                                TextEncoding::Utf8 => {
+                                    let end = text_buf.iter().position(|b| *b == 0).unwrap_or(text_buf.len());
+                                    String::from_utf8_lossy(&text_buf[..end]).into_owned()
+                                }
+                                TextEncoding::Utf16 => {
+                                    let units = text_buf
+                                        .chunks_exact(2)
+                                        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                                        .take_while(|unit| *unit != 0)
+                                        .collect::<Vec<_>>();
+                                    String::from_utf16_lossy(&units)
+                                }
+                            };
+                            let is_match = candidate.expected_text.as_deref() == Some(&text);
+                            candidate.observed_text = Some(text.clone());
+                            candidate.live_text = Some(text);
+                            if is_match {
+                                candidate.valid = Some(true);
+                                verified += 1;
+                            } else {
+                                candidate.valid = None;
+                                changed += 1;
                             }
-                        };
-                        let is_match = candidate.expected_text.as_deref() == Some(&text);
-                        candidate.observed_text = Some(text.clone());
-                        candidate.live_text = Some(text);
-                        if is_match {
-                            candidate.valid = Some(true);
-                            verified += 1;
                         } else {
-                            candidate.valid = None;
-                            changed += 1;
-                        }
-                    } else {
-                        if process.read(curr_addr, &mut val_buf[..val_width]).is_err() {
-                            candidate.valid = Some(false);
-                            candidate.observed_value = None;
-                            candidate.live_value = None;
-                            candidate.filter_value = None;
-                            broken += 1;
-                            continue;
-                        }
-                        let Some(observed) = value_type.decode(&val_buf[..val_width]) else {
-                            candidate.valid = Some(false);
-                            candidate.observed_value = None;
-                            candidate.live_value = None;
-                            candidate.filter_value = None;
-                            broken += 1;
-                            continue;
-                        };
-                        candidate.observed_value = Some(observed);
-                        candidate.live_value = Some(observed);
-                        candidate.filter_value = Some(observed);
-                        if observed == candidate.expected_value {
-                            candidate.valid = Some(true);
-                            verified += 1;
-                        } else {
-                            candidate.valid = None;
-                            changed += 1;
+                            if process.read(curr_addr, &mut val_buf[..val_width]).is_err() {
+                                candidate.valid = Some(false);
+                                candidate.observed_value = None;
+                                candidate.live_value = None;
+                                candidate.filter_value = None;
+                                broken += 1;
+                                continue;
+                            }
+                            let Some(observed) = value_type.decode(&val_buf[..val_width]) else {
+                                candidate.valid = Some(false);
+                                candidate.observed_value = None;
+                                candidate.live_value = None;
+                                candidate.filter_value = None;
+                                broken += 1;
+                                continue;
+                            };
+                            candidate.observed_value = Some(observed);
+                            candidate.live_value = Some(observed);
+                            candidate.filter_value = Some(observed);
+                            if observed == candidate.expected_value {
+                                candidate.valid = Some(true);
+                                verified += 1;
+                            } else {
+                                candidate.valid = None;
+                                changed += 1;
+                            }
                         }
                     }
-                }
-                Ok(())
-            });
+                    Ok(())
+                });
 
-            candidates.sort_by_key(|candidate| match candidate.valid {
-                Some(true) => 0,
-                None if candidate.observed_value.is_some() || candidate.observed_text.is_some() => 1,
-                _ => 2,
-            });
+                candidates.sort_by_key(|candidate| match candidate.valid {
+                    Some(true) => 0,
+                    None if candidate.observed_value.is_some() || candidate.observed_text.is_some() => 1,
+                    _ => 2,
+                });
+
+                (candidates, verified, changed, broken)
+            }));
+
+            let (candidates, verified, changed, broken) = res.unwrap_or_else(|_| (candidates_fallback, 0, 0, 0));
 
             let _ = tx.send(StablePointerValidationResult {
                 pid,
@@ -15203,11 +15214,14 @@ impl CrosshairApp {
             input_count
         );
         thread::spawn(move || {
-            let result = if let Some(comparison) = comparison {
-                filter_scan_candidates(pid, inputs, value_type, comparison, exact, range)
-            } else {
-                refresh_scan_candidates(pid, &mut inputs, value_type).map(|()| inputs)
-            }
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if let Some(comparison) = comparison {
+                    filter_scan_candidates(pid, inputs, value_type, comparison, exact, range)
+                } else {
+                    refresh_scan_candidates(pid, &mut inputs, value_type).map(|()| inputs)
+                }
+            }))
+            .unwrap_or_else(|_| Err(std::io::Error::other("Pointer filter thread encountered an error")))
             .map_err(|error| error.to_string());
             let _ = tx.send(StablePointerFilterResult {
                 pid,

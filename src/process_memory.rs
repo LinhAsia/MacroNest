@@ -675,15 +675,17 @@ fn capture_pointer_map_with_budget_cancel(
             }
             if pointer_width == 8 {
                 let chunks = read / 8;
-                let slice = unsafe { std::slice::from_raw_parts(buffer.as_ptr() as *const u64, chunks) };
-                for (i, &word_le) in slice.iter().enumerate() {
-                    let value = u64::from_le(word_le) as usize;
+                for (i, chunk) in buffer[..chunks * 8].chunks_exact(8).enumerate() {
+                    let value = u64::from_le_bytes(chunk.try_into().unwrap()) as usize;
                     if value < min_readable || value >= max_readable {
                         continue;
                     }
                     if value >= last_hit_base && value < last_hit_end {
                         if pointers.len() == pointers.capacity() {
-                            let _ = pointers.try_reserve_exact(1_000_000);
+                            let additional = pointers.capacity().max(1_000_000).min(8_000_000);
+                            if pointers.try_reserve(additional).is_err() {
+                                break 'regions;
+                            }
                         }
                         pointers.push((value, address + i * 8));
                         continue;
@@ -693,22 +695,27 @@ fn capture_pointer_map_with_budget_cancel(
                         last_hit_base = readable_ranges[range - 1].0;
                         last_hit_end = readable_ranges[range - 1].1;
                         if pointers.len() == pointers.capacity() {
-                            let _ = pointers.try_reserve_exact(1_000_000);
+                            let additional = pointers.capacity().max(1_000_000).min(8_000_000);
+                            if pointers.try_reserve(additional).is_err() {
+                                break 'regions;
+                            }
                         }
                         pointers.push((value, address + i * 8));
                     }
                 }
             } else {
                 let chunks = read / 4;
-                let slice = unsafe { std::slice::from_raw_parts(buffer.as_ptr() as *const u32, chunks) };
-                for (i, &word_le) in slice.iter().enumerate() {
-                    let value = u32::from_le(word_le) as usize;
+                for (i, chunk) in buffer[..chunks * 4].chunks_exact(4).enumerate() {
+                    let value = u32::from_le_bytes(chunk.try_into().unwrap()) as usize;
                     if value < min_readable || value >= max_readable {
                         continue;
                     }
                     if value >= last_hit_base && value < last_hit_end {
                         if pointers.len() == pointers.capacity() {
-                            let _ = pointers.try_reserve_exact(1_000_000);
+                            let additional = pointers.capacity().max(1_000_000).min(8_000_000);
+                            if pointers.try_reserve(additional).is_err() {
+                                break 'regions;
+                            }
                         }
                         pointers.push((value, address + i * 4));
                         continue;
@@ -718,7 +725,10 @@ fn capture_pointer_map_with_budget_cancel(
                         last_hit_base = readable_ranges[range - 1].0;
                         last_hit_end = readable_ranges[range - 1].1;
                         if pointers.len() == pointers.capacity() {
-                            let _ = pointers.try_reserve_exact(1_000_000);
+                            let additional = pointers.capacity().max(1_000_000).min(8_000_000);
+                            if pointers.try_reserve(additional).is_err() {
+                                break 'regions;
+                            }
                         }
                         pointers.push((value, address + i * 4));
                     }
@@ -904,6 +914,42 @@ struct FastModuleInfo {
     is_system: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct SmallOffsets {
+    len: u8,
+    data: [usize; 16],
+}
+
+impl SmallOffsets {
+    #[inline]
+    fn new() -> Self {
+        Self {
+            len: 0,
+            data: [0; 16],
+        }
+    }
+
+    #[inline]
+    fn pushed(mut self, offset: usize) -> Option<Self> {
+        if (self.len as usize) < self.data.len() {
+            self.data[self.len as usize] = offset;
+            self.len += 1;
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn to_reversed_vec(&self) -> Vec<usize> {
+        let mut v = Vec::with_capacity(self.len as usize);
+        for i in (0..self.len as usize).rev() {
+            v.push(self.data[i]);
+        }
+        v
+    }
+}
+
 fn find_pointer_paths_to_any(
     pointers: &[(usize, usize)],
     targets: &[usize],
@@ -913,8 +959,9 @@ fn find_pointer_paths_to_any(
     result_limit: usize,
     include_system_modules: bool,
 ) -> Vec<PointerPath> {
-    let max_frontier = result_limit.saturating_mul(16).clamp(50_000, 1_000_000);
+    let max_frontier = result_limit.saturating_mul(4).clamp(10_000, 100_000);
     let mut results = Vec::new();
+    let mut seen_results = HashSet::new();
 
     let mut fast_modules: Vec<FastModuleInfo> = modules
         .iter()
@@ -942,13 +989,13 @@ fn find_pointer_paths_to_any(
         .collect();
     fast_modules.sort_unstable_by_key(|m| m.base);
 
-    let mut seen_targets = HashSet::new();
-    let mut frontier = targets
-        .iter()
-        .copied()
-        .filter(|target| seen_targets.insert(*target))
-        .map(|target| (target, Vec::<usize>::new()))
-        .collect::<Vec<_>>();
+    let mut visited = HashSet::new();
+    let mut frontier = Vec::new();
+    for &target in targets {
+        if visited.insert(target) {
+            frontier.push((target, SmallOffsets::new()));
+        }
+    }
 
     for _ in 0..max_depth.max(1) {
         let mut next = Vec::new();
@@ -958,36 +1005,35 @@ fn find_pointer_paths_to_any(
             let end = pointers.partition_point(|(value, _)| *value <= node);
             for &(value, location) in &pointers[start..end] {
                 let offset = node - value;
-                let mut reverse_offsets = Vec::with_capacity(suffix.len() + 1);
-                reverse_offsets.extend_from_slice(&suffix);
-                reverse_offsets.push(offset);
+                let Some(new_suffix) = suffix.pushed(offset) else {
+                    continue;
+                };
 
                 let mod_idx = fast_modules.partition_point(|m| m.base <= location);
                 if mod_idx > 0 {
                     let m = &fast_modules[mod_idx - 1];
                     if location < m.end && (include_system_modules || !m.is_system) {
-                        let mut offsets = reverse_offsets.clone();
-                        offsets.reverse();
-                        results.push(PointerPath {
-                            module: m.name.clone(),
-                            module_offset: location - m.base,
-                            offsets,
-                        });
-                        if results.len() >= result_limit.max(1) {
-                            return results;
+                        let module_offset = location - m.base;
+                        if seen_results.insert((mod_idx, module_offset, new_suffix)) {
+                            results.push(PointerPath {
+                                module: m.name.clone(),
+                                module_offset,
+                                offsets: new_suffix.to_reversed_vec(),
+                            });
+                            if results.len() >= result_limit.max(1) {
+                                return results;
+                            }
                         }
                     }
                 }
-                if next.len() < max_frontier {
-                    next.push((location, reverse_offsets));
+                if next.len() < max_frontier && visited.insert(location) {
+                    next.push((location, new_suffix));
                 }
             }
         }
         if next.is_empty() {
             break;
         }
-        next.sort_unstable_by_key(|(address, _)| *address);
-        next.dedup_by_key(|(address, _)| *address);
         frontier = next;
     }
     results
