@@ -2470,7 +2470,7 @@ pub fn filter_scan_candidates_with_progress(
         .map(|count| count.get())
         .unwrap_or(4)
         .clamp(1, 32)
-        .min(candidates.len().div_ceil(5_000).max(1));
+        .min(candidates.len().div_ceil(500).max(1));
     let chunk_len = candidates.len().div_ceil(worker_count);
     let progress = progress.as_deref();
     let kept = thread::scope(|scope| {
@@ -2528,6 +2528,264 @@ fn filter_candidate_slice(
     let mut accumulated_progress = 0usize;
     let buf_ptr = buffer.as_ptr();
 
+    macro_rules! filter_int_candidates {
+        ($candidates:ident, $index:ident, $end:ident, $batch_base:ident, $count:ident, $write:ident, $buf_ptr:ident, $ty:ty, $get_fn:ident, $new_fn:ident, $read_expr:expr, $variant:ident) => {{
+            let width = std::mem::size_of::<$ty>();
+            let exact_val = match exact {
+                Some(ScanValue::$variant(v)) => Some(v),
+                _ => None,
+            };
+            let (min_val, max_val) = match range {
+                Some((ScanValue::$variant(min), ScanValue::$variant(max))) => (Some(min), Some(max)),
+                _ => (None, None),
+            };
+
+            match comparison {
+                ScanComparison::Unchanged => {
+                    for read in $index..$end {
+                        let candidate = $candidates[read];
+                        let offset = candidate.address - $batch_base;
+                        if offset + width <= $count {
+                            let cur: $ty = unsafe { $read_expr(offset) };
+                            if cur == candidate.$get_fn() {
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += 1;
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Changed => {
+                    for read in $index..$end {
+                        let candidate = $candidates[read];
+                        let offset = candidate.address - $batch_base;
+                        if offset + width <= $count {
+                            let cur: $ty = unsafe { $read_expr(offset) };
+                            if cur != candidate.$get_fn() {
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += 1;
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Increased => {
+                    for read in $index..$end {
+                        let candidate = $candidates[read];
+                        let offset = candidate.address - $batch_base;
+                        if offset + width <= $count {
+                            let cur: $ty = unsafe { $read_expr(offset) };
+                            if cur > candidate.$get_fn() {
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += 1;
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Decreased => {
+                    for read in $index..$end {
+                        let candidate = $candidates[read];
+                        let offset = candidate.address - $batch_base;
+                        if offset + width <= $count {
+                            let cur: $ty = unsafe { $read_expr(offset) };
+                            if cur < candidate.$get_fn() {
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += 1;
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Exact => {
+                    if let Some(e) = exact_val {
+                        for read in $index..$end {
+                            let candidate = $candidates[read];
+                            let offset = candidate.address - $batch_base;
+                            if offset + width <= $count {
+                                let cur: $ty = unsafe { $read_expr(offset) };
+                                if cur == e {
+                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                    $write += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Greater => {
+                    if let Some(e) = exact_val {
+                        for read in $index..$end {
+                            let candidate = $candidates[read];
+                            let offset = candidate.address - $batch_base;
+                            if offset + width <= $count {
+                                let cur: $ty = unsafe { $read_expr(offset) };
+                                if cur > e {
+                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                    $write += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Less => {
+                    if let Some(e) = exact_val {
+                        for read in $index..$end {
+                            let candidate = $candidates[read];
+                            let offset = candidate.address - $batch_base;
+                            if offset + width <= $count {
+                                let cur: $ty = unsafe { $read_expr(offset) };
+                                if cur < e {
+                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                    $write += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Between => {
+                    if let (Some(min), Some(max)) = (min_val, max_val) {
+                        for read in $index..$end {
+                            let candidate = $candidates[read];
+                            let offset = candidate.address - $batch_base;
+                            if offset + width <= $count {
+                                let cur: $ty = unsafe { $read_expr(offset) };
+                                if cur >= min && cur <= max {
+                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                    $write += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }};
+    }
+
+    macro_rules! filter_float_candidates {
+        ($candidates:ident, $index:ident, $end:ident, $batch_base:ident, $count:ident, $write:ident, $buf_ptr:ident, $ty:ty, $get_fn:ident, $new_fn:ident, $variant:ident, $rel_eps:expr, $abs_eps:expr) => {{
+            let width = std::mem::size_of::<$ty>();
+            let exact_val = match exact {
+                Some(ScanValue::$variant(v)) => Some(v),
+                _ => None,
+            };
+            let (min_val, max_val) = match range {
+                Some((ScanValue::$variant(min), ScanValue::$variant(max))) => (Some(min), Some(max)),
+                _ => (None, None),
+            };
+
+            match comparison {
+                ScanComparison::Unchanged => {
+                    for read in $index..$end {
+                        let candidate = $candidates[read];
+                        let offset = candidate.address - $batch_base;
+                        if offset + width <= $count {
+                            let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
+                            if cur.to_bits() == candidate.$get_fn().to_bits() {
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += 1;
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Changed => {
+                    for read in $index..$end {
+                        let candidate = $candidates[read];
+                        let offset = candidate.address - $batch_base;
+                        if offset + width <= $count {
+                            let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
+                            if cur.to_bits() != candidate.$get_fn().to_bits() {
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += 1;
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Increased => {
+                    for read in $index..$end {
+                        let candidate = $candidates[read];
+                        let offset = candidate.address - $batch_base;
+                        if offset + width <= $count {
+                            let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
+                            if cur > candidate.$get_fn() {
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += 1;
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Decreased => {
+                    for read in $index..$end {
+                        let candidate = $candidates[read];
+                        let offset = candidate.address - $batch_base;
+                        if offset + width <= $count {
+                            let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
+                            if cur < candidate.$get_fn() {
+                                $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                $write += 1;
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Exact => {
+                    if let Some(e) = exact_val {
+                        for read in $index..$end {
+                            let candidate = $candidates[read];
+                            let offset = candidate.address - $batch_base;
+                            if offset + width <= $count {
+                                let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
+                                if (cur - e).abs() <= (e.abs() * $rel_eps).max($abs_eps) {
+                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                    $write += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Greater => {
+                    if let Some(e) = exact_val {
+                        for read in $index..$end {
+                            let candidate = $candidates[read];
+                            let offset = candidate.address - $batch_base;
+                            if offset + width <= $count {
+                                let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
+                                if cur > e {
+                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                    $write += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Less => {
+                    if let Some(e) = exact_val {
+                        for read in $index..$end {
+                            let candidate = $candidates[read];
+                            let offset = candidate.address - $batch_base;
+                            if offset + width <= $count {
+                                let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
+                                if cur < e {
+                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                    $write += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                ScanComparison::Between => {
+                    if let (Some(min), Some(max)) = (min_val, max_val) {
+                        for read in $index..$end {
+                            let candidate = $candidates[read];
+                            let offset = candidate.address - $batch_base;
+                            if offset + width <= $count {
+                                let cur = unsafe { ($buf_ptr.add(offset) as *const $ty).read_unaligned() };
+                                if cur >= min && cur <= max {
+                                    $candidates[$write] = ScanCandidate::$new_fn(candidate.address, cur);
+                                    $write += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }};
+    }
+
     while index < candidates.len() {
         let batch_base = candidates[index].address & !(PAGE_BYTES - 1);
         let mut end = index + 1;
@@ -2550,214 +2808,22 @@ fn filter_candidate_slice(
 
             match value_type {
                 ScanValueType::I32 => {
-                    let exact_i32 = match exact {
-                        Some(ScanValue::I32(v)) => Some(v),
-                        _ => None,
-                    };
-                    let (min_i32, max_i32) = match range {
-                        Some((ScanValue::I32(min), ScanValue::I32(max))) => (Some(min), Some(max)),
-                        _ => (None, None),
-                    };
-                    for read in index..end {
-                        let candidate = candidates[read];
-                        let offset = candidate.address - batch_base;
-                        if offset + 4 > count {
-                            continue;
-                        }
-                        let cur = unsafe { (buf_ptr.add(offset) as *const i32).read_unaligned() };
-                        let prev = candidate.get_i32();
-                        let matches = match comparison {
-                            ScanComparison::Exact => exact_i32.is_some_and(|e| cur == e),
-                            ScanComparison::Less => exact_i32.is_some_and(|e| cur < e),
-                            ScanComparison::Greater => exact_i32.is_some_and(|e| cur > e),
-                            ScanComparison::Changed => cur != prev,
-                            ScanComparison::Unchanged => cur == prev,
-                            ScanComparison::Increased => cur > prev,
-                            ScanComparison::Decreased => cur < prev,
-                            ScanComparison::Between => {
-                                min_i32.is_some_and(|min| max_i32.is_some_and(|max| cur >= min && cur <= max))
-                            }
-                        };
-                        if matches {
-                            candidates[write] = ScanCandidate::new_i32(candidate.address, cur);
-                            write += 1;
-                        }
-                    }
+                    filter_int_candidates!(candidates, index, end, batch_base, count, write, buf_ptr, i32, get_i32, new_i32, |off| (buf_ptr.add(off) as *const i32).read_unaligned(), I32);
                 }
                 ScanValueType::F32 => {
-                    let exact_f32 = match exact {
-                        Some(ScanValue::F32(v)) => Some(v),
-                        _ => None,
-                    };
-                    let (min_f32, max_f32) = match range {
-                        Some((ScanValue::F32(min), ScanValue::F32(max))) => (Some(min), Some(max)),
-                        _ => (None, None),
-                    };
-                    for read in index..end {
-                        let candidate = candidates[read];
-                        let offset = candidate.address - batch_base;
-                        if offset + 4 > count {
-                            continue;
-                        }
-                        let cur = unsafe { (buf_ptr.add(offset) as *const f32).read_unaligned() };
-                        let prev = candidate.get_f32();
-                        let matches = match comparison {
-                            ScanComparison::Exact => exact_f32.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-6).max(1e-5)),
-                            ScanComparison::Less => exact_f32.is_some_and(|e| cur < e),
-                            ScanComparison::Greater => exact_f32.is_some_and(|e| cur > e),
-                            ScanComparison::Changed => cur.to_bits() != prev.to_bits(),
-                            ScanComparison::Unchanged => cur.to_bits() == prev.to_bits(),
-                            ScanComparison::Increased => cur > prev,
-                            ScanComparison::Decreased => cur < prev,
-                            ScanComparison::Between => {
-                                min_f32.is_some_and(|min| max_f32.is_some_and(|max| cur >= min && cur <= max))
-                            }
-                        };
-                        if matches {
-                            candidates[write] = ScanCandidate::new_f32(candidate.address, cur);
-                            write += 1;
-                        }
-                    }
+                    filter_float_candidates!(candidates, index, end, batch_base, count, write, buf_ptr, f32, get_f32, new_f32, F32, 1e-6, 1e-5);
                 }
                 ScanValueType::I64 => {
-                    let exact_i64 = match exact {
-                        Some(ScanValue::I64(v)) => Some(v),
-                        _ => None,
-                    };
-                    let (min_i64, max_i64) = match range {
-                        Some((ScanValue::I64(min), ScanValue::I64(max))) => (Some(min), Some(max)),
-                        _ => (None, None),
-                    };
-                    for read in index..end {
-                        let candidate = candidates[read];
-                        let offset = candidate.address - batch_base;
-                        if offset + 8 > count {
-                            continue;
-                        }
-                        let cur = unsafe { (buf_ptr.add(offset) as *const i64).read_unaligned() };
-                        let prev = candidate.get_i64();
-                        let matches = match comparison {
-                            ScanComparison::Exact => exact_i64.is_some_and(|e| cur == e),
-                            ScanComparison::Less => exact_i64.is_some_and(|e| cur < e),
-                            ScanComparison::Greater => exact_i64.is_some_and(|e| cur > e),
-                            ScanComparison::Changed => cur != prev,
-                            ScanComparison::Unchanged => cur == prev,
-                            ScanComparison::Increased => cur > prev,
-                            ScanComparison::Decreased => cur < prev,
-                            ScanComparison::Between => {
-                                min_i64.is_some_and(|min| max_i64.is_some_and(|max| cur >= min && cur <= max))
-                            }
-                        };
-                        if matches {
-                            candidates[write] = ScanCandidate::new_i64(candidate.address, cur);
-                            write += 1;
-                        }
-                    }
+                    filter_int_candidates!(candidates, index, end, batch_base, count, write, buf_ptr, i64, get_i64, new_i64, |off| (buf_ptr.add(off) as *const i64).read_unaligned(), I64);
                 }
                 ScanValueType::F64 => {
-                    let exact_f64 = match exact {
-                        Some(ScanValue::F64(v)) => Some(v),
-                        _ => None,
-                    };
-                    let (min_f64, max_f64) = match range {
-                        Some((ScanValue::F64(min), ScanValue::F64(max))) => (Some(min), Some(max)),
-                        _ => (None, None),
-                    };
-                    for read in index..end {
-                        let candidate = candidates[read];
-                        let offset = candidate.address - batch_base;
-                        if offset + 8 > count {
-                            continue;
-                        }
-                        let cur = unsafe { (buf_ptr.add(offset) as *const f64).read_unaligned() };
-                        let prev = candidate.get_f64();
-                        let matches = match comparison {
-                            ScanComparison::Exact => exact_f64.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-12).max(1e-9)),
-                            ScanComparison::Less => exact_f64.is_some_and(|e| cur < e),
-                            ScanComparison::Greater => exact_f64.is_some_and(|e| cur > e),
-                            ScanComparison::Changed => cur.to_bits() != prev.to_bits(),
-                            ScanComparison::Unchanged => cur.to_bits() == prev.to_bits(),
-                            ScanComparison::Increased => cur > prev,
-                            ScanComparison::Decreased => cur < prev,
-                            ScanComparison::Between => {
-                                min_f64.is_some_and(|min| max_f64.is_some_and(|max| cur >= min && cur <= max))
-                            }
-                        };
-                        if matches {
-                            candidates[write] = ScanCandidate::new_f64(candidate.address, cur);
-                            write += 1;
-                        }
-                    }
+                    filter_float_candidates!(candidates, index, end, batch_base, count, write, buf_ptr, f64, get_f64, new_f64, F64, 1e-12, 1e-9);
                 }
                 ScanValueType::I16 => {
-                    let exact_i16 = match exact {
-                        Some(ScanValue::I16(v)) => Some(v),
-                        _ => None,
-                    };
-                    let (min_i16, max_i16) = match range {
-                        Some((ScanValue::I16(min), ScanValue::I16(max))) => (Some(min), Some(max)),
-                        _ => (None, None),
-                    };
-                    for read in index..end {
-                        let candidate = candidates[read];
-                        let offset = candidate.address - batch_base;
-                        if offset + 2 > count {
-                            continue;
-                        }
-                        let cur = unsafe { (buf_ptr.add(offset) as *const i16).read_unaligned() };
-                        let prev = candidate.get_i16();
-                        let matches = match comparison {
-                            ScanComparison::Exact => exact_i16.is_some_and(|e| cur == e),
-                            ScanComparison::Less => exact_i16.is_some_and(|e| cur < e),
-                            ScanComparison::Greater => exact_i16.is_some_and(|e| cur > e),
-                            ScanComparison::Changed => cur != prev,
-                            ScanComparison::Unchanged => cur == prev,
-                            ScanComparison::Increased => cur > prev,
-                            ScanComparison::Decreased => cur < prev,
-                            ScanComparison::Between => {
-                                min_i16.is_some_and(|min| max_i16.is_some_and(|max| cur >= min && cur <= max))
-                            }
-                        };
-                        if matches {
-                            candidates[write] = ScanCandidate::new_i16(candidate.address, cur);
-                            write += 1;
-                        }
-                    }
+                    filter_int_candidates!(candidates, index, end, batch_base, count, write, buf_ptr, i16, get_i16, new_i16, |off| (buf_ptr.add(off) as *const i16).read_unaligned(), I16);
                 }
                 ScanValueType::I8 => {
-                    let exact_i8 = match exact {
-                        Some(ScanValue::I8(v)) => Some(v),
-                        _ => None,
-                    };
-                    let (min_i8, max_i8) = match range {
-                        Some((ScanValue::I8(min), ScanValue::I8(max))) => (Some(min), Some(max)),
-                        _ => (None, None),
-                    };
-                    for read in index..end {
-                        let candidate = candidates[read];
-                        let offset = candidate.address - batch_base;
-                        if offset + 1 > count {
-                            continue;
-                        }
-                        let cur = unsafe { *buf_ptr.add(offset) as i8 };
-                        let prev = candidate.get_i8();
-                        let matches = match comparison {
-                            ScanComparison::Exact => exact_i8.is_some_and(|e| cur == e),
-                            ScanComparison::Less => exact_i8.is_some_and(|e| cur < e),
-                            ScanComparison::Greater => exact_i8.is_some_and(|e| cur > e),
-                            ScanComparison::Changed => cur != prev,
-                            ScanComparison::Unchanged => cur == prev,
-                            ScanComparison::Increased => cur > prev,
-                            ScanComparison::Decreased => cur < prev,
-                            ScanComparison::Between => {
-                                min_i8.is_some_and(|min| max_i8.is_some_and(|max| cur >= min && cur <= max))
-                            }
-                        };
-                        if matches {
-                            candidates[write] = ScanCandidate::new_i8(candidate.address, cur);
-                            write += 1;
-                        }
-                    }
+                    filter_int_candidates!(candidates, index, end, batch_base, count, write, buf_ptr, i8, get_i8, new_i8, |off| *buf_ptr.add(off) as i8, I8);
                 }
             }
         }
@@ -3518,6 +3584,474 @@ pub fn filter_memory_snapshot_with_progress(
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
+
+#[cfg(target_arch = "x86_64")]
+const AVX_CMP_LE_OQ: i32 = 0x12;
+#[cfg(target_arch = "x86_64")]
+const AVX_CMP_GE_OQ: i32 = 0x1d;
+#[cfg(target_arch = "x86_64")]
+const AVX_CMP_GT_OQ: i32 = 0x1e;
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn filter_snapshot_chunk_i32_avx2(
+    fresh: &[u8],
+    snap: &[u8],
+    old_mask: Option<&[u64]>,
+    new_mask: &mut [u64],
+    slots_count: usize,
+    comparison: ScanComparison,
+    exact_val: Option<i32>,
+    range_val: Option<(i32, i32)>,
+) -> usize {
+    let fresh_ptr = fresh.as_ptr();
+    let snap_ptr = snap.as_ptr();
+    let full_words = slots_count / 64;
+    let mut total_matches = 0usize;
+
+    let target_v = _mm256_set1_epi32(exact_val.unwrap_or(0));
+    let (min_v, max_v) = match range_val {
+        Some((min, max)) => (_mm256_set1_epi32(min), _mm256_set1_epi32(max)),
+        None => (_mm256_setzero_si256(), _mm256_setzero_si256()),
+    };
+    let all_ones = _mm256_set1_epi32(-1);
+
+    macro_rules! avx2_i32_loop {
+        ($cmp_fn:expr) => {{
+            for word_idx in 0..full_words {
+                let old_word = match old_mask {
+                    Some(old) => {
+                        let w = if word_idx < old.len() { old[word_idx] } else { 0 };
+                        if w == 0 {
+                            new_mask[word_idx] = 0;
+                            continue;
+                        }
+                        w
+                    }
+                    None => u64::MAX,
+                };
+
+                let base_offset = word_idx * 256;
+                let mut word_res = 0u64;
+
+                for v in 0..8 {
+                    if ((old_word >> (v * 8)) & 0xFF) == 0 {
+                        continue;
+                    }
+                    let off = base_offset + v * 32;
+                    let f = _mm256_loadu_si256(fresh_ptr.add(off) as *const __m256i);
+                    let s = _mm256_loadu_si256(snap_ptr.add(off) as *const __m256i);
+                    let cmp = $cmp_fn(f, s);
+                    let byte_mask = _mm256_movemask_ps(_mm256_castsi256_ps(cmp)) as u8;
+                    word_res |= (byte_mask as u64) << (v * 8);
+                }
+
+                let final_word = word_res & old_word;
+                new_mask[word_idx] = final_word;
+                total_matches += final_word.count_ones() as usize;
+            }
+        }};
+    }
+
+    match comparison {
+        ScanComparison::Unchanged => {
+            avx2_i32_loop!(|f, s| _mm256_cmpeq_epi32(f, s));
+        }
+        ScanComparison::Changed => {
+            avx2_i32_loop!(|f, s| _mm256_xor_si256(_mm256_cmpeq_epi32(f, s), all_ones));
+        }
+        ScanComparison::Increased => {
+            avx2_i32_loop!(|f, s| _mm256_cmpgt_epi32(f, s));
+        }
+        ScanComparison::Decreased => {
+            avx2_i32_loop!(|f, s| _mm256_cmpgt_epi32(s, f));
+        }
+        ScanComparison::Exact => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i32_loop!(|f, _s| _mm256_cmpeq_epi32(f, target_v));
+        }
+        ScanComparison::Greater => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i32_loop!(|f, _s| _mm256_cmpgt_epi32(f, target_v));
+        }
+        ScanComparison::Less => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i32_loop!(|f, _s| _mm256_cmpgt_epi32(target_v, f));
+        }
+        ScanComparison::Between => {
+            if range_val.is_none() {
+                return 0;
+            }
+            avx2_i32_loop!(|f, _s| {
+                let not_lt_min = _mm256_xor_si256(_mm256_cmpgt_epi32(min_v, f), all_ones);
+                let not_gt_max = _mm256_xor_si256(_mm256_cmpgt_epi32(f, max_v), all_ones);
+                _mm256_and_si256(not_lt_min, not_gt_max)
+            });
+        }
+    }
+
+    let processed_slots = full_words * 64;
+    if processed_slots < slots_count {
+        let last_word_idx = full_words;
+        let mut active_bits = match old_mask {
+            Some(old) => if last_word_idx < old.len() { old[last_word_idx] } else { 0 },
+            None => u64::MAX,
+        };
+        let mut word_matches = 0u64;
+        let rem_count = slots_count - processed_slots;
+        let valid_mask = if rem_count >= 64 { u64::MAX } else { (1u64 << rem_count) - 1 };
+        active_bits &= valid_mask;
+
+        while active_bits != 0 {
+            let bit_idx = active_bits.trailing_zeros() as usize;
+            let slot_idx = processed_slots + bit_idx;
+            let offset = slot_idx * 4;
+            let cur = (fresh_ptr.add(offset) as *const i32).read_unaligned();
+            let prev = (snap_ptr.add(offset) as *const i32).read_unaligned();
+            let matches = match comparison {
+                ScanComparison::Unchanged => cur == prev,
+                ScanComparison::Changed => cur != prev,
+                ScanComparison::Increased => cur > prev,
+                ScanComparison::Decreased => cur < prev,
+                ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
+                ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
+                ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                ScanComparison::Between => {
+                    range_val.is_some_and(|(min, max)| cur >= min && cur <= max)
+                }
+            };
+            if matches {
+                word_matches |= 1u64 << bit_idx;
+            }
+            active_bits &= active_bits - 1;
+        }
+        new_mask[last_word_idx] = word_matches;
+        total_matches += word_matches.count_ones() as usize;
+    }
+
+    total_matches
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn filter_snapshot_chunk_f32_avx2(
+    fresh: &[u8],
+    snap: &[u8],
+    old_mask: Option<&[u64]>,
+    new_mask: &mut [u64],
+    slots_count: usize,
+    comparison: ScanComparison,
+    exact_val: Option<f32>,
+    range_val: Option<(f32, f32)>,
+) -> usize {
+    let fresh_ptr = fresh.as_ptr();
+    let snap_ptr = snap.as_ptr();
+    let full_words = slots_count / 64;
+    let mut total_matches = 0usize;
+
+    let target_v = _mm256_set1_ps(exact_val.unwrap_or(0.0));
+    let (min_v, max_v) = match range_val {
+        Some((min, max)) => (_mm256_set1_ps(min), _mm256_set1_ps(max)),
+        None => (_mm256_setzero_ps(), _mm256_setzero_ps()),
+    };
+    let tol_v = if let Some(e) = exact_val {
+        _mm256_set1_ps((e.abs() * 1e-6).max(1e-5))
+    } else {
+        _mm256_setzero_ps()
+    };
+    let abs_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFF_FFFF));
+    let all_ones = _mm256_set1_epi32(-1);
+
+    macro_rules! avx2_f32_loop {
+        ($cmp_fn:expr) => {{
+            for word_idx in 0..full_words {
+                let old_word = match old_mask {
+                    Some(old) => {
+                        let w = if word_idx < old.len() { old[word_idx] } else { 0 };
+                        if w == 0 {
+                            new_mask[word_idx] = 0;
+                            continue;
+                        }
+                        w
+                    }
+                    None => u64::MAX,
+                };
+
+                let base_offset = word_idx * 256;
+                let mut word_res = 0u64;
+
+                for v in 0..8 {
+                    if ((old_word >> (v * 8)) & 0xFF) == 0 {
+                        continue;
+                    }
+                    let off = base_offset + v * 32;
+                    let f = _mm256_loadu_ps(fresh_ptr.add(off) as *const f32);
+                    let s = _mm256_loadu_ps(snap_ptr.add(off) as *const f32);
+                    let cmp = $cmp_fn(f, s);
+                    let byte_mask = _mm256_movemask_ps(cmp) as u8;
+                    word_res |= (byte_mask as u64) << (v * 8);
+                }
+
+                let final_word = word_res & old_word;
+                new_mask[word_idx] = final_word;
+                total_matches += final_word.count_ones() as usize;
+            }
+        }};
+    }
+
+    match comparison {
+        ScanComparison::Unchanged => {
+            avx2_f32_loop!(|f, s| {
+                let f_i = _mm256_castps_si256(f);
+                let s_i = _mm256_castps_si256(s);
+                _mm256_castsi256_ps(_mm256_cmpeq_epi32(f_i, s_i))
+            });
+        }
+        ScanComparison::Changed => {
+            avx2_f32_loop!(|f, s| {
+                let f_i = _mm256_castps_si256(f);
+                let s_i = _mm256_castps_si256(s);
+                _mm256_castsi256_ps(_mm256_xor_si256(_mm256_cmpeq_epi32(f_i, s_i), all_ones))
+            });
+        }
+        ScanComparison::Increased => {
+            avx2_f32_loop!(|f, s| _mm256_cmp_ps(f, s, AVX_CMP_GT_OQ));
+        }
+        ScanComparison::Decreased => {
+            avx2_f32_loop!(|f, s| _mm256_cmp_ps(s, f, AVX_CMP_GT_OQ));
+        }
+        ScanComparison::Exact => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_f32_loop!(|f, _s| {
+                let diff = _mm256_and_ps(_mm256_sub_ps(f, target_v), abs_mask);
+                _mm256_cmp_ps(diff, tol_v, AVX_CMP_LE_OQ)
+            });
+        }
+        ScanComparison::Greater => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_f32_loop!(|f, _s| _mm256_cmp_ps(f, target_v, AVX_CMP_GT_OQ));
+        }
+        ScanComparison::Less => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_f32_loop!(|f, _s| _mm256_cmp_ps(target_v, f, AVX_CMP_GT_OQ));
+        }
+        ScanComparison::Between => {
+            if range_val.is_none() {
+                return 0;
+            }
+            avx2_f32_loop!(|f, _s| {
+                let ge_min = _mm256_cmp_ps(f, min_v, AVX_CMP_GE_OQ);
+                let le_max = _mm256_cmp_ps(f, max_v, AVX_CMP_LE_OQ);
+                _mm256_and_ps(ge_min, le_max)
+            });
+        }
+    }
+
+    let processed_slots = full_words * 64;
+    if processed_slots < slots_count {
+        let last_word_idx = full_words;
+        let mut active_bits = match old_mask {
+            Some(old) => if last_word_idx < old.len() { old[last_word_idx] } else { 0 },
+            None => u64::MAX,
+        };
+        let mut word_matches = 0u64;
+        let rem_count = slots_count - processed_slots;
+        let valid_mask = if rem_count >= 64 { u64::MAX } else { (1u64 << rem_count) - 1 };
+        active_bits &= valid_mask;
+
+        while active_bits != 0 {
+            let bit_idx = active_bits.trailing_zeros() as usize;
+            let slot_idx = processed_slots + bit_idx;
+            let offset = slot_idx * 4;
+            let cur = (fresh_ptr.add(offset) as *const f32).read_unaligned();
+            let prev = (snap_ptr.add(offset) as *const f32).read_unaligned();
+            let matches = match comparison {
+                ScanComparison::Unchanged => cur.to_bits() == prev.to_bits(),
+                ScanComparison::Changed => cur.to_bits() != prev.to_bits(),
+                ScanComparison::Increased => cur > prev,
+                ScanComparison::Decreased => cur < prev,
+                ScanComparison::Exact => exact_val.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-6).max(1e-5)),
+                ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
+                ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                ScanComparison::Between => {
+                    range_val.is_some_and(|(min, max)| cur >= min && cur <= max)
+                }
+            };
+            if matches {
+                word_matches |= 1u64 << bit_idx;
+            }
+            active_bits &= active_bits - 1;
+        }
+        new_mask[last_word_idx] = word_matches;
+        total_matches += word_matches.count_ones() as usize;
+    }
+
+    total_matches
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn filter_snapshot_chunk_i8_avx2(
+    fresh: &[u8],
+    snap: &[u8],
+    old_mask: Option<&[u64]>,
+    new_mask: &mut [u64],
+    slots_count: usize,
+    comparison: ScanComparison,
+    exact_val: Option<i8>,
+    range_val: Option<(i8, i8)>,
+) -> usize {
+    let fresh_ptr = fresh.as_ptr();
+    let snap_ptr = snap.as_ptr();
+    let full_words = slots_count / 64;
+    let mut total_matches = 0usize;
+
+    let target_v = _mm256_set1_epi8(exact_val.unwrap_or(0));
+    let (min_v, max_v) = match range_val {
+        Some((min, max)) => (_mm256_set1_epi8(min), _mm256_set1_epi8(max)),
+        None => (_mm256_setzero_si256(), _mm256_setzero_si256()),
+    };
+    let all_ones = _mm256_set1_epi8(-1);
+
+    macro_rules! avx2_i8_loop {
+        ($cmp_fn:expr) => {{
+            for word_idx in 0..full_words {
+                let old_word = match old_mask {
+                    Some(old) => {
+                        let w = if word_idx < old.len() { old[word_idx] } else { 0 };
+                        if w == 0 {
+                            new_mask[word_idx] = 0;
+                            continue;
+                        }
+                        w
+                    }
+                    None => u64::MAX,
+                };
+
+                let base_offset = word_idx * 64;
+                let mut word_res = 0u64;
+
+                for v in 0..2 {
+                    if ((old_word >> (v * 32)) & 0xFFFF_FFFF) == 0 {
+                        continue;
+                    }
+                    let off = base_offset + v * 32;
+                    let f = _mm256_loadu_si256(fresh_ptr.add(off) as *const __m256i);
+                    let s = _mm256_loadu_si256(snap_ptr.add(off) as *const __m256i);
+                    let cmp = $cmp_fn(f, s);
+                    let mask_32 = _mm256_movemask_epi8(cmp) as u32;
+                    word_res |= (mask_32 as u64) << (v * 32);
+                }
+
+                let final_word = word_res & old_word;
+                new_mask[word_idx] = final_word;
+                total_matches += final_word.count_ones() as usize;
+            }
+        }};
+    }
+
+    match comparison {
+        ScanComparison::Unchanged => {
+            avx2_i8_loop!(|f, s| _mm256_cmpeq_epi8(f, s));
+        }
+        ScanComparison::Changed => {
+            avx2_i8_loop!(|f, s| _mm256_xor_si256(_mm256_cmpeq_epi8(f, s), all_ones));
+        }
+        ScanComparison::Increased => {
+            avx2_i8_loop!(|f, s| _mm256_cmpgt_epi8(f, s));
+        }
+        ScanComparison::Decreased => {
+            avx2_i8_loop!(|f, s| _mm256_cmpgt_epi8(s, f));
+        }
+        ScanComparison::Exact => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i8_loop!(|f, _s| _mm256_cmpeq_epi8(f, target_v));
+        }
+        ScanComparison::Greater => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i8_loop!(|f, _s| _mm256_cmpgt_epi8(f, target_v));
+        }
+        ScanComparison::Less => {
+            if exact_val.is_none() {
+                return 0;
+            }
+            avx2_i8_loop!(|f, _s| _mm256_cmpgt_epi8(target_v, f));
+        }
+        ScanComparison::Between => {
+            if range_val.is_none() {
+                return 0;
+            }
+            avx2_i8_loop!(|f, _s| {
+                let not_lt_min = _mm256_xor_si256(_mm256_cmpgt_epi8(min_v, f), all_ones);
+                let not_gt_max = _mm256_xor_si256(_mm256_cmpgt_epi8(f, max_v), all_ones);
+                _mm256_and_si256(not_lt_min, not_gt_max)
+            });
+        }
+    }
+
+    let processed_slots = full_words * 64;
+    if processed_slots < slots_count {
+        let last_word_idx = full_words;
+        let mut active_bits = match old_mask {
+            Some(old) => if last_word_idx < old.len() { old[last_word_idx] } else { 0 },
+            None => u64::MAX,
+        };
+        let mut word_matches = 0u64;
+        let rem_count = slots_count - processed_slots;
+        let valid_mask = if rem_count >= 64 { u64::MAX } else { (1u64 << rem_count) - 1 };
+        active_bits &= valid_mask;
+
+        while active_bits != 0 {
+            let bit_idx = active_bits.trailing_zeros() as usize;
+            let slot_idx = processed_slots + bit_idx;
+            let offset = slot_idx;
+            let cur = *fresh_ptr.add(offset) as i8;
+            let prev = *snap_ptr.add(offset) as i8;
+            let matches = match comparison {
+                ScanComparison::Unchanged => cur == prev,
+                ScanComparison::Changed => cur != prev,
+                ScanComparison::Increased => cur > prev,
+                ScanComparison::Decreased => cur < prev,
+                ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
+                ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
+                ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
+                ScanComparison::Between => {
+                    range_val.is_some_and(|(min, max)| cur >= min && cur <= max)
+                }
+            };
+            if matches {
+                word_matches |= 1u64 << bit_idx;
+            }
+            active_bits &= active_bits - 1;
+        }
+        new_mask[last_word_idx] = word_matches;
+        total_matches += word_matches.count_ones() as usize;
+    }
+
+    total_matches
+}
+
 #[inline(always)]
 fn run_mask_loop<F: Fn(usize) -> bool>(
     old_mask: Option<&[u64]>,
@@ -3543,12 +4077,12 @@ fn run_mask_loop<F: Fn(usize) -> bool>(
                     let offset = slot_idx * alignment;
                     if check(offset) {
                         word_matches |= 1u64 << bit_idx;
-                        total_matches += 1;
                     }
                 }
                 active_bits &= active_bits - 1;
             }
             new_mask[word_idx] = word_matches;
+            total_matches += word_matches.count_ones() as usize;
         }
     } else {
         for word_idx in 0..words {
@@ -3560,10 +4094,10 @@ fn run_mask_loop<F: Fn(usize) -> bool>(
                 let offset = slot_idx * alignment;
                 if check(offset) {
                     word_matches |= 1u64 << bit_idx;
-                    total_matches += 1;
                 }
             }
             new_mask[word_idx] = word_matches;
+            total_matches += word_matches.count_ones() as usize;
         }
     }
     total_matches
@@ -3589,168 +4123,259 @@ fn filter_snapshot_chunk_mask(
     let fresh_ptr = fresh.as_ptr();
     let snap_ptr = snap.as_ptr();
 
+    macro_rules! dispatch_snapshot_int {
+        ($ty:ty, $variant:ident, $read_expr:expr) => {{
+            let exact_val = match exact {
+                Some(ScanValue::$variant(v)) => Some(v),
+                _ => None,
+            };
+            let (min_val, max_val) = match range {
+                Some((ScanValue::$variant(min), ScanValue::$variant(max))) => (Some(min), Some(max)),
+                _ => (None, None),
+            };
+            match comparison {
+                ScanComparison::Unchanged => {
+                    run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                        let cur: $ty = unsafe { $read_expr(offset, fresh_ptr) };
+                        let prev: $ty = unsafe { $read_expr(offset, snap_ptr) };
+                        cur == prev
+                    })
+                }
+                ScanComparison::Changed => {
+                    run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                        let cur: $ty = unsafe { $read_expr(offset, fresh_ptr) };
+                        let prev: $ty = unsafe { $read_expr(offset, snap_ptr) };
+                        cur != prev
+                    })
+                }
+                ScanComparison::Increased => {
+                    run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                        let cur: $ty = unsafe { $read_expr(offset, fresh_ptr) };
+                        let prev: $ty = unsafe { $read_expr(offset, snap_ptr) };
+                        cur > prev
+                    })
+                }
+                ScanComparison::Decreased => {
+                    run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                        let cur: $ty = unsafe { $read_expr(offset, fresh_ptr) };
+                        let prev: $ty = unsafe { $read_expr(offset, snap_ptr) };
+                        cur < prev
+                    })
+                }
+                ScanComparison::Exact => {
+                    if let Some(e) = exact_val {
+                        run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                            let cur: $ty = unsafe { $read_expr(offset, fresh_ptr) };
+                            cur == e
+                        })
+                    } else {
+                        0
+                    }
+                }
+                ScanComparison::Greater => {
+                    if let Some(e) = exact_val {
+                        run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                            let cur: $ty = unsafe { $read_expr(offset, fresh_ptr) };
+                            cur > e
+                        })
+                    } else {
+                        0
+                    }
+                }
+                ScanComparison::Less => {
+                    if let Some(e) = exact_val {
+                        run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                            let cur: $ty = unsafe { $read_expr(offset, fresh_ptr) };
+                            cur < e
+                        })
+                    } else {
+                        0
+                    }
+                }
+                ScanComparison::Between => {
+                    if let (Some(min), Some(max)) = (min_val, max_val) {
+                        run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                            let cur: $ty = unsafe { $read_expr(offset, fresh_ptr) };
+                            cur >= min && cur <= max
+                        })
+                    } else {
+                        0
+                    }
+                }
+            }
+        }};
+    }
+
+    macro_rules! dispatch_snapshot_float {
+        ($ty:ty, $variant:ident, $rel_eps:expr, $abs_eps:expr) => {{
+            let exact_val = match exact {
+                Some(ScanValue::$variant(v)) => Some(v),
+                _ => None,
+            };
+            let (min_val, max_val) = match range {
+                Some((ScanValue::$variant(min), ScanValue::$variant(max))) => (Some(min), Some(max)),
+                _ => (None, None),
+            };
+            match comparison {
+                ScanComparison::Unchanged => {
+                    run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                        let cur = unsafe { (fresh_ptr.add(offset) as *const $ty).read_unaligned() };
+                        let prev = unsafe { (snap_ptr.add(offset) as *const $ty).read_unaligned() };
+                        cur.to_bits() == prev.to_bits()
+                    })
+                }
+                ScanComparison::Changed => {
+                    run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                        let cur = unsafe { (fresh_ptr.add(offset) as *const $ty).read_unaligned() };
+                        let prev = unsafe { (snap_ptr.add(offset) as *const $ty).read_unaligned() };
+                        cur.to_bits() != prev.to_bits()
+                    })
+                }
+                ScanComparison::Increased => {
+                    run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                        let cur = unsafe { (fresh_ptr.add(offset) as *const $ty).read_unaligned() };
+                        let prev = unsafe { (snap_ptr.add(offset) as *const $ty).read_unaligned() };
+                        cur > prev
+                    })
+                }
+                ScanComparison::Decreased => {
+                    run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                        let cur = unsafe { (fresh_ptr.add(offset) as *const $ty).read_unaligned() };
+                        let prev = unsafe { (snap_ptr.add(offset) as *const $ty).read_unaligned() };
+                        cur < prev
+                    })
+                }
+                ScanComparison::Exact => {
+                    if let Some(e) = exact_val {
+                        run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                            let cur = unsafe { (fresh_ptr.add(offset) as *const $ty).read_unaligned() };
+                            (cur - e).abs() <= (e.abs() * $rel_eps).max($abs_eps)
+                        })
+                    } else {
+                        0
+                    }
+                }
+                ScanComparison::Greater => {
+                    if let Some(e) = exact_val {
+                        run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                            let cur = unsafe { (fresh_ptr.add(offset) as *const $ty).read_unaligned() };
+                            cur > e
+                        })
+                    } else {
+                        0
+                    }
+                }
+                ScanComparison::Less => {
+                    if let Some(e) = exact_val {
+                        run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                            let cur = unsafe { (fresh_ptr.add(offset) as *const $ty).read_unaligned() };
+                            cur < e
+                        })
+                    } else {
+                        0
+                    }
+                }
+                ScanComparison::Between => {
+                    if let (Some(min), Some(max)) = (min_val, max_val) {
+                        run_mask_loop(old_mask, new_mask, slots_count, alignment, |offset| {
+                            let cur = unsafe { (fresh_ptr.add(offset) as *const $ty).read_unaligned() };
+                            cur >= min && cur <= max
+                        })
+                    } else {
+                        0
+                    }
+                }
+            }
+        }};
+    }
+
     match value_type {
         ScanValueType::I32 => {
-            let exact_val = match exact {
-                Some(ScanValue::I32(v)) => Some(v),
-                _ => None,
-            };
-            let (min_val, max_val) = match range {
-                Some((ScanValue::I32(min), ScanValue::I32(max))) => (Some(min), Some(max)),
-                _ => (None, None),
-            };
-            let check = |offset: usize| -> bool {
-                let cur = unsafe { (fresh_ptr.add(offset) as *const i32).read_unaligned() };
-                let prev = unsafe { (snap_ptr.add(offset) as *const i32).read_unaligned() };
-                match comparison {
-                    ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
-                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
-                    ScanComparison::Changed => cur != prev,
-                    ScanComparison::Unchanged => cur == prev,
-                    ScanComparison::Increased => cur > prev,
-                    ScanComparison::Decreased => cur < prev,
-                    ScanComparison::Between => {
-                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
-                    }
-                }
-            };
-            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
+            #[cfg(target_arch = "x86_64")]
+            if alignment == 4 && is_x86_feature_detected!("avx2") {
+                let exact_val = match exact {
+                    Some(ScanValue::I32(v)) => Some(v),
+                    _ => None,
+                };
+                let range_val = match range {
+                    Some((ScanValue::I32(min), ScanValue::I32(max))) => Some((min, max)),
+                    _ => None,
+                };
+                return unsafe {
+                    filter_snapshot_chunk_i32_avx2(
+                        fresh,
+                        snap,
+                        old_mask,
+                        new_mask,
+                        slots_count,
+                        comparison,
+                        exact_val,
+                        range_val,
+                    )
+                };
+            }
+            dispatch_snapshot_int!(i32, I32, |off, ptr: *const u8| (ptr.add(off) as *const i32).read_unaligned())
         }
         ScanValueType::F32 => {
-            let exact_val = match exact {
-                Some(ScanValue::F32(v)) => Some(v),
-                _ => None,
-            };
-            let (min_val, max_val) = match range {
-                Some((ScanValue::F32(min), ScanValue::F32(max))) => (Some(min), Some(max)),
-                _ => (None, None),
-            };
-            let check = |offset: usize| -> bool {
-                let cur = unsafe { (fresh_ptr.add(offset) as *const f32).read_unaligned() };
-                let prev = unsafe { (snap_ptr.add(offset) as *const f32).read_unaligned() };
-                match comparison {
-                    ScanComparison::Exact => exact_val.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-6).max(1e-5)),
-                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
-                    ScanComparison::Changed => cur.to_bits() != prev.to_bits(),
-                    ScanComparison::Unchanged => cur.to_bits() == prev.to_bits(),
-                    ScanComparison::Increased => cur > prev,
-                    ScanComparison::Decreased => cur < prev,
-                    ScanComparison::Between => {
-                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
-                    }
-                }
-            };
-            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
-        }
-        ScanValueType::I64 => {
-            let exact_val = match exact {
-                Some(ScanValue::I64(v)) => Some(v),
-                _ => None,
-            };
-            let (min_val, max_val) = match range {
-                Some((ScanValue::I64(min), ScanValue::I64(max))) => (Some(min), Some(max)),
-                _ => (None, None),
-            };
-            let check = |offset: usize| -> bool {
-                let cur = unsafe { (fresh_ptr.add(offset) as *const i64).read_unaligned() };
-                let prev = unsafe { (snap_ptr.add(offset) as *const i64).read_unaligned() };
-                match comparison {
-                    ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
-                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
-                    ScanComparison::Changed => cur != prev,
-                    ScanComparison::Unchanged => cur == prev,
-                    ScanComparison::Increased => cur > prev,
-                    ScanComparison::Decreased => cur < prev,
-                    ScanComparison::Between => {
-                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
-                    }
-                }
-            };
-            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
-        }
-        ScanValueType::F64 => {
-            let exact_val = match exact {
-                Some(ScanValue::F64(v)) => Some(v),
-                _ => None,
-            };
-            let (min_val, max_val) = match range {
-                Some((ScanValue::F64(min), ScanValue::F64(max))) => (Some(min), Some(max)),
-                _ => (None, None),
-            };
-            let check = |offset: usize| -> bool {
-                let cur = unsafe { (fresh_ptr.add(offset) as *const f64).read_unaligned() };
-                let prev = unsafe { (snap_ptr.add(offset) as *const f64).read_unaligned() };
-                match comparison {
-                    ScanComparison::Exact => exact_val.is_some_and(|e| (cur - e).abs() <= (e.abs() * 1e-12).max(1e-9)),
-                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
-                    ScanComparison::Changed => cur.to_bits() != prev.to_bits(),
-                    ScanComparison::Unchanged => cur.to_bits() == prev.to_bits(),
-                    ScanComparison::Increased => cur > prev,
-                    ScanComparison::Decreased => cur < prev,
-                    ScanComparison::Between => {
-                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
-                    }
-                }
-            };
-            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
-        }
-        ScanValueType::I16 => {
-            let exact_val = match exact {
-                Some(ScanValue::I16(v)) => Some(v),
-                _ => None,
-            };
-            let (min_val, max_val) = match range {
-                Some((ScanValue::I16(min), ScanValue::I16(max))) => (Some(min), Some(max)),
-                _ => (None, None),
-            };
-            let check = |offset: usize| -> bool {
-                let cur = unsafe { (fresh_ptr.add(offset) as *const i16).read_unaligned() };
-                let prev = unsafe { (snap_ptr.add(offset) as *const i16).read_unaligned() };
-                match comparison {
-                    ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
-                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
-                    ScanComparison::Changed => cur != prev,
-                    ScanComparison::Unchanged => cur == prev,
-                    ScanComparison::Increased => cur > prev,
-                    ScanComparison::Decreased => cur < prev,
-                    ScanComparison::Between => {
-                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
-                    }
-                }
-            };
-            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
+            #[cfg(target_arch = "x86_64")]
+            if alignment == 4 && is_x86_feature_detected!("avx2") {
+                let exact_val = match exact {
+                    Some(ScanValue::F32(v)) => Some(v),
+                    _ => None,
+                };
+                let range_val = match range {
+                    Some((ScanValue::F32(min), ScanValue::F32(max))) => Some((min, max)),
+                    _ => None,
+                };
+                return unsafe {
+                    filter_snapshot_chunk_f32_avx2(
+                        fresh,
+                        snap,
+                        old_mask,
+                        new_mask,
+                        slots_count,
+                        comparison,
+                        exact_val,
+                        range_val,
+                    )
+                };
+            }
+            dispatch_snapshot_float!(f32, F32, 1e-6, 1e-5)
         }
         ScanValueType::I8 => {
-            let exact_val = match exact {
-                Some(ScanValue::I8(v)) => Some(v),
-                _ => None,
-            };
-            let (min_val, max_val) = match range {
-                Some((ScanValue::I8(min), ScanValue::I8(max))) => (Some(min), Some(max)),
-                _ => (None, None),
-            };
-            let check = |offset: usize| -> bool {
-                let cur = unsafe { *fresh_ptr.add(offset) as i8 };
-                let prev = unsafe { *snap_ptr.add(offset) as i8 };
-                match comparison {
-                    ScanComparison::Exact => exact_val.is_some_and(|e| cur == e),
-                    ScanComparison::Less => exact_val.is_some_and(|e| cur < e),
-                    ScanComparison::Greater => exact_val.is_some_and(|e| cur > e),
-                    ScanComparison::Changed => cur != prev,
-                    ScanComparison::Unchanged => cur == prev,
-                    ScanComparison::Increased => cur > prev,
-                    ScanComparison::Decreased => cur < prev,
-                    ScanComparison::Between => {
-                        min_val.is_some_and(|min| max_val.is_some_and(|max| cur >= min && cur <= max))
-                    }
-                }
-            };
-            run_mask_loop(old_mask, new_mask, slots_count, alignment, check)
+            #[cfg(target_arch = "x86_64")]
+            if alignment == 1 && is_x86_feature_detected!("avx2") {
+                let exact_val = match exact {
+                    Some(ScanValue::I8(v)) => Some(v),
+                    _ => None,
+                };
+                let range_val = match range {
+                    Some((ScanValue::I8(min), ScanValue::I8(max))) => Some((min, max)),
+                    _ => None,
+                };
+                return unsafe {
+                    filter_snapshot_chunk_i8_avx2(
+                        fresh,
+                        snap,
+                        old_mask,
+                        new_mask,
+                        slots_count,
+                        comparison,
+                        exact_val,
+                        range_val,
+                    )
+                };
+            }
+            dispatch_snapshot_int!(i8, I8, |off, ptr: *const u8| *ptr.add(off) as i8)
+        }
+        ScanValueType::I64 => {
+            dispatch_snapshot_int!(i64, I64, |off, ptr: *const u8| (ptr.add(off) as *const i64).read_unaligned())
+        }
+        ScanValueType::F64 => {
+            dispatch_snapshot_float!(f64, F64, 1e-12, 1e-9)
+        }
+        ScanValueType::I16 => {
+            dispatch_snapshot_int!(i16, I16, |off, ptr: *const u8| (ptr.add(off) as *const i16).read_unaligned())
         }
     }
 }
@@ -3767,46 +4392,45 @@ fn extract_candidates_from_chunk(
     let data_ptr = data.as_ptr();
     let data_len = data.len();
 
-    for (word_idx, &word) in mask.iter().enumerate() {
-        if word == 0 {
-            continue;
-        }
-        let mut bits = word;
-        while bits != 0 {
-            let bit_idx = bits.trailing_zeros() as usize;
-            let slot_idx = word_idx * 64 + bit_idx;
-            let offset = slot_idx * alignment;
-            if offset + width <= data_len {
-                let address = chunk_base + offset;
-                let candidate = match value_type {
-                    ScanValueType::I8 => {
-                        let val = unsafe { *data_ptr.add(offset) as i8 };
-                        ScanCandidate::new_i8(address, val)
+    macro_rules! extract_loop {
+        ($extract_fn:expr) => {
+            for (word_idx, &word) in mask.iter().enumerate() {
+                if word == 0 {
+                    continue;
+                }
+                let mut bits = word;
+                while bits != 0 {
+                    let bit_idx = bits.trailing_zeros() as usize;
+                    let slot_idx = word_idx * 64 + bit_idx;
+                    let offset = slot_idx * alignment;
+                    if offset + width <= data_len {
+                        let address = chunk_base + offset;
+                        found.push(unsafe { $extract_fn(address, offset) });
                     }
-                    ScanValueType::I16 => {
-                        let val = unsafe { (data_ptr.add(offset) as *const i16).read_unaligned() };
-                        ScanCandidate::new_i16(address, val)
-                    }
-                    ScanValueType::I32 => {
-                        let val = unsafe { (data_ptr.add(offset) as *const i32).read_unaligned() };
-                        ScanCandidate::new_i32(address, val)
-                    }
-                    ScanValueType::F32 => {
-                        let val = unsafe { (data_ptr.add(offset) as *const f32).read_unaligned() };
-                        ScanCandidate::new_f32(address, val)
-                    }
-                    ScanValueType::I64 => {
-                        let val = unsafe { (data_ptr.add(offset) as *const i64).read_unaligned() };
-                        ScanCandidate::new_i64(address, val)
-                    }
-                    ScanValueType::F64 => {
-                        let val = unsafe { (data_ptr.add(offset) as *const f64).read_unaligned() };
-                        ScanCandidate::new_f64(address, val)
-                    }
-                };
-                found.push(candidate);
+                    bits &= bits - 1;
+                }
             }
-            bits &= bits - 1;
+        };
+    }
+
+    match value_type {
+        ScanValueType::I8 => {
+            extract_loop!(|addr, off| ScanCandidate::new_i8(addr, *data_ptr.add(off) as i8));
+        }
+        ScanValueType::I16 => {
+            extract_loop!(|addr, off| ScanCandidate::new_i16(addr, (data_ptr.add(off) as *const i16).read_unaligned()));
+        }
+        ScanValueType::I32 => {
+            extract_loop!(|addr, off| ScanCandidate::new_i32(addr, (data_ptr.add(off) as *const i32).read_unaligned()));
+        }
+        ScanValueType::F32 => {
+            extract_loop!(|addr, off| ScanCandidate::new_f32(addr, (data_ptr.add(off) as *const f32).read_unaligned()));
+        }
+        ScanValueType::I64 => {
+            extract_loop!(|addr, off| ScanCandidate::new_i64(addr, (data_ptr.add(off) as *const i64).read_unaligned()));
+        }
+        ScanValueType::F64 => {
+            extract_loop!(|addr, off| ScanCandidate::new_f64(addr, (data_ptr.add(off) as *const f64).read_unaligned()));
         }
     }
 }
