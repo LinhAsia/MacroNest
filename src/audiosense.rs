@@ -263,22 +263,19 @@ fn run_pitch_loop(
             smoothed_level = smoothed_level * 0.78 + level_visual * 0.22;
             let waveform_level = (raw_level * 18.0).clamp(0.0, 1.0);
             waveform.push_back(waveform_level);
-            while waveform.len() > 160 {
-                let _ = waveform.pop_front();
+            if waveform.len() > 160 {
+                waveform.pop_front();
             }
-            for sample in mono {
-                pitch_samples.push_back(sample);
-                while pitch_samples.len() > PITCH_ANALYSIS_SAMPLES {
-                    let _ = pitch_samples.pop_front();
-                }
+            pitch_samples.extend(mono);
+            if pitch_samples.len() > PITCH_ANALYSIS_SAMPLES {
+                pitch_samples.drain(..pitch_samples.len() - PITCH_ANALYSIS_SAMPLES);
             }
 
             if last_publish.elapsed() >= interval {
-                let analysis_window = pitch_samples.iter().copied().collect::<Vec<_>>();
                 let accept_confidence = (config.min_confidence as f32 / 1000.0).max(0.0).min(1.0);
                 let level_gate = (config.min_level as f32 / 1000.0).max(0.0);
                 if let Some((frequency, confidence)) = detect_pitch(
-                    &analysis_window,
+                    pitch_samples.make_contiguous(),
                     ANALYSIS_SAMPLE_RATE,
                     accept_confidence,
                     level_gate,
@@ -499,3 +496,25 @@ fn pitch_to_spn(frequency: f32, show_sharps: bool) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pitch_to_spn_formats_notes_and_accidentals() {
+        assert_eq!(pitch_to_spn(440.0, true), "A4");
+        assert_eq!(pitch_to_spn(261.63, true), "C4");
+        assert_eq!(pitch_to_spn(277.18, true), "C#4");
+        assert_eq!(pitch_to_spn(277.18, false), "Db4");
+    }
+
+    #[test]
+    fn rms_level_computes_expected_values() {
+        assert_eq!(rms_level(&[]), 0.0);
+        assert_eq!(rms_level(&[1.0, 1.0, 1.0]), 1.0);
+        let val = rms_level(&[1.0, -1.0]);
+        assert!((val - 1.0).abs() < 1e-6);
+    }
+}
+

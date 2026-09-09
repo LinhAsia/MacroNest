@@ -170,14 +170,16 @@ fn esp_spatial_audio_worker() {
                 .get(&update.preset_id)
                 .is_none_or(|active| active.path != path || active.looped != update.looped);
             if needs_source {
-                state.active.remove(&update.preset_id);
-                if !state.cache.contains_key(&path) {
-                    let Ok(audio) = load_cached_audio(path.to_string_lossy().as_ref()) else {
-                        continue;
-                    };
-                    state.cache.insert(path.clone(), audio);
-                }
-                let audio = state.cache.get(&path).expect("cached audio should exist");
+                use std::collections::hash_map::Entry;
+                let audio = match state.cache.entry(path.clone()) {
+                    Entry::Occupied(entry) => entry.into_mut(),
+                    Entry::Vacant(entry) => {
+                        let Ok(audio) = load_cached_audio(&path) else {
+                            continue;
+                        };
+                        entry.insert(audio)
+                    }
+                };
                 let source = SharedSamplesSource {
                     samples: Arc::clone(&audio.samples),
                     index: 0,
@@ -400,14 +402,14 @@ pub fn play_clip_async(clip: AudioClipSettings) {
 }
 
 pub fn try_play_clip_async(clip: AudioClipSettings) -> Result<()> {
+    if !clip.enabled || clip.file_path.trim().is_empty() {
+        return Ok(());
+    }
     try_play_clip_sequence_async(vec![clip])
 }
 
-pub fn try_play_clip_sequence_async(clips: Vec<AudioClipSettings>) -> Result<()> {
-    let clips = clips
-        .into_iter()
-        .filter(|clip| clip.enabled && !clip.file_path.trim().is_empty())
-        .collect::<Vec<_>>();
+pub fn try_play_clip_sequence_async(mut clips: Vec<AudioClipSettings>) -> Result<()> {
+    clips.retain(|clip| clip.enabled && !clip.file_path.trim().is_empty());
     if clips.is_empty() {
         return Ok(());
     }
@@ -720,37 +722,36 @@ fn video_preview_state() -> Result<parking_lot::MutexGuard<'static, Option<Video
     Ok(state)
 }
 
-fn load_cached_audio(path: &str) -> Result<CachedAudio> {
-    let mut decoder = open_decoder(path)?;
+fn load_cached_audio<P: AsRef<Path>>(path: P) -> Result<CachedAudio> {
+    let path_ref = path.as_ref();
+    let mut decoder = open_decoder(path_ref)?;
     let channels = decoder.channels();
     let sample_rate = decoder.sample_rate();
     let samples: Vec<f32> = decoder.by_ref().collect();
     Ok(CachedAudio {
-        path: Path::new(path).to_path_buf(),
+        path: path_ref.to_path_buf(),
         channels,
         sample_rate,
         samples: Arc::from(samples.into_boxed_slice()),
     })
 }
 
-fn open_decoder(path: &str) -> Result<Decoder<BufReader<File>>> {
-    let file = File::open(path).with_context(|| format!("Failed to open audio file: {path}"))?;
+fn open_decoder<P: AsRef<Path>>(path: P) -> Result<Decoder<BufReader<File>>> {
+    let path_ref = path.as_ref();
+    let file = File::open(path_ref)
+        .with_context(|| format!("Failed to open audio file: {}", path_ref.display()))?;
     Decoder::new(BufReader::new(file)).context("Failed to decode the audio file")
 }
 
 fn computed_duration_ms(sample_count: usize, channels: u16, sample_rate: u32) -> Option<u64> {
     let channel_count = usize::from(channels.max(1));
-    let rate = sample_rate.max(1);
+    let rate = u64::from(sample_rate.max(1));
     if sample_count == 0 {
         return Some(0);
     }
 
-    let frame_count = sample_count / channel_count;
-    Some(
-        ((frame_count as f64 / rate as f64) * 1000.0)
-            .round()
-            .max(0.0) as u64,
-    )
+    let frame_count = (sample_count / channel_count) as u64;
+    Some((frame_count * 1000 + (rate / 2)) / rate)
 }
 
 fn decode_media_audio(path: &str) -> Result<CachedAudio> {
@@ -985,3 +986,17 @@ pub fn play_key_sound_vk(style: u32, vk: u32, volume: f32) {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::computed_duration_ms;
+
+    #[test]
+    fn computed_duration_ms_handles_stereo_mono_and_rounding() {
+        assert_eq!(computed_duration_ms(0, 2, 44100), Some(0));
+        assert_eq!(computed_duration_ms(44100, 1, 44100), Some(1000));
+        assert_eq!(computed_duration_ms(88200, 2, 44100), Some(1000));
+        assert_eq!(computed_duration_ms(22050, 1, 44100), Some(500));
+    }
+}
+
