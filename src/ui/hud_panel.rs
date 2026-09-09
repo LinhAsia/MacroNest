@@ -35,7 +35,6 @@ impl CrosshairApp {
             Some(crate::ui::PresetClipboard::Hud(_))
         );
         for index in 0..self.state.hud_presets.len() {
-            let hud_snapshot = self.state.hud_presets[index].clone();
             let language = self.state.ui_language;
             let preset = &mut self.state.hud_presets[index];
             Self::show_preset_card(ui, false, |ui| {
@@ -81,7 +80,7 @@ impl CrosshairApp {
                             paste_hud_after = Some(index);
                         }
                         if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                            copy_hud_preset = Some(hud_snapshot.clone());
+                            copy_hud_preset = Some(preset.clone());
                         }
 
                         if Self::sound_style_remove_button(ui).clicked() {
@@ -316,7 +315,6 @@ impl CrosshairApp {
             Some(crate::ui::PresetClipboard::Timer(_))
         );
         for index in 0..self.state.timer_presets.len() {
-            let timer_snapshot = self.state.timer_presets[index].clone();
             let preset = &mut self.state.timer_presets[index];
             if preset.show_progress_bar || !preset.show_text {
                 preset.show_progress_bar = false;
@@ -350,7 +348,7 @@ impl CrosshairApp {
                             paste_timer_after = Some(index);
                         }
                         if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                            copy_timer_preset = Some(timer_snapshot.clone());
+                            copy_timer_preset = Some(preset.clone());
                         }
 
                         if Self::sound_style_remove_button(ui).clicked() {

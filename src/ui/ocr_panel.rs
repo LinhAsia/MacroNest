@@ -76,7 +76,6 @@ impl CrosshairApp {
         );
         // Render card-based presets list
         for index in 0..self.state.ocr_presets.len() {
-            let ocr_snapshot = self.state.ocr_presets[index].clone();
             let preset = &mut self.state.ocr_presets[index];
             preset.enabled = true; // Always enabled for macros
 
@@ -121,7 +120,7 @@ impl CrosshairApp {
                             paste_ocr_after = Some(index);
                         }
                         if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                            copy_ocr_preset = Some(ocr_snapshot.clone());
+                            copy_ocr_preset = Some(preset.clone());
                         }
 
                         // Delete Button

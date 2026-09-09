@@ -637,7 +637,6 @@ impl CrosshairApp {
             Some(crate::ui::PresetClipboard::Sound(_))
         );
         for index in 0..self.state.audio_settings.presets.len() {
-            let sound_snapshot = self.state.audio_settings.presets[index].clone();
             let mut choose_file_for = None;
             let open_editor_target = None;
             let mut activate_preview_target = None;
@@ -685,7 +684,7 @@ impl CrosshairApp {
                             paste_sound_after = Some(index);
                         }
                         if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                            copy_sound_preset = Some(sound_snapshot.clone());
+                            copy_sound_preset = Some(preset.clone());
                         }
 
                         if Self::sound_style_remove_button(ui)

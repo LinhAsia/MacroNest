@@ -32,7 +32,6 @@ impl CrosshairApp {
             Some(crate::ui::PresetClipboard::Command(_))
         );
         for index in 0..self.state.command_presets.len() {
-            let snapshot = self.state.command_presets[index].clone();
             let preset = &mut self.state.command_presets[index];
             preset.target_window_title = None;
             preset.extra_target_window_titles.clear();
@@ -90,7 +89,7 @@ impl CrosshairApp {
                             paste_after = Some(index);
                         }
                         if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                            copy_preset = Some(snapshot.clone());
+                            copy_preset = Some(preset.clone());
                         }
                         let is_generating = self
                             .command_ai_job

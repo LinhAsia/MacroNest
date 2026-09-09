@@ -111,12 +111,12 @@ impl CrosshairApp {
                 .size(14.0),
         );
         ui.add_space(4.0);
+        let active_capture_target = self.capture_target.clone();
+        let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
         for index in 0..self.state.window_presets.len() {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
             let mut run_resize_now = false;
-            let active_capture_target = self.capture_target.clone();
-            let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
             let preset_snapshot = self.state.window_presets[index].clone();
             let preview = if preset_snapshot.preview_enabled && !preset_snapshot.collapsed {
                 self.window_preview_for_target(
@@ -592,12 +592,12 @@ impl CrosshairApp {
             && ui
                 .ctx()
                 .input(|input| input.viewport().focused != Some(false));
+        let active_capture_target = self.capture_target.clone();
+        let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
         for index in 0..self.state.pin_presets.len() {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
             let mut toggle_pin_now = false;
-            let active_capture_target = self.capture_target.clone();
-            let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
             let preset_snapshot = self.state.pin_presets[index].clone();
             let source_preview = if pin_preview_allowed && !preset_snapshot.collapsed {
                 self.pin_preview_for_target(
@@ -3311,13 +3311,12 @@ impl CrosshairApp {
         );
 
         let layouts_count = self.state.window_layouts.len();
+        let active_capture_target = self.capture_target.clone();
+        let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
         for index in 0..layouts_count {
-            let layout_snapshot = self.state.window_layouts[index].clone();
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
             let mut run_layout_now = false;
-            let active_capture_target = self.capture_target.clone();
-            let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
 
             let layout = &mut self.state.window_layouts[index];
             Self::sanitize_layout(layout);
@@ -3483,7 +3482,7 @@ impl CrosshairApp {
                                 paste_layout_after = Some(index);
                             }
                             if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                                copy_layout_preset = Some(layout_snapshot.clone());
+                                copy_layout_preset = Some(layout.clone());
                             }
 
                             if Self::sound_style_remove_button(ui).clicked() {

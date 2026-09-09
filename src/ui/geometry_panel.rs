@@ -126,7 +126,6 @@ impl CrosshairApp {
         );
 
         for preset_index in 0..self.state.geometry_presets.len() {
-            let geometry_snapshot = self.state.geometry_presets[preset_index].clone();
             let preset = &mut self.state.geometry_presets[preset_index];
             if preset.objects.is_empty() {
                 preset.objects.push(crate::model::GeometryObject::new(
@@ -158,7 +157,7 @@ impl CrosshairApp {
                             paste_geometry_after = Some(preset_index);
                         }
                         if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                            copy_geometry_preset = Some(geometry_snapshot.clone());
+                            copy_geometry_preset = Some(preset.clone());
                         }
 
                         if Self::sound_style_remove_button(ui)

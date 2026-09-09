@@ -28,8 +28,6 @@ impl CrosshairApp {
 
     pub(crate) fn render_vision_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let language = self.state.ui_language;
-        let _capture_target_snapshot = self.capture_target.clone();
-        let _selected_steps_snapshot = self.selected_macro_steps.clone();
         let cancel_mouse_move_absolute_capture = false;
         let next_mouse_move_absolute_capture_target = None;
         ui.add_space(2.0);

@@ -204,7 +204,6 @@ impl CrosshairApp {
             .collect::<Vec<_>>();
 
         for (position, preset_index) in matching_indices.iter().copied().enumerate() {
-            let preset_snapshot = self.state.audio_sense_presets[preset_index].clone();
             let preset = &mut self.state.audio_sense_presets[preset_index];
             Self::show_preset_card(ui, false, |ui| {
                 ui.horizontal(|ui| {
@@ -230,7 +229,7 @@ impl CrosshairApp {
                             paste_audiosense_after = Some(preset_index);
                         }
                         if Self::sound_style_toggle_button(ui, "Copy").clicked() {
-                            copy_audiosense_preset = Some(preset_snapshot.clone());
+                            copy_audiosense_preset = Some(preset.clone());
                         }
 
                         if Self::sound_style_remove_button(ui).clicked() {
