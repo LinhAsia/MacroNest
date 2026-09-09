@@ -2213,6 +2213,7 @@ impl CrosshairApp {
                             egui::ComboBox::from_id_salt("memory-process")
                                 .width(ui.available_width())
                                 .height(820.0)
+                                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                 .selected_text(Self::truncate_window_title(&process_label, 52))
                                 .show_ui(ui, |ui| {
                                     ui.set_min_height(520.0);
@@ -2244,6 +2245,7 @@ impl CrosshairApp {
                                             ui.separator();
                                         }
                                     }
+                                    let filter = self.memory_panel.process_search.trim().to_lowercase();
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new(self.tr("Window processes (grouped)", "Window processes (grouped)")).strong());
                                         if self.open_windows_loading {
@@ -2260,41 +2262,65 @@ impl CrosshairApp {
                                             ui.label(self.tr("No window processes found", "Không tìm thấy cửa sổ nào"));
                                         }
                                     } else {
-                                        let win_count = self.open_window_infos.len();
-                                        let win_height = (win_count as f32 * 26.0).clamp(50.0, 150.0);
-                                        egui::ScrollArea::vertical()
-                                            .id_salt("memory-window-processes-scroll")
-                                            .max_height(win_height)
-                                            .show(ui, |ui| {
-                                                for window in self.open_window_infos.clone() {
-                                                    let selected =
-                                                        window.selector == self.memory_panel.process_selector;
-                                                    let title_with_pid = format!("{} (PID: {})", Self::simplify_window_title(&window.title), window.process_id);
-                                                    ui.horizontal(|ui| {
-                                                        if ui.small_button("Focus")
-                                                            .on_hover_text(self.tr("Bring this window to front to check", "Bật nổi cửa sổ này lên màn hình để kiểm tra"))
-                                                            .clicked()
-                                                        {
-                                                            window_list::focus_window(&window.selector);
-                                                        }
-                                                        if Self::selectable_process_row_with_selector(
-                                                                ui,
-                                                                selected,
-                                                                Self::truncate_window_title(
-                                                                    &title_with_pid,
-                                                                    60,
-                                                                ),
+                                        let matching_window_indices: Vec<usize> = self
+                                            .open_window_infos
+                                            .iter()
+                                            .enumerate()
+                                            .filter(|(_, w)| {
+                                                filter.is_empty()
+                                                    || w.title.to_lowercase().contains(&filter)
+                                                    || w.process_id.to_string().contains(&filter)
+                                                    || w.process_path.to_lowercase().contains(&filter)
+                                            })
+                                            .map(|(i, _)| i)
+                                            .collect();
+                                        if matching_window_indices.is_empty() {
+                                            ui.label(self.tr("No window processes matching search", "Không có cửa sổ nào khớp tìm kiếm"));
+                                        } else {
+                                            let win_count = matching_window_indices.len();
+                                            let win_height = (win_count as f32 * 26.0).clamp(50.0, 150.0);
+                                            egui::ScrollArea::vertical()
+                                                .id_salt("memory-window-processes-scroll")
+                                                .max_height(win_height)
+                                                .show(ui, |ui| {
+                                                    for idx in matching_window_indices {
+                                                        let (selected, title_with_pid, process_id, process_path, selector) = {
+                                                            let window = &self.open_window_infos[idx];
+                                                            (
+                                                                window.selector == self.memory_panel.process_selector,
+                                                                format!("{} (PID: {})", Self::simplify_window_title(&window.title), window.process_id),
                                                                 window.process_id,
-                                                                &window.process_path,
-                                                                Some(&window.selector),
+                                                                window.process_path.clone(),
+                                                                window.selector.clone(),
                                                             )
-                                                            .clicked()
-                                                        {
-                                                            self.select_memory_process(window.selector, Some(window.process_id), ui.ctx());
-                                                        }
-                                                    });
-                                                }
-                                            });
+                                                        };
+                                                        ui.horizontal(|ui| {
+                                                            if ui.small_button("Focus")
+                                                                .on_hover_text(self.tr("Bring this window to front to check", "Bật nổi cửa sổ này lên màn hình để kiểm tra"))
+                                                                .clicked()
+                                                            {
+                                                                window_list::focus_window(&selector);
+                                                            }
+                                                            if Self::selectable_process_row_with_selector(
+                                                                    ui,
+                                                                    selected,
+                                                                    Self::truncate_window_title(
+                                                                        &title_with_pid,
+                                                                        60,
+                                                                    ),
+                                                                    process_id,
+                                                                    &process_path,
+                                                                    Some(&selector),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                self.select_memory_process(selector, Some(process_id), ui.ctx());
+                                                                ui.close();
+                                                            }
+                                                        });
+                                                    }
+                                                });
+                                        }
                                     }
                                     #[cfg(windows)]
                                     {
@@ -2312,10 +2338,16 @@ impl CrosshairApp {
                                             }
                                             let search_hint = self.tr("Search PID / Name...", "Tìm PID / Tên...");
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                ui.add(
+                                                let search_resp = ui.add(
                                                     egui::TextEdit::singleline(&mut self.memory_panel.process_search)
                                                         .hint_text(search_hint)
                                                         .desired_width(170.0),
+                                                );
+                                                Self::apply_vietnamese_input_if_changed(
+                                                    &search_resp,
+                                                    self.state.vietnamese_input_enabled,
+                                                    self.state.vietnamese_input_mode,
+                                                    &mut self.memory_panel.process_search,
                                                 );
                                             });
                                         });
@@ -2329,7 +2361,6 @@ impl CrosshairApp {
                                                 ui.label(self.tr("No processes found", "Không tìm thấy tiến trình nào"));
                                             }
                                         } else {
-                                            let filter = self.memory_panel.process_search.trim().to_lowercase();
                                             let matching_indices: Vec<usize> = if filter.is_empty() {
                                                 (0..self.memory_panel.process_choices.len()).collect()
                                             } else {
@@ -2370,6 +2401,7 @@ impl CrosshairApp {
                                                         };
                                                         if Self::selectable_process_detail_row(ui, selected, &name, pid, &path).clicked() {
                                                             self.select_memory_process(format!("pid:{}:{}", pid, name), Some(pid), ui.ctx());
+                                                            ui.close();
                                                         }
                                                     }
                                                 });
@@ -19176,5 +19208,44 @@ mod tests {
         assert_eq!(compact_hotkey_label("Ctrl+Shift+F"), "F");
         assert_eq!(compact_hotkey_label("Ctrl+Alt+Delete"), "Del");
         assert_eq!(compact_hotkey_label("Ctrl+Shift"), "CS");
+    }
+
+    #[test]
+    fn process_selector_window_search_filter() {
+        let windows = vec![
+            crate::window_list::WindowInfo {
+                title: "Calculator - Standard".to_owned(),
+                process_id: 1234,
+                selector: "win:1234:calc".to_owned(),
+                process_path: "C:\\Windows\\System32\\calc.exe".to_owned(),
+            },
+            crate::window_list::WindowInfo {
+                title: "My Game Client".to_owned(),
+                process_id: 5678,
+                selector: "win:5678:game".to_owned(),
+                process_path: "D:\\Games\\game.exe".to_owned(),
+            },
+        ];
+
+        let filter_match = |filter: &str| -> Vec<usize> {
+            let f = filter.trim().to_lowercase();
+            windows
+                .iter()
+                .enumerate()
+                .filter(|(_, w)| {
+                    f.is_empty()
+                        || w.title.to_lowercase().contains(&f)
+                        || w.process_id.to_string().contains(&f)
+                        || w.process_path.to_lowercase().contains(&f)
+                })
+                .map(|(i, _)| i)
+                .collect()
+        };
+
+        assert_eq!(filter_match(""), vec![0, 1]);
+        assert_eq!(filter_match("calc"), vec![0]);
+        assert_eq!(filter_match("5678"), vec![1]);
+        assert_eq!(filter_match("game"), vec![1]);
+        assert_eq!(filter_match("nonexistent"), Vec::<usize>::new());
     }
 }
