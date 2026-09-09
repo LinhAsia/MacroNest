@@ -210,7 +210,23 @@ pub struct MacroShareResources {
 
 impl MacroShareResources {
     pub fn is_empty(&self) -> bool {
-        self == &Self::default()
+        self.crosshair_profiles.is_empty()
+            && self.window_presets.is_empty()
+            && self.window_layouts.is_empty()
+            && self.window_focus_presets.is_empty()
+            && self.pin_presets.is_empty()
+            && self.mouse_path_presets.is_empty()
+            && self.mouse_sensitivity_presets.is_empty()
+            && self.zoom_presets.is_empty()
+            && self.hud_presets.is_empty()
+            && self.command_presets.is_empty()
+            && self.geometry_presets.is_empty()
+            && self.vision_presets.is_empty()
+            && self.ocr_presets.is_empty()
+            && self.audio_sense_presets.is_empty()
+            && self.timer_presets.is_empty()
+            && self.esp_presets.is_empty()
+            && self.memory_code_list.is_empty()
     }
 }
 
@@ -408,12 +424,11 @@ fn expand_fields(
     mut defaults: serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Map<String, serde_json::Value> {
     for (field_id, value) in sparse {
-        if let Some(name) = defaults
-            .keys()
-            .find(|k| stable_field_id(k) == field_id)
-            .cloned()
+        if let Some((_, slot)) = defaults
+            .iter_mut()
+            .find(|(k, _)| stable_field_id(k) == field_id)
         {
-            defaults.insert(name, value);
+            *slot = value;
         }
     }
     defaults
@@ -866,5 +881,19 @@ mod tests {
             let decoded = z85_decode(&encoded).expect("z85 decode");
             assert_eq!(decoded, data);
         }
+    }
+
+    #[test]
+    fn macro_share_resources_is_empty_checks_all_collections() {
+        let mut res = MacroShareResources::default();
+        assert!(res.is_empty());
+
+        res.crosshair_profiles.push(ProfileRecord::default());
+        assert!(!res.is_empty());
+        res.crosshair_profiles.clear();
+        assert!(res.is_empty());
+
+        res.memory_code_list.push(MemoryCodeEntry::default());
+        assert!(!res.is_empty());
     }
 }

@@ -151,13 +151,9 @@ fn esp_spatial_audio_worker() {
         let state = state
             .as_mut()
             .expect("ESP audio state should be initialized");
-        let wanted = updates
-            .iter()
-            .map(|update| update.preset_id)
-            .collect::<HashSet<_>>();
         state
             .active
-            .retain(|preset_id, _| wanted.contains(preset_id));
+            .retain(|preset_id, _| updates.iter().any(|u| u.preset_id == *preset_id));
 
         for update in updates {
             let path = PathBuf::from(update.path.trim());
@@ -170,15 +166,13 @@ fn esp_spatial_audio_worker() {
                 .get(&update.preset_id)
                 .is_none_or(|active| active.path != path || active.looped != update.looped);
             if needs_source {
-                use std::collections::hash_map::Entry;
-                let audio = match state.cache.entry(path.clone()) {
-                    Entry::Occupied(entry) => entry.into_mut(),
-                    Entry::Vacant(entry) => {
-                        let Ok(audio) = load_cached_audio(&path) else {
-                            continue;
-                        };
-                        entry.insert(audio)
-                    }
+                let audio = if let Some(audio) = state.cache.get_mut(&path) {
+                    audio
+                } else {
+                    let Ok(audio) = load_cached_audio(&path) else {
+                        continue;
+                    };
+                    state.cache.entry(path.clone()).or_insert(audio)
                 };
                 let source = SharedSamplesSource {
                     samples: Arc::clone(&audio.samples),
@@ -579,11 +573,14 @@ fn install_video_audio_preview(
     }
 
     let sink = Sink::connect_new(state._stream.mixer());
-    sink.append(SamplesBuffer::new(
+    let source = SharedSamplesSource {
+        samples: Arc::clone(&decoded.samples),
+        index: start_sample,
+        end: end_sample,
         channels,
         sample_rate,
-        decoded.samples[start_sample..end_sample].to_vec(),
-    ));
+    };
+    sink.append(source);
     sink.play();
     state.path = path.to_owned();
     state.start_ms = start_ms;

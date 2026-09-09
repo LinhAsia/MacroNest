@@ -22,16 +22,15 @@ pub(crate) fn circle_from_3_points(
         return None;
     }
 
-    let ux = ((x1 * x1 + y1 * y1) * (y2 - y3)
-        + (x2 * x2 + y2 * y2) * (y3 - y1)
-        + (x3 * x3 + y3 * y3) * (y1 - y2))
-        / d;
-    let uy = ((x1 * x1 + y1 * y1) * (x3 - x2)
-        + (x2 * x2 + y2 * y2) * (x1 - x3)
-        + (x3 * x3 + y3 * y3) * (x2 - x1))
-        / d;
+    let sq1 = x1 * x1 + y1 * y1;
+    let sq2 = x2 * x2 + y2 * y2;
+    let sq3 = x3 * x3 + y3 * y3;
+    let inv_d = 1.0 / d;
 
-    let radius = ((x1 - ux).powi(2) + (y1 - uy).powi(2)).sqrt();
+    let ux = (sq1 * (y2 - y3) + sq2 * (y3 - y1) + sq3 * (y1 - y2)) * inv_d;
+    let uy = (sq1 * (x3 - x2) + sq2 * (x1 - x3) + sq3 * (x2 - x1)) * inv_d;
+
+    let radius = (x1 - ux).hypot(y1 - uy);
     Some(((ux.round() as i32, uy.round() as i32), radius as f32))
 }
 

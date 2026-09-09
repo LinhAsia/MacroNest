@@ -39,7 +39,10 @@ impl CrosshairApp {
 
     pub(crate) fn truncate_window_title(title: &str, max_chars: usize) -> String {
         if let Some((idx, _)) = title.char_indices().nth(max_chars) {
-            format!("{}...", &title[..idx])
+            let mut result = String::with_capacity(idx + 3);
+            result.push_str(&title[..idx]);
+            result.push_str("...");
+            result
         } else {
             title.to_owned()
         }
