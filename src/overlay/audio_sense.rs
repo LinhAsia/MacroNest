@@ -105,12 +105,11 @@ pub(crate) fn run_pitch_monitor_loop(
     set_audio_sense_active(&monitor_key, false);
 }
 
-pub(crate) fn stop_audio_sense_preset(spec: &str) -> Result<()> {
-    let preset = audio_sense_preset_by_id(spec)?;
-    let monitor_key = audio_sense_monitor_key_for_preset(preset.id);
+pub(crate) fn stop_audio_sense_preset_by_id(preset_id: u32) {
+    let monitor_key = audio_sense_monitor_key_for_preset(preset_id);
     set_audio_sense_active(&monitor_key, false);
-    Ok(())
 }
+
 
 pub(crate) fn start_custom_audio_sense(
     monitor_key: String,
@@ -195,7 +194,7 @@ pub(crate) fn stop_audio_sense_from_step(
             if step.audio_sense_stop_all {
                 stop_all_audio_sense();
             } else if let Some(preset_id) = step.audio_sense_preset_id {
-                let _ = stop_audio_sense_preset(&preset_id.to_string());
+                stop_audio_sense_preset_by_id(preset_id);
             } else {
                 let pitch_key =
                     custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop);

@@ -4483,6 +4483,9 @@ impl CrosshairApp {
         for name in Self::builtin_variable_suggestions() {
             suggestion_names.insert(name.to_string());
         }
+        for (const_name, _) in &self.state.global_constants {
+            suggestion_names.insert(const_name.clone());
+        }
         for name in self.collect_all_macro_referenced_variables() {
             if !name.contains('.') {
                 suggestion_names.insert(name);
@@ -4510,13 +4513,6 @@ impl CrosshairApp {
         let mut writable_suggestion_names: Vec<String> =
             writable_suggestion_names.into_iter().collect();
         writable_suggestion_names.sort();
-        let mut all_vars = suggestion_names.clone();
-        for (const_name, _) in &self.state.global_constants {
-            if !all_vars.contains(const_name) {
-                all_vars.push(const_name.clone());
-            }
-        }
-        all_vars.sort();
         let mut memory_alias_suggestions = self
             .state
             .memory_pointer_list

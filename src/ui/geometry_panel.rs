@@ -53,10 +53,8 @@ impl CrosshairApp {
             .map(|p| p.name.clone())
             .collect();
         let mut suggestion_names = std::collections::HashSet::new();
-        for preset in &self.state.timer_presets {
-            suggestion_names.insert(preset.name.clone());
-        }
-        for (idx, _name) in timer_names.iter().enumerate() {
+        for (idx, name) in timer_names.iter().enumerate() {
+            suggestion_names.insert(name.clone());
             suggestion_names.insert(format!("Timer{}", idx + 1));
         }
         for name in self.collect_all_macro_referenced_variables() {
@@ -72,15 +70,11 @@ impl CrosshairApp {
                 }
             }
         }
+        for (const_name, _) in &self.state.global_constants {
+            suggestion_names.insert(const_name.clone());
+        }
         let mut suggestion_names: Vec<String> = suggestion_names.into_iter().collect();
         suggestion_names.sort();
-        let mut all_vars = suggestion_names.clone();
-        for (const_name, _) in &self.state.global_constants {
-            if !all_vars.contains(const_name) {
-                all_vars.push(const_name.clone());
-            }
-        }
-        all_vars.sort();
 
         ui.memory_mut(|mem| {
             mem.data.insert_temp(

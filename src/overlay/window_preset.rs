@@ -135,13 +135,8 @@ fn focus_window_for_title(
     prefer_other_if_foreground_matches: bool,
 ) -> Result<()> {
     let is_specific = target_title.is_some_and(|t| {
-        if let Some(prefix) = t.strip_suffix(')')
-            && let Some((_, _)) = prefix.rsplit_once(" (0x")
-        {
-            true
-        } else {
-            false
-        }
+        t.strip_suffix(')')
+            .is_some_and(|prefix| prefix.rsplit_once(" (0x").is_some())
     });
     let prefer_other = prefer_other_if_foreground_matches && !is_specific;
     let hwnd = find_target_window_hwnd(

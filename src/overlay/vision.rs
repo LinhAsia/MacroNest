@@ -137,26 +137,31 @@ pub(crate) fn start_vision_following(
     rate_hz: u32,
 ) -> Result<()> {
     let preset = vision_preset_by_id(spec)?;
-    if image_search_following_is_active(preset.id) {
+    let (ui_tx, already_active) = {
+        let mut lock = HOOK_STATE.lock();
+        if lock.vision_following_presets.contains(&preset.id) {
+            (None, true)
+        } else {
+            lock.vision_following_presets.insert(preset.id);
+            lock.vision_following_offsets
+                .insert(preset.id, (offset_x, offset_y));
+            lock.vision_following_axis_locks
+                .insert(preset.id, axis_lock);
+            lock.vision_following_relative_moves
+                .insert(preset.id, relative_move);
+            lock.vision_following_passes.insert(preset.id, passes);
+            lock.vision_following_delays.insert(preset.id, delay_ms);
+            lock.vision_following_tolerances
+                .insert(preset.id, tolerance);
+            lock.vision_following_rates
+                .insert(preset.id, rate_hz.max(1));
+            (lock.ui_tx.clone(), false)
+        }
+    };
+    if already_active {
         return Ok(());
     }
 
-    let ui_tx = HOOK_STATE.lock().ui_tx.clone();
-    set_image_search_following_active(preset.id, true);
-    let mut lock = HOOK_STATE.lock();
-    lock.vision_following_offsets
-        .insert(preset.id, (offset_x, offset_y));
-    lock.vision_following_axis_locks
-        .insert(preset.id, axis_lock);
-    lock.vision_following_relative_moves
-        .insert(preset.id, relative_move);
-    lock.vision_following_passes.insert(preset.id, passes);
-    lock.vision_following_delays.insert(preset.id, delay_ms);
-    lock.vision_following_tolerances
-        .insert(preset.id, tolerance);
-    lock.vision_following_rates
-        .insert(preset.id, rate_hz.max(1));
-    drop(lock);
     let var_override = variable_override.map(|s| s.to_string());
     thread::spawn(move || run_image_search_follow_loop(preset, ui_tx, var_override));
     Ok(())
@@ -532,7 +537,7 @@ pub(crate) fn rgba_to_gray_mat(rgba: &[u8], width: usize, height: usize) -> Resu
     Ok(gray)
 }
 
-pub(crate) fn select_better_template_match(
+fn select_better_template_match(
     candidate: TemplateMatchHit,
     current: Option<TemplateMatchHit>,
     anchor_hint: Option<(i32, i32)>,

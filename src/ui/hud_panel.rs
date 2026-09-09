@@ -5,15 +5,13 @@ use eframe::egui::{self, Color32, RichText, Sense, Slider, TextEdit, vec2};
 
 impl CrosshairApp {
     pub(crate) fn render_hud_panel(&mut self, ui: &mut egui::Ui) {
-        let _language = self.state.ui_language;
-
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             if ui
                 .button(self.tr("+ Add HUD preset", "+ Add HUD preset"))
                 .clicked()
             {
-                self.add_toolbox_preset();
+                self.add_hud_preset();
                 self.persist_hud_presets();
             }
         });
@@ -1093,7 +1091,7 @@ impl CrosshairApp {
         changed
     }
 
-    pub(crate) fn add_toolbox_preset(&mut self) {
+    pub(crate) fn add_hud_preset(&mut self) {
         let id = Self::allocate_next_id(
             &self.state.hud_presets,
             &mut self.state.next_hud_preset_id,

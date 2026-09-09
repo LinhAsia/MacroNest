@@ -4460,7 +4460,7 @@ mod windows_overlay {
                     } else if let Some(action) = runtime.registered_window_hotkeys.get(&hotkey_id) {
                         match action {
                             WindowHotkeyAction::Apply(preset) => {
-                                let _ = apply_window_preset(preset);
+                                let _ = window_preset::apply_window_preset(preset);
                             }
 
                             WindowHotkeyAction::Focus(preset) => {
@@ -4470,7 +4470,7 @@ mod windows_overlay {
                             WindowHotkeyAction::Animate(preset) => {
                                 let preset = preset.clone();
                                 thread::spawn(move || {
-                                    let _ = apply_window_preset_animated(&preset);
+                                    let _ = window_preset::apply_window_preset_animated(&preset);
                                 });
                             }
 
@@ -6546,7 +6546,7 @@ mod windows_overlay {
             for action in window_actions {
                 match action {
                     WindowHotkeyAction::Apply(preset) => {
-                        let _ = apply_window_preset(&preset);
+                        let _ = window_preset::apply_window_preset(&preset);
                     }
 
                     WindowHotkeyAction::Focus(preset) => {
@@ -6555,7 +6555,7 @@ mod windows_overlay {
 
                     WindowHotkeyAction::Animate(preset) => {
                         thread::spawn(move || {
-                            let _ = apply_window_preset_animated(&preset);
+                            let _ = window_preset::apply_window_preset_animated(&preset);
                         });
                     }
 
@@ -6652,7 +6652,7 @@ mod windows_overlay {
         for action in window_actions {
             match action {
                 WindowHotkeyAction::Apply(preset) => {
-                    let _ = apply_window_preset(&preset);
+                    let _ = window_preset::apply_window_preset(&preset);
                 }
 
                 WindowHotkeyAction::Focus(preset) => {
@@ -6661,7 +6661,7 @@ mod windows_overlay {
 
                 WindowHotkeyAction::Animate(preset) => {
                     thread::spawn(move || {
-                        let _ = apply_window_preset_animated(&preset);
+                        let _ = window_preset::apply_window_preset_animated(&preset);
                     });
                 }
 
@@ -35856,12 +35856,8 @@ mod windows_overlay {
             hook_state.last_dispatched_window_focus_hwnd = Some(pending);
         }
 
-        trigger_macros_on_window_focus_change();
-        has_pending_window_focus_trigger()
-    }
-
-    fn trigger_macros_on_window_focus_change() {
         trigger_window_focus_macros(None);
+        has_pending_window_focus_trigger()
     }
 
     fn trigger_window_focus_macros(filter_preset_ids: Option<&[u32]>) {
@@ -35992,13 +35988,7 @@ mod windows_overlay {
         }
     }
 
-    fn apply_window_preset(preset: &WindowPreset) -> Result<()> {
-        window_preset::apply_window_preset(preset)
-    }
 
-    fn apply_window_preset_animated(preset: &WindowPreset) -> Result<()> {
-        window_preset::apply_window_preset_animated(preset)
-    }
 
 
 

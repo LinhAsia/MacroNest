@@ -929,7 +929,7 @@ static KEY_SOUND_STYLES: Lazy<Vec<KeySoundStyle>> = Lazy::new(|| {
     ]
 });
 
-pub fn init_key_sound_player() {
+fn init_key_sound_player() {
     let mut guard = KEY_SOUND_CHANNEL.lock();
     if guard.is_none() {
         let (tx, rx) = crossbeam_channel::unbounded();

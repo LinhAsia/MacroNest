@@ -27,9 +27,6 @@ impl CrosshairApp {
         Some((width.max(height) as f32).clamp(16.0, 4096.0))
     }
 
-    pub(crate) fn render_crosshair_panel(&mut self, ui: &mut egui::Ui) {
-        self.render_crosshair_presets_panel(ui);
-    }
 
     fn render_crosshair_color_control(
         ui: &mut egui::Ui,
@@ -379,7 +376,7 @@ impl CrosshairApp {
         (changed, dragging)
     }
 
-    fn render_crosshair_presets_panel(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn render_crosshair_panel(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
         ui.spacing_mut().slider_width = 260.0;
         ui.add_space(2.0);
