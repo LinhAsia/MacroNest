@@ -129,39 +129,39 @@ struct OcrEngineBundle {
 }
 
 #[cfg(windows)]
-static OCR_ENGINE_CACHE: Lazy<Mutex<HashMap<String, OcrEngineBundle>>> =
+static OCR_ENGINE_CACHE: Lazy<Mutex<HashMap<&'static str, OcrEngineBundle>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub fn ocr_language_packs() -> &'static [OcrLanguagePack] {
     OCR_LANGUAGE_PACKS
 }
 
-pub fn normalize_language_code(value: &str) -> String {
-    let normalized = value.trim().to_ascii_lowercase();
-    if normalized == "active" {
-        return OCR_DEFAULT_CODE.to_owned();
+pub fn normalize_language_code(value: &str) -> &'static str {
+    let trimmed = value.trim();
+    if trimmed.eq_ignore_ascii_case("active") {
+        return OCR_DEFAULT_CODE;
     }
-    if OCR_LANGUAGE_PACKS
+    OCR_LANGUAGE_PACKS
         .iter()
-        .any(|pack| pack.code == normalized)
-    {
-        normalized
-    } else {
-        OCR_DEFAULT_CODE.to_owned()
-    }
+        .find(|pack| pack.code.eq_ignore_ascii_case(trimmed))
+        .map(|pack| pack.code)
+        .unwrap_or(OCR_DEFAULT_CODE)
+}
+
+pub fn language_pack_for_code(value: &str) -> &'static OcrLanguagePack {
+    let code = normalize_language_code(value);
+    OCR_LANGUAGE_PACKS
+        .iter()
+        .find(|pack| pack.code == code)
+        .unwrap_or(&OCR_LANGUAGE_PACKS[0])
 }
 
 pub fn label_for_language_code(value: &str) -> &'static str {
-    let normalized = normalize_language_code(value);
-    OCR_LANGUAGE_PACKS
-        .iter()
-        .find(|pack| pack.code == normalized)
-        .map(|pack| pack.label)
-        .unwrap_or(OCR_LANGUAGE_PACKS[0].label)
+    language_pack_for_code(value).label
 }
 
 pub fn compact_label_for_language_code(value: &str) -> &'static str {
-    match normalize_language_code(value).as_str() {
+    match normalize_language_code(value) {
         "multilingual" => "CJK",
         "latin" => "Latin",
         "korean" => "Korean",
@@ -175,25 +175,6 @@ pub fn compact_label_for_language_code(value: &str) -> &'static str {
         "en" => "English",
         _ => "OCR",
     }
-}
-
-
-#[cfg(windows)]
-fn resolve_requested_language(value: &str) -> String {
-    if value.trim().is_empty() {
-        OCR_DEFAULT_CODE.to_owned()
-    } else {
-        normalize_language_code(value)
-    }
-}
-
-#[cfg(windows)]
-fn language_pack_for_code(value: &str) -> &'static OcrLanguagePack {
-    let normalized = normalize_language_code(value);
-    OCR_LANGUAGE_PACKS
-        .iter()
-        .find(|pack| pack.code == normalized)
-        .unwrap_or(&OCR_LANGUAGE_PACKS[0])
 }
 
 #[cfg(windows)]
@@ -509,17 +490,17 @@ fn build_engine(pack: &OcrLanguagePack) -> Result<ocr_rs::OcrEngine> {
 
 #[cfg(windows)]
 fn engine_for_language(value: &str) -> Result<Arc<Mutex<ocr_rs::OcrEngine>>> {
-    let requested = resolve_requested_language(value);
+    let requested = normalize_language_code(value);
     if let Some(existing) = OCR_ENGINE_CACHE
         .lock()
         .map_err(|_| anyhow!("OCR engine cache lock was poisoned"))?
-        .get(&requested)
+        .get(requested)
         .map(|bundle| bundle.engine.clone())
     {
         return Ok(existing);
     }
 
-    let pack = language_pack_for_code(&requested);
+    let pack = language_pack_for_code(requested);
     let engine = Arc::new(Mutex::new(build_engine(pack)?));
 
     let mut cache = OCR_ENGINE_CACHE
@@ -586,15 +567,18 @@ pub fn perform_ocr(rgba_bytes: &[u8], width: u32, height: u32, lang: &str) -> Re
         .recognize(&image)
         .map_err(|error| anyhow!("PaddleOCR scan failed: {error}"))?;
 
-    let mut text_lines = Vec::new();
-    let mut words = Vec::new();
+    let mut text = String::new();
+    let mut words = Vec::with_capacity(results.len());
 
     for item in results {
         if item.text.trim().is_empty() {
             continue;
         }
         let rect = item.bbox.rect;
-        text_lines.push(item.text.clone());
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&item.text);
         words.push(OcrWord {
             text: item.text,
             x: rect.left() as f32 / scale,
@@ -604,10 +588,7 @@ pub fn perform_ocr(rgba_bytes: &[u8], width: u32, height: u32, lang: &str) -> Re
         });
     }
 
-    Ok(OcrResult {
-        text: text_lines.join("\n"),
-        words,
-    })
+    Ok(OcrResult { text, words })
 }
 
 #[cfg(not(windows))]
@@ -629,5 +610,21 @@ mod tests {
         let img = vec![255u8; 100 * 100 * 4];
         let res = perform_ocr(&img, 100, 100, "multilingual");
         println!("OCR result: {:?}", res);
+    }
+
+    #[test]
+    fn normalize_language_code_and_labels_match() {
+        assert_eq!(normalize_language_code("multilingual"), "multilingual");
+        assert_eq!(normalize_language_code("LATIN"), "latin");
+        assert_eq!(normalize_language_code("active"), "multilingual");
+        assert_eq!(normalize_language_code("unknown_xyz"), "multilingual");
+        assert_eq!(normalize_language_code(""), "multilingual");
+
+        assert_eq!(compact_label_for_language_code("multilingual"), "CJK");
+        assert_eq!(compact_label_for_language_code("latin"), "Latin");
+        assert_eq!(compact_label_for_language_code("korean"), "Korean");
+
+        assert_eq!(label_for_language_code("latin"), "Latin / Vietnamese / European");
+        assert_eq!(label_for_language_code("invalid"), "Chinese / English / Japanese");
     }
 }
