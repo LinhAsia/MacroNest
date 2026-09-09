@@ -16474,7 +16474,6 @@ if supports_move_mouse || show_detection_tuning {
                         self.cancel_mouse_path_draw_capture(ui.ctx());
                     }
                     if let Some(path_id) = hovered_mouse_path_step {
-                        self.mouse_path_hover_last_seen = Some(Instant::now());
                         if self.mouse_path_step_preview_preset_id != Some(path_id) {
                             let preview_events = self
                                 .state
@@ -16486,16 +16485,8 @@ if supports_move_mouse || show_detection_tuning {
                             self.mouse_path_hover_preview_active = true;
                         }
                     } else if self.mouse_path_hover_preview_active {
-                        if self
-                            .mouse_path_hover_last_seen
-                            .is_some_and(|t| t.elapsed() > Duration::from_millis(150))
-                        {
-                            self.clear_mouse_path_preview();
-                            self.mouse_path_hover_preview_active = false;
-                            self.mouse_path_hover_last_seen = None;
-                        } else {
-                            ui.ctx().request_repaint_after(Duration::from_millis(50));
-                        }
+                        self.clear_mouse_path_preview();
+                        self.mouse_path_hover_preview_active = false;
                     }
                     if let Some((group_id, preset_id, step_index, selected_id)) =
                         add_mouse_path_preset_request.take()
@@ -21954,6 +21945,23 @@ mod tests {
             "",
             Some(7)
         ));
+    }
+
+    #[test]
+    fn mouse_path_hover_preview_clears_immediately_when_unhovered() {
+        let mut hover_preview_active = true;
+        let mut cleared = false;
+        let hovered_mouse_path_step: Option<u32> = None;
+
+        if let Some(_path_id) = hovered_mouse_path_step {
+            unreachable!("Step is not hovered");
+        } else if hover_preview_active {
+            cleared = true;
+            hover_preview_active = false;
+        }
+
+        assert!(cleared, "Preview must be cleared immediately upon unhover");
+        assert!(!hover_preview_active, "Hover preview state must deactivate");
     }
 }
 

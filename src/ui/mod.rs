@@ -732,7 +732,6 @@ pub struct CrosshairApp {
     mouse_path_draw_capture_restore_outer_pos: Option<egui::Pos2>,
     mouse_path_step_preview_preset_id: Option<u32>,
     mouse_path_hover_preview_active: bool,
-    mouse_path_hover_last_seen: Option<Instant>,
     mouse_path_timeline_initialized: HashSet<u32>,
     mouse_path_merge_selection: HashMap<u32, u32>,
     macro_step_copy_feedback_target: Option<(u32, u32, usize)>,
@@ -1099,7 +1098,6 @@ impl CrosshairApp {
             mouse_path_draw_capture_restore_outer_pos: None,
             mouse_path_step_preview_preset_id: None,
             mouse_path_hover_preview_active: false,
-            mouse_path_hover_last_seen: None,
             mouse_path_timeline_initialized: HashSet::new(),
             mouse_path_merge_selection: HashMap::new(),
             macro_step_copy_feedback_target: None,
@@ -15967,7 +15965,6 @@ impl eframe::App for CrosshairApp {
         if !keep_mouse_path_preview && self.mouse_path_step_preview_preset_id.is_some() {
             self.clear_mouse_path_preview();
             self.mouse_path_hover_preview_active = false;
-            self.mouse_path_hover_last_seen = None;
         }
 
         let keep_macro_geometry_preview =
