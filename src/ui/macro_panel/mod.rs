@@ -5608,7 +5608,6 @@ impl CrosshairApp {
         let _total_render_items = render_items.len();
         let _lazy_render_active = false;
         let toggle_collapsed_folder_id: Option<u32> = None;
-        let mut add_group_to_folder_id: Option<u32> = None;
         let mut renamed_folder: Option<(u32, String)> = None;
         let _toggle_folder_enabled_id: Option<u32> = None;
         let mut pending_custom_preset_save: Option<(
@@ -5818,7 +5817,6 @@ impl CrosshairApp {
                     let last_rect: Option<egui::Rect> = ui.ctx().data(|data| data.get_temp(rect_key));
                     let hovered = last_rect.map_or(false, |rect| ui.rect_contains_pointer(rect));
                     let mut delete_clicked = false;
-                    let mut add_clicked = false;
                     let (inner_res, frame_response) = Self::show_folder_card(ui, folder_has_enabled_content, hovered, |ui| {
                         ui.horizontal(|ui| {
                             let icon_btn = ui.add_sized(
@@ -5844,7 +5842,7 @@ impl CrosshairApp {
                                         .replace("{}", &folder_group_count.to_string()),
                                 ),
                             );
-                            let (add_response, delete_response) = ui
+                            let delete_response = ui
                                 .with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -5852,50 +5850,24 @@ impl CrosshairApp {
                                         if delete_btn.clicked() {
                                             delete_clicked = true;
                                         }
-                                        let add_btn = if folder_group_count == 0 {
-                                            let btn = ui
-                                                .add_sized(
-                                                    [28.0, 21.0],
-                                                    Button::new(Self::material_icon_text(
-                                                        0xe145, 16.0,
-                                                    )),
-                                                )
-                                                .on_hover_text(Self::tr_lang(
-                                                    language,
-                                                    "Add the first macro group to this folder",
-                                                    "Add the first macro group to this folder"
-                                                ));
-                                            if btn.clicked() {
-                                                add_clicked = true;
-                                            }
-                                            Some(btn)
-                                        } else {
-                                            None
-                                        };
-                                        (add_btn, delete_btn)
+                                        delete_btn
                                     },
                                 )
                                 .inner;
-                            (icon_btn, name_response, add_response, delete_response)
+                            (icon_btn, name_response, delete_response)
                         })
                     });
-                    let (icon_btn, name_response, add_response, delete_response) = inner_res.inner;
+                    let (icon_btn, name_response, delete_response) = inner_res.inner;
                     ui.ctx().data_mut(|data| data.insert_temp(rect_key, frame_response.rect));
                     let card_hovered = frame_response.hovered();
                     let pointer_in_widgets = ui.rect_contains_pointer(name_response.rect)
-                        || ui.rect_contains_pointer(delete_response.rect)
-                        || add_response
-                            .as_ref()
-                            .is_some_and(|response| ui.rect_contains_pointer(response.rect));
+                        || ui.rect_contains_pointer(delete_response.rect);
                     let card_clicked = card_hovered && ui.input(|i| i.pointer.any_click());
                     if card_hovered && !pointer_in_widgets {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
                     if ((card_clicked && !pointer_in_widgets && !delete_clicked && !name_response.has_focus()) || icon_btn.clicked()) && !self.confirm_delete_folder_id.is_some() {
                         enter_folder_id = Some(folder_id);
-                    }
-                    if add_clicked {
-                        add_group_to_folder_id = Some(folder_id);
                     }
                     if delete_clicked {
                         if folder_group_count > 0 {
@@ -16905,18 +16877,6 @@ if supports_move_mouse || show_detection_tuning {
                 folder.collapsed = !folder.collapsed;
                 self.persist();
             }
-        }
-        if let Some(folder_id) = add_group_to_folder_id {
-            self.add_macro_group_to_folder(folder_id);
-            if let Some(folder) = self
-                .state
-                .macro_folders
-                .iter_mut()
-                .find(|folder| folder.id == folder_id)
-            {
-                folder.collapsed = false;
-            }
-            self.persist();
         }
 
         ui.add_space((macro_panel_scroll_height - 50.0).max(0.0));
