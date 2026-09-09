@@ -10819,8 +10819,9 @@ mod windows_overlay {
         }
 
         let _previous = SelectObject(mem_dc, HGDIOBJ(bitmap.0));
-        let bgra = rgba_to_bgra(canvas.as_raw());
-        std::ptr::copy_nonoverlapping(bgra.as_ptr(), bits as *mut u8, bgra.len());
+        let raw = canvas.as_raw();
+        let dst = std::slice::from_raw_parts_mut(bits as *mut u8, raw.len());
+        copy_rgba_to_bgra(raw, dst);
         let blend = BLENDFUNCTION {
             BlendOp: AC_SRC_OVER as u8,
             BlendFlags: 0,

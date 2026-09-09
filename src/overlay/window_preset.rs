@@ -308,53 +308,10 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
     let total_w = (work_rect.right - work_rect.left).max(1) as f32;
     let total_h = (work_rect.bottom - work_rect.top).max(1) as f32;
 
-    let row_ratios: Vec<f32> = {
-        let prov: Vec<f32> = layout
-            .row_ratios
-            .iter()
-            .take(rows)
-            .copied()
-            .map(|v| v.max(0.01))
-            .collect();
-        if prov.len() == rows {
-            let sum: f32 = prov.iter().sum();
-            prov.iter().map(|v| v / sum).collect()
-        } else {
-            vec![1.0 / rows as f32; rows]
-        }
-    };
-    let col_ratios: Vec<f32> = {
-        let prov: Vec<f32> = layout
-            .col_ratios
-            .iter()
-            .take(cols)
-            .copied()
-            .map(|v| v.max(0.01))
-            .collect();
-        if prov.len() == cols {
-            let sum: f32 = prov.iter().sum();
-            prov.iter().map(|v| v / sum).collect()
-        } else {
-            vec![1.0 / cols as f32; cols]
-        }
-    };
-
-    let mut row_starts: Vec<i32> = vec![0];
-    {
-        let mut acc = 0.0f32;
-        for r in &row_ratios {
-            acc += r * total_h;
-            row_starts.push(acc.round() as i32);
-        }
-    }
-    let mut col_starts: Vec<i32> = vec![0];
-    {
-        let mut acc = 0.0f32;
-        for c in &col_ratios {
-            acc += c * total_w;
-            col_starts.push(acc.round() as i32);
-        }
-    }
+    let row_ratios = compute_ratios(&layout.row_ratios, rows);
+    let col_ratios = compute_ratios(&layout.col_ratios, cols);
+    let row_starts = compute_starts(&row_ratios, total_h);
+    let col_starts = compute_starts(&col_ratios, total_w);
 
     let mut used_hwnds: HashSet<isize> = HashSet::new();
     let mut focus_targets: Vec<HWND> = Vec::new();
@@ -384,15 +341,15 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
                 })
             };
 
-            let mut found = cell.target_window_title.as_deref().and_then(find_matching);
-            if found.is_none() {
-                for extra_title in &cell.extra_target_window_titles {
-                    if let Some(h) = find_matching(extra_title) {
-                        found = Some(h);
-                        break;
-                    }
-                }
-            }
+            let mut found = cell
+                .target_window_title
+                .as_deref()
+                .and_then(find_matching)
+                .or_else(|| {
+                    cell.extra_target_window_titles
+                        .iter()
+                        .find_map(|t| find_matching(t))
+                });
             if found.is_none()
                 && cell.target_window_title.is_none()
                 && cell.extra_target_window_titles.is_empty()
@@ -500,4 +457,58 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
     }
 
     Ok(())
+}
+
+fn compute_ratios(ratios: &[f32], count: usize) -> Vec<f32> {
+    if ratios.len() >= count && count > 0 {
+        let mut prov: Vec<f32> = ratios[..count].iter().map(|&v| v.max(0.01)).collect();
+        let sum: f32 = prov.iter().sum();
+        let inv_sum = 1.0 / sum;
+        for v in &mut prov {
+            *v *= inv_sum;
+        }
+        prov
+    } else {
+        vec![1.0 / count.max(1) as f32; count]
+    }
+}
+
+fn compute_starts(ratios: &[f32], total: f32) -> Vec<i32> {
+    let mut starts = Vec::with_capacity(ratios.len() + 1);
+    starts.push(0);
+    let mut acc = 0.0f32;
+    for &r in ratios {
+        acc += r * total;
+        starts.push(acc.round() as i32);
+    }
+    starts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_ratios, compute_starts};
+
+    #[test]
+    fn compute_ratios_defaults_to_equal_distribution() {
+        let ratios = compute_ratios(&[], 4);
+        assert_eq!(ratios.len(), 4);
+        for r in ratios {
+            assert!((r - 0.25).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn compute_ratios_normalizes_provided_proportions() {
+        let ratios = compute_ratios(&[1.0, 3.0], 2);
+        assert_eq!(ratios.len(), 2);
+        assert!((ratios[0] - 0.25).abs() < 1e-4);
+        assert!((ratios[1] - 0.75).abs() < 1e-4);
+    }
+
+    #[test]
+    fn compute_starts_calculates_cumulative_pixel_positions() {
+        let ratios = [0.25, 0.5, 0.25];
+        let starts = compute_starts(&ratios, 1000.0);
+        assert_eq!(starts, vec![0, 250, 750, 1000]);
+    }
 }

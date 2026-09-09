@@ -11,12 +11,18 @@ use windows::core::PCWSTR;
 
 use super::{HOOK_STATE, TRAY_UID, WMAPP_TRAYICON, runtime_icon_path};
 
-pub(crate) fn rgba_to_bgra(rgba: &[u8]) -> Vec<u8> {
-    let mut bgra = rgba.to_vec();
-    for pixel in bgra.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
+pub(crate) fn copy_rgba_to_bgra(src: &[u8], dst: &mut [u8]) {
+    for (s, d) in src.chunks_exact(4).zip(dst.chunks_exact_mut(4)) {
+        d[0] = s[2];
+        d[1] = s[1];
+        d[2] = s[0];
+        d[3] = s[3];
     }
+}
 
+pub(crate) fn rgba_to_bgra(rgba: &[u8]) -> Vec<u8> {
+    let mut bgra = vec![0u8; rgba.len()];
+    copy_rgba_to_bgra(rgba, &mut bgra);
     bgra
 }
 
@@ -118,5 +124,12 @@ mod tests {
             format_stopwatch_time(125_432, true, true, true),
             "02:05.432"
         );
+    }
+
+    #[test]
+    fn rgba_to_bgra_swaps_red_and_blue_channels() {
+        let rgba = vec![255, 128, 64, 200, 10, 20, 30, 40];
+        let bgra = super::rgba_to_bgra(&rgba);
+        assert_eq!(bgra, vec![64, 128, 255, 200, 30, 20, 10, 40]);
     }
 }
