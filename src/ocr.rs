@@ -160,10 +160,6 @@ pub fn label_for_language_code(value: &str) -> &'static str {
         .unwrap_or(OCR_LANGUAGE_PACKS[0].label)
 }
 
-pub fn display_label_for_language_code(value: &str) -> String {
-    label_for_language_code(value).to_owned()
-}
-
 pub fn compact_label_for_language_code(value: &str) -> &'static str {
     match normalize_language_code(value).as_str() {
         "multilingual" => "CJK",

@@ -6743,7 +6743,7 @@ impl CrosshairApp {
                                         .size(10.0),
                                     );
                                     let lang_before = self.state.quick_ocr_language.clone();
-                                    let current_label = crate::ocr::display_label_for_language_code(
+                                    let current_label = crate::ocr::label_for_language_code(
                                         &self.state.quick_ocr_language,
                                     );
                                     egui::ComboBox::from_id_salt("quick-ocr-language")

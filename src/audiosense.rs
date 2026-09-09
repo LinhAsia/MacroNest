@@ -59,6 +59,15 @@ impl PitchMonitor {
             worker: None,
         }
     }
+}
+
+impl Default for PitchMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PitchMonitor {
 
     pub fn snapshot(&self) -> PitchSnapshot {
         self.state.lock().unwrap().clone()
@@ -227,6 +236,7 @@ fn run_pitch_loop(
         .checked_sub(PITCH_HOLD_TIME)
         .unwrap_or_else(Instant::now);
     let mut waveform = VecDeque::with_capacity(160);
+    let mut chunk = vec![0u8; chunk_bytes];
 
     audio_client.start_stream()?;
     while !stop_flag.load(Ordering::Relaxed) {
@@ -243,7 +253,6 @@ fn run_pitch_loop(
         }
 
         while sample_queue.len() >= chunk_bytes {
-            let mut chunk = vec![0u8; chunk_bytes];
             for value in &mut chunk {
                 *value = sample_queue.pop_front().unwrap_or_default();
             }

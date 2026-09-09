@@ -163,7 +163,7 @@ impl CrosshairApp {
                         // Language
                         ui.label(Self::tr_lang(language, "Language", "Language"));
                         egui::ComboBox::from_id_salt((preset.id, "ocr-language"))
-                            .selected_text(crate::ocr::display_label_for_language_code(
+                            .selected_text(crate::ocr::label_for_language_code(
                                 &self.state.ocr_language,
                             ))
                             .width(260.0)

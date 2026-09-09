@@ -4491,25 +4491,18 @@ impl CrosshairApp {
                 suggestion_names.insert(name);
             }
         }
-        {
-            let vars = crate::overlay::RUNTIME_VARIABLES.lock();
-            for name in vars.keys() {
-                if !name.contains('.') {
-                    suggestion_names.insert(name.clone());
-                }
-            }
-        }
-        let mut suggestion_names: Vec<String> = suggestion_names.into_iter().collect();
-        suggestion_names.sort();
         let mut writable_suggestion_names = std::collections::HashSet::new();
         {
             let vars = crate::overlay::RUNTIME_VARIABLES.lock();
             for name in vars.keys() {
                 if !name.contains('.') {
+                    suggestion_names.insert(name.clone());
                     writable_suggestion_names.insert(name.clone());
                 }
             }
         }
+        let mut suggestion_names: Vec<String> = suggestion_names.into_iter().collect();
+        suggestion_names.sort();
         let mut writable_suggestion_names: Vec<String> =
             writable_suggestion_names.into_iter().collect();
         writable_suggestion_names.sort();

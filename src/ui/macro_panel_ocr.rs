@@ -182,13 +182,12 @@ impl CrosshairApp {
                     let installed = crate::ocr::is_language_pack_installed(pack.code);
                     let is_downloading = is_ocr_download_running && !installed;
                     let is_selected = step.ocr_language == pack.code;
-                    let label_text = crate::ocr::display_label_for_language_code(pack.code);
                     let row = ui
                         .horizontal(|ui| {
                             let btn_width = if installed { 184.0 } else { 118.0 };
                             let label_response = ui.add_sized(
                                 [btn_width, 20.0],
-                                egui::SelectableLabel::new(is_selected, label_text),
+                                egui::SelectableLabel::new(is_selected, pack.label),
                             );
                             if is_downloading {
                                 ui.add_sized([58.0, 18.0], egui::Spinner::new());
@@ -199,7 +198,7 @@ impl CrosshairApp {
                         })
                         .inner;
                     if row.clicked() {
-                        step.ocr_language = crate::ocr::normalize_language_code(pack.code);
+                        step.ocr_language = pack.code.to_owned();
                         *live_sync = true;
                     }
                 }
