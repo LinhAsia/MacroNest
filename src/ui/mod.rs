@@ -14544,10 +14544,6 @@ impl CrosshairApp {
         self.persist();
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
     }
-
-    pub(crate) fn render_protractor_calibration_overlay(&mut self, _ctx: &egui::Context) -> bool {
-        false
-    }
 }
 
 impl eframe::App for CrosshairApp {
@@ -15027,58 +15023,6 @@ impl eframe::App for CrosshairApp {
                         );
                     }
                 }
-                UiCommand::VisionPointCaptured {
-                    preset_id,
-                    priority_anchor,
-                    screen_x,
-                    screen_y,
-                    color,
-                } => {
-                    self.finish_image_search_point_capture_command(
-                        ctx,
-                        preset_id,
-                        priority_anchor,
-                        screen_x,
-                        screen_y,
-                        color,
-                    );
-                }
-                UiCommand::VisionRegionPreview {
-                    screen_x,
-                    screen_y,
-                    width,
-                    height,
-                } => {
-                    self.vision_capture_screen_region_preview =
-                        Some((screen_x, screen_y, width, height));
-                    self.status =
-                        format!("Selecting area {width}x{height} at {screen_x}, {screen_y}.");
-                    ctx.request_repaint();
-                }
-                UiCommand::VisionRegionCaptured {
-                    preset_id,
-                    template_mode,
-                    screen_x,
-                    screen_y,
-                    width,
-                    height,
-                } => {
-                    self.finish_image_search_region_capture_command(
-                        ctx,
-                        preset_id,
-                        template_mode,
-                        screen_x,
-                        screen_y,
-                        width,
-                        height,
-                    );
-                }
-                UiCommand::VisionPointCaptureCancelled(status) => {
-                    self.clear_image_search_capture_state();
-                    self.restore_image_search_capture_window(ctx);
-                    self.status = status;
-                    ctx.request_repaint();
-                }
                 UiCommand::ScreenDrawCaptureStatus(status) => {
                     self.status = status;
                     ctx.request_repaint();
@@ -15138,8 +15082,6 @@ impl eframe::App for CrosshairApp {
                     self.persist();
                 }
 
-                UiCommand::MouseMoveAbsolutePointCaptured { .. } => {}
-                UiCommand::MouseMoveAbsoluteCaptureCancelled => {}
                 UiCommand::NativeVisionCaptureFinished {
                     target,
                     mode,
@@ -16193,13 +16135,6 @@ impl eframe::App for CrosshairApp {
 
         if let Some(progress) = self.startup_splash_progress(ctx) {
             self.render_startup_splash(ctx, progress);
-            return;
-        }
-
-        if self.render_image_search_capture_overlay(ctx) {
-            return;
-        }
-        if self.render_protractor_calibration_overlay(ctx) {
             return;
         }
 

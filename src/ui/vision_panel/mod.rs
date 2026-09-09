@@ -974,10 +974,6 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn render_image_search_capture_overlay(&mut self, _ctx: &egui::Context) -> bool {
-        false
-    }
-
     pub(crate) fn sync_vision_presets(&mut self) {
         let presets = self.state.vision_presets.clone();
         if !Self::update_synced_state(presets.clone(), &mut self.last_synced_vision_presets) {

@@ -1,27 +1,8 @@
-use eframe::egui::{Key, Modifiers};
+#[cfg(test)]
+use eframe::egui::Modifiers;
 use std::collections::HashSet;
 
 use crate::model::HotkeyBinding;
-
-#[allow(dead_code)]
-pub fn capture_from_egui(key: Key, modifiers: Modifiers) -> Option<HotkeyBinding> {
-    let key_name = key_to_name(key)?;
-    let mut combo_keys = Vec::new();
-    if modifiers.ctrl || modifiers.command {
-        combo_keys.push("Ctrl".to_owned());
-    }
-    if modifiers.alt {
-        combo_keys.push("Alt".to_owned());
-    }
-    if modifiers.shift {
-        combo_keys.push("Shift".to_owned());
-    }
-    if modifiers.mac_cmd {
-        combo_keys.push("Win".to_owned());
-    }
-    combo_keys.push(key_name.to_owned());
-    binding_from_keys(combo_keys)
-}
 
 #[cfg(test)]
 pub fn capture_modifiers_from_egui(modifiers: Modifiers, win: bool) -> Option<HotkeyBinding> {
@@ -151,7 +132,6 @@ pub fn append_binding_to_list(spec: &mut String, binding: &HotkeyBinding) -> boo
 
 
 
-#[allow(dead_code)]
 pub fn is_mouse_key_name(name: &str) -> bool {
     matches!(
         name,
@@ -278,88 +258,6 @@ fn binding_from_keys(mut combo_keys: Vec<String>) -> Option<HotkeyBinding> {
     })
 }
 
-#[allow(dead_code)]
-fn key_to_name(key: Key) -> Option<&'static str> {
-    Some(match key {
-        Key::ArrowDown => "Down",
-        Key::ArrowLeft => "Left",
-        Key::ArrowRight => "Right",
-        Key::ArrowUp => "Up",
-        Key::Escape => "Escape",
-        Key::Tab => "Tab",
-        Key::Backspace => "Backspace",
-        Key::Enter => "Enter",
-        Key::Space => "Space",
-        Key::Insert => "Insert",
-        Key::Delete => "Delete",
-        Key::Home => "Home",
-        Key::End => "End",
-        Key::PageUp => "PageUp",
-        Key::PageDown => "PageDown",
-        Key::Num0 => "0",
-        Key::Num1 => "1",
-        Key::Num2 => "2",
-        Key::Num3 => "3",
-        Key::Num4 => "4",
-        Key::Num5 => "5",
-        Key::Num6 => "6",
-        Key::Num7 => "7",
-        Key::Num8 => "8",
-        Key::Num9 => "9",
-        Key::A => "A",
-        Key::B => "B",
-        Key::C => "C",
-        Key::D => "D",
-        Key::E => "E",
-        Key::F => "F",
-        Key::G => "G",
-        Key::H => "H",
-        Key::I => "I",
-        Key::J => "J",
-        Key::K => "K",
-        Key::L => "L",
-        Key::M => "M",
-        Key::N => "N",
-        Key::O => "O",
-        Key::P => "P",
-        Key::Q => "Q",
-        Key::R => "R",
-        Key::S => "S",
-        Key::T => "T",
-        Key::U => "U",
-        Key::V => "V",
-        Key::W => "W",
-        Key::X => "X",
-        Key::Y => "Y",
-        Key::Z => "Z",
-        Key::F1 => "F1",
-        Key::F2 => "F2",
-        Key::F3 => "F3",
-        Key::F4 => "F4",
-        Key::F5 => "F5",
-        Key::F6 => "F6",
-        Key::F7 => "F7",
-        Key::F8 => "F8",
-        Key::F9 => "F9",
-        Key::F10 => "F10",
-        Key::F11 => "F11",
-        Key::F12 => "F12",
-        Key::F13 => "F13",
-        Key::F14 => "F14",
-        Key::F15 => "F15",
-        Key::F16 => "F16",
-        Key::F17 => "F17",
-        Key::F18 => "F18",
-        Key::F19 => "F19",
-        Key::F20 => "F20",
-        Key::F21 => "F21",
-        Key::F22 => "F22",
-        Key::F23 => "F23",
-        Key::F24 => "F24",
-        _ => return None,
-    })
-}
-
 fn normalize_key_name(key: &str) -> String {
     let trimmed = key.trim();
     if let Some(vk) = key_name_to_vk(trimmed)
@@ -371,7 +269,6 @@ fn normalize_key_name(key: &str) -> String {
 }
 
 #[cfg(windows)]
-#[allow(dead_code)]
 pub fn to_windows_registration(
     binding: &HotkeyBinding,
 ) -> Option<(

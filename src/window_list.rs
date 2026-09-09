@@ -20,11 +20,11 @@ mod windows_impl {
                 BringWindowToTop, DI_NORMAL, DestroyIcon, DrawIconEx, EnumWindows,
                 GetClassLongPtrW, GET_CLASS_LONG_INDEX, GetClientRect, GetForegroundWindow,
                 GetSystemMetrics, GetWindowRect, GetWindowTextLengthW,
-                GetWindowTextW, GetWindowThreadProcessId, HICON, HWND_NOTOPMOST, HWND_TOPMOST,
+                GetWindowTextW, GetWindowThreadProcessId, HICON,
                 IsIconic, IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN,
                 SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SMTO_ABORTIFHUNG,
-                SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SendMessageTimeoutW,
-                SetForegroundWindow, SetWindowPos, ShowWindow, WM_GETICON,
+                SW_RESTORE, SendMessageTimeoutW,
+                SetForegroundWindow, ShowWindow, WM_GETICON,
             },
         },
         core::{BOOL, PCWSTR},
@@ -352,43 +352,6 @@ mod windows_impl {
         height: i32,
     ) -> Option<ScreenCaptureFrame> {
         unsafe { capture_screen_region_from_desktop(left, top, width.max(1), height.max(1)) }
-    }
-
-    #[allow(dead_code)]
-    pub fn set_window_topmost(selector: &str, topmost: bool) -> bool {
-        let Some(hwnd) = find_window_handle(Some(selector)) else {
-            return false;
-        };
-        unsafe {
-            if !IsWindow(Some(hwnd)).as_bool() {
-                return false;
-            }
-            if topmost && IsIconic(hwnd).as_bool() {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
-            }
-
-            let success = SetWindowPos(
-                hwnd,
-                Some(if topmost {
-                    HWND_TOPMOST
-                } else {
-                    HWND_NOTOPMOST
-                }),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | SWP_SHOWWINDOW,
-            )
-            .is_ok();
-
-            if success && topmost {
-                let _ = BringWindowToTop(hwnd);
-                let _ = SetForegroundWindow(hwnd);
-            }
-
-            success
-        }
     }
 
     pub fn focus_window(selector: &str) -> bool {
@@ -1639,11 +1602,6 @@ mod fallback {
         _match_duplicate_window_titles: bool,
     ) -> Option<ScreenCaptureFrame> {
         None
-    }
-
-    #[allow(dead_code)]
-    pub fn set_window_topmost(_selector: &str, _topmost: bool) -> bool {
-        false
     }
 
     pub(crate) fn close_window_capture_session() {}
