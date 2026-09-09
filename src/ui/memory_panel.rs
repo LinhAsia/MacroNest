@@ -2939,7 +2939,8 @@ impl CrosshairApp {
         let (full_row_rect, mut response) =
             ui.allocate_exact_size(vec2(pane_width, 22.0), Sense::click());
         response = response.on_hover_cursor(egui::CursorIcon::Default);
-        if self.memory_panel.text_encoding.is_none()
+        if response.hovered()
+            && self.memory_panel.text_encoding.is_none()
             && let Some(pid) = self.memory_panel.process_pid
         {
             let read_f32 = |addr: usize| -> Option<f32> {
@@ -3549,16 +3550,19 @@ impl CrosshairApp {
                             if index >= self.memory_panel.saved.len() {
                                 continue;
                             }
-                            let saved = self.memory_panel.saved[index].clone();
-                            if !saved.group.is_empty() {
+                            let (address, value_type, text_encoding, current, hexadecimal, frozen_val) = {
+                                let s = &self.memory_panel.saved[index];
+                                (s.address, s.value_type, s.text_encoding, s.current, s.hexadecimal, s.frozen)
+                            };
+                            if !self.memory_panel.saved[index].group.is_empty() {
                                 let prev_group = index
                                     .checked_sub(1)
                                     .and_then(|i| self.memory_panel.saved.get(i))
                                     .map(|s| s.group.as_str())
                                     .unwrap_or("");
-                                if saved.group != prev_group {
+                                if self.memory_panel.saved[index].group != prev_group {
                                     ui.add_space(3.0);
-                                    ui.label(RichText::new(format!("▼ {}", saved.group)).strong());
+                                    ui.label(RichText::new(format!("▼ {}", self.memory_panel.saved[index].group)).strong());
                                     ui.separator();
                                 }
                             }
@@ -3632,10 +3636,10 @@ impl CrosshairApp {
                                             persist_pointer_changes = true;
                                         }
                                     } else {
-                                        let description = if saved.description.is_empty() {
+                                        let description = if self.memory_panel.saved[index].description.is_empty() {
                                             RichText::new("description").weak()
                                         } else {
-                                            RichText::new(&saved.description)
+                                            RichText::new(&self.memory_panel.saved[index].description)
                                         };
                                         let description_response = Self::memory_label_cell(
                                             ui,
@@ -3648,10 +3652,10 @@ impl CrosshairApp {
                                         );
                                         row_hits.push(description_response);
                                     }
-                                    let current_type_label = match saved.text_encoding {
+                                    let current_type_label = match text_encoding {
                                         Some(TextEncoding::Utf8) => "Text (UTF-8)",
                                         Some(TextEncoding::Utf16) => "Text (UTF-16)",
-                                        None => memory_type_label(saved.value_type),
+                                        None => memory_type_label(value_type),
                                     };
                                     let (type_rect, type_cell_resp) = ui.allocate_exact_size(vec2(column_width, row_height), Sense::hover());
                                     let mut type_cell = ui.new_child(
@@ -3659,7 +3663,6 @@ impl CrosshairApp {
                                             .max_rect(type_rect)
                                             .layout(egui::Layout::left_to_right(egui::Align::Center)),
                                     );
-                                    let _selected_type = saved.value_type;
                                     let combo_resp = egui::ComboBox::from_id_salt(("saved-type-combo", index))
                                         .selected_text(current_type_label)
                                         .width(column_width.min(120.0).max(76.0))
@@ -3673,7 +3676,7 @@ impl CrosshairApp {
                                                 (ScanValueType::F64, "Double"),
                                             ];
                                             for (vtype, label) in types {
-                                                let is_selected = saved.text_encoding.is_none() && saved.value_type == vtype;
+                                                let is_selected = text_encoding.is_none() && value_type == vtype;
                                                 if ui.selectable_label(is_selected, label).clicked() {
                                                     self.memory_panel.saved[index].value_type = vtype;
                                                     self.memory_panel.saved[index].text_encoding = None;
@@ -3681,7 +3684,7 @@ impl CrosshairApp {
                                                 }
                                             }
                                             ui.separator();
-                                            let is_utf8 = saved.text_encoding == Some(TextEncoding::Utf8);
+                                            let is_utf8 = text_encoding == Some(TextEncoding::Utf8);
                                             if ui.selectable_label(is_utf8, "Text (UTF-8)").clicked() {
                                                 self.memory_panel.saved[index].value_type = ScanValueType::I8;
                                                 self.memory_panel.saved[index].text_encoding = Some(TextEncoding::Utf8);
@@ -3690,7 +3693,7 @@ impl CrosshairApp {
                                                 }
                                                 persist_pointer_changes = true;
                                             }
-                                            let is_utf16 = saved.text_encoding == Some(TextEncoding::Utf16);
+                                            let is_utf16 = text_encoding == Some(TextEncoding::Utf16);
                                             if ui.selectable_label(is_utf16, "Text (UTF-16)").clicked() {
                                                 self.memory_panel.saved[index].value_type = ScanValueType::I8;
                                                 self.memory_panel.saved[index].text_encoding = Some(TextEncoding::Utf16);
@@ -3702,23 +3705,23 @@ impl CrosshairApp {
                                         }).response;
                                     let type_response = type_cell_resp.union(combo_resp);
                                     row_hits.push(type_response);
+                                    let value_label = self.memory_panel.saved[index]
+                                        .current_text
+                                        .as_deref()
+                                        .map(std::borrow::Cow::Borrowed)
+                                        .or_else(|| {
+                                            current.map(|value| {
+                                                std::borrow::Cow::Owned(format_scan_value(value, hexadecimal))
+                                            })
+                                        })
+                                        .unwrap_or(std::borrow::Cow::Borrowed("?"));
                                     let value_response = Self::memory_label_cell(
                                         ui,
                                         column_width,
                                         row_height,
-                                        egui::Label::new(
-                                            saved
-                                                .current_text
-                                                .clone()
-                                                .or_else(|| {
-                                                    saved.current.map(|value| {
-                                                        format_scan_value(value, saved.hexadecimal)
-                                                    })
-                                                })
-                                                .unwrap_or_else(|| "?".to_owned()),
-                                        )
-                                        .selectable(false)
-                                        .sense(Sense::hover()),
+                                        egui::Label::new(value_label)
+                                            .selectable(false)
+                                            .sense(Sense::hover()),
                                     );
                                     value_response
                                         .clone()
@@ -3728,14 +3731,14 @@ impl CrosshairApp {
                                         ui,
                                         column_width,
                                         row_height,
-                                        egui::Label::new(format_memory_address(saved.address))
+                                        egui::Label::new(format_memory_address(address))
                                             .selectable(false)
                                             .sense(Sense::hover()),
                                     );
                                     row_hits.push(address_response);
-                                    let mut frozen = saved.frozen.is_some();
+                                    let mut frozen = frozen_val.is_some();
                                     let frozen_response = ui
-                                        .add_enabled_ui(saved.text_encoding.is_none(), |ui| {
+                                        .add_enabled_ui(text_encoding.is_none(), |ui| {
                                             ui.add_sized(
                                                 [18.0, 18.0],
                                                 egui::Checkbox::without_text(&mut frozen),
@@ -3744,9 +3747,9 @@ impl CrosshairApp {
                                         .inner
                                         .on_hover_text("Freeze");
                                     row_hits.push(frozen_response.clone());
-                                    if saved.text_encoding.is_none() && frozen_response.changed() {
+                                    if text_encoding.is_none() && frozen_response.changed() {
                                         self.memory_panel.saved[index].frozen =
-                                            if frozen { saved.current } else { None };
+                                            if frozen { current } else { None };
                                     }
                                 },
                             );
@@ -3759,7 +3762,7 @@ impl CrosshairApp {
                             if response.clicked_by(egui::PointerButton::Middle) {
                                 self.memory_panel.saved_list_active = true;
                                 self.select_saved_memory_row(index, selected, ui);
-                                self.navigate_open_memory_view(saved.address);
+                                self.navigate_open_memory_view(address);
                             }
                             if ui.input(|input| {
                                 input.pointer.button_pressed(egui::PointerButton::Primary)
@@ -3812,13 +3815,13 @@ impl CrosshairApp {
                                 self.memory_panel.selected_saved.insert(index);
                                 self.memory_panel.saved_selection_anchor = Some(index);
                                 if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
-                                    Self::navigate_memory_view_dialog(view, saved.address);
+                                    Self::navigate_memory_view_dialog(view, address);
                                 } else {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
-                                        address: saved.address,
+                                        address,
                                         tracked_base: None,
                                         kind: MemoryViewKind::Bytes,
-                                        display_type: memory_display_type_for_saved(&saved),
+                                        display_type: if text_encoding.is_some() { MemoryDisplayType::Text } else { memory_display_type_for_scan_type(value_type) },
                                         relative_addresses: false,
                                         pinned: true,
                                         elements: default_structure_elements(),
@@ -3835,7 +3838,7 @@ impl CrosshairApp {
                                         changed_addresses: HashSet::new(),
                                         classes: vec![StructureClass {
                                             name: "Class_0".to_owned(),
-                                            address: saved.address,
+                                            address,
                                             elements: default_structure_elements(),
                                         }],
                                         selected_class: 0,
@@ -3858,6 +3861,7 @@ impl CrosshairApp {
                                 }
                             }
                             response.context_menu(|ui| {
+                                let Some(saved) = self.memory_panel.saved.get(index).cloned() else { return; };
                                 let selected_count = self.memory_panel.selected_saved.len();
                                 let single_target = selected_count == 1;
                                 let debugger_arch = self
@@ -4500,11 +4504,11 @@ impl CrosshairApp {
                                     .collect();
                                 self.open_instruction_watch_many(addresses, reads_and_writes);
                             }
-                            if find_stable_pointer {
+                            if find_stable_pointer && let Some(saved) = self.memory_panel.saved.get(index).cloned() {
                                 self.start_stable_pointer_scan(&saved);
                                 ui.ctx().request_repaint();
                             }
-                            if deep_pointer_scan {
+                            if deep_pointer_scan && let Some(saved) = self.memory_panel.saved.get(index).cloned() {
                                 self.start_or_compare_deep_pointer_scan(&saved);
                                 ui.ctx().request_repaint();
                             }
@@ -4536,7 +4540,7 @@ impl CrosshairApp {
                                 self.memory_panel.status =
                                     format!("{saved_count} address(es) saved to library");
                             }
-                            if open_address {
+                            if open_address && let Some(saved) = self.memory_panel.saved.get(index).cloned() {
                                 let (address, offsets, pointer) =
                                     saved.pointer.as_ref().map_or_else(
                                         || {
@@ -9498,20 +9502,20 @@ impl CrosshairApp {
                         let address = candidate
                             .resolved_address
                             .map_or_else(|| "—".to_owned(), format_prefixed_memory_address);
-                        let value = if dialog.text_encoding.is_some() {
-                            candidate.observed_text.clone().unwrap_or_else(|| "—".to_owned())
+                        let value: std::borrow::Cow<'_, str> = if dialog.text_encoding.is_some() {
+                            candidate.observed_text.as_deref().unwrap_or("—").into()
                         } else {
                             candidate.observed_value.map_or_else(
-                                || "—".to_owned(),
-                                |value| editable_scan_value(value, false),
+                                || "—".into(),
+                                |value| editable_scan_value(value, false).into(),
                             )
                         };
-                        let current = if dialog.text_encoding.is_some() {
-                            candidate.live_text.clone().unwrap_or_else(|| "—".to_owned())
+                        let current: std::borrow::Cow<'_, str> = if dialog.text_encoding.is_some() {
+                            candidate.live_text.as_deref().unwrap_or("—").into()
                         } else {
                             candidate.live_value.map_or_else(
-                                || "—".to_owned(),
-                                |value| editable_scan_value(value, false),
+                                || "—".into(),
+                                |value| editable_scan_value(value, false).into(),
                             )
                         };
                         let row_rect = egui::Rect::from_min_size(
@@ -9548,9 +9552,9 @@ impl CrosshairApp {
                                     );
                                 }
                                 for (width, text) in [
-                                    (STATUS_WIDTH, state.to_owned()),
-                                    (ROOT_WIDTH, root),
-                                    (OFFSETS_WIDTH, offsets),
+                                    (STATUS_WIDTH, state),
+                                    (ROOT_WIDTH, root.as_str()),
+                                    (OFFSETS_WIDTH, offsets.as_str()),
                                 ] {
                                     Self::memory_label_cell(
                                         ui,
@@ -9568,8 +9572,8 @@ impl CrosshairApp {
                                     );
                                 }
                                 for (width, text) in [
-                                    (VALUE_WIDTH, value),
-                                    (CURRENT_WIDTH, current),
+                                    (VALUE_WIDTH, value.as_ref()),
+                                    (CURRENT_WIDTH, current.as_ref()),
                                 ] {
                                     Self::memory_label_cell(
                                         ui,

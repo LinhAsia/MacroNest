@@ -1116,9 +1116,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::MouseSensitivity(preset));
         }
         if let Some(index) = paste_sensitivity_after
-            && let Some(crate::ui::PresetClipboard::MouseSensitivity(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::MouseSensitivity(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.mouse_sensitivity_presets,
                 &mut self.state.next_mouse_sensitivity_preset_id,
@@ -1135,9 +1136,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::MousePath(preset));
         }
         if let Some(index) = paste_mouse_path_after
-            && let Some(crate::ui::PresetClipboard::MousePath(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::MousePath(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.mouse_path_presets,
                 &mut self.state.next_mouse_path_preset_id,

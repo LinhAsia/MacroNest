@@ -308,9 +308,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Geometry(preset));
         }
         if let Some(index) = paste_geometry_after
-            && let Some(crate::ui::PresetClipboard::Geometry(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Geometry(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.geometry_presets,
                 &mut self.state.next_geometry_preset_id,

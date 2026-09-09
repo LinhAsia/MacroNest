@@ -210,9 +210,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Command(preset));
         }
         if let Some(index) = paste_after
-            && let Some(crate::ui::PresetClipboard::Command(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Command(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.command_presets,
                 &mut self.state.next_command_preset_id,

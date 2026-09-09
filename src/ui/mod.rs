@@ -614,7 +614,6 @@ pub(crate) enum MacroGroupClipboardFeedback {
     Cut,
 }
 
-#[derive(Clone)]
 enum PresetClipboard {
     Command(CommandPreset),
     Window(WindowPreset),

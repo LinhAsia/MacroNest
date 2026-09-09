@@ -392,9 +392,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::AudioSense(preset));
         }
         if let Some(index) = paste_audiosense_after
-            && let Some(crate::ui::PresetClipboard::AudioSense(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::AudioSense(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.audio_sense_presets,
                 &mut self.state.next_audio_sense_preset_id,

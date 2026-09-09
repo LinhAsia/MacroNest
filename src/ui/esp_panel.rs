@@ -1918,8 +1918,9 @@ impl CrosshairApp {
         }
 
         if let Some(index) = paste_after
-            && let Some(crate::ui::PresetClipboard::Esp(mut preset)) = self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Esp(preset)) = self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.esp_presets,
                 &mut self.state.next_esp_preset_id,

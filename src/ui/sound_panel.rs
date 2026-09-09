@@ -775,9 +775,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Sound(preset));
         }
         if let Some(index) = paste_sound_after
-            && let Some(crate::ui::PresetClipboard::Sound(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Sound(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.audio_settings.presets,
                 &mut self.state.audio_settings.next_preset_id,

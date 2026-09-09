@@ -948,9 +948,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Vision(preset));
         }
         if let Some(index) = paste_vision_after
-            && let Some(crate::ui::PresetClipboard::Vision(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Vision(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             let old_id = preset.id;
             preset.id = Self::allocate_next_id(
                 &self.state.vision_presets,

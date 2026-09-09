@@ -232,8 +232,9 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Hud(preset));
         }
         if let Some(index) = paste_hud_after
-            && let Some(crate::ui::PresetClipboard::Hud(mut preset)) = self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Hud(preset)) = self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.hud_presets,
                 &mut self.state.next_hud_preset_id,
@@ -577,9 +578,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Timer(preset));
         }
         if let Some(index) = paste_timer_after
-            && let Some(crate::ui::PresetClipboard::Timer(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Timer(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.timer_presets,
                 &mut self.state.next_timer_preset_id,

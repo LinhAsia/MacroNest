@@ -516,9 +516,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Window(preset));
         }
         if let Some(index) = paste_after
-            && let Some(crate::ui::PresetClipboard::Window(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Window(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.window_presets,
                 &mut self.state.next_preset_id,
@@ -1338,8 +1339,9 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::Pin(preset));
         }
         if let Some(index) = paste_after
-            && let Some(crate::ui::PresetClipboard::Pin(mut preset)) = self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::Pin(preset)) = self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.pin_presets,
                 &mut self.state.next_pin_preset_id,
@@ -4951,9 +4953,10 @@ impl CrosshairApp {
             self.preset_clipboard = Some(crate::ui::PresetClipboard::WindowLayout(preset));
         }
         if let Some(index) = paste_layout_after
-            && let Some(crate::ui::PresetClipboard::WindowLayout(mut preset)) =
-                self.preset_clipboard.clone()
+            && let Some(crate::ui::PresetClipboard::WindowLayout(preset)) =
+                self.preset_clipboard.as_ref()
         {
+            let mut preset = preset.clone();
             preset.id = Self::allocate_next_id(
                 &self.state.window_layouts,
                 &mut self.state.next_window_layout_id,
