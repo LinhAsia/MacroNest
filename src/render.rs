@@ -75,8 +75,6 @@ pub struct RenderedSvgImage {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
-    pub orig_width: u32,
-    pub orig_height: u32,
 }
 
 pub fn render_crosshair(
@@ -420,9 +418,6 @@ pub fn render_svg_image(
         }
     };
 
-    let orig_width = pixmap.width();
-    let orig_height = pixmap.height();
-
     let pixmap = if rotation.abs() >= f32::EPSILON {
         rotate_pixmap(&pixmap, rotation)?
     } else {
@@ -438,8 +433,6 @@ pub fn render_svg_image(
         width: pixmap.width(),
         height: pixmap.height(),
         rgba,
-        orig_width,
-        orig_height,
     })
 }
 

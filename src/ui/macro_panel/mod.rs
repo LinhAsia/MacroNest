@@ -1444,7 +1444,7 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let is_layout = step_key.trim().starts_with("layout:");
-            let mut current_mode = if is_layout { 1 } else { 0 };
+            let current_mode = if is_layout { 1 } else { 0 };
 
             let mode_text = if current_mode == 1 {
                 Self::tr_lang(language, "Layout Preset", "Layout Preset").to_owned()
@@ -2599,8 +2599,8 @@ impl CrosshairApp {
         let active_mouse_click_popup_key_id =
             egui::Id::new((id_source, "mouse-click-active-submenu-key"));
         let popup_id = egui::Id::new((id_source, "mouse-submenu-popup"));
-        let image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
-        let timer_popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
+        let _image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
+        let _timer_popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
@@ -2986,8 +2986,8 @@ impl CrosshairApp {
         let selected = Self::macro_action_is_image_search(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = egui::Id::new((id_source, "image-search-submenu-popup"));
-        let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
-        let timer_popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
+        let _mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
+        let _timer_popup_id = ui.make_persistent_id((id_source, "timer-submenu-popup"));
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
@@ -3029,7 +3029,7 @@ impl CrosshairApp {
                     });
                 }
                 let popup_rect_id = ui.make_persistent_id((id_source, "image-search-submenu-rect"));
-                let popup_response = egui::Popup::from_response(&response)
+                let _popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
                     .align(egui::RectAlign::BOTTOM_START)
@@ -3174,8 +3174,8 @@ impl CrosshairApp {
         let selected = Self::macro_action_is_timer(*current);
         let owner_id = egui::Id::new("macro-action-submenu-owner");
         let popup_id = egui::Id::new((id_source, "timer-submenu-popup"));
-        let mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
-        let image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
+        let _mouse_popup_id = ui.make_persistent_id((id_source, "mouse-submenu-popup"));
+        let _image_popup_id = ui.make_persistent_id((id_source, "image-search-submenu-popup"));
         let active_owner = ui
             .ctx()
             .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
@@ -3216,7 +3216,7 @@ impl CrosshairApp {
                         .data_mut(|data| data.insert_temp(owner_id, MacroActionSubmenuKind::Timer));
                 }
                 let popup_rect_id = ui.make_persistent_id((id_source, "timer-submenu-rect"));
-                let popup_response = egui::Popup::from_response(&response)
+                let _popup_response = egui::Popup::from_response(&response)
                     .id(popup_id)
                     .open_bool(&mut open)
                     .align(egui::RectAlign::BOTTOM_START)
@@ -3442,7 +3442,7 @@ impl CrosshairApp {
                         }
                     }
                     let is_dark_theme = ui.visuals().dark_mode;
-                    let hint_color = if is_dark_theme {
+                    let _hint_color = if is_dark_theme {
                         Color32::from_rgba_unmultiplied(140, 140, 140, 150)
                     } else {
                         Color32::from_rgba_unmultiplied(100, 100, 100, 150)
@@ -3857,11 +3857,11 @@ impl CrosshairApp {
         timer_names: &[String],
         ocr_preset_options: &[(u32, String)],
         image_search_preset_options: &[(u32, String)],
-        all_presets: &[(u32, String)],
+        _all_presets: &[(u32, String)],
         all_groups: &[(u32, String, Vec<(u32, String)>)],
         language: UiLanguage,
         live_sync: &mut bool,
-        timer_presets: &[crate::model::TimerPreset],
+        _timer_presets: &[crate::model::TimerPreset],
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: crate::model::VietnameseInputMode,
         pending_pick_target: &mut Option<MouseMoveAbsoluteCaptureTarget>,
@@ -5203,13 +5203,8 @@ impl CrosshairApp {
         let scroll_frames_key = ui.make_persistent_id("pending-scroll-frames");
         let last_scroll_target: Option<u32> =
             ui.ctx().data(|data| data.get_temp(scroll_target_key));
-
-        let mut scroll_frames: usize = ui
-            .ctx()
-            .data(|data| data.get_temp(scroll_frames_key).unwrap_or(0));
         let resolved_scroll_target = if pending_macro_group_scroll_target.is_some() {
             if pending_macro_group_scroll_target != last_scroll_target {
-                scroll_frames = 0;
                 ui.ctx().data_mut(|data| {
                     data.insert_temp(
                         scroll_target_key,
@@ -5236,7 +5231,7 @@ impl CrosshairApp {
             .max_height(macro_panel_scroll_height)
             .show_viewport(ui, |ui, viewport| {
         let mut pending_macro_group_scroll_rect: Option<egui::Rect> = None;
-        let mut release_folder_id = None;
+        let release_folder_id = None;
         let mut delete_folder_id = None;
         let mut enter_folder_id = None;
         let mut begin_mouse_move_absolute_capture_target = None;
@@ -5248,7 +5243,7 @@ impl CrosshairApp {
         let mut cancel_mouse_path_draw_capture = false;
         let capture_target_snapshot = self.capture_target.clone();
         let capture_hotkey_combo_keys_snapshot = self.capture_hotkey_combo_keys.clone();
-        let active_folder_name = self.active_macro_folder_name();
+        let _active_folder_name = self.active_macro_folder_name();
         self.normalize_macro_folder_view_state();
         if false {
             ui.horizontal_wrapped(|ui| {
@@ -5704,7 +5699,7 @@ impl CrosshairApp {
                 render_items.push(RenderItem::AddMacroGroup(None));
             }
         }
-        let root_group_count = self
+        let _root_group_count = self
             .state
             .macro_groups
             .iter()
@@ -5853,12 +5848,12 @@ impl CrosshairApp {
                 }
             }
         }
-        let total_render_items = render_items.len();
-        let lazy_render_active = false;
-        let mut toggle_collapsed_folder_id: Option<u32> = None;
+        let _total_render_items = render_items.len();
+        let _lazy_render_active = false;
+        let toggle_collapsed_folder_id: Option<u32> = None;
         let mut add_group_to_folder_id: Option<u32> = None;
         let mut renamed_folder: Option<(u32, String)> = None;
-        let mut toggle_folder_enabled_id: Option<u32> = None;
+        let _toggle_folder_enabled_id: Option<u32> = None;
         let mut pending_custom_preset_save: Option<(
             u32,
             u32,
@@ -6194,7 +6189,7 @@ impl CrosshairApp {
                     let mut export_group: Option<u32> = None;
                     let mut import_group_after: Option<u32> = None; // insert_after_group_id
                     let mut copy_group_to_clipboard: Option<u32> = None;
-                    let mut paste_groups_after: Option<u32> = None;
+                    let _paste_groups_after: Option<u32> = None;
                     let selected_steps_snapshot = self.selected_macro_steps.clone();
                 let render_preset_indices = {
                     let group = &self.state.macro_groups[group_index];
@@ -7681,7 +7676,7 @@ impl CrosshairApp {
                                         };
                                         ui.horizontal_wrapped(|ui| {
                                             ui.label(Self::tr_lang(language, "On Stop", "On Stop"));
-                                            let hold_stop_combo = egui::ComboBox::from_id_salt((
+                                            let _hold_stop_combo = egui::ComboBox::from_id_salt((
                                                 group.id,
                                                 preset.id,
                                                 "hold-stop-action",
@@ -10008,7 +10003,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                         };
                                         ui.horizontal_wrapped(|ui| {
                                             ui.label(Self::tr_lang(language, "On Stop", "On Stop"));
-                                            let hold_stop_combo = egui::ComboBox::from_id_salt((
+                                            let _hold_stop_combo = egui::ComboBox::from_id_salt((
                                                 group.id,
                                                 preset.id,
                                                 "press-stop-action",
@@ -12824,7 +12819,7 @@ if supports_move_mouse || show_detection_tuning {
                                             ui.spacing_mut().item_spacing.x = 2.0;
                                             ui.spacing_mut().interact_size.y = STEP_TOOLBAR_BUTTON[1];
                                             let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
-                                            let hint_color = if is_dark_theme {
+                                            let _hint_color = if is_dark_theme {
                                                 Color32::from_rgba_unmultiplied(140, 140, 140, 150)
                                             } else {
                                                 Color32::from_rgba_unmultiplied(100, 100, 100, 150)
@@ -13233,7 +13228,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     }
                                                 });
                                             let previous_action = step.action;
-                                            let action_combo = egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "action"))
+                                            let _action_combo = egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "action"))
                                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                                 .width(146.0)
                                                 .height(420.0)
@@ -15184,7 +15179,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                                     }
                                                                                 }
                                                                             });
-                                                                        let mut variable_layouter = |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
+                                                                        let _variable_layouter = |ui: &egui::Ui, string: &dyn TextBuffer, wrap_width: f32| {
                                                                             let job = Self::interpolation_highlight_job(
                                                                                 ui,
                                                                                 string.as_str(),
@@ -17565,7 +17560,7 @@ if supports_move_mouse || show_detection_tuning {
         language: UiLanguage,
         live_sync: &mut bool,
         show_unlock_on_exit: bool,
-        warning_tooltip_id: &'static str,
+        _warning_tooltip_id: &'static str,
     ) {
         ui.horizontal(|ui| {
             for (value, label, tip_en, tip_vi) in [
@@ -20722,10 +20717,10 @@ if supports_move_mouse || show_detection_tuning {
         ui: &mut egui::Ui,
         language: UiLanguage,
         id_prefix: impl std::hash::Hash + Copy,
-        group_id: u32,
-        macro_preset_id: u32,
-        step_index: usize,
-        is_hold_stop: bool,
+        _group_id: u32,
+        _macro_preset_id: u32,
+        _step_index: usize,
+        _is_hold_stop: bool,
         preset_options: &[(u32, String)],
         audio_sense_presets: &mut Vec<AudioSensePreset>,
         audio_sense_devices: &[String],
@@ -21285,7 +21280,7 @@ if supports_move_mouse || show_detection_tuning {
         } else {
             below_space.max(80.0)
         };
-        let area_res = egui::Area::new(popup_id)
+        let _area_res = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
             .pivot(if open_upward {
                 egui::Align2::LEFT_BOTTOM
@@ -21310,7 +21305,7 @@ if supports_move_mouse || show_detection_tuning {
                                         }
                                         VariableValueKind::Neutral => ui.visuals().text_color(),
                                     };
-                                    let mut resp = ui.selectable_label(
+                                    let resp = ui.selectable_label(
                                         is_selected,
                                         RichText::new(label).color(color),
                                     );
@@ -21535,7 +21530,7 @@ if supports_move_mouse || show_detection_tuning {
         } else {
             below_space.max(80.0)
         };
-        let area_res = egui::Area::new(popup_id)
+        let _area_res = egui::Area::new(popup_id)
             .order(egui::Order::Foreground)
             .pivot(if open_upward {
                 egui::Align2::LEFT_BOTTOM
@@ -21560,7 +21555,7 @@ if supports_move_mouse || show_detection_tuning {
                                         }
                                         VariableValueKind::Neutral => ui.visuals().text_color(),
                                     };
-                                    let mut resp = ui.selectable_label(
+                                    let resp = ui.selectable_label(
                                         is_selected,
                                         RichText::new(label).color(color),
                                     );

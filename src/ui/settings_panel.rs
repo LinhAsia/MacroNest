@@ -2250,7 +2250,7 @@ impl CrosshairApp {
         let current_version = self.app_version_label().to_owned();
         let network_proxy = self.network_panel.active_proxy_url();
         std::thread::spawn(move || {
-            let mut client = reqwest::blocking::Client::builder()
+            let client = reqwest::blocking::Client::builder()
                 .user_agent("MacroNest")
                 .connect_timeout(Duration::from_secs(10))
                 .timeout(Duration::from_secs(20));

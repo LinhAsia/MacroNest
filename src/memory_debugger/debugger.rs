@@ -262,10 +262,7 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
 const ERROR_SEM_TIMEOUT: i32 = 121;
 const ERROR_BAD_LENGTH: i32 = 24;
 const ERROR_MORE_DATA: i32 = 234;
-// ponytail: keep address watches bounded. A single hit is not enough to tell an
-// initialization write from a live position update, while an unbounded hardware
-// watchpoint can pause a hot game thread until the game stalls or crashes.
-const MAX_ADDRESS_WATCH_HITS: usize = 64;
+
 const RESUME_FLAG: u32 = 1 << 16;
 
 #[repr(C, align(16))]
@@ -292,9 +289,7 @@ pub enum WatchEvent {
     AddressHit {
         instruction_address: usize,
         instruction: String,
-        data_address: usize,
         details: String,
-        likely_stack_copy: bool,
     },
     AccessHit {
         instruction_address: usize,
@@ -352,6 +347,7 @@ impl Drop for WatchSession {
 pub struct WriteWatch(WatchSession);
 
 impl WriteWatch {
+    #[cfg(test)]
     pub fn start<F>(
         pid: u32,
         address: usize,
@@ -394,6 +390,7 @@ impl WriteWatch {
 pub struct AddressAccessWatch(WatchSession);
 
 impl AddressAccessWatch {
+    #[cfg(test)]
     pub fn start<F>(
         pid: u32,
         address: usize,
@@ -458,17 +455,6 @@ impl AccessWatch {
         Self::start_with_limit(pid, instruction_address, architecture, usize::MAX, notify)
     }
 
-    pub fn start_many<F>(
-        pid: u32,
-        instruction_addresses: &[usize],
-        architecture: MemoryDebuggerArchitecture,
-        notify: F,
-    ) -> io::Result<Self>
-    where
-        F: Fn(WatchEvent) + Send + 'static,
-    {
-        Self::start_many_with_batch_ms(pid, instruction_addresses, architecture, 1_000, notify)
-    }
 
     pub fn start_many_with_batch_ms<F>(
         pid: u32,
@@ -637,7 +623,6 @@ enum WatchKind {
     },
 }
 
-const EXECUTE_CAPTURE_LIMIT: usize = 64;
 
 impl WatchKind {
     fn addresses(&self) -> &[usize] {
@@ -911,15 +896,11 @@ fn watch_loop<F>(
                                             .insert(instruction_address, pair.clone());
                                         pair
                                     };
-                                    let likely_stack_copy =
-                                        address.abs_diff(context.Rsp as usize) < 8 * 1024 * 1024;
                                     access_hits += 1;
                                     notify(WatchEvent::AddressHit {
                                         instruction_address,
                                         instruction,
-                                        data_address: *address,
                                         details,
-                                        likely_stack_copy,
                                     });
                                 }
                                 }
@@ -1530,78 +1511,7 @@ ACTUAL DATA ADDRESS=0x{:016X}\r\n",
     text
 }
 
-fn format_hit_details_legacy(
-    process: &Process,
-    instruction: &Instruction,
-    context: &CONTEXT,
-    data_address: usize,
-    action: &str,
-) -> String {
-    let mut text = format!(
-        "DISASSEMBLY (dÃ²ng << lÃ  instruction {action}; cÃ¡c dÃ²ng sau lÃ  code káº¿ tiáº¿p)\r\n"
-    );
-    let mut current = *instruction;
-    for index in 0..6 {
-        let mut bytes = [0u8; 15];
-        let read = process
-            .read(current.ip() as usize, &mut bytes[..current.len()])
-            .unwrap_or(0);
-        let encoded = bytes[..read]
-            .iter()
-            .map(|byte| format!("{byte:02X}"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut formatter = IntelFormatter::new();
-        let mut assembly = String::new();
-        formatter.format(&current, &mut assembly);
-        text.push_str(&format!(
-            "0x{:016X}  {:<32}  {}{}\r\n",
-            current.ip(),
-            encoded,
-            assembly,
-            if index == 0 { "  <<" } else { "" }
-        ));
-        let Ok(next) = decode_at(process, current.next_ip() as usize, TargetArchitecture::X64)
-        else {
-            break;
-        };
-        current = next;
-    }
-    text.push_str(&format!(
-        "\r\nSNAPSHOT SAU Láº¦N {} Gáº¦N NHáº¤T\r\n\
-RAX={:016X}  RBX={:016X}\r\n\
-RCX={:016X}  RDX={:016X}\r\n\
-RSI={:016X}  RDI={:016X}\r\n\
-RBP={:016X}  RSP={:016X}\r\n\
-R8 ={:016X}  R9 ={:016X}\r\n\
-R10={:016X}  R11={:016X}\r\n\
-R12={:016X}  R13={:016X}\r\n\
-R14={:016X}  R15={:016X}\r\n\
-RIP(sau lá»‡nh)={:016X}  RFLAGS={:08X}\r\n\
-Äá»ŠA CHá»ˆ DATA THá»°C Táº¾=0x{:016X}\r\n",
-        action.to_uppercase(),
-        context.Rax,
-        context.Rbx,
-        context.Rcx,
-        context.Rdx,
-        context.Rsi,
-        context.Rdi,
-        context.Rbp,
-        context.Rsp,
-        context.R8,
-        context.R9,
-        context.R10,
-        context.R11,
-        context.R12,
-        context.R13,
-        context.R14,
-        context.R15,
-        context.Rip,
-        context.EFlags,
-        data_address,
-    ));
-    text
-}
+
 
 fn effective_address(instruction: &Instruction, context: &CONTEXT) -> Option<usize> {
     let has_memory =
@@ -1832,7 +1742,7 @@ mod tests {
     fn hardware_write_watch_reports_a_hit_from_owned_child() {
         let executable = std::env::current_exe().unwrap();
         let mut child = Command::new(executable)
-            .args(["--exact", "debugger::tests::watch_child", "--nocapture"])
+            .args(["--exact", "memory_debugger::debugger::tests::watch_child", "--nocapture"])
             .env("RAM_READER_WATCH_CHILD", "1")
             .stdout(Stdio::piped())
             .spawn()
@@ -1841,7 +1751,9 @@ mod tests {
         let mut reader = BufReader::new(stdout);
         let address = loop {
             let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
+            if reader.read_line(&mut line).unwrap() == 0 {
+                panic!("Child process exited without outputting WATCH_ADDRESS");
+            }
             if let Some(hex) = line.trim().strip_prefix("WATCH_ADDRESS=") {
                 break usize::from_str_radix(hex, 16).unwrap();
             }
@@ -1895,7 +1807,7 @@ mod tests {
                 _ => {}
             }
         };
-        assert!(access_details.contains("TRUY Cáº¬P"));
+        assert!(access_details.to_lowercase().contains("access"));
         address_access_watch.stop();
         let (sender, receiver) = mpsc::channel();
         let mut access_watch = AccessWatch::start(

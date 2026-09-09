@@ -292,6 +292,7 @@ pub struct SharedMacroGroup {
     pub resources: MacroShareResources,
 }
 
+#[cfg(test)]
 pub fn encode_step(step: &MacroStep) -> Result<String> {
     encode_v2(step, PREFIX_STEP_V2, "step")
 }
@@ -300,6 +301,7 @@ pub fn decode_step(code: &str) -> Result<MacroStep> {
     decode_any(code, PREFIX_STEP_V2, PREFIX_STEP, "step")
 }
 
+#[cfg(test)]
 pub fn encode_preset(preset: &MacroPreset) -> Result<String> {
     encode_v2(preset, PREFIX_PRESET_V2, "preset")
 }
@@ -308,6 +310,7 @@ pub fn decode_preset(code: &str) -> Result<MacroPreset> {
     decode_any(code, PREFIX_PRESET_V2, PREFIX_PRESET, "preset")
 }
 
+#[cfg(test)]
 pub fn encode_group(group: &MacroGroup) -> Result<String> {
     encode_v2(group, PREFIX_GROUP_V2, "group")
 }

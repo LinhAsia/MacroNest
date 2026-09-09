@@ -23,6 +23,7 @@ pub fn capture_from_egui(key: Key, modifiers: Modifiers) -> Option<HotkeyBinding
     binding_from_keys(combo_keys)
 }
 
+#[cfg(test)]
 pub fn capture_modifiers_from_egui(modifiers: Modifiers, win: bool) -> Option<HotkeyBinding> {
     let mut keys = Vec::new();
     if modifiers.ctrl || modifiers.command {
@@ -54,14 +55,7 @@ pub fn format_binding(binding: Option<&HotkeyBinding>) -> String {
     }
 }
 
-pub fn format_key_list(spec: &str) -> String {
-    let keys = split_key_list(spec);
-    if keys.is_empty() {
-        "Not set".to_owned()
-    } else {
-        keys.join(", ")
-    }
-}
+
 
 pub fn is_modifier_key_name(name: &str) -> bool {
     matches!(
@@ -85,11 +79,7 @@ pub fn split_key_list(spec: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn key_list_contains(spec: &str, key_name: &str) -> bool {
-    split_key_list(spec)
-        .iter()
-        .any(|item| item.eq_ignore_ascii_case(key_name))
-}
+
 
 pub fn parse_binding(spec: &str) -> Option<HotkeyBinding> {
     let mut combo_keys = split_key_list(spec);
@@ -134,11 +124,7 @@ pub fn format_binding_list(bindings: &[HotkeyBinding]) -> String {
     }
 }
 
-pub fn binding_list_matches(spec: &str, observed: &HotkeyBinding) -> bool {
-    parse_binding_list(spec)
-        .iter()
-        .any(|binding| binding_matches(binding, observed))
-}
+
 
 pub fn append_binding_to_list(spec: &mut String, binding: &HotkeyBinding) -> bool {
     let normalized = format_binding(Some(binding));
@@ -163,14 +149,7 @@ pub fn append_binding_to_list(spec: &mut String, binding: &HotkeyBinding) -> boo
     true
 }
 
-pub fn pop_binding_list_entry(spec: &mut String) -> bool {
-    let mut entries = split_binding_list(spec);
-    let Some(_) = entries.pop() else {
-        return false;
-    };
-    *spec = entries.join(", ");
-    true
-}
+
 
 #[allow(dead_code)]
 pub fn is_mouse_key_name(name: &str) -> bool {
@@ -427,40 +406,7 @@ pub fn to_windows_registration(
     vk.map(|vk| (modifiers, vk))
 }
 
-#[cfg(windows)]
-pub fn binding_is_down(binding: &HotkeyBinding) -> bool {
-    use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
-    let keys = binding_key_names(binding);
-    if keys.is_empty() {
-        return false;
-    }
-    let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
-    for key in keys {
-        let upper = key.to_ascii_uppercase();
-        let down = match upper.as_str() {
-            "CTRL" | "CONTROL" => is_down(0x11) || is_down(0xA2) || is_down(0xA3),
-            "ALT" => is_down(0x12) || is_down(0xA4) || is_down(0xA5),
-            "SHIFT" => is_down(0x10) || is_down(0xA0) || is_down(0xA1),
-            "WIN" | "META" => is_down(0x5B) || is_down(0x5C),
-            _ => {
-                if let Some(vk) = key_name_to_vk(&key) {
-                    is_down(vk as i32)
-                } else {
-                    true
-                }
-            }
-        };
-        if !down {
-            return false;
-        }
-    }
-    true
-}
 
-#[cfg(not(windows))]
-pub fn binding_is_down(_binding: &HotkeyBinding) -> bool {
-    false
-}
 
 #[cfg(windows)]
 pub fn key_name_to_vk(name: &str) -> Option<u32> {

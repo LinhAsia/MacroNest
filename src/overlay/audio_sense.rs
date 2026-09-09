@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use std::thread;
-use std::time::Duration;
 
 use super::{HOOK_STATE, is_ui_in_foreground, set_text_variable_value, set_variable_value};
 use crate::audiosense;
@@ -106,20 +105,6 @@ pub(crate) fn run_pitch_monitor_loop(
     set_audio_sense_active(&monitor_key, false);
 }
 
-pub(crate) fn start_audio_sense_preset(spec: &str, stop_when_ui_foreground: bool) -> Result<()> {
-    let preset = audio_sense_preset_by_id(spec)?;
-    let monitor_key = audio_sense_monitor_key_for_preset(preset.id);
-    if audio_sense_is_active(&monitor_key) {
-        return Ok(());
-    }
-
-    set_audio_sense_active(&monitor_key, true);
-    thread::spawn(move || {
-        run_pitch_monitor_loop(monitor_key, preset.pitch, stop_when_ui_foreground, false)
-    });
-    Ok(())
-}
-
 pub(crate) fn stop_audio_sense_preset(spec: &str) -> Result<()> {
     let preset = audio_sense_preset_by_id(spec)?;
     let monitor_key = audio_sense_monitor_key_for_preset(preset.id);
@@ -219,59 +204,4 @@ pub(crate) fn stop_audio_sense_from_step(
         }
         _ => {}
     }
-}
-
-pub(crate) fn is_audio_sense_active(
-    preset_id: Option<u32>,
-    macro_preset_id: u32,
-    step_index: usize,
-    is_hold_stop: bool,
-) -> bool {
-    let key = if let Some(id) = preset_id {
-        audio_sense_monitor_key_for_preset(id)
-    } else {
-        custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop)
-    };
-    audio_sense_is_active(&key)
-}
-
-pub(crate) fn start_audio_sense_preview(
-    step: &MacroStep,
-    macro_preset_id: u32,
-    step_index: usize,
-    is_hold_stop: bool,
-) {
-    start_audio_sense_from_step(step, macro_preset_id, step_index, is_hold_stop, true, true);
-}
-
-pub(crate) fn stop_audio_sense(
-    preset_id: Option<u32>,
-    macro_preset_id: u32,
-    step_index: usize,
-    is_hold_stop: bool,
-) {
-    if let Some(id) = preset_id {
-        let _ = stop_audio_sense_preset(&id.to_string());
-    } else {
-        let pitch_key = custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop);
-        set_audio_sense_active(&pitch_key, false);
-    }
-}
-
-pub(crate) fn get_audio_sense_snapshot(
-    preset_id: Option<u32>,
-    macro_preset_id: u32,
-    step_index: usize,
-    is_hold_stop: bool,
-) -> Option<crate::audiosense::PitchSnapshot> {
-    let key = if let Some(id) = preset_id {
-        audio_sense_monitor_key_for_preset(id)
-    } else {
-        custom_audio_sense_monitor_key(macro_preset_id, step_index, is_hold_stop)
-    };
-    HOOK_STATE
-        .lock()
-        .active_audio_sense_snapshots
-        .get(&key)
-        .cloned()
 }

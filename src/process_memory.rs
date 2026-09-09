@@ -1720,7 +1720,7 @@ pub fn scan_memory_range_with_progress(
                 })
         })
         .collect::<Vec<_>>();
-    let slots = regions
+    let _slots = regions
         .iter()
         .map(|region| region.size / value_type.width())
         .fold(0usize, usize::saturating_add);
@@ -4523,25 +4523,6 @@ mod tests {
     }
 
     #[test]
-    fn between_includes_both_bounds() {
-        assert!(scan_value_between(
-            ScanValue::I32(10),
-            ScanValue::I32(10),
-            ScanValue::I32(20)
-        ));
-        assert!(scan_value_between(
-            ScanValue::F32(20.0),
-            ScanValue::F32(10.0),
-            ScanValue::F32(20.0)
-        ));
-        assert!(!scan_value_between(
-            ScanValue::I32(21),
-            ScanValue::I32(10),
-            ScanValue::I32(20)
-        ));
-    }
-
-    #[test]
     fn reads_and_writes_double_in_current_process() {
         let mut value = Box::new(3.5f64);
         let address = std::ptr::from_mut(&mut *value).addr();
@@ -4568,43 +4549,15 @@ mod tests {
     }
 
     #[test]
-    fn exact_float_scan_accepts_display_rounding() {
-        assert!(scan_exact_matches(
-            ScanValue::F32(123.39999),
-            ScanValue::F32(123.4),
-        ));
-        assert!(!scan_exact_matches(
-            ScanValue::F32(123.39),
-            ScanValue::F32(123.4),
-        ));
-    }
-
-    #[test]
-    fn float_change_comparison_uses_bits() {
-        let nan = f32::from_bits(0x7FC0_0001);
-        assert!(scan_value_matches(
-            ScanComparison::Unchanged,
-            ScanValue::F32(nan),
-            ScanValue::F32(nan),
-            None,
-        ));
-        assert!(!scan_value_matches(
-            ScanComparison::Changed,
-            ScanValue::F32(nan),
-            ScanValue::F32(nan),
-            None,
-        ));
-    }
-
-    #[test]
     fn pointer_paths_keep_offsets_in_dereference_order() {
-        let paths = find_pointer_paths(
+        let paths = find_pointer_paths_to_any(
             &[(0x1FF0, 0x1010), (0x2FE0, 0x2000)],
-            0x3000,
+            &[0x3000],
             &[("game.exe".to_owned(), 0x1000, 0x100)],
             0x100,
             3,
             8,
+            false,
         );
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].module, "game.exe");

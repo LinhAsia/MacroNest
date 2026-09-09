@@ -26,7 +26,7 @@ use crate::{
         GeometryPreset, GeometrySpec, GroqSettings, HotkeyBinding, HudPreset, MacroAction,
         MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MascotStyle,
         MasterMacroGroupState, MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
-        MasterWindowPresetState, MasterZoomPresetState, MousePathEventKind,
+        MasterWindowPresetState, MasterZoomPresetState,
         MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset, ProfileRecord,
         QuickKeyDisplayMode, QuickScreenDrawTool, QuickVideoRecordMode, RgbaColor, SoundPreset,
         TimerPreset, UiLanguage, UiThemeMode, VietnameseInputMode, VisionPreset, VisionSettings,
@@ -78,7 +78,6 @@ pub(crate) use windows::Win32::{
 pub(crate) struct AudioCardOutcome {
     changed: bool,
     choose_file: bool,
-    open_editor: bool,
     status: Option<String>,
 }
 
@@ -215,7 +214,6 @@ pub(crate) enum VisionCaptureTarget {
     QuickActionsCoordinates,
     QuickActionsColor,
     QuickActionsKeyDisplayPosition,
-    QuickActionsVideoRegion,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -707,8 +705,6 @@ pub struct CrosshairApp {
     last_synced_windows_key_locked: Option<bool>,
     last_synced_native_focus_highlight_enabled: Option<bool>,
     last_synced_vietnamese_input_enabled: Option<bool>,
-    screen_draw_color_picker_open: bool,
-    screen_draw_color_pick_pending_at: Option<Instant>,
     last_synced_active_macro_folder_scope: Option<crate::overlay::MacroFolderScope>,
     last_synced_interactive_pin_enabled: Option<bool>,
     last_synced_protractor_enabled: Option<bool>,
@@ -749,7 +745,6 @@ pub struct CrosshairApp {
 
     pub(crate) captured_freeze_frame: Option<crate::window_list::ScreenCaptureFrame>,
     pub(crate) captured_freeze_texture: Option<egui::TextureHandle>,
-    pub(crate) captured_freeze_pos: egui::Pos2,
     vision_capture_active: bool,
     vision_capture_target: Option<VisionCaptureTarget>,
     vision_capture_mode: Option<VisionCaptureMode>,
@@ -780,7 +775,6 @@ pub struct CrosshairApp {
     confirm_delete_folder_id: Option<u32>,
     confirm_release_folder_id: Option<u32>,
     confirm_delete_macro_group_id: Option<u32>,
-    pending_macro_infinite_loop_enable: Option<(u32, u32)>,
     enforce_square_window_frames: u8,
     last_window_refresh_at: Instant,
     last_audio_sense_devices_refresh_at: Instant,
@@ -935,8 +929,6 @@ pub struct CrosshairApp {
     audio_sense_test_pitch_settings: crate::model::PitchAudioSenseSettings,
     audio_sense_test_active: bool,
     active_pitch_preview_preset_id: Option<u32>,
-    /// Target for color picking a DrawGeometry macro step spec (group_id, preset_id, step_index, is_fill, is_hold_stop)
-    macro_step_geometry_color_pick_target: Option<(u32, u32, usize, bool, bool)>,
     /// Which DrawGeometry macro step is currently being previewed on overlay (group_id, preset_id, step_index, is_hold_stop)
     draw_geometry_step_preview_target: Option<(u32, u32, usize, bool)>,
     draw_geometry_step_preview_sent: Option<crate::model::GeometrySpec>,
@@ -953,7 +945,6 @@ pub struct CrosshairApp {
     mouse_input_normal_open: bool,
     mouse_input_arduino_open: bool,
     mouse_input_interception_open: bool,
-    window_layout_tab: usize,
     selected_layout_cell: Option<(u32, usize, usize)>,
     drag_start_layout_cell: Option<(u32, usize, usize)>,
     protractor_picking_active: bool,
@@ -1082,8 +1073,6 @@ impl CrosshairApp {
             last_synced_windows_key_locked: None,
             last_synced_native_focus_highlight_enabled: None,
             last_synced_vietnamese_input_enabled: None,
-            screen_draw_color_picker_open: false,
-            screen_draw_color_pick_pending_at: None,
             last_synced_active_macro_folder_scope: None,
             last_synced_interactive_pin_enabled: None,
             last_synced_protractor_enabled: None,
@@ -1124,7 +1113,6 @@ impl CrosshairApp {
 
             captured_freeze_frame: None,
             captured_freeze_texture: None,
-            captured_freeze_pos: egui::Pos2::ZERO,
             vision_capture_active: false,
             vision_capture_target: None,
             vision_capture_mode: None,
@@ -1160,7 +1148,6 @@ impl CrosshairApp {
             confirm_delete_folder_id: None,
             confirm_release_folder_id: None,
             confirm_delete_macro_group_id: None,
-            pending_macro_infinite_loop_enable: None,
             enforce_square_window_frames: 0,
             last_window_refresh_at: Instant::now(),
             last_audio_sense_devices_refresh_at: Instant::now(),
@@ -1308,7 +1295,6 @@ impl CrosshairApp {
             audio_sense_test_pitch_settings: crate::model::PitchAudioSenseSettings::default(),
             audio_sense_test_active: false,
             active_pitch_preview_preset_id: None,
-            macro_step_geometry_color_pick_target: None,
             draw_geometry_step_preview_target: None,
             draw_geometry_step_preview_sent: None,
             macro_step_inline_feedback: HashMap::new(),
@@ -1324,7 +1310,6 @@ impl CrosshairApp {
             mouse_input_normal_open: false,
             mouse_input_arduino_open: false,
             mouse_input_interception_open: false,
-            window_layout_tab: 0,
             selected_layout_cell: None,
             drag_start_layout_cell: None,
             panel_warmup_target: Some(initial_active_panel),
@@ -3473,11 +3458,6 @@ impl CrosshairApp {
         format!("{:.2}s", ms as f64 / 1000.0)
     }
 
-    fn preset_title_text(dark_mode: bool, name: &str, enabled: bool) -> RichText {
-        let text = RichText::new(name).strong();
-        text.color(Self::preset_body_text_color(dark_mode, enabled))
-    }
-
     fn contains_case_insensitive(haystack: &str, needle: &str) -> bool {
         if needle.is_empty() {
             return true;
@@ -3582,15 +3562,6 @@ impl CrosshairApp {
             UiLanguage::English => UiLanguage::Vietnamese,
             UiLanguage::Vietnamese => UiLanguage::English,
             UiLanguage::Icon => UiLanguage::English,
-        };
-        self.persist();
-    }
-
-    fn cycle_vietnamese_input_mode(&mut self) {
-        self.state.vietnamese_input_mode = match self.state.vietnamese_input_mode {
-            VietnameseInputMode::Off => VietnameseInputMode::Telex,
-            VietnameseInputMode::Telex => VietnameseInputMode::Vni,
-            VietnameseInputMode::Vni => VietnameseInputMode::Off,
         };
         self.persist();
     }
@@ -4054,17 +4025,6 @@ impl CrosshairApp {
         }
     }
 
-    fn macro_trigger_remove_last_binding(preset: &mut MacroPreset) -> bool {
-        if !preset.trigger_keys.trim().is_empty() {
-            return hotkey::pop_binding_list_entry(&mut preset.trigger_keys);
-        }
-        if preset.hotkey.is_some() {
-            preset.hotkey = None;
-            return true;
-        }
-        false
-    }
-
     fn macro_trigger_remove_binding(preset: &mut MacroPreset, binding: &HotkeyBinding) -> bool {
         if preset
             .hotkey
@@ -4238,15 +4198,6 @@ impl CrosshairApp {
         } else {
             label
         }
-    }
-
-    fn pop_key_list_entry(spec: &mut String) -> bool {
-        let mut keys = hotkey::split_key_list(spec);
-        let Some(_) = keys.pop() else {
-            return false;
-        };
-        *spec = keys.join(", ");
-        true
     }
 
     fn short_key_chip_label(key: &str) -> String {
@@ -9279,167 +9230,6 @@ impl CrosshairApp {
             total_seconds % 60
         )
     }
-
-    fn render_multi_window_targets(
-        ui: &mut egui::Ui,
-        language: UiLanguage,
-        id_source: impl std::hash::Hash + Copy,
-        label_when_none: &str,
-        primary: &mut Option<String>,
-        extras: &mut Vec<String>,
-        open_windows: &[WindowInfo],
-    ) -> bool {
-        let mut changed = false;
-        let extras_expanded_id =
-            ui.make_persistent_id((id_source, "extra-target-windows-expanded"));
-        let mut extras_expanded = ui
-            .ctx()
-            .data(|data| data.get_temp::<bool>(extras_expanded_id))
-            .unwrap_or(false);
-        ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().interact_size.y = 21.0;
-                let missing_primary = primary.as_ref().is_some_and(|current| {
-                    !open_windows
-                        .iter()
-                        .any(|window| &window.selector == current)
-                });
-                if missing_primary {
-                    *primary = None;
-                    changed = true;
-                }
-                let display_primary = if missing_primary {
-                    label_when_none.to_owned()
-                } else {
-                    primary
-                        .as_deref()
-                        .map(|current| Self::display_title_for_selector(current, open_windows))
-                        .unwrap_or_else(|| label_when_none.to_owned())
-                };
-                let truncated_primary = Self::truncate_window_title(&display_primary, 40);
-                ui.scope(|ui| {
-                    if missing_primary || primary.is_none() {
-                        let stroke = egui::Stroke::new(1.0, Color32::from_rgb(185, 82, 82));
-                        ui.style_mut().visuals.widgets.inactive.bg_stroke = stroke;
-                        ui.style_mut().visuals.widgets.hovered.bg_stroke = stroke;
-                    }
-                    egui::ComboBox::from_id_salt((id_source, "primary-target-window"))
-                        .width(320.0)
-                        .selected_text(truncated_primary)
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_label(primary.is_none(), label_when_none)
-                                .clicked()
-                            {
-                                *primary = None;
-                                changed = true;
-                            }
-                            for window in open_windows {
-                                let selector = &window.selector;
-                                let display_title = Self::simplify_window_title(&window.title);
-                                let truncated_title =
-                                    Self::truncate_window_title(&display_title, 50);
-                                if ui
-                                    .selectable_label(
-                                        primary.as_deref() == Some(selector),
-                                        truncated_title,
-                                    )
-                                    .on_hover_text(selector)
-                                    .clicked()
-                                {
-                                    *primary = Some(selector.clone());
-                                    changed = true;
-                                }
-                            }
-                        });
-                });
-
-                let add_btn = Button::new(Self::material_icon_text(0xe145, 12.0));
-                if ui
-                    .add_sized([24.0, 21.0], add_btn)
-                    .on_hover_text(Self::tr_lang(language, "+ Window", "+ Window"))
-                    .clicked()
-                {
-                    let next = open_windows
-                        .iter()
-                        .find(|window| {
-                            primary.as_deref() != Some(window.selector.as_str())
-                                && !extras.iter().any(|existing| existing == &window.selector)
-                        })
-                        .map(|window| window.selector.clone())
-                        .or_else(|| open_windows.first().map(|window| window.selector.clone()))
-                        .unwrap_or_default();
-                    if !next.is_empty() {
-                        extras.push(next);
-                        extras_expanded = true;
-                        changed = true;
-                    }
-                }
-                if !extras.is_empty() {
-                    let toggle_icon = if extras_expanded { 0xe5cf } else { 0xe5cc };
-                    if ui
-                        .add_sized(
-                            [24.0, 21.0],
-                            Button::new(Self::material_icon_text(toggle_icon, 14.0)),
-                        )
-                        .on_hover_text(Self::tr_lang(
-                            language,
-                            "Show or hide the extra target windows list.",
-                            "Show or hide the extra target windows list.",
-                        ))
-                        .clicked()
-                    {
-                        extras_expanded = !extras_expanded;
-                    }
-                }
-            });
-
-            if extras_expanded {
-                let mut remove_index = None;
-                for (index, extra) in extras.iter_mut().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().interact_size.y = 21.0;
-                        let display_extra = Self::display_title_for_selector(extra, open_windows);
-                        let truncated_extra = Self::truncate_window_title(&display_extra, 40);
-                        egui::ComboBox::from_id_salt((id_source, "extra-target-window", index))
-                            .width(320.0)
-                            .selected_text(truncated_extra)
-                            .show_ui(ui, |ui| {
-                                for window in open_windows {
-                                    let selector = &window.selector;
-                                    let display_title = Self::simplify_window_title(&window.title);
-                                    let truncated_title =
-                                        Self::truncate_window_title(&display_title, 50);
-                                    if ui
-                                        .selectable_label(extra == selector, truncated_title)
-                                        .on_hover_text(selector)
-                                        .clicked()
-                                    {
-                                        *extra = selector.clone();
-                                        changed = true;
-                                    }
-                                }
-                            });
-                        let remove_btn = Button::new(Self::material_icon_text(0xe14c, 12.0));
-                        if ui.add_sized([24.0, 21.0], remove_btn).clicked() {
-                            remove_index = Some(index);
-                        }
-                    });
-                }
-                if let Some(index) = remove_index {
-                    extras.remove(index);
-                    changed = true;
-                    if extras.is_empty() {
-                        extras_expanded = false;
-                    }
-                }
-            }
-        });
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(extras_expanded_id, extras_expanded));
-        changed
-    }
-
     fn selector_base_title(target: &str) -> &str {
         crate::window_list::selector_base_title(target)
     }
@@ -10120,12 +9910,7 @@ impl CrosshairApp {
             MacroAction::StopEspScan => "StopESPScan",
             MacroAction::ReadEspTarget => "ReadESPTarget",
             MacroAction::Esp3DAimLock => "Esp3DAimLock",
-            MacroAction::StartTimerPreset => "StartTimerPreset",
-            MacroAction::PauseTimerPreset => "PauseTimerPreset",
-            MacroAction::StopTimerPreset => "StopTimerPreset",
-            MacroAction::ReadTimerPreset => "ReadTimerPreset",
-            MacroAction::EnableStep => "EnableStep",
-            MacroAction::DisableStep => "DisableStep",
+
             MacroAction::FunnyMemeReply => "MemeReply",
             MacroAction::AiResponse => "AiResponse",
             MacroAction::JumpToStep => "JumpToStep",
@@ -10480,18 +10265,7 @@ impl CrosshairApp {
                 "macro_action_tooltip.stop_timer_preset",
                 "Stop a running timer preset.",
             ),
-            MacroAction::ReadTimerPreset => (
-                "macro_action_tooltip.read_timer_preset",
-                "Read the value of a timer preset into a variable.",
-            ),
-            MacroAction::EnableStep => (
-                "macro_action_tooltip.enable_step",
-                "Enable a macro step by key.",
-            ),
-            MacroAction::DisableStep => (
-                "macro_action_tooltip.disable_step",
-                "Disable a macro step by key.",
-            ),
+
             MacroAction::FunnyMemeReply => (
                 "macro_action_tooltip.funny_meme_reply",
                 "Turn one message into a meme search query, fetch the best image result, and copy it to the clipboard.",
@@ -10604,12 +10378,7 @@ impl CrosshairApp {
             MacroAction::StopEspScan => 0xe047,
             MacroAction::ReadEspTarget => 0xe8b6,
             MacroAction::Esp3DAimLock => 0xe876,
-            MacroAction::StartTimerPreset => 0xe425,
-            MacroAction::PauseTimerPreset => 0xe034,
-            MacroAction::StopTimerPreset => 0xe047,
-            MacroAction::ReadTimerPreset => 0xe8b6,
-            MacroAction::EnableStep => 0xe8f4,
-            MacroAction::DisableStep => 0xe8f5,
+
             MacroAction::FunnyMemeReply => 0xe420,
             MacroAction::AiResponse => 0xeb8e,
             MacroAction::JumpToStep => 0xe5c8,
@@ -10802,17 +10571,6 @@ impl CrosshairApp {
         }
     }
 
-    fn macro_action_pair_tag(action: MacroAction) -> Option<&'static str> {
-        match action {
-            MacroAction::KeyDown | MacroAction::KeyUp => Some("KEY"),
-            MacroAction::LockKeys | MacroAction::UnlockKeys => Some("KLOCK"),
-            MacroAction::LockMouse | MacroAction::UnlockMouse => Some("MLOCK"),
-            MacroAction::HideTaskbar | MacroAction::ShowTaskbar => Some("TASKBAR"),
-            MacroAction::StartEspScan | MacroAction::StopEspScan => Some("ESPSCAN"),
-            _ => None,
-        }
-    }
-
     fn macro_action_selected_label(action: MacroAction, language: UiLanguage) -> String {
         if matches!(
             action,
@@ -10979,34 +10737,6 @@ impl CrosshairApp {
             });
     }
 
-    fn shell_toggle_button(
-        ui: &mut egui::Ui,
-        selected: bool,
-        label: RichText,
-        tooltip: &str,
-    ) -> egui::Response {
-        let (fill, stroke, text_color) = if selected {
-            (
-                Color32::from_rgb(36, 90, 160),
-                Color32::from_rgb(102, 196, 255),
-                Color32::WHITE,
-            )
-        } else {
-            (
-                ui.visuals().widgets.inactive.bg_fill,
-                ui.visuals().widgets.inactive.bg_stroke.color,
-                ui.visuals().weak_text_color(),
-            )
-        };
-        ui.add(
-            Button::new(label.color(text_color))
-                .fill(fill)
-                .stroke(Stroke::new(1.0, stroke))
-                .min_size(vec2(56.0, 24.0)),
-        )
-        .on_hover_text(tooltip)
-    }
-
     fn folder_icon_text(open: bool, size: f32) -> RichText {
         if open {
             Self::material_icon_text(0xe2c8, size)
@@ -11156,138 +10886,11 @@ impl CrosshairApp {
             });
     }
 
-    fn set_macro_step_range_selection(
-        &mut self,
-        group_id: u32,
-        preset_id: u32,
-        start_index: usize,
-        end_index: usize,
-    ) {
-        self.clear_macro_step_selection_for_preset(group_id, preset_id);
-        let start = start_index.min(end_index);
-        let end = start_index.max(end_index);
-        for step_index in start..=end {
-            self.selected_macro_steps
-                .insert((group_id, preset_id, step_index));
-        }
-    }
-
     fn macro_action_uses_position(action: MacroAction) -> bool {
         matches!(
             action,
             MacroAction::MouseMoveAbsolute | MacroAction::MouseMoveRelative
         )
-    }
-
-    fn format_macro_steps_for_ai_context(steps: &[MacroStep]) -> String {
-        if steps.is_empty() {
-            return "None".to_owned();
-        }
-
-        steps
-            .iter()
-            .enumerate()
-            .map(|(index, step)| {
-                let json = serde_json::to_string(step).unwrap_or_else(|_| format!("{:?}", step));
-                format!("{}. {}", index + 1, json)
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    fn format_id_name_catalog(title: &str, items: &[(u32, String)]) -> String {
-        let mut output = String::new();
-        output.push_str(title);
-        output.push('\n');
-        if items.is_empty() {
-            output.push_str("- None\n");
-            return output;
-        }
-
-        for (id, name) in items {
-            output.push_str(&format!("- {id} | {name}\n"));
-        }
-        output
-    }
-
-    fn format_name_catalog(title: &str, items: &[String]) -> String {
-        let mut output = String::new();
-        output.push_str(title);
-        output.push('\n');
-        if items.is_empty() {
-            output.push_str("- None\n");
-            return output;
-        }
-
-        for name in items {
-            output.push_str(&format!("- {name}\n"));
-        }
-        output
-    }
-
-    fn format_custom_preset_catalog(items: &[CommandPreset]) -> String {
-        let mut output = String::new();
-        output.push_str("Available custom presets:\n");
-        if items.is_empty() {
-            output.push_str("- None\n");
-            return output;
-        }
-
-        for preset in items {
-            let target = preset
-                .target_window_title
-                .as_deref()
-                .unwrap_or("Any focused window");
-            let command = preset.command.trim();
-            let command_preview = if command.is_empty() {
-                "no command".to_owned()
-            } else if command.chars().count() > 80 {
-                let mut preview = command.chars().take(77).collect::<String>();
-                preview.push_str("...");
-                preview
-            } else {
-                command.to_owned()
-            };
-            output.push_str(&format!(
-                "- {} | {} | target: {} | command: {}\n",
-                preset.id, preset.name, target, command_preview
-            ));
-        }
-        output
-    }
-
-    fn mouse_path_event_label(event: MousePathEventKind) -> &'static str {
-        match event {
-            MousePathEventKind::Move => "Move",
-            MousePathEventKind::LeftDown => "LDown",
-            MousePathEventKind::LeftUp => "LUp",
-            MousePathEventKind::RightDown => "RDown",
-            MousePathEventKind::RightUp => "RUp",
-            MousePathEventKind::MiddleDown => "MDown",
-            MousePathEventKind::MiddleUp => "MUp",
-            MousePathEventKind::WheelUp => "Wheel+",
-            MousePathEventKind::WheelDown => "Wheel-",
-        }
-    }
-
-    fn build_macro_steps_from_recording(
-        &mut self,
-        _preset_name: &str,
-        events: &[crate::overlay::MacroRecordingEvent],
-    ) -> Vec<MacroStep> {
-        let mut built_steps = Vec::new();
-        for event in events {
-            let mut step = MacroStep::default();
-            step.action = event.action;
-            step.delay_ms = event.delay_ms;
-            step.x = event.x;
-            step.y = event.y;
-            if let Some(key) = &event.key {
-                step.key = key.clone();
-            }
-            built_steps.push(step);
-        }
-        built_steps
     }
 
     fn is_copy_feedback_active(until: Option<Instant>) -> bool {
@@ -11401,21 +11004,6 @@ impl CrosshairApp {
             WindowAnchor::BottomLeft => "Bottom Left",
             WindowAnchor::Bottom => "Bottom",
             WindowAnchor::BottomRight => "Bottom Right",
-        }
-    }
-
-    fn window_anchor_icon(anchor: WindowAnchor) -> &'static str {
-        match anchor {
-            WindowAnchor::Manual => "XY",
-            WindowAnchor::Center => "\u{25CE}",
-            WindowAnchor::TopLeft => "\u{2196}",
-            WindowAnchor::Top => "\u{2191}",
-            WindowAnchor::TopRight => "\u{2197}",
-            WindowAnchor::Left => "\u{2190}",
-            WindowAnchor::Right => "\u{2192}",
-            WindowAnchor::BottomLeft => "\u{2199}",
-            WindowAnchor::Bottom => "\u{2193}",
-            WindowAnchor::BottomRight => "\u{2198}",
         }
     }
 
@@ -11575,21 +11163,6 @@ impl CrosshairApp {
         });
 
         changed
-    }
-
-    fn window_anchor_summary(anchor: WindowAnchor) -> &'static str {
-        match anchor {
-            WindowAnchor::Manual => "Manual X/Y",
-            WindowAnchor::Center => "Auto: Center",
-            WindowAnchor::TopLeft => "Auto: Top Left",
-            WindowAnchor::Top => "Auto: Top Edge",
-            WindowAnchor::TopRight => "Auto: Top Right",
-            WindowAnchor::Left => "Auto: Left Edge",
-            WindowAnchor::Right => "Auto: Right Edge",
-            WindowAnchor::BottomLeft => "Auto: Bottom Left",
-            WindowAnchor::Bottom => "Auto: Bottom Edge",
-            WindowAnchor::BottomRight => "Auto: Bottom Right",
-        }
     }
 
     fn window_anchor_preview_position(preset: &WindowPreset) -> Option<(i32, i32)> {
@@ -11775,7 +11348,7 @@ impl CrosshairApp {
             rect.max.y = (rect.min.y + min_size.y).min(preview_rect.bottom());
         }
 
-        let rect_id = ui.make_persistent_id((id_source, "timer-rect"));
+        let _rect_id = ui.make_persistent_id((id_source, "timer-rect"));
         let drag_id = ui.make_persistent_id((id_source, "timer-selection-drag-handle"));
         let offset_id = ui.make_persistent_id((id_source, "timer-selection-drag-offset"));
         let anchor_id = ui.make_persistent_id((id_source, "timer-selection-drag-anchor"));
@@ -12216,7 +11789,7 @@ impl CrosshairApp {
 
     #[allow(deprecated)]
     fn show_instant_hover_tooltip(
-        ui: &egui::Ui,
+        _ui: &egui::Ui,
         response: &egui::Response,
         text: impl Into<String>,
     ) {
@@ -13469,7 +13042,6 @@ impl CrosshairApp {
 
         let clipboard_steps = self.macro_step_clipboard.clone();
         let pasted_count = clipboard_steps.len();
-        let mut final_insert_at = 0;
 
         let (group_index, preset_index) = match self.macro_preset_indices(group_id, preset_id) {
             Ok(indices) => indices,
@@ -13479,10 +13051,9 @@ impl CrosshairApp {
             }
         };
         let preset = &mut self.state.macro_groups[group_index].presets[preset_index];
-        let insert_at = (step_index + 1).min(preset.steps.len());
-        final_insert_at = insert_at;
+        let final_insert_at = (step_index + 1).min(preset.steps.len());
         for (offset, step) in clipboard_steps.into_iter().enumerate() {
-            preset.steps.insert(insert_at + offset, step);
+            preset.steps.insert(final_insert_at + offset, step);
         }
 
         self.status = format!("Pasted {} step(s).", pasted_count);
@@ -14703,9 +14274,6 @@ impl CrosshairApp {
         self.persist_macro_presets();
     }
 
-    fn persist_timer_presets(&mut self) {
-        self.persist_after_sync(Self::sync_timer_presets);
-    }
 
     #[allow(unreachable_code)]
     fn startup_splash_progress(&mut self, ctx: &egui::Context) -> Option<f32> {

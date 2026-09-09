@@ -746,6 +746,9 @@ pub fn stop_blocking() {
 
 pub fn process_hotkey(binding: &HotkeyBinding, is_down: bool, is_repeat: bool) -> bool {
     let config = CONFIG.lock();
+    if !config.enabled {
+        return false;
+    }
     let matches = config.hotkey.as_ref().is_some_and(|trigger| {
         if is_down {
             hotkey::binding_matches(trigger, binding)
@@ -1621,7 +1624,7 @@ fn capture_system_audio(
         Ok((audio_client, capture, event, BufWriter::new(file)))
     })();
 
-    let (mut audio_client, capture, event, mut output) = match initialized {
+    let (audio_client, capture, event, mut output) = match initialized {
         Ok(values) => {
             let _ = ready.send(Ok(()));
             values

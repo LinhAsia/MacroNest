@@ -395,20 +395,8 @@ pub fn load_duration_ms(path: &str) -> Result<u64> {
         .context("Could not determine the audio duration")
 }
 
-pub fn preload_preview_audio(path: &str) -> Result<()> {
-    let mut state = preview_state()?;
-    state
-        .as_mut()
-        .expect("preview state should be initialized")
-        .ensure_cached_audio(path)
-}
-
 pub fn play_clip_async(clip: AudioClipSettings) {
     let _ = try_play_clip_async(clip);
-}
-
-pub fn play_clip_sequence_async(clips: Vec<AudioClipSettings>) {
-    let _ = try_play_clip_sequence_async(clips);
 }
 
 pub fn try_play_clip_async(clip: AudioClipSettings) -> Result<()> {
@@ -446,41 +434,7 @@ pub fn try_play_clip_sequence_async(clips: Vec<AudioClipSettings>) -> Result<()>
     Ok(())
 }
 
-pub fn play_clip_blocking(clip: &AudioClipSettings) -> Result<()> {
-    play_clip_sequence_blocking(std::slice::from_ref(clip))
-}
 
-pub fn play_clip_sequence_blocking(clips: &[AudioClipSettings]) -> Result<()> {
-    let clips = clips
-        .iter()
-        .filter(|clip| clip.enabled && !clip.file_path.trim().is_empty())
-        .cloned()
-        .collect::<Vec<_>>();
-    if clips.is_empty() {
-        return Ok(());
-    }
-    for clip in &clips {
-        let path = clip.file_path.trim();
-        if !Path::new(path).exists() {
-            bail!("Audio file was not found");
-        }
-    }
-
-    let stream = OutputStreamBuilder::open_default_stream()
-        .context("Could not open the default audio output")?;
-    let sink = Sink::connect_new(stream.mixer());
-    for clip in &clips {
-        sink.set_volume(clip.volume.clamp(0.0, 2.0));
-        sink.append(clipped_source_from_ms(clip, clip.start_ms)?);
-    }
-    sink.sleep_until_end();
-    Ok(())
-}
-
-pub fn toggle_preview(clip: AudioClipSettings) -> Result<bool> {
-    let start_ms = clip.start_ms;
-    toggle_preview_from_ms(clip, start_ms)
-}
 
 pub fn start_preview_from_ms(clip: AudioClipSettings, start_position_ms: u64) -> Result<()> {
     let mut state = preview_state()?;
@@ -493,49 +447,6 @@ pub fn start_preview_from_ms(clip: AudioClipSettings, start_position_ms: u64) ->
     Ok(())
 }
 
-pub fn toggle_preview_from_ms(mut clip: AudioClipSettings, start_position_ms: u64) -> Result<bool> {
-    if !clip.enabled || clip.file_path.trim().is_empty() {
-        bail!("Choose an audio file first");
-    }
-    clip.enabled = true;
-    let start_position_ms =
-        start_position_ms.clamp(clip.start_ms, clip.end_ms.max(clip.start_ms + 1));
-
-    let mut state = preview_state()?;
-    state
-        .as_mut()
-        .expect("preview state should be initialized")
-        .cleanup();
-
-    if state
-        .as_ref()
-        .expect("preview state should be initialized")
-        .sink
-        .is_some()
-        && state
-            .as_ref()
-            .expect("preview state should be initialized")
-            .clip
-            == clip
-        && state
-            .as_ref()
-            .expect("preview state should be initialized")
-            .start_position_ms
-            == start_position_ms
-    {
-        state
-            .as_mut()
-            .expect("preview state should be initialized")
-            .stop();
-        return Ok(false);
-    }
-
-    state
-        .as_mut()
-        .expect("preview state should be initialized")
-        .play(clip, start_position_ms)?;
-    Ok(true)
-}
 
 pub fn stop_preview() {
     if let Ok(mut state) = preview_state() {
@@ -581,18 +492,6 @@ pub fn preview_position_ms(clip: &AudioClipSettings) -> Option<u64> {
         .position_ms(clip)
 }
 
-pub fn play_video_audio_preview(path: &str, start_ms: u64, end_ms: u64) -> Result<()> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        bail!("Choose a video file first");
-    }
-    let generation = VIDEO_PREVIEW_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
-    let decoded = decode_media_audio(trimmed)?;
-    if generation != VIDEO_PREVIEW_GENERATION.load(Ordering::Acquire) {
-        return Ok(());
-    }
-    install_video_audio_preview(trimmed, decoded, start_ms, end_ms)
-}
 
 pub fn play_video_audio_preview_async(path: String, start_ms: u64, end_ms: u64) {
     let generation = VIDEO_PREVIEW_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
@@ -1063,9 +962,6 @@ pub fn init_key_sound_player() {
     }
 }
 
-pub fn play_key_sound(style: u32) {
-    play_key_sound_vk(style, 0, 1.0);
-}
 
 pub fn play_key_sound_vk(style: u32, vk: u32, volume: f32) {
     let initialized = KEY_SOUND_CHANNEL.lock().is_some();

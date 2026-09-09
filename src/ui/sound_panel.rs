@@ -636,7 +636,7 @@ impl CrosshairApp {
         for index in 0..self.state.audio_settings.presets.len() {
             let sound_snapshot = self.state.audio_settings.presets[index].clone();
             let mut choose_file_for = None;
-            let mut open_editor_target = None;
+            let open_editor_target = None;
             let mut activate_preview_target = None;
             let preset_id = self.state.audio_settings.presets[index].id;
             let waveform_path = self.state.audio_settings.presets[index]
@@ -652,7 +652,7 @@ impl CrosshairApp {
                 .get(&preset_id)
                 .copied()
                 .flatten();
-            let mut show_editor = self.show_sound_preset_audio_editor.contains(&preset.id);
+            let show_editor = self.show_sound_preset_audio_editor.contains(&preset.id);
             if !preset.clip.enabled {
                 preset.clip.enabled = true;
                 changed = true;

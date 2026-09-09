@@ -5,7 +5,7 @@ use eframe::egui::{self, Color32, RichText, Sense, Slider, TextEdit, vec2};
 
 impl CrosshairApp {
     pub(crate) fn render_hud_panel(&mut self, ui: &mut egui::Ui) {
-        let language = self.state.ui_language;
+        let _language = self.state.ui_language;
 
         ui.add_space(2.0);
         ui.horizontal(|ui| {
@@ -678,7 +678,7 @@ impl CrosshairApp {
             rect.max.y = (rect.min.y + min_size.y).min(preview_rect.bottom());
         }
 
-        let rect_id = ui.make_persistent_id((id_source, "toolbox-rect"));
+        let _rect_id = ui.make_persistent_id((id_source, "toolbox-rect"));
         let drag_id = ui.make_persistent_id((id_source, "hud-selection-drag-handle"));
         let offset_id = ui.make_persistent_id((id_source, "hud-selection-drag-offset"));
         let anchor_id = ui.make_persistent_id((id_source, "hud-selection-drag-anchor"));

@@ -33,7 +33,7 @@ type FnNvencDestroy = unsafe extern "C" fn(encoder: *mut c_void);
 pub struct NvencHardwareEncoder {
     _lib: Library,
     encoder: *mut c_void,
-    registered_tex: *mut c_void,
+    _registered_tex: *mut c_void,
     fn_encode_frame: FnNvencEncodeFrame,
     fn_destroy: FnNvencDestroy,
 }
@@ -79,7 +79,7 @@ impl NvencHardwareEncoder {
             fn_destroy: *fn_destroy,
             _lib: lib,
             encoder,
-            registered_tex,
+            _registered_tex: registered_tex,
         })
     }
 

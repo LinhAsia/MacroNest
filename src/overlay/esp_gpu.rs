@@ -19,7 +19,7 @@ use windows::{
                 D2D1_DASH_STYLE_SOLID, D2D1_DEVICE_CONTEXT_OPTIONS_NONE, D2D1_DRAW_TEXT_OPTIONS_NONE,
                 D2D1_ELLIPSE, D2D1_INTERPOLATION_MODE_LINEAR, D2D1_LINE_JOIN_ROUND,
                 D2D1_STROKE_STYLE_PROPERTIES, D2D1CreateDevice, ID2D1Bitmap1, ID2D1DeviceContext,
-                ID2D1Factory, ID2D1GeometrySink, ID2D1Image, ID2D1PathGeometry, ID2D1SolidColorBrush,
+                ID2D1Factory, ID2D1GeometrySink, ID2D1Image, ID2D1SolidColorBrush,
                 ID2D1StrokeStyle,
             },
             Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
@@ -43,7 +43,7 @@ use windows::{
                 },
                 DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
                 DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice,
-                IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1, IDXGISwapChain3,
+                IDXGIFactory2, IDXGIOutput, IDXGISurface, IDXGISwapChain1,
             },
         },
         UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos},
@@ -53,7 +53,7 @@ use windows::{
 use windows_numerics::Vector2;
 
 pub(super) struct EspGpuRenderer {
-    hwnd: HWND,
+    _hwnd: HWND,
     origin: (i32, i32),
     size: (u32, u32),
     _d3d: ID3D11Device,
@@ -151,7 +151,7 @@ impl EspGpuRenderer {
             let round_stroke_style = d2d_factory.CreateStrokeStyle(&stroke_props, None)?;
 
             Ok(Self {
-                hwnd,
+                _hwnd: hwnd,
                 origin: (left, top),
                 size: (width as u32, height as u32),
                 _d3d: d3d,
@@ -432,7 +432,6 @@ impl EspGpuRenderer {
                     );
                 }
             }
-            _ => {}
         }
         Ok(())
     }

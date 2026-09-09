@@ -1,4 +1,5 @@
 #![windows_subsystem = "windows"]
+#![allow(deprecated)]
 
 mod ai;
 mod app_icon;
@@ -346,15 +347,6 @@ fn normalize_legacy_active_window_targets(state: &mut AppState) -> bool {
     changed
 }
 
-fn wait_for_startup_gate(startup_gate: &Arc<(Mutex<bool>, Condvar)>) {
-    let (gate_lock, gate_ready) = &**startup_gate;
-    let mut gate_open = gate_lock.lock().expect("startup gate poisoned");
-    while !*gate_open {
-        gate_open = gate_ready
-            .wait(gate_open)
-            .expect("startup gate wait poisoned");
-    }
-}
 
 fn apply_process_startup_tuning(paths: &AppPaths) {
     platform::set_high_priority();

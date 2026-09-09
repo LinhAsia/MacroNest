@@ -24,8 +24,7 @@ pub struct CommandPresetPatch {
     pub extra_target_window_titles: Option<Vec<String>>,
     #[serde(default)]
     pub match_duplicate_window_titles: Option<bool>,
-    #[serde(default)]
-    pub use_powershell: Option<bool>,
+
 }
 
 impl CommandPresetPatch {

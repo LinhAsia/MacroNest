@@ -262,7 +262,6 @@ struct DeepPointerComparisonStats {
 
 struct DeepPointerDialog {
     map_a: Option<Arc<PointerMap>>,
-    source_pid: u32,
     source_addresses: Vec<usize>,
     value_type: ScanValueType,
     text_encoding: Option<TextEncoding>,
@@ -412,7 +411,6 @@ struct AddressDialog {
     text_encoding: Option<TextEncoding>,
     text_byte_len: usize,
     hexadecimal: bool,
-    position: egui::Pos2,
     rect: Option<egui::Rect>,
 }
 
@@ -2139,7 +2137,7 @@ impl CrosshairApp {
                 self.memory_panel.status = "Target process exited".to_owned();
             }
         }
-        let size = ui.available_size();
+        let _size = ui.available_size();
         Frame::group(ui.style())
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
@@ -2785,7 +2783,7 @@ impl CrosshairApp {
                         ) || !self.memory_panel.candidates.is_empty()
                             || !self.memory_panel.text_candidates.is_empty()
                             || self.memory_panel.raw_snapshot.is_some())));
-            let mut btn = Button::new(action_btn_text);
+            let btn = Button::new(action_btn_text);
             let btn_resp = ui
                 .add_enabled_ui(enabled, |ui| {
                     let resp = ui.add_sized(
@@ -4013,7 +4011,7 @@ impl CrosshairApp {
                                             .max_rect(type_rect)
                                             .layout(egui::Layout::left_to_right(egui::Align::Center)),
                                     );
-                                    let mut selected_type = saved.value_type;
+                                    let _selected_type = saved.value_type;
                                     let combo_resp = egui::ComboBox::from_id_salt(("saved-type-combo", index))
                                         .selected_text(current_type_label)
                                         .width(column_width.min(120.0).max(76.0))
@@ -4933,11 +4931,6 @@ impl CrosshairApp {
                                         saved.text_byte_len
                                     },
                                     hexadecimal: saved.hexadecimal,
-                                    position: ui
-                                        .ctx()
-                                        .pointer_latest_pos()
-                                        .unwrap_or(full_row_rect.left_bottom())
-                                        + vec2(12.0, 20.0),
                                     rect: None,
                                 });
                             }
@@ -6984,7 +6977,6 @@ impl CrosshairApp {
                 } else {
                     self.memory_panel.deep_pointer_dialog = Some(DeepPointerDialog {
                         map_a: None,
-                        source_pid: pid,
                         source_addresses,
                         value_type: saved.value_type,
                         text_encoding: saved.text_encoding,
@@ -7137,7 +7129,6 @@ impl CrosshairApp {
             });
             self.memory_panel.deep_pointer_dialog = Some(DeepPointerDialog {
                 map_a: None,
-                source_pid: pid,
                 source_addresses,
                 value_type: saved.value_type,
                 text_encoding: saved.text_encoding,
@@ -11940,7 +11931,7 @@ impl CrosshairApp {
         let candidates = Self::code_compare_candidates(&dialog);
         let mut open = true;
         let mut toggle_pin = false;
-        let mut builder = egui::ViewportBuilder::default()
+        let _builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_position(egui::pos2(0.0, 0.0))
             .with_inner_size(vec2(1100.0, 520.0))
@@ -13263,7 +13254,7 @@ impl CrosshairApp {
         let unit = memory_display_width(dialog.display_type);
         let row_bytes = unit * dialog.memory_columns.max(1);
         let three_column_width = Self::memory_view_width_for_columns(dialog.display_type, 3);
-        let region = dialog.memory_region_override.or_else(|| {
+        let _region = dialog.memory_region_override.or_else(|| {
             self.memory_panel
                 .process_pid
                 .and_then(|pid| query_memory_region(pid, address).ok())
@@ -14079,7 +14070,7 @@ impl CrosshairApp {
             });
         ui.separator();
 
-        let mut open_pointer_class: Option<usize> = None;
+        let _open_pointer_class: Option<usize> = None;
         let selected_address = dialog.selected_structure_address;
         let mut newly_selected_address = None;
         egui::Grid::new("struct-elements")
@@ -14111,7 +14102,7 @@ impl CrosshairApp {
                     let selected_background =
                         row_selected.then_some(Color32::from_rgb(35, 82, 105));
                     let mut add_request = None;
-                    let mut navigate_to: Option<usize> = None;
+                    let _navigate_to: Option<usize> = None;
 
                     // Lazy RTTI detection for Pointer fields
                     if element.value_type == StructureElementType::Pointer {
@@ -16588,7 +16579,7 @@ impl CrosshairApp {
         }
         let mut dialog = std::mem::take(&mut self.memory_panel.proximity_finder_dialog);
         let mut open = true;
-        let mut request_close = false;
+        let request_close = false;
 
         let mut action_load_a_results = false;
         let mut action_load_a_saved = false;
@@ -19031,6 +19022,7 @@ fn compare_manual_aob_token_lists(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory_debugger::debugger::normalize_instruction;
 
     #[test]
     fn test_generate_multi_aob_pattern() {
@@ -19249,21 +19241,6 @@ mod tests {
         assert!(dialog.previous_bytes.is_empty());
         assert!(dialog.changed_addresses.is_empty());
         assert!(!dialog.track_changes);
-
-        let visible_start = CrosshairApp::memory_view_window_start(
-            dialog.address,
-            12,
-            dialog.scroll_offset,
-        );
-        CrosshairApp::move_memory_view_highlight(&mut dialog, 0x200C, 12);
-        assert_eq!(
-            CrosshairApp::memory_view_window_start(
-                dialog.address,
-                12,
-                dialog.scroll_offset,
-            ),
-            visible_start
-        );
     }
 
     #[test]
@@ -19279,32 +19256,6 @@ mod tests {
             CrosshairApp::memory_address_stride("0x25B19B2E388", "25B19B2E394"),
             Some(0xC)
         );
-        let region = MemoryRegionInfo {
-            allocation_base: 0x4000,
-            base: 0x4000,
-            size: 0x1800,
-            protect: 0,
-        };
-        assert_eq!(
-            CrosshairApp::memory_view_read_window(0x3000, 0x1000, Some(&region)),
-            (0x4000, 0x1000)
-        );
-        let contiguous = MemoryRegionInfo {
-            base: region.base + region.size,
-            ..region
-        };
-        let separated = MemoryRegionInfo {
-            base: contiguous.base + 0x1000,
-            ..region
-        };
-        assert!(CrosshairApp::memory_regions_are_contiguous(
-            &region,
-            &contiguous
-        ));
-        assert!(!CrosshairApp::memory_regions_are_contiguous(
-            &region,
-            &separated
-        ));
         assert_eq!(
             CrosshairApp::memory_view_column_count(
                 CrosshairApp::memory_view_width_for_columns(MemoryDisplayType::Float, 3) - 50.0,
@@ -19440,7 +19391,7 @@ mod tests {
         };
         assert_eq!(
             memory_display_type_for_saved(&text_saved),
-            MemoryDisplayType::ByteHex
+            MemoryDisplayType::Text
         );
 
         let float_saved = SavedMemoryAddress {

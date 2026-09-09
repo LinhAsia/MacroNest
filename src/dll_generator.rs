@@ -338,7 +338,7 @@ pub fn generate_frida_js_script(config: &DllProjectConfig) -> String {
                     .filter_map(|s| u8::from_str_radix(s, 16).ok())
                     .collect();
                 if !byte_vals.is_empty() {
-                    let hex_str = byte_vals
+                    let _hex_str = byte_vals
                         .iter()
                         .map(|b| format!("{:02x}", b))
                         .collect::<Vec<_>>()

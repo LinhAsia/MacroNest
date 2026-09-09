@@ -48,8 +48,6 @@ pub struct AppPaths {
     pub game_capture_dir: PathBuf,
     pub game_capture_zip: PathBuf,
     pub graphics_hook64_dll: PathBuf,
-    pub inject_helper64_exe: PathBuf,
-    pub get_graphics_offsets64_exe: PathBuf,
     pub nvenc_dll: PathBuf,
 }
 
@@ -115,8 +113,6 @@ impl AppPaths {
         let game_capture_dir = bin_dir.join("game_capture");
         let game_capture_zip = bin_dir.join("game_capture.zip");
         let graphics_hook64_dll = game_capture_dir.join("graphics-hook64.dll");
-        let inject_helper64_exe = game_capture_dir.join("inject-helper64.exe");
-        let get_graphics_offsets64_exe = game_capture_dir.join("get-graphics-offsets64.exe");
         let nvenc_dll = bin_dir.join("nvenc_d3d11.dll");
 
         fs::create_dir_all(&root)?;
@@ -150,8 +146,6 @@ impl AppPaths {
             game_capture_dir,
             game_capture_zip,
             graphics_hook64_dll,
-            inject_helper64_exe,
-            get_graphics_offsets64_exe,
             nvenc_dll,
         })
     }

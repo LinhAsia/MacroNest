@@ -106,7 +106,7 @@ impl CrosshairApp {
     pub(crate) fn render_mouse_panel(&mut self, ui: &mut egui::Ui) {
         self.poll_mouse_tool_jobs();
         ui.add_space(2.0);
-        let language = self.state.ui_language;
+        let _language = self.state.ui_language;
 
         // --- Declarations ---
 

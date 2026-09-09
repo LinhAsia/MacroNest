@@ -527,7 +527,7 @@ impl CrosshairApp {
             preset.name = format!("{} Copy", preset.name);
             preset.collapsed = true;
             self.state.window_presets.insert(index + 1, preset);
-            live_sync = true;
+            self.persist_window_presets();
         }
         if let Some(id) = remove_id {
             self.state.window_presets.retain(|preset| preset.id != id);

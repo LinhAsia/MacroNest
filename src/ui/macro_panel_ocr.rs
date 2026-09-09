@@ -148,8 +148,8 @@ impl CrosshairApp {
     pub(crate) fn render_custom_ocr_inline_controls(
         ui: &mut egui::Ui,
         language: UiLanguage,
-        vietnamese_input_enabled: bool,
-        vietnamese_input_mode: VietnameseInputMode,
+        _vietnamese_input_enabled: bool,
+        _vietnamese_input_mode: VietnameseInputMode,
         group_id: u32,
         preset_id: u32,
         step_index: usize,

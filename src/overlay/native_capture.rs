@@ -4,22 +4,19 @@ use windows::Win32::{
     Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
     Graphics::Gdi::{
         BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, BitBlt, CreateCompatibleBitmap,
-        CreateCompatibleDC, CreateDIBSection, CreateFontW, CreatePen, CreateSolidBrush,
+        CreateCompatibleDC, CreateFontW, CreatePen, CreateSolidBrush,
         DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_LEFT, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
         DrawTextW, Ellipse, EndPaint, FONT_CHARSET, FONT_CLIP_PRECISION, FONT_OUTPUT_PRECISION,
-        FONT_QUALITY, FW_BOLD, FW_NORMAL, FW_SEMIBOLD, FillRect, GetDC, HDC, HFONT, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT,
-        PS_DASH, PS_SOLID, Rectangle, ReleaseDC, SRCCOPY, SelectObject, SetBkMode, SetPixel, SetTextColor,
-        SetViewportOrgEx, StretchDIBits, TRANSPARENT, UpdateWindow,
+        FONT_QUALITY, FW_BOLD, FW_SEMIBOLD, HDC, HGDIOBJ, LineTo, MoveToEx, PAINTSTRUCT,
+        PS_DASH, PS_SOLID, SRCCOPY, SelectObject, SetBkMode, SetPixel, SetTextColor, StretchDIBits, TRANSPARENT,
     },
     UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE, VK_RETURN, VK_SHIFT},
     UI::WindowsAndMessaging::{
         CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
-        DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW, HCURSOR,
-        HWND_TOPMOST, IDC_ARROW, IDC_CROSS, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS, IDC_SIZENWSE,
-        IDC_SIZEWE, IMAGE_CURSOR, KillTimer, LR_SHARED, LoadCursorW, LoadImageW, MSG, PostMessageW,
-        PostQuitMessage, RegisterClassW, SW_HIDE, SW_SHOW, SW_SHOWNORMAL, SWP_NOACTIVATE,
-        SWP_SHOWWINDOW, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage,
-        WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINDOW_STYLE, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
+        DispatchMessageW, GWLP_USERDATA, GetCursorPos, GetMessageW, GetWindowLongPtrW,
+        HWND_TOPMOST, IDC_ARROW, KillTimer, LoadCursorW, MSG,
+        PostQuitMessage, RegisterClassW, SW_SHOW,
+        SWP_SHOWWINDOW, SetCursor, SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TranslateMessage, WINDOW_LONG_PTR_INDEX, WM_CREATE, WM_DESTROY, WM_ERASEBKGND,
         WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCCREATE, WM_PAINT,
         WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_EX_TOOLWINDOW,
         WS_EX_TOPMOST, WS_POPUP,
@@ -819,6 +816,7 @@ unsafe fn get_state<'a>(hwnd: HWND) -> Option<&'a mut CaptureState> {
     }
 }
 
+#[allow(non_snake_case)]
 unsafe fn InvalidateRect(hwnd: HWND, rect: Option<&RECT>, erase: bool) {
     let lp_rect = match rect {
         Some(r) => r as *const RECT,

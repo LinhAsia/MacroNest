@@ -181,16 +181,6 @@ pub fn compact_label_for_language_code(value: &str) -> &'static str {
     }
 }
 
-pub fn language_pack_for_code_public(value: &str) -> OcrLanguagePack {
-    #[cfg(windows)]
-    {
-        *language_pack_for_code(value)
-    }
-    #[cfg(not(windows))]
-    {
-        OCR_LANGUAGE_PACKS[0]
-    }
-}
 
 #[cfg(windows)]
 fn resolve_requested_language(value: &str) -> String {
@@ -232,17 +222,6 @@ fn ocr_assets_archive_path() -> Result<PathBuf> {
     Ok(ocr_models_dir()?.join("ocr-assets.zip"))
 }
 
-#[cfg(windows)]
-pub fn is_ocr_assets_archive_cached() -> bool {
-    ocr_assets_archive_path().ok().is_some_and(|path| {
-        path.exists() && path.metadata().map(|meta| meta.len() > 0).unwrap_or(false)
-    })
-}
-
-#[cfg(not(windows))]
-pub fn is_ocr_assets_archive_cached() -> bool {
-    false
-}
 
 pub fn expected_ocr_assets_archive_size() -> u64 {
     OCR_ASSETS_ARCHIVE_EXPECTED_SIZE_BYTES
@@ -418,28 +397,6 @@ pub fn is_language_pack_installed(_value: &str) -> bool {
     false
 }
 
-#[cfg(windows)]
-pub fn installed_language_pack_size(value: &str) -> u64 {
-    let pack = language_pack_for_code(value);
-    model_paths_for_pack(pack)
-        .map(|(det_path, rec_path, charset_path)| {
-            [det_path, rec_path, charset_path]
-                .iter()
-                .filter_map(|path| path.metadata().ok().map(|meta| meta.len()))
-                .sum()
-        })
-        .unwrap_or(0)
-}
-
-#[cfg(not(windows))]
-pub fn installed_language_pack_size(_value: &str) -> u64 {
-    0
-}
-
-pub fn expected_language_pack_size(value: &str) -> u64 {
-    let pack = language_pack_for_code(value);
-    pack.expected_size_bytes
-}
 
 #[cfg(windows)]
 fn missing_language_pack_files(pack: &OcrLanguagePack) -> Result<Vec<(PathBuf, &'static str)>> {
@@ -491,46 +448,6 @@ where
     bail!("OCR is only supported on Windows.");
 }
 
-#[cfg(windows)]
-pub fn install_language_pack<F>(_value: &str, progress: F) -> Result<()>
-where
-    F: FnMut(u64, u64),
-{
-    install_all_language_packs(progress)
-}
-
-#[cfg(not(windows))]
-pub fn install_language_pack<F>(_value: &str, progress: F) -> Result<()>
-where
-    F: FnMut(u64, u64),
-{
-    install_all_language_packs(progress)
-}
-
-#[cfg(windows)]
-pub fn delete_language_pack(value: &str) -> Result<()> {
-    let pack = language_pack_for_code(value);
-    OCR_ENGINE_CACHE
-        .lock()
-        .map_err(|_| anyhow!("OCR engine cache lock was poisoned"))?
-        .remove(pack.code);
-    let (det_path, rec_path, charset_path) = model_paths_for_pack(pack)?;
-    let shared_det_is_still_needed = OCR_LANGUAGE_PACKS
-        .iter()
-        .filter(|other| other.code != pack.code)
-        .any(|other| is_language_pack_installed(other.code));
-    let _ = fs::remove_file(&rec_path);
-    let _ = fs::remove_file(&charset_path);
-    if !shared_det_is_still_needed {
-        let _ = fs::remove_file(&det_path);
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-pub fn delete_language_pack(_value: &str) -> Result<()> {
-    Ok(())
-}
 
 #[cfg(windows)]
 pub fn delete_all_ocr_assets() -> Result<()> {

@@ -5,17 +5,14 @@ use crate::ui::{
     CrosshairApp, VisionCaptureMode, VisionCaptureTarget, VisionPreviewCache, VisionPreviewView,
 };
 use crate::window_list;
-use crossbeam_channel::Sender;
 use eframe::egui::{
-    self, Button, Color32, ColorImage, DragValue, RichText, Sense, Slider, TextBuffer, TextEdit,
-    TextureOptions, pos2, vec2,
+    self, Button, Color32, ColorImage, DragValue, RichText, Sense, Slider, TextEdit,
+    TextureOptions, vec2,
 };
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-#[cfg(windows)]
-use crate::ui::{GetAsyncKeyState, GetCursorPos, POINT};
 
 impl CrosshairApp {
     pub(crate) fn native_selected_region_target_handles_cleanup(
@@ -31,8 +28,8 @@ impl CrosshairApp {
 
     pub(crate) fn render_vision_panel(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let language = self.state.ui_language;
-        let capture_target_snapshot = self.capture_target.clone();
-        let selected_steps_snapshot = self.selected_macro_steps.clone();
+        let _capture_target_snapshot = self.capture_target.clone();
+        let _selected_steps_snapshot = self.selected_macro_steps.clone();
         let cancel_mouse_move_absolute_capture = false;
         let next_mouse_move_absolute_capture_target = None;
         ui.add_space(2.0);
@@ -122,7 +119,7 @@ impl CrosshairApp {
         let mut live_sync = false;
         let next_capture_target = None;
         let cancel_active_capture = false;
-        let pending_custom_preset_save: Option<()> = None;
+        let _pending_custom_preset_save: Option<()> = None;
 
         let categories = [
             (
@@ -1088,21 +1085,6 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn image_search_target_color_text(preset: &VisionPreset) -> String {
-        let colors = Self::image_search_target_colors(preset);
-        match colors.as_slice() {
-            [] => "None".to_owned(),
-            [color] => format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b),
-            [first, rest @ ..] => format!(
-                "#{:02X}{:02X}{:02X} +{}",
-                first.r,
-                first.g,
-                first.b,
-                rest.len()
-            ),
-        }
-    }
-
     pub(crate) fn image_search_target_colors(preset: &VisionPreset) -> Vec<RgbaColor> {
         if !preset.target_colors.is_empty() {
             return preset.target_colors.clone();
@@ -1229,7 +1211,6 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates
                 | VisionCaptureTarget::QuickActionsColor
                 | VisionCaptureTarget::QuickActionsKeyDisplayPosition
-                | VisionCaptureTarget::QuickActionsVideoRegion
                 | VisionCaptureTarget::PinPresetColor(_)
                 | VisionCaptureTarget::PinPresetRegion(_)
                 | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -1516,7 +1497,6 @@ impl CrosshairApp {
                         VisionCaptureTarget::QuickActionsCoordinates
                         | VisionCaptureTarget::QuickActionsColor
                         | VisionCaptureTarget::QuickActionsKeyDisplayPosition
-                        | VisionCaptureTarget::QuickActionsVideoRegion
                         | VisionCaptureTarget::PinPresetColor(_)
                         | VisionCaptureTarget::PinPresetRegion(_)
                         | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -1636,12 +1616,7 @@ impl CrosshairApp {
                             }
                         };
                     }
-                    VisionCaptureTarget::QuickActionsVideoRegion => {
-                        self.cancel_image_search_capture_with_status(
-                            ctx,
-                            "Video recording regions require an area selection.",
-                        );
-                    }
+
                     VisionCaptureTarget::PinPresetRegion(_)
                     | VisionCaptureTarget::PinPresetSourceCrop(_)
                     | VisionCaptureTarget::HudPresetRegion(_) => {
@@ -1654,138 +1629,6 @@ impl CrosshairApp {
             }
             VisionCaptureMode::RegionAdjust => {}
         }
-    }
-
-    pub(crate) fn spawn_image_search_point_capture_thread(
-        ui_tx: Sender<UiCommand>,
-        ctx: egui::Context,
-        preset_id: u32,
-        priority_anchor: bool,
-    ) {
-        std::thread::spawn(move || {
-            let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
-            while is_down(0x01) {
-                if is_down(0x1B) {
-                    let _ = ui_tx.send(UiCommand::VisionPointCaptureCancelled(
-                        "Image point capture cancelled.".to_owned(),
-                    ));
-                    ctx.request_repaint();
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(6));
-            }
-            loop {
-                if is_down(0x1B) {
-                    let _ = ui_tx.send(UiCommand::VisionPointCaptureCancelled(
-                        "Image point capture cancelled.".to_owned(),
-                    ));
-                    break;
-                }
-                if is_down(0x01) {
-                    let mut point = POINT::default();
-                    let got_point = unsafe { GetCursorPos(&mut point).is_ok() };
-                    if got_point {
-                        let color = if priority_anchor {
-                            None
-                        } else {
-                            window_list::capture_virtual_screen_region(point.x, point.y, 1, 1)
-                                .and_then(|frame| {
-                                    (frame.rgba.len() >= 4).then(|| RgbaColor {
-                                        r: frame.rgba[0],
-                                        g: frame.rgba[1],
-                                        b: frame.rgba[2],
-                                        a: 255,
-                                    })
-                                })
-                        };
-                        let _ = ui_tx.send(UiCommand::VisionPointCaptured {
-                            preset_id,
-                            priority_anchor,
-                            screen_x: point.x,
-                            screen_y: point.y,
-                            color,
-                        });
-                    } else {
-                        let _ = ui_tx.send(UiCommand::VisionPointCaptureCancelled(
-                            "Failed to read the selected screen point.".to_owned(),
-                        ));
-                    }
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(6));
-            }
-            ctx.request_repaint();
-        });
-    }
-
-    pub(crate) fn spawn_image_search_region_capture_thread(
-        ui_tx: Sender<UiCommand>,
-        ctx: egui::Context,
-        preset_id: u32,
-        template_mode: bool,
-    ) {
-        std::thread::spawn(move || {
-            let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
-            let mut origin: Option<(i32, i32)> = None;
-            while is_down(0x01) {
-                if is_down(0x1B) {
-                    let _ = ui_tx.send(UiCommand::VisionPointCaptureCancelled(
-                        "Image area capture cancelled.".to_owned(),
-                    ));
-                    ctx.request_repaint();
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(6));
-            }
-            loop {
-                if is_down(0x1B) {
-                    let _ = ui_tx.send(UiCommand::VisionPointCaptureCancelled(
-                        "Image area capture cancelled.".to_owned(),
-                    ));
-                    break;
-                }
-                let mut point = POINT::default();
-                let got_point = unsafe { GetCursorPos(&mut point).is_ok() };
-                if got_point {
-                    if is_down(0x01) {
-                        let start = origin.get_or_insert((point.x, point.y));
-                        let x = start.0.min(point.x);
-                        let y = start.1.min(point.y);
-                        let width = (start.0 - point.x).abs().max(1);
-                        let height = (start.1 - point.y).abs().max(1);
-                        let _ = ui_tx.send(UiCommand::VisionRegionPreview {
-                            screen_x: x,
-                            screen_y: y,
-                            width,
-                            height,
-                        });
-                        ctx.request_repaint();
-                    } else if let Some(start) = origin {
-                        let x = start.0.min(point.x);
-                        let y = start.1.min(point.y);
-                        let width = (start.0 - point.x).abs();
-                        let height = (start.1 - point.y).abs();
-                        if width >= 2 && height >= 2 {
-                            let _ = ui_tx.send(UiCommand::VisionRegionCaptured {
-                                preset_id,
-                                template_mode,
-                                screen_x: x,
-                                screen_y: y,
-                                width,
-                                height,
-                            });
-                        } else {
-                            let _ = ui_tx.send(UiCommand::VisionPointCaptureCancelled(
-                                "Image area capture cancelled.".to_owned(),
-                            ));
-                        }
-                        ctx.request_repaint();
-                        break;
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(16));
-            }
-        });
     }
 
     pub(crate) fn cancel_image_search_capture(&mut self, ctx: &egui::Context) {
@@ -1817,59 +1660,6 @@ impl CrosshairApp {
         if let Some(pos) = self.vision_restore_outer_pos.take() {
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(pos));
         }
-    }
-
-    pub(crate) fn capture_screen_region_from_rect(
-        &self,
-        ctx: &egui::Context,
-        rect: egui::Rect,
-        pixels_per_point: f32,
-    ) -> Option<window_list::ScreenCaptureFrame> {
-        let (capture_left, capture_top, capture_width, capture_height) =
-            self.screen_region_from_rect(ctx, rect, pixels_per_point)?;
-        window_list::capture_virtual_screen_region(
-            capture_left,
-            capture_top,
-            capture_width,
-            capture_height,
-        )
-    }
-
-    pub(crate) fn screen_point_from_pos(
-        &self,
-        ctx: &egui::Context,
-        pos: egui::Pos2,
-        pixels_per_point: f32,
-    ) -> Option<(i32, i32)> {
-        let (left, top, _width, _height) = window_list::virtual_screen_bounds();
-        let scale = pixels_per_point.max(0.5);
-        let viewport_origin = ctx
-            .input(|input| input.viewport().inner_rect.map(|viewport| viewport.min))
-            .unwrap_or_else(|| egui::pos2(left as f32 / scale, top as f32 / scale));
-        Some((
-            ((viewport_origin.x + pos.x) * scale).round() as i32,
-            ((viewport_origin.y + pos.y) * scale).round() as i32,
-        ))
-    }
-
-    pub(crate) fn screen_region_from_rect(
-        &self,
-        ctx: &egui::Context,
-        rect: egui::Rect,
-        pixels_per_point: f32,
-    ) -> Option<(i32, i32, i32, i32)> {
-        let (left, top, _width, _height) = window_list::virtual_screen_bounds();
-        let min = rect.min;
-        let max = rect.max;
-        let scale = pixels_per_point.max(0.5);
-        let viewport_origin = ctx
-            .input(|input| input.viewport().inner_rect.map(|viewport| viewport.min))
-            .unwrap_or_else(|| egui::pos2(left as f32 / scale, top as f32 / scale));
-        let capture_left = ((viewport_origin.x + min.x) * scale).round() as i32;
-        let capture_top = ((viewport_origin.y + min.y) * scale).round() as i32;
-        let capture_width = ((max.x - min.x).abs() * scale).round().max(1.0) as i32;
-        let capture_height = ((max.y - min.y).abs() * scale).round().max(1.0) as i32;
-        Some((capture_left, capture_top, capture_width, capture_height))
     }
 
     pub(crate) fn clear_image_search_capture_state(&mut self) {
@@ -1975,16 +1765,6 @@ impl CrosshairApp {
         self.status = status;
     }
 
-    fn finish_image_search_priority_anchor_result(
-        &mut self,
-        target: VisionCaptureTarget,
-        screen_x: i32,
-        screen_y: i32,
-    ) {
-        self.status = self.apply_image_search_priority_anchor(target, screen_x, screen_y);
-        self.persist();
-    }
-
     fn sample_image_search_color(&self, screen_x: i32, screen_y: i32) -> Option<RgbaColor> {
         if let Some(ref frame) = self.captured_freeze_frame {
             let rx = screen_x - frame.screen_x;
@@ -2086,7 +1866,6 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
             | VisionCaptureTarget::QuickActionsKeyDisplayPosition
-            | VisionCaptureTarget::QuickActionsVideoRegion
             | VisionCaptureTarget::PinPresetColor(_)
             | VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -2310,9 +2089,7 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsKeyDisplayPosition => {
                 "Key display position does not support color picking.".to_owned()
             }
-            VisionCaptureTarget::QuickActionsVideoRegion => {
-                "Video recording regions do not support color picking.".to_owned()
-            }
+
             VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)
             | VisionCaptureTarget::HudPresetRegion(_) => {
@@ -2361,7 +2138,6 @@ impl CrosshairApp {
             VisionCaptureTarget::QuickActionsCoordinates
             | VisionCaptureTarget::QuickActionsColor
             | VisionCaptureTarget::QuickActionsKeyDisplayPosition
-            | VisionCaptureTarget::QuickActionsVideoRegion
             | VisionCaptureTarget::PinPresetColor(_)
             | VisionCaptureTarget::PinPresetRegion(_)
             | VisionCaptureTarget::PinPresetSourceCrop(_)
@@ -2438,21 +2214,6 @@ impl CrosshairApp {
         };
 
         self.finish_image_search_color_pick_result(target, color);
-        ctx.request_repaint();
-    }
-
-    pub(crate) fn finish_image_search_color_priority_anchor_pick_from_screen(
-        &mut self,
-        ctx: &egui::Context,
-        screen_x: i32,
-        screen_y: i32,
-    ) {
-        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
-            return;
-        };
-
-        self.finish_image_search_capture_cleanup(ctx);
-        self.finish_image_search_priority_anchor_result(target, screen_x, screen_y);
         ctx.request_repaint();
     }
 
@@ -2552,63 +2313,6 @@ impl CrosshairApp {
         self.restore_image_search_capture_window(ctx);
         self.status =
             self.apply_image_search_region(ctx, target, screen_x, screen_y, width, height);
-        ctx.request_repaint();
-    }
-
-    pub(crate) fn finish_image_search_color_pick(&mut self, ctx: &egui::Context, pos: egui::Pos2) {
-        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
-            return;
-        };
-
-        self.clear_image_search_capture_state();
-        let screen_point = self.screen_point_from_pos(ctx, pos, ctx.pixels_per_point());
-        self.hide_image_search_capture_window(ctx, 70);
-        let capture = screen_point.and_then(|(screen_x, screen_y)| {
-            window_list::capture_virtual_screen_region(screen_x, screen_y, 1, 1)
-        });
-        self.restore_image_search_capture_window(ctx);
-
-        let Some(capture) = capture else {
-            self.status = "Failed to sample the selected screen color.".to_owned();
-            ctx.request_repaint();
-            return;
-        };
-        if capture.rgba.len() < 4 {
-            self.status = "Failed to read the selected screen color.".to_owned();
-            ctx.request_repaint();
-            return;
-        }
-
-        let color = RgbaColor {
-            r: capture.rgba[0],
-            g: capture.rgba[1],
-            b: capture.rgba[2],
-            a: 255,
-        };
-        self.finish_image_search_color_pick_result(target, color);
-        ctx.request_repaint();
-    }
-
-    pub(crate) fn finish_image_search_color_priority_anchor_pick(
-        &mut self,
-        ctx: &egui::Context,
-        pos: egui::Pos2,
-    ) {
-        let Some(target) = self.vision_capture_target_or_cancel(ctx) else {
-            return;
-        };
-
-        self.clear_image_search_capture_state();
-        let screen_point = self.screen_point_from_pos(ctx, pos, ctx.pixels_per_point());
-        self.restore_image_search_capture_window(ctx);
-
-        let Some((screen_x, screen_y)) = screen_point else {
-            self.status = "Failed to read the selected priority point.".to_owned();
-            ctx.request_repaint();
-            return;
-        };
-
-        self.finish_image_search_priority_anchor_result(target, screen_x, screen_y);
         ctx.request_repaint();
     }
 }

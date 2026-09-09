@@ -206,7 +206,7 @@ fn run_pitch_loop(
     stop_flag: Arc<AtomicBool>,
     config: PitchAudioSenseSettings,
 ) -> Result<()> {
-    let (mut audio_client, capture_client, event_handle, blockalign) =
+    let (audio_client, capture_client, event_handle, blockalign) =
         resolve_device(&config.monitor)?;
     let buffer_frame_count = audio_client.get_buffer_size()? as usize;
     let chunk_frames = 512usize;

@@ -70,9 +70,7 @@ mod windows_platform {
 
     static SINGLE_INSTANCE_HANDLE: OnceLock<std::sync::Mutex<Option<SendHandle>>> = OnceLock::new();
 
-    pub struct SingleInstanceGuard {
-        handle: HANDLE,
-    }
+    pub struct SingleInstanceGuard;
 
     impl Drop for SingleInstanceGuard {
         fn drop(&mut self) {
@@ -94,7 +92,7 @@ mod windows_platform {
 
     pub fn acquire_single_instance() -> Result<Option<SingleInstanceGuard>> {
         let name = widestring(MUTEX_NAME);
-        let err_before = unsafe { GetLastError().0 };
+        let _err_before = unsafe { GetLastError().0 };
         unsafe {
             windows::Win32::Foundation::SetLastError(windows::Win32::Foundation::WIN32_ERROR(0));
         }
@@ -115,7 +113,7 @@ mod windows_platform {
             *lock = Some(SendHandle(handle));
         }
 
-        Ok(Some(SingleInstanceGuard { handle }))
+        Ok(Some(SingleInstanceGuard))
     }
 
     pub fn disable_power_throttling() {

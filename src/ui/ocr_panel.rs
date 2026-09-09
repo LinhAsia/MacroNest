@@ -344,7 +344,7 @@ impl CrosshairApp {
                             });
                             ui.add_space(4.0);
 
-                            let mut text_val_str = if res.text.trim().is_empty() {
+                            let text_val_str = if res.text.trim().is_empty() {
                                 Self::tr_lang(
                                     language,
                                     "[No text found in region]",

@@ -27,7 +27,6 @@ pub(super) struct EspEntityRootCapture {
     rx: std::sync::mpsc::Receiver<WatchEvent>,
     active: Option<AccessWatch>,
     hud_preset_id: Option<u32>,
-    started_at: std::time::Instant,
     last_hit_at: std::time::Instant,
     timeout_at: Option<std::time::Instant>,
 }
@@ -381,7 +380,6 @@ impl CrosshairApp {
                     rx,
                     active: Some(active),
                     hud_preset_id,
-                    started_at: now,
                     last_hit_at: now,
                     timeout_at,
                 });
@@ -2013,7 +2011,7 @@ fn find_nearest_entity_index(
             continue;
         };
 
-        let mut read_comp = |addr: usize| -> Option<f32> {
+        let read_comp = |addr: usize| -> Option<f32> {
             let first = read_esp_f32_from_address(pid, addr, preset.value_type)?;
             if !preset.entity_aabb_center {
                 return Some(first);
@@ -2098,7 +2096,7 @@ fn merge_entity_addresses_by_3d_proximity(
             continue;
         };
 
-        let mut read_comp = |addr: usize| -> Option<f32> {
+        let read_comp = |addr: usize| -> Option<f32> {
             let first = read_esp_f32_from_address(pid, addr, preset.value_type)?;
             if !preset.entity_aabb_center {
                 return Some(first);

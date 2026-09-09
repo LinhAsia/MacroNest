@@ -9,7 +9,7 @@ use std::os::windows::process::CommandExt;
 use windows::{
     core::PCWSTR,
     Win32::{
-        Foundation::{CloseHandle, HANDLE, HMODULE, HWND, RECT},
+        Foundation::{CloseHandle, HANDLE, HMODULE, HWND},
         Graphics::{
             Direct3D::D3D_DRIVER_TYPE_HARDWARE,
             Direct3D11::{
@@ -132,6 +132,7 @@ pub struct GraphicsOffsets {
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureType {
+    #[allow(dead_code)]
     Memory = 0,
     Texture = 1,
 }
@@ -170,8 +171,8 @@ pub struct ShtexData {
 
 #[cfg(windows)]
 pub struct GameCaptureSession {
-    pub hwnd: HWND,
-    pub pid: u32,
+    pub _hwnd: HWND,
+    pub _pid: u32,
     d3d_device: ID3D11Device,
     d3d_context: ID3D11DeviceContext,
     shared_texture: Option<ID3D11Texture2D>,
@@ -489,24 +490,21 @@ impl GameCaptureSession {
                 ])
                 .status();
 
-            let mut inject_ok = match &inject_status {
+            let inject_ok = match &inject_status {
                 Ok(s) => s.success(),
                 Err(_) => false,
             };
 
             if !inject_ok {
                 // Try safe injection with thread_id (SetWindowsHookEx)
-                if let Ok(safe_status) = Command::new(&inject_helper)
+                let _ = Command::new(&inject_helper)
                     .creation_flags(0x0800_0000)
                     .args([
                         hook_dll.to_str().unwrap_or_default(),
                         "1",
                         &thread_id.to_string(),
                     ])
-                    .status()
-                {
-                    inject_ok = safe_status.success();
-                }
+                    .status();
             }
 
             // Signal both hook_init (starts capture loop) and hook_restart (authorizes capture_should_init)
@@ -615,8 +613,8 @@ impl GameCaptureSession {
             }
 
             Ok(Self {
-                hwnd,
-                pid,
+                _hwnd: hwnd,
+                _pid: pid,
                 d3d_device,
                 d3d_context,
                 shared_texture: Some(shared_texture),

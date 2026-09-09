@@ -1257,7 +1257,7 @@ fn get_object_property_text_value(token: &str) -> Option<String> {
             return Some(String::new());
         }
 
-        return unsafe { window_title(hwnd) }.or_else(|| Some(String::new()));
+        return window_title(hwnd).or_else(|| Some(String::new()));
     }
 
     if obj_name == "clipboard" && prop_name == "text" {
@@ -1380,6 +1380,7 @@ mod tests {
 
     #[test]
     fn substr_and_len_support_text_variables() {
+        let _guard = super::super::tests::TEST_MUTEX.lock().unwrap();
         {
             let mut runtime_vars = RUNTIME_VARIABLES.lock();
             runtime_vars.clear();
@@ -1424,6 +1425,7 @@ mod tests {
 
     #[test]
     fn char_at_whitespace_comparison_and_dynamic_variable_names_work() {
+        let _guard = super::super::tests::TEST_MUTEX.lock().unwrap();
         RUNTIME_VARIABLES.lock().clear();
         TEXT_VARIABLES.lock().clear();
 
@@ -1480,6 +1482,7 @@ mod tests {
 
     #[test]
     fn clamp_between_and_text_helpers_work() {
+        let _guard = super::super::tests::TEST_MUTEX.lock().unwrap();
         {
             let mut runtime_vars = RUNTIME_VARIABLES.lock();
             runtime_vars.clear();

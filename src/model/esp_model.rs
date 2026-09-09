@@ -365,6 +365,7 @@ pub(crate) fn shift_raw_entity_root(text: &str, stride: u32, slots: i32) -> Opti
     Some(format!("0x{address:X}"))
 }
 
+#[cfg(test)]
 pub(crate) fn entity_root_from_instruction_hits(
     hits: &[usize],
     required: u32,
@@ -421,6 +422,7 @@ pub(crate) fn entity_instruction_hit_progress(
     (candidate, best.min(required))
 }
 
+#[cfg(test)]
 pub(crate) fn entity_hits_in_capture_order(
     hits: &[usize],
     required: u32,
@@ -843,7 +845,6 @@ pub(crate) fn esp_orientation_from_direction_pair(
 pub struct EspPermutationConfig {
     pub index: usize,
     pub short_desc: String,
-    pub label: String,
     pub swap_direction_pair: bool,
     pub invert_direction_a: bool,
     pub invert_direction_b: bool,
@@ -905,12 +906,10 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
                                     let elev_str = if inv_elev { "InvElev" } else { "NormElev" };
 
                                     let short_desc = format!("{swap_str} | {inv_str} | {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {p_tag}");
-                                    let label = format!("#{idx}: {swap_str} {inv_str} {rev_y_str} {yaw_str} {rev_p_str} {elev_str} {p_tag}");
 
                                     configs.push(EspPermutationConfig {
                                         index: idx,
                                         short_desc,
-                                        label,
                                         swap_direction_pair: swap,
                                         invert_direction_a: inv_a,
                                         invert_direction_b: inv_b,
@@ -1150,6 +1149,7 @@ pub(crate) fn project_esp(
 }
 
 /// Projects a world position into normalized screen coordinates (-1..=1).
+#[cfg(test)]
 pub(crate) fn project_esp_normalized(
     preset: &EspPreset,
     target: [f32; 3],
@@ -1299,7 +1299,7 @@ mod tests {
 
     #[test]
     fn horizontal_camera_strafe_does_not_move_target_vertically() {
-        let mut preset = EspPreset::default();
+        let preset = EspPreset::default();
         let stationary = project_esp_normalized(
             &preset,
             [10.0, 0.0, 2.0],

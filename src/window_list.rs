@@ -260,7 +260,7 @@ mod windows_impl {
             return None;
         }
         let dc = CreateCompatibleDC(Some(screen));
-        let mut bitmap_info = BITMAPINFO {
+        let bitmap_info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
                 biWidth: 16,
@@ -672,7 +672,7 @@ mod windows_impl {
         if !unsafe { IsWindowVisible(hwnd).as_bool() } {
             return None;
         }
-        let title = unsafe { window_title(hwnd) }?;
+        let title = window_title(hwnd)?;
         let selector = window_selector(hwnd, &title);
         Some((title, selector))
     }
@@ -1142,7 +1142,7 @@ mod windows_impl {
 
     pub(crate) struct WgcSession {
         pub(crate) hwnd: HWND,
-        dxgi_device: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice,
+        _dxgi_device: windows::Graphics::DirectX::Direct3D11::IDirect3DDevice,
         d3d_device: ID3D11Device,
         frame_pool: Direct3D11CaptureFramePool,
         session: GraphicsCaptureSession,
@@ -1201,7 +1201,7 @@ mod windows_impl {
 
         Ok(WgcSession {
             hwnd,
-            dxgi_device: dxgi_device_winrt,
+            _dxgi_device: dxgi_device_winrt,
             d3d_device,
             frame_pool,
             session,
