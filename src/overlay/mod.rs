@@ -1,20 +1,10 @@
 #![allow(unsafe_op_in_unsafe_fn)]
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct MacroRecordingEvent {
-    pub key: Option<String>,
-    pub action: crate::model::MacroAction,
-    pub delay_ms: u64,
-    pub x: i32,
-    pub y: i32,
-}
 
 #[derive(Debug, Clone)]
 pub struct MacroRecordingSession {
     pub group_id: u32,
     pub preset_id: u32,
     pub last_event_at: std::time::Instant,
-    pub events: Vec<MacroRecordingEvent>,
     pub pressed_key_vks: std::collections::HashSet<u32>,
     pub last_mouse_pos: Option<(i32, i32)>,
 }
@@ -44,7 +34,7 @@ mod windows_overlay {
     pub use native_capture::*;
     pub(crate) use vision::*;
 
-    use super::{MacroRecordingEvent, MacroRecordingSession};
+    use super::MacroRecordingSession;
     use crate::ui::{MouseMoveAbsoluteCaptureTarget, VisionCaptureMode, VisionCaptureTarget};
     use anyhow::{Context, Result, bail};
     use arboard::Clipboard;
@@ -1902,8 +1892,6 @@ mod windows_overlay {
             brush_size: f32,
             smoothing: bool,
             smoothing_amount: f32,
-            #[allow(dead_code)]
-            fill: bool,
             freeze: bool,
             tool: crate::model::QuickScreenDrawTool,
             text_border: bool,
@@ -2390,7 +2378,7 @@ mod windows_overlay {
         UpdateAvailable(String, String, String), // version, body, download_url
 
         MacroRecordingStarted(u32, String),
-        MacroRecordingFinished(u32, u32, Vec<MacroRecordingEvent>, String),
+        MacroRecordingFinished(u32, u32, String),
         MacroRealtimeStepAdded(u32, u32, crate::model::MacroStep),
         UpdateDownloadFinished(String), // new_exe_path
 
@@ -5060,13 +5048,6 @@ mod windows_overlay {
                                     .as_millis()
                                     .min(u64::MAX as u128) as u64;
                                 session.last_event_at = now;
-                                session.events.push(MacroRecordingEvent {
-                                    key: Some(k_name.clone()),
-                                    action,
-                                    delay_ms,
-                                    x: 0,
-                                    y: 0,
-                                });
                                 if let Some(tx) = &HOOK_STATE.lock().ui_tx {
                                     let mut step = crate::model::MacroStep::default();
                                     step.action = action;
@@ -5996,13 +5977,6 @@ mod windows_overlay {
                     .as_millis()
                     .min(u64::MAX as u128) as u64;
                 session.last_event_at = now;
-                session.events.push(MacroRecordingEvent {
-                    key: Some(key_name.clone()),
-                    action,
-                    delay_ms,
-                    x: 0,
-                    y: 0,
-                });
                 if let Some(tx) = &HOOK_STATE.lock().ui_tx {
                     let mut step = crate::model::MacroStep::default();
                     step.action = action;
@@ -6022,13 +5996,6 @@ mod windows_overlay {
                             .as_millis()
                             .min(u64::MAX as u128) as u64;
                         session.last_event_at = now;
-                        session.events.push(MacroRecordingEvent {
-                            key: Some(key_name.clone()),
-                            action: crate::model::MacroAction::KeyUp,
-                            delay_ms,
-                            x: 0,
-                            y: 0,
-                        });
                         if let Some(tx) = &HOOK_STATE.lock().ui_tx {
                             let mut step = crate::model::MacroStep::default();
                             step.action = crate::model::MacroAction::KeyUp;
@@ -6140,13 +6107,6 @@ mod windows_overlay {
         let ui_tx = HOOK_STATE.lock().ui_tx.clone();
 
         if pos_changed {
-            session.events.push(MacroRecordingEvent {
-                key: None,
-                action: crate::model::MacroAction::MouseMoveAbsolute,
-                delay_ms,
-                x: info.pt.x,
-                y: info.pt.y,
-            });
             if let Some(tx) = &ui_tx {
                 let mut step = crate::model::MacroStep::default();
                 step.action = crate::model::MacroAction::MouseMoveAbsolute;
@@ -6162,13 +6122,6 @@ mod windows_overlay {
         }
 
         let click_delay = if pos_changed { 10 } else { delay_ms };
-        session.events.push(MacroRecordingEvent {
-            key: None,
-            action,
-            delay_ms: click_delay,
-            x: info.pt.x,
-            y: info.pt.y,
-        });
         if let Some(tx) = &ui_tx {
             let mut step = crate::model::MacroStep::default();
             step.action = action;
@@ -6189,24 +6142,22 @@ mod windows_overlay {
             if guard.is_some() {
                 let session = guard.take().unwrap();
                 if session.preset_id == preset_id {
-                    Some((session.group_id, session.preset_id, session.events, true))
+                    Some((session.group_id, session.preset_id, true))
                 } else {
                     *guard = Some(MacroRecordingSession {
                         group_id,
                         preset_id,
                         last_event_at: std::time::Instant::now(),
-                        events: Vec::new(),
                         pressed_key_vks: std::collections::HashSet::new(),
                         last_mouse_pos: None,
                     });
-                    Some((session.group_id, session.preset_id, session.events, false))
+                    Some((session.group_id, session.preset_id, false))
                 }
             } else {
                 *guard = Some(MacroRecordingSession {
                     group_id,
                     preset_id,
                     last_event_at: std::time::Instant::now(),
-                    events: Vec::new(),
                     pressed_key_vks: std::collections::HashSet::new(),
                     last_mouse_pos: None,
                 });
@@ -6214,12 +6165,11 @@ mod windows_overlay {
             }
         };
         let ui_tx = HOOK_STATE.lock().ui_tx.clone();
-        if let Some((finished_group_id, finished_preset_id, events, is_same)) = finished {
+        if let Some((finished_group_id, finished_preset_id, is_same)) = finished {
             if let Some(tx) = &ui_tx {
                 let _ = tx.send(UiCommand::MacroRecordingFinished(
                     finished_group_id,
                     finished_preset_id,
-                    events,
                     format!("Saved macro record."),
                 ));
             }
@@ -10267,7 +10217,6 @@ mod windows_overlay {
                     brush_size,
                     smoothing,
                     smoothing_amount,
-                    fill: _,
                     freeze,
                     tool,
                     text_border,
@@ -38031,7 +37980,6 @@ mod fallback {
             brush_size: f32,
             smoothing: bool,
             smoothing_amount: f32,
-            fill: bool,
             freeze: bool,
             tool: crate::model::QuickScreenDrawTool,
             text_border: bool,
@@ -38062,7 +38010,6 @@ mod fallback {
         VisionFinished(String),
         EspCalibrationUpdated {
             preset_id: u32,
-            sample_count: usize,
             result: Option<crate::model::EspCalibrationResult>,
             status: String,
         },
@@ -38107,11 +38054,6 @@ mod fallback {
             freeze: bool,
             tool: crate::model::QuickScreenDrawTool,
             text_border: bool,
-        },
-        MascotDragged {
-            style: MascotStyle,
-            x: i32,
-            y: i32,
         },
     }
 

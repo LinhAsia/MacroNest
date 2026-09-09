@@ -14,10 +14,6 @@ const BUNDLED_ARDUINO_SERIAL_FIRMWARE: &[u8] = include_bytes!("../assets/firmwar
 #[cfg(windows)]
 const BUNDLED_NVENC_DLL: &[u8] = include_bytes!("../assets/bin/nvenc_d3d11.dll");
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StateLoadStatus {
-    Loaded,
-}
 
 #[derive(Debug, Clone)]
 pub struct AppPaths {
@@ -303,7 +299,7 @@ impl AppPaths {
         Ok(None)
     }
 
-    pub fn load_state(&self) -> Result<(AppState, StateLoadStatus)> {
+    pub fn load_state(&self) -> Result<AppState> {
         // Fallback: Copy interception.dll from local assets folder if not present in bin directory
         if !self.interception_dll.exists() {
             let local_asset = std::env::current_dir()
@@ -315,18 +311,18 @@ impl AppPaths {
             }
         }
 
-        let (mut state, status) = if !self.state_file.exists() {
+        let mut state = if !self.state_file.exists() {
             if let Some(restored) = self.restore_state_from_backup()? {
-                (restored, StateLoadStatus::Loaded)
+                restored
             } else {
-                (AppState::default(), StateLoadStatus::Loaded)
+                AppState::default()
             }
         } else {
             match Self::read_state_file(&self.state_file) {
-                Ok(state) => (state, StateLoadStatus::Loaded),
+                Ok(state) => state,
                 Err(primary_error) => {
                     if let Some(restored) = self.restore_state_from_backup()? {
-                        (restored, StateLoadStatus::Loaded)
+                        restored
                     } else {
                         anyhow::bail!(
                             "state.json could not be loaded: {primary_error}. No valid backup could be restored."
@@ -717,7 +713,7 @@ impl AppPaths {
             item.collapsed = true;
         }
 
-        Ok((state, status))
+        Ok(state)
     }
 
     pub fn save_state(&self, state: &AppState) -> Result<()> {

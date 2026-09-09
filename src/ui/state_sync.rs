@@ -379,7 +379,6 @@ impl CrosshairApp {
                 brush_size: config.3,
                 smoothing: config.4,
                 smoothing_amount: config.5,
-                fill: config.6,
                 freeze: config.7,
                 tool: config.8,
                 text_border: config.9,

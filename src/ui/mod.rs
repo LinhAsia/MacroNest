@@ -14863,7 +14863,7 @@ impl eframe::App for CrosshairApp {
                     }
                     ctx.request_repaint();
                 }
-                UiCommand::MacroRecordingFinished(group_id, preset_id, _events, status) => {
+                UiCommand::MacroRecordingFinished(group_id, preset_id, status) => {
                     if let Ok((group_index, preset_index)) =
                         self.macro_preset_indices(group_id, preset_id)
                     {

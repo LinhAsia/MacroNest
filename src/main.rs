@@ -96,7 +96,7 @@ fn load_startup_state(paths: &AppPaths) -> Result<(AppState, bool, bool)> {
     let startup_state_needs_cjk_fallback = std::fs::read_to_string(&paths.state_file)
         .map(|json| ui::text_has_cjk(&json))
         .unwrap_or(false);
-    let (mut state, _) = paths.load_state()?;
+    let mut state = paths.load_state()?;
     let mut state_changed = false;
     for preset in &mut state.vision_presets {
         if preset.is_pixel_counter && !preset.use_color_matching {

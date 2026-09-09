@@ -2559,7 +2559,7 @@ impl CrosshairApp {
         let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::UpdatePaths(self.paths.clone()));
 
         let (mut loaded_state, state_dirty) = match self.paths.load_state() {
-            Ok((s, _)) => (s, false),
+            Ok(s) => (s, false),
             Err(_) => (AppState::default(), true),
         };
         if let Ok(profiles) = self.paths.load_profiles() {
