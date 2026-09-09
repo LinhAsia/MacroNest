@@ -58,11 +58,13 @@ impl CrosshairApp {
             .find(|candidate| candidate.selector == selector)
             .map(|candidate| Self::simplify_window_title(&candidate.title))
             .unwrap_or_else(|| Self::simplify_window_title(selector));
-        let duplicate_count = open_windows
-            .iter()
-            .filter(|candidate| Self::simplify_window_title(&candidate.title) == simplified)
-            .count();
-        if duplicate_count > 1 {
+        if open_windows.len() > 1
+            && open_windows
+                .iter()
+                .filter(|candidate| Self::simplify_window_title(&candidate.title) == simplified)
+                .nth(1)
+                .is_some()
+        {
             Self::selector_base_title(selector).to_owned()
         } else {
             simplified
@@ -92,6 +94,35 @@ mod tests {
         assert_eq!(
             CrosshairApp::truncate_window_title("Trình quản lý tác vụ", 5),
             "Trình..."
+        );
+    }
+
+    #[test]
+    fn quick_action_window_display_handles_unique_and_duplicates() {
+        use crate::window_list::WindowInfo;
+
+        let w1 = WindowInfo {
+            selector: "calc.exe::Calculator".to_string(),
+            title: "Calculator".to_string(),
+            process_id: 100,
+            process_path: "calc.exe".to_string(),
+        };
+        // Single window: returns simplified
+        assert_eq!(
+            CrosshairApp::quick_action_window_display(&w1.selector, &[w1.clone()]),
+            "Calculator"
+        );
+
+        let w2 = WindowInfo {
+            selector: "calc2.exe::Calculator".to_string(),
+            title: "Calculator".to_string(),
+            process_id: 200,
+            process_path: "calc2.exe".to_string(),
+        };
+        // Multiple windows with same simplified title: returns selector base title
+        assert_eq!(
+            CrosshairApp::quick_action_window_display(&w1.selector, &[w1.clone(), w2]),
+            "calc.exe::Calculator"
         );
     }
 }

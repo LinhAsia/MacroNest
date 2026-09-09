@@ -572,11 +572,6 @@ impl AppPaths {
         if state.next_macro_preset_id < next_macro_preset_id {
             state.next_macro_preset_id = next_macro_preset_id;
         }
-        for group in &mut state.macro_groups {
-            for preset in &mut group.presets {
-                preset.collapsed = true;
-            }
-        }
         let next_sound_preset_id = state
             .audio_settings
             .presets
@@ -598,6 +593,9 @@ impl AppPaths {
             + 1;
         if state.audio_settings.next_library_item_id < next_sound_library_id {
             state.audio_settings.next_library_item_id = next_sound_library_id;
+        }
+        for preset in &mut state.audio_settings.presets {
+            preset.collapsed = true;
         }
         for item in &mut state.audio_settings.library {
             item.collapsed = true;
@@ -706,12 +704,6 @@ impl AppPaths {
             });
             !has_unknown
         });
-        for preset in &mut state.audio_settings.presets {
-            preset.collapsed = true;
-        }
-        for item in &mut state.audio_settings.library {
-            item.collapsed = true;
-        }
 
         Ok(state)
     }

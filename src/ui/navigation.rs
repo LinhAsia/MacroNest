@@ -32,7 +32,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn panel_label(&self, panel: AppPanel) -> &'static str {
-        let english = match panel {
+        match panel {
             AppPanel::Crosshair => "Crosshair",
             AppPanel::WindowPresets => "Window Control",
             AppPanel::Pin | AppPanel::Zoom => "Pin",
@@ -50,8 +50,7 @@ impl CrosshairApp {
             AppPanel::Timer => "Timer",
             AppPanel::Memory => "Memory",
             AppPanel::Network => "Network",
-        };
-        Self::tr_lang(self.state.ui_language, english, english)
+        }
     }
 
     pub(crate) fn language_button_text(&self) -> RichText {
@@ -73,7 +72,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn titlebar_language_tooltip(&self) -> &'static str {
-        self.tr("Switch language", "Switch language")
+        "Switch language"
     }
 
     pub(crate) fn vietnamese_input_button_text(&self) -> RichText {
@@ -90,35 +89,28 @@ impl CrosshairApp {
 
     pub(crate) fn titlebar_vietnamese_input_tooltip(&self) -> &'static str {
         if !self.state.vietnamese_input_enabled {
-            self.tr("Vietnamese input: off", "Vietnamese input: off")
+            "Vietnamese input: off"
         } else {
             match self.state.vietnamese_input_mode {
-                VietnameseInputMode::Telex => {
-                    self.tr("Vietnamese input: Telex", "Vietnamese input: Telex")
-                }
-                VietnameseInputMode::Vni => {
-                    self.tr("Vietnamese input: VNI", "Vietnamese input: VNI")
-                }
-                VietnameseInputMode::Off => {
-                    self.tr("Vietnamese input: Telex", "Vietnamese input: Telex")
-                }
+                VietnameseInputMode::Telex | VietnameseInputMode::Off => "Vietnamese input: Telex",
+                VietnameseInputMode::Vni => "Vietnamese input: VNI",
             }
         }
     }
 
     pub(crate) fn titlebar_theme_tooltip(&self) -> &'static str {
-        self.tr("Toggle dark / light theme", "Toggle dark / light theme")
+        "Toggle dark / light theme"
     }
 
     pub(crate) fn titlebar_minimize_tooltip(&self) -> &'static str {
-        self.tr("Minimize", "Minimize")
+        "Minimize"
     }
 
     pub(crate) fn titlebar_maximize_tooltip(&self, maximized: bool) -> &'static str {
         if maximized {
-            self.tr("Restore", "Restore")
+            "Restore"
         } else {
-            self.tr("Maximize", "Maximize")
+            "Maximize"
         }
     }
 
