@@ -16665,10 +16665,17 @@ impl CrosshairApp {
     ) {
         for (offset, &byte) in bytes.iter().enumerate() {
             let address = start_address.wrapping_add(offset);
-            if previous.get(&address).is_some_and(|old| *old != byte) {
-                changed.insert(address);
+            match previous.entry(address) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    if *entry.get() != byte {
+                        changed.insert(address);
+                        entry.insert(byte);
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(byte);
+                }
             }
-            previous.insert(address, byte);
         }
     }
 
@@ -17436,56 +17443,58 @@ fn entity_root_priority(module: &str) -> u8 {
     }
 }
 
-fn format_pointer_path(path: &PointerPath) -> String {
-    let root = format!("{}+{:X}", path.module, path.module_offset);
-    if path.offsets.is_empty() {
-        root
-    } else {
-        format!(
-            "{root} [{}]",
-            path.offsets
-                .iter()
-                .map(|offset| format!("{offset:X}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+fn format_hex_offsets(out: &mut String, offsets: &[usize]) {
+    if !offsets.is_empty() {
+        use std::fmt::Write;
+        out.push_str(" [");
+        for (i, offset) in offsets.iter().enumerate() {
+            if i > 0 {
+                out.push_str(", ");
+            }
+            let _ = write!(out, "{offset:X}");
+        }
+        out.push(']');
     }
+}
+
+fn format_pointer_path(path: &PointerPath) -> String {
+    let mut root = format!("{}+{:X}", path.module, path.module_offset);
+    format_hex_offsets(&mut root, &path.offsets);
+    root
 }
 
 fn format_pointer_expression(pointer: &PointerSpec) -> String {
-    let root = pointer.module.as_ref().map_or_else(
+    let mut root = pointer.module.as_ref().map_or_else(
         || format_prefixed_memory_address(pointer.base),
         |(module, offset)| format!("{module}+{offset:X}"),
     );
-    if pointer.offsets.is_empty() {
-        return root;
-    }
-    let offsets = pointer
-        .offsets
-        .iter()
-        .map(|offset| format!("{offset:X}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("{root} [{offsets}]")
+    format_hex_offsets(&mut root, &pointer.offsets);
+    root
 }
 
 fn compact_hotkey_label(label: &str) -> String {
-    let keys = hotkey::split_key_list(label);
-    if let Some(key) = keys
+    let entries: Vec<&str> = hotkey::split_key_entries(label).collect();
+    if let Some(key) = entries
         .iter()
         .rev()
-        .find(|key| !hotkey::is_modifier_key_name(key))
+        .find(|&&key| !hotkey::is_modifier_key_name(key))
     {
         return key.chars().take(3).collect();
     }
-    keys.iter()
+    entries
+        .iter()
         .filter_map(|key| key.chars().next())
         .take(3)
         .collect()
 }
 
 fn parse_scan_value(text: &str, value_type: ScanValueType, hex: bool) -> Option<ScanValue> {
-    let text = text.trim().replace('_', "");
+    let trimmed = text.trim();
+    let text: std::borrow::Cow<'_, str> = if trimmed.contains('_') {
+        std::borrow::Cow::Owned(trimmed.replace('_', ""))
+    } else {
+        std::borrow::Cow::Borrowed(trimmed)
+    };
     let direct = match value_type {
         ScanValueType::F32 => text
             .parse::<f32>()
@@ -17515,11 +17524,24 @@ fn parse_scan_value(text: &str, value_type: ScanValueType, hex: bool) -> Option<
     if direct.is_some() || hex {
         return direct;
     }
-    if !text.chars().any(|character| "+-*/^()".contains(character))
-        || !text.chars().all(|character| {
-            character.is_ascii_digit()
-                || character.is_ascii_whitespace()
-                || ".+-*/^()".contains(character)
+    if !text
+        .chars()
+        .any(|ch| matches!(ch, '+' | '-' | '*' | '/' | '^' | '(' | ')'))
+        || !text.chars().all(|ch| {
+            matches!(
+                ch,
+                '0'..='9'
+                    | ' '
+                    | '\t'
+                    | '.'
+                    | '+'
+                    | '-'
+                    | '*'
+                    | '/'
+                    | '^'
+                    | '('
+                    | ')'
+            )
         })
     {
         return None;
@@ -17651,10 +17673,10 @@ fn format_compact_float(value: f64, precision: usize) -> String {
     if !(0.001..1_000_000_000.0).contains(&absolute) {
         return format!("{value:.precision$e}");
     }
-    format!("{value:.precision$}")
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_owned()
+    let mut s = format!("{value:.precision$}");
+    let trimmed_len = s.trim_end_matches('0').trim_end_matches('.').len();
+    s.truncate(trimmed_len);
+    s
 }
 
 fn default_structure_elements() -> Vec<StructureElement> {
@@ -18278,16 +18300,11 @@ fn best_camera_projection(
         .min_by(|left, right| left.3.total_cmp(&right.3))
 }
 
-fn parse_memory_address(text: &str) -> Option<usize> {
-    let compact = text.trim().replace([' ', '_'], "");
-    let operator = compact
-        .char_indices()
-        .skip(1)
-        .find(|(_, character)| matches!(character, '+' | '-'));
-    let Some((mut position, _)) = operator else {
-        return parse_memory_address_term(&compact);
-    };
-    let mut address = parse_memory_address_term(&compact[..position])?;
+fn apply_memory_address_offsets(
+    mut address: usize,
+    compact: &str,
+    mut position: usize,
+) -> Option<usize> {
     while position < compact.len() {
         let operation = compact.as_bytes()[position];
         let start = position + 1;
@@ -18305,12 +18322,37 @@ fn parse_memory_address(text: &str) -> Option<usize> {
     Some(address)
 }
 
+fn parse_memory_address(text: &str) -> Option<usize> {
+    let trimmed = text.trim();
+    let compact: std::borrow::Cow<'_, str> =
+        if trimmed.as_bytes().iter().any(|&b| b == b' ' || b == b'_') {
+            std::borrow::Cow::Owned(trimmed.replace([' ', '_'], ""))
+        } else {
+            std::borrow::Cow::Borrowed(trimmed)
+        };
+    let operator = compact
+        .char_indices()
+        .skip(1)
+        .find(|(_, character)| matches!(character, '+' | '-'));
+    let Some((position, _)) = operator else {
+        return parse_memory_address_term(&compact);
+    };
+    let address = parse_memory_address_term(&compact[..position])?;
+    apply_memory_address_offsets(address, &compact, position)
+}
+
 fn parse_address_edit(current: usize, text: &str) -> Option<usize> {
-    let text = text.trim();
-    if text.starts_with(['+', '-']) {
-        return parse_memory_address(&format!("0x{current:X}{text}"));
+    let trimmed = text.trim();
+    if trimmed.starts_with(['+', '-']) {
+        let compact: std::borrow::Cow<'_, str> =
+            if trimmed.as_bytes().iter().any(|&b| b == b' ' || b == b'_') {
+                std::borrow::Cow::Owned(trimmed.replace([' ', '_'], ""))
+            } else {
+                std::borrow::Cow::Borrowed(trimmed)
+            };
+        return apply_memory_address_offsets(current, &compact, 0);
     }
-    parse_memory_address(text)
+    parse_memory_address(trimmed)
 }
 
 fn parse_pointer_expression(text: &str) -> Option<(String, usize, Vec<usize>)> {
@@ -18361,7 +18403,7 @@ fn format_memory_address(address: usize) -> String {
 }
 
 fn format_prefixed_memory_address(address: usize) -> String {
-    format!("0x{}", format_memory_address(address))
+    format!("0x{address:08X}")
 }
 
 fn parse_hex_offset(text: &str) -> Option<usize> {
@@ -18570,32 +18612,44 @@ fn resolve_memory_address(
 }
 
 fn format_aob_hex(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|b| format!("{b:02X}"))
-        .collect::<Vec<_>>()
-        .join(" ")
+    if bytes.is_empty() {
+        return String::new();
+    }
+    const HEX_CHARS: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(bytes.len() * 3 - 1);
+    for (i, &b) in bytes.iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        out.push(HEX_CHARS[(b >> 4) as usize] as char);
+        out.push(HEX_CHARS[(b & 0xF) as usize] as char);
+    }
+    out
 }
 
 fn generate_multi_aob_pattern(samples: &[&[u8]]) -> (String, usize, usize) {
     if samples.is_empty() {
         return (String::new(), 0, 0);
     }
+    const HEX_CHARS: &[u8; 16] = b"0123456789ABCDEF";
     let total_bytes = samples.iter().map(|b| b.len()).min().unwrap_or(0);
-    let mut parts = Vec::with_capacity(total_bytes);
+    let mut out = String::with_capacity(total_bytes.saturating_mul(3));
     let mut wildcard_count = 0;
 
     for i in 0..total_bytes {
+        if i > 0 {
+            out.push(' ');
+        }
         let first = samples[0][i];
-        let all_match = samples.iter().all(|b| b[i] == first);
-        if all_match {
-            parts.push(format!("{:02X}", first));
+        if samples.iter().all(|b| b[i] == first) {
+            out.push(HEX_CHARS[(first >> 4) as usize] as char);
+            out.push(HEX_CHARS[(first & 0xF) as usize] as char);
         } else {
-            parts.push("??".to_owned());
+            out.push_str("??");
             wildcard_count += 1;
         }
     }
-    (parts.join(" "), total_bytes, wildcard_count)
+    (out, total_bytes, wildcard_count)
 }
 
 fn parse_manual_aob_tokens(input: &str) -> Vec<Option<u8>> {
@@ -19096,5 +19150,31 @@ mod tests {
             ScanCandidate::new(0x1000, ScanValue::I32(1)),
         ];
         assert_eq!(state.total_result_count(), 1);
+    }
+
+    #[test]
+    fn format_helpers_and_compact_labels() {
+        assert_eq!(format_aob_hex(&[]), "");
+        assert_eq!(format_aob_hex(&[0x48, 0x8B, 0x05, 0xFF]), "48 8B 05 FF");
+
+        let path = PointerPath {
+            module: "game.exe".to_owned(),
+            module_offset: 0x1234,
+            offsets: vec![0x10, 0x28, 0x3A0],
+        };
+        assert_eq!(format_pointer_path(&path), "game.exe+1234 [10, 28, 3A0]");
+
+        let path_no_offsets = PointerPath {
+            module: "engine.dll".to_owned(),
+            module_offset: 0x50,
+            offsets: Vec::new(),
+        };
+        assert_eq!(format_pointer_path(&path_no_offsets), "engine.dll+50");
+
+        assert_eq!(format_prefixed_memory_address(0x1000), "0x00001000");
+
+        assert_eq!(compact_hotkey_label("Ctrl+Shift+F"), "F");
+        assert_eq!(compact_hotkey_label("Ctrl+Alt+Delete"), "Del");
+        assert_eq!(compact_hotkey_label("Ctrl+Shift"), "CS");
     }
 }

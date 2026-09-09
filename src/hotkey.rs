@@ -48,19 +48,15 @@ pub fn is_modifier_key_name(name: &str) -> bool {
         || trimmed.eq_ignore_ascii_case("meta")
 }
 
-pub fn split_key_list(spec: &str) -> Vec<String> {
-    let trimmed = spec.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
+pub fn split_key_entries(spec: &str) -> impl Iterator<Item = &str> {
+    spec.split(|ch: char| matches!(ch, ',' | ';' | '+' | ' ' | '\t' | '\n' | '\r'))
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(normalize_key_name)
+}
 
-    trimmed
-        .split(|ch: char| matches!(ch, ',' | ';' | '+' | ' ' | '\t' | '\n'))
-        .filter_map(|part| {
-            let key = part.trim();
-            (!key.is_empty()).then(|| normalize_key_name(key).to_owned())
-        })
-        .collect()
+pub fn split_key_list(spec: &str) -> Vec<String> {
+    split_key_entries(spec).map(str::to_owned).collect()
 }
 
 
