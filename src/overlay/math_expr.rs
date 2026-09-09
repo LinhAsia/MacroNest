@@ -11,7 +11,10 @@ use super::{
 use crate::window_list::window_title;
 
 pub fn interpolate_variables(text: &str) -> String {
-    let mut result = String::new();
+    if !text.contains('{') {
+        return text.to_owned();
+    }
+    let mut result = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '{' {
@@ -32,11 +35,12 @@ pub fn interpolate_variables(text: &str) -> String {
                 if let Some(text_val) = resolve_text_variable_value(var_trimmed) {
                     result.push_str(&text_val);
                 } else {
+                    use std::fmt::Write;
                     let val = evaluate_math_expression_f64(var_trimmed);
                     if val.fract() == 0.0 {
-                        result.push_str(&(val as i64).to_string());
+                        let _ = write!(result, "{}", val as i64);
                     } else {
-                        result.push_str(&val.to_string());
+                        let _ = write!(result, "{val}");
                     }
                 }
             } else {
@@ -52,7 +56,11 @@ pub fn interpolate_variables(text: &str) -> String {
 }
 
 pub(crate) fn evaluate_interpolated_math_expression(expr: &str) -> i32 {
-    let interpolated = interpolate_variables(expr.trim());
+    let trimmed = expr.trim();
+    if !trimmed.contains('{') {
+        return evaluate_math_expression(trimmed);
+    }
+    let interpolated = interpolate_variables(trimmed);
     evaluate_math_expression(&interpolated)
 }
 
@@ -69,10 +77,17 @@ pub(crate) fn clamp_f64_to_i32(value: f64) -> i32 {
 }
 
 pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
-    let mut expr_str = expr.trim().to_string();
-    if expr_str.is_empty() {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
         return 0.0;
     }
+    if !trimmed.contains('(') {
+        if let Ok(val) = trimmed.parse::<f64>() {
+            return val;
+        }
+    }
+
+    let mut expr_str = trimmed.to_string();
 
     while let Some(open_idx) = expr_str.rfind('(') {
         let mut func_start_idx = open_idx;
@@ -328,19 +343,14 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
 
     let mut tokens = Vec::new();
     let mut current_token = String::new();
-    let chars: Vec<char> = expr.chars().collect();
-    let mut idx = 0;
-    while idx < chars.len() {
-        let c = chars[idx];
+    for c in expr.chars() {
         if c.is_whitespace() {
             if !current_token.is_empty() {
-                tokens.push(current_token.clone());
-                current_token.clear();
+                tokens.push(std::mem::take(&mut current_token));
             }
-        } else if c == '+' || c == '*' || c == '/' || c == '^' {
+        } else if matches!(c, '+' | '*' | '/' | '^') {
             if !current_token.is_empty() {
-                tokens.push(current_token.clone());
-                current_token.clear();
+                tokens.push(std::mem::take(&mut current_token));
             }
             tokens.push(c.to_string());
         } else if c == '-' {
@@ -354,15 +364,13 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                 current_token.push(c);
             } else {
                 if !current_token.is_empty() {
-                    tokens.push(current_token.clone());
-                    current_token.clear();
+                    tokens.push(std::mem::take(&mut current_token));
                 }
                 tokens.push(c.to_string());
             }
         } else {
             current_token.push(c);
         }
-        idx += 1;
     }
 
     if !current_token.is_empty() {
@@ -390,10 +398,8 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
     };
     let mut values = Vec::new();
     let mut operators = Vec::new();
-    let mut i = 0;
-    while i < tokens.len() {
-        let token = &tokens[i];
-        if token == "+" || token == "-" || token == "*" || token == "/" || token == "^" {
+    for token in &tokens {
+        if matches!(token.as_str(), "+" | "-" | "*" | "/" | "^") {
             while operators
                 .last()
                 .copied()
@@ -407,7 +413,6 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
         } else {
             values.push(get_value(token));
         }
-        i += 1;
     }
 
     if values.is_empty() {
@@ -461,19 +466,36 @@ pub(crate) fn resolve_variable_name(name: &str) -> String {
 }
 
 pub(crate) fn is_builtin_property_name(token: &str) -> bool {
-    let trimmed = token.trim().to_lowercase();
+    let trimmed = token.trim();
     if let Some((obj, prop)) = trimmed.split_once('.') {
-        matches!(
-            (obj.trim(), prop.trim()),
-            (
-                "system",
-                "date" | "time" | "year" | "month" | "day" | "hour" | "minute" | "second"
-            ) | ("mouse", "x" | "y" | "sensitivity")
-                | ("screen", "width" | "height")
-                | ("volume", "level")
-                | ("window", "title")
-                | ("clipboard", "text")
-        )
+        let (obj, prop) = (obj.trim(), prop.trim());
+        if obj.eq_ignore_ascii_case("system") {
+            matches!(
+                prop,
+                p if p.eq_ignore_ascii_case("date")
+                    || p.eq_ignore_ascii_case("time")
+                    || p.eq_ignore_ascii_case("year")
+                    || p.eq_ignore_ascii_case("month")
+                    || p.eq_ignore_ascii_case("day")
+                    || p.eq_ignore_ascii_case("hour")
+                    || p.eq_ignore_ascii_case("minute")
+                    || p.eq_ignore_ascii_case("second")
+            )
+        } else if obj.eq_ignore_ascii_case("mouse") {
+            prop.eq_ignore_ascii_case("x")
+                || prop.eq_ignore_ascii_case("y")
+                || prop.eq_ignore_ascii_case("sensitivity")
+        } else if obj.eq_ignore_ascii_case("screen") {
+            prop.eq_ignore_ascii_case("width") || prop.eq_ignore_ascii_case("height")
+        } else if obj.eq_ignore_ascii_case("volume") {
+            prop.eq_ignore_ascii_case("level")
+        } else if obj.eq_ignore_ascii_case("window") {
+            prop.eq_ignore_ascii_case("title")
+        } else if obj.eq_ignore_ascii_case("clipboard") {
+            prop.eq_ignore_ascii_case("text")
+        } else {
+            false
+        }
     } else {
         false
     }
@@ -1110,27 +1132,20 @@ fn get_pseudo_random(min: i32, max: i32) -> i32 {
 }
 
 fn get_object_property_value(token: &str) -> Option<i32> {
-    if !token.contains('.') {
+    let (obj_raw, prop_raw) = token.split_once('.')?;
+    let obj_name_raw = obj_raw.trim();
+    let prop_name = prop_raw.trim();
+
+    if obj_name_raw.eq_ignore_ascii_case("screen") {
+        if prop_name.eq_ignore_ascii_case("width") {
+            return Some(unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(0));
+        } else if prop_name.eq_ignore_ascii_case("height") {
+            return Some(unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(0));
+        }
         return None;
     }
 
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-
-    let obj_name_raw = parts[0].trim();
-    let obj_name = obj_name_raw.to_lowercase();
-    let prop_name = parts[1].trim().to_lowercase();
-    if obj_name == "screen" {
-        return match prop_name.as_str() {
-            "width" => Some(unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(0)),
-            "height" => Some(unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(0)),
-            _ => None,
-        };
-    }
-
-    if obj_name == "mouse" {
+    if obj_name_raw.eq_ignore_ascii_case("mouse") {
         let mut point = POINT::default();
         unsafe {
             if GetCursorPos(&mut point).is_err() {
@@ -1138,37 +1153,45 @@ fn get_object_property_value(token: &str) -> Option<i32> {
             }
         }
 
-        return match prop_name.as_str() {
-            "x" => Some(point.x),
-            "y" => Some(point.y),
-            "sensitivity" => current_mouse_speed().ok().map(|speed| speed as i32),
-            _ => None,
-        };
+        if prop_name.eq_ignore_ascii_case("x") {
+            return Some(point.x);
+        } else if prop_name.eq_ignore_ascii_case("y") {
+            return Some(point.y);
+        } else if prop_name.eq_ignore_ascii_case("sensitivity") {
+            return current_mouse_speed().ok().map(|speed| speed as i32);
+        }
+        return None;
     }
 
-    if obj_name == "volume" {
-        return match prop_name.as_str() {
-            "level" => current_system_volume_percent(),
-            _ => None,
-        };
+    if obj_name_raw.eq_ignore_ascii_case("volume") {
+        if prop_name.eq_ignore_ascii_case("level") {
+            return current_system_volume_percent();
+        }
+        return None;
     }
 
-    if obj_name == "system" {
+    if obj_name_raw.eq_ignore_ascii_case("system") {
         use chrono::{Datelike, Timelike};
         let now = chrono::Local::now();
-        return match prop_name.as_str() {
-            "year" => Some(now.year() as i32),
-            "month" => Some(now.month() as i32),
-            "day" => Some(now.day() as i32),
-            "hour" => Some(now.hour() as i32),
-            "minute" => Some(now.minute() as i32),
-            "second" => Some(now.second() as i32),
-            "millisecond" => Some((now.nanosecond() / 1_000_000) as i32),
-            _ => None,
-        };
+        if prop_name.eq_ignore_ascii_case("year") {
+            return Some(now.year() as i32);
+        } else if prop_name.eq_ignore_ascii_case("month") {
+            return Some(now.month() as i32);
+        } else if prop_name.eq_ignore_ascii_case("day") {
+            return Some(now.day() as i32);
+        } else if prop_name.eq_ignore_ascii_case("hour") {
+            return Some(now.hour() as i32);
+        } else if prop_name.eq_ignore_ascii_case("minute") {
+            return Some(now.minute() as i32);
+        } else if prop_name.eq_ignore_ascii_case("second") {
+            return Some(now.second() as i32);
+        } else if prop_name.eq_ignore_ascii_case("millisecond") {
+            return Some((now.nanosecond() / 1_000_000) as i32);
+        }
+        return None;
     }
 
-    if obj_name == "window" {
+    if obj_name_raw.eq_ignore_ascii_case("window") {
         let hwnd = unsafe { GetForegroundWindow() };
         if hwnd.0.is_null() {
             return Some(0);
@@ -1181,20 +1204,27 @@ fn get_object_property_value(token: &str) -> Option<i32> {
             }
         }
 
-        return match prop_name.as_str() {
-            "x" | "left" => Some(rect.left),
-            "y" | "top" => Some(rect.top),
-            "right" => Some(rect.right),
-            "bottom" => Some(rect.bottom),
-            "width" | "w" => Some((rect.right - rect.left).max(0)),
-            "height" | "h" => Some((rect.bottom - rect.top).max(0)),
-            "centerx" | "cx" => Some(rect.left + ((rect.right - rect.left) / 2)),
-            "centery" | "cy" => Some(rect.top + ((rect.bottom - rect.top) / 2)),
-            _ => None,
-        };
+        if prop_name.eq_ignore_ascii_case("x") || prop_name.eq_ignore_ascii_case("left") {
+            return Some(rect.left);
+        } else if prop_name.eq_ignore_ascii_case("y") || prop_name.eq_ignore_ascii_case("top") {
+            return Some(rect.top);
+        } else if prop_name.eq_ignore_ascii_case("right") {
+            return Some(rect.right);
+        } else if prop_name.eq_ignore_ascii_case("bottom") {
+            return Some(rect.bottom);
+        } else if prop_name.eq_ignore_ascii_case("width") || prop_name.eq_ignore_ascii_case("w") {
+            return Some((rect.right - rect.left).max(0));
+        } else if prop_name.eq_ignore_ascii_case("height") || prop_name.eq_ignore_ascii_case("h") {
+            return Some((rect.bottom - rect.top).max(0));
+        } else if prop_name.eq_ignore_ascii_case("centerx") || prop_name.eq_ignore_ascii_case("cx") {
+            return Some(rect.left + ((rect.right - rect.left) / 2));
+        } else if prop_name.eq_ignore_ascii_case("centery") || prop_name.eq_ignore_ascii_case("cy") {
+            return Some(rect.top + ((rect.bottom - rect.top) / 2));
+        }
+        return None;
     }
 
-    if prop_name == "tonumber" {
+    if prop_name.eq_ignore_ascii_case("tonumber") {
         let mut found_str = None;
         let mut is_text_var = false;
         {
@@ -1230,27 +1260,21 @@ fn get_object_property_value(token: &str) -> Option<i32> {
 }
 
 fn get_object_property_text_value(token: &str) -> Option<String> {
-    if !token.contains('.') {
-        return None;
-    }
+    let (obj_raw, prop_raw) = token.split_once('.')?;
+    let obj_name_raw = obj_raw.trim();
+    let prop_name = prop_raw.trim();
 
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-
-    let obj_name = parts[0].trim().to_lowercase();
-    let prop_name = parts[1].trim().to_lowercase();
-    if obj_name == "system" {
+    if obj_name_raw.eq_ignore_ascii_case("system") {
         let now = chrono::Local::now();
-        return match prop_name.as_str() {
-            "date" => Some(now.format("%Y-%m-%d").to_string()),
-            "time" => Some(now.format("%H:%M:%S").to_string()),
-            _ => None,
-        };
+        if prop_name.eq_ignore_ascii_case("date") {
+            return Some(now.format("%Y-%m-%d").to_string());
+        } else if prop_name.eq_ignore_ascii_case("time") {
+            return Some(now.format("%H:%M:%S").to_string());
+        }
+        return None;
     }
 
-    if obj_name == "window" && prop_name == "title" {
+    if obj_name_raw.eq_ignore_ascii_case("window") && prop_name.eq_ignore_ascii_case("title") {
         let hwnd = unsafe { GetForegroundWindow() };
         if hwnd.0.is_null() {
             return Some(String::new());
@@ -1259,7 +1283,7 @@ fn get_object_property_text_value(token: &str) -> Option<String> {
         return window_title(hwnd).or_else(|| Some(String::new()));
     }
 
-    if obj_name == "clipboard" && prop_name == "text" {
+    if obj_name_raw.eq_ignore_ascii_case("clipboard") && prop_name.eq_ignore_ascii_case("text") {
         let text = arboard::Clipboard::new()
             .ok()
             .and_then(|mut clipboard| clipboard.get_text().ok())
@@ -1267,10 +1291,9 @@ fn get_object_property_text_value(token: &str) -> Option<String> {
         return Some(text);
     }
 
-    if prop_name == "tostring" {
+    if prop_name.eq_ignore_ascii_case("tostring") {
         let mut found_str = None;
         let mut is_runtime_var = false;
-        let obj_name_raw = parts[0].trim();
         {
             let vars = RUNTIME_VARIABLES.lock();
             if let Some(val) = vars.get(obj_name_raw) {
