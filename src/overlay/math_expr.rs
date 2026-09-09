@@ -75,17 +75,12 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
     }
 
     while let Some(open_idx) = expr_str.rfind('(') {
-        let mut func_name = String::new();
         let mut func_start_idx = open_idx;
-        while func_start_idx > 0 {
-            let prev_char = expr_str.chars().nth(func_start_idx - 1).unwrap_or('\0');
-            if prev_char.is_ascii_alphanumeric() {
-                func_name.insert(0, prev_char);
-                func_start_idx -= 1;
-            } else {
-                break;
-            }
+        let bytes = expr_str.as_bytes();
+        while func_start_idx > 0 && bytes[func_start_idx - 1].is_ascii_alphanumeric() {
+            func_start_idx -= 1;
         }
+        let func_name = &expr_str[func_start_idx..open_idx];
 
         if let Some(close_offset) = expr_str[open_idx..].find(')') {
             let close_idx = open_idx + close_offset;
@@ -513,7 +508,7 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
         return;
     }
 
-    let expr_trimmed = expr_raw.trim().to_string();
+    let expr_trimmed = expr_raw.trim();
     if let Some(literal) = expr_trimmed
         .strip_prefix('"')
         .and_then(|value| value.strip_suffix('"'))
@@ -526,7 +521,7 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
         set_text_variable_value(target_trimmed, literal);
         return;
     }
-    if let Some(chosen) = resolve_choice_expression_value(&expr_trimmed) {
+    if let Some(chosen) = resolve_choice_expression_value(expr_trimmed) {
         if let Ok(val) = chosen.parse::<f64>() {
             set_variable_value(target_trimmed, val);
             TEXT_VARIABLES.lock().remove(target_trimmed);
@@ -540,34 +535,32 @@ pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &st
         if let Ok(val) = expr_trimmed.parse::<f64>() {
             set_variable_value(target_trimmed, val);
             TEXT_VARIABLES.lock().remove(target_trimmed);
-        } else if let Some(text_val) = evaluate_text_function_expression(&expr_trimmed) {
+        } else if let Some(text_val) = evaluate_text_function_expression(expr_trimmed) {
             set_text_variable_value(target_trimmed, &text_val);
             RUNTIME_VARIABLES.lock().remove(target_trimmed);
-        } else if looks_like_math_expression_text(&expr_trimmed) {
-            let val = evaluate_math_expression_f64(&expr_trimmed);
+        } else if looks_like_math_expression_text(expr_trimmed) {
+            let val = evaluate_math_expression_f64(expr_trimmed);
             set_variable_value(target_trimmed, val);
             TEXT_VARIABLES.lock().remove(target_trimmed);
         } else {
-            set_text_variable_value(target_trimmed, &expr_trimmed);
+            set_text_variable_value(target_trimmed, expr_trimmed);
             RUNTIME_VARIABLES.lock().remove(target_trimmed);
         }
     } else {
-        let interpolated = interpolate_variables(&expr_trimmed);
+        let interpolated = interpolate_variables(expr_trimmed);
         if let Ok(val) = interpolated.parse::<f64>() {
             set_variable_value(target_trimmed, val);
             TEXT_VARIABLES.lock().remove(target_trimmed);
+        } else if let Some(text_val) = evaluate_text_function_expression(&interpolated) {
+            set_text_variable_value(target_trimmed, &text_val);
+            RUNTIME_VARIABLES.lock().remove(target_trimmed);
+        } else if looks_like_math_expression_text(&interpolated) {
+            let val = evaluate_math_expression_f64(&interpolated);
+            set_variable_value(target_trimmed, val);
+            TEXT_VARIABLES.lock().remove(target_trimmed);
         } else {
-            if let Some(text_val) = evaluate_text_function_expression(&interpolated) {
-                set_text_variable_value(target_trimmed, &text_val);
-                RUNTIME_VARIABLES.lock().remove(target_trimmed);
-            } else if looks_like_math_expression_text(&interpolated) {
-                let val = evaluate_math_expression_f64(&interpolated);
-                set_variable_value(target_trimmed, val);
-                TEXT_VARIABLES.lock().remove(target_trimmed);
-            } else {
-                set_text_variable_value(target_trimmed, &interpolated);
-                RUNTIME_VARIABLES.lock().remove(target_trimmed);
-            }
+            set_text_variable_value(target_trimmed, &interpolated);
+            RUNTIME_VARIABLES.lock().remove(target_trimmed);
         }
     }
 }
@@ -698,18 +691,24 @@ pub(crate) fn resolve_expression_argument_text(arg: &str) -> String {
 
 fn evaluate_text_function_expression(expr: &str) -> Option<String> {
     let (func_name, args) = parse_expression_function_call(expr)?;
-    match func_name.to_ascii_lowercase().as_str() {
-        "substr" => Some(evaluate_substr_expression(&args)),
-        "charat" => Some(evaluate_char_at_expression(&args)),
-        "concat" => Some(evaluate_concat_expression(&args)),
-        "lower" => Some(evaluate_lower_expression(&args)),
-        "upper" => Some(evaluate_upper_expression(&args)),
-        "trim" => Some(evaluate_trim_expression(&args)),
-        _ => None,
+    if func_name.eq_ignore_ascii_case("substr") {
+        Some(evaluate_substr_expression(&args))
+    } else if func_name.eq_ignore_ascii_case("charat") {
+        Some(evaluate_char_at_expression(&args))
+    } else if func_name.eq_ignore_ascii_case("concat") {
+        Some(evaluate_concat_expression(&args))
+    } else if func_name.eq_ignore_ascii_case("lower") {
+        Some(evaluate_lower_expression(&args))
+    } else if func_name.eq_ignore_ascii_case("upper") {
+        Some(evaluate_upper_expression(&args))
+    } else if func_name.eq_ignore_ascii_case("trim") {
+        Some(evaluate_trim_expression(&args))
+    } else {
+        None
     }
 }
 
-fn parse_expression_function_call(expr: &str) -> Option<(String, Vec<String>)> {
+fn parse_expression_function_call(expr: &str) -> Option<(&str, Vec<String>)> {
     let trimmed = expr.trim();
     let open_idx = trimmed.find('(')?;
     let func_name = trimmed[..open_idx].trim();
@@ -721,7 +720,7 @@ fn parse_expression_function_call(expr: &str) -> Option<(String, Vec<String>)> {
     {
         return None;
     }
-    Some((func_name.to_string(), split_expression_arguments(inner)))
+    Some((func_name, split_expression_arguments(inner)))
 }
 
 fn evaluate_substr_expression(args: &[String]) -> String {
