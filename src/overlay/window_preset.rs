@@ -2,7 +2,7 @@ use std::{collections::HashSet, mem::size_of, os::raw::c_void, thread, time::Dur
 
 use anyhow::{Context, Result, bail};
 use windows::Win32::{
-    Foundation::RECT,
+    Foundation::{HWND, RECT},
     Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
     Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint},
     System::Threading::{AttachThreadInput, GetCurrentThreadId},
@@ -147,65 +147,69 @@ fn focus_window_for_title(
     )
     .context("Target window was not found")?;
     unsafe {
-        let foreground = GetForegroundWindow();
-        if foreground == hwnd && !IsIconic(hwnd).as_bool() {
-            return Ok(());
-        }
-        let current_thread = GetCurrentThreadId();
-        let target_thread = GetWindowThreadProcessId(hwnd, None);
-        let foreground_thread = if foreground.0.is_null() {
-            0
-        } else {
-            GetWindowThreadProcessId(foreground, None)
-        };
-
-        let attach_foreground = foreground_thread != 0 && foreground_thread != current_thread;
-        let attach_target = target_thread != 0 && target_thread != current_thread;
-
-        if attach_foreground {
-            let _ = AttachThreadInput(foreground_thread, current_thread, true);
-        }
-        if attach_target {
-            let _ = AttachThreadInput(target_thread, current_thread, true);
-        }
-
-        if IsIconic(hwnd).as_bool() {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
-        }
-        let _ = BringWindowToTop(hwnd);
-        let _ = SetWindowPos(
-            hwnd,
-            Some(HWND_TOPMOST),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        );
-        let _ = SetWindowPos(
-            hwnd,
-            Some(HWND_NOTOPMOST),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
-        );
-        let _ = SetForegroundWindow(hwnd);
-        let _ = SetActiveWindow(hwnd);
-        let _ = SetFocus(Some(hwnd));
-
-        // ponytail: detach input queues before the settle delay so physical or
-        // macro-driven key events do not get stuck in a shared thread state.
-        if attach_target {
-            let _ = AttachThreadInput(target_thread, current_thread, false);
-        }
-        if attach_foreground {
-            let _ = AttachThreadInput(foreground_thread, current_thread, false);
-        }
-        thread::sleep(Duration::from_millis(18));
+        force_focus_hwnd(hwnd, 18);
     }
     Ok(())
+}
+
+unsafe fn force_focus_hwnd(hwnd: HWND, settle_ms: u64) {
+    let foreground = GetForegroundWindow();
+    if foreground == hwnd && !IsIconic(hwnd).as_bool() {
+        return;
+    }
+    let current_thread = GetCurrentThreadId();
+    let target_thread = GetWindowThreadProcessId(hwnd, None);
+    let foreground_thread = if foreground.0.is_null() {
+        0
+    } else {
+        GetWindowThreadProcessId(foreground, None)
+    };
+
+    let attach_foreground = foreground_thread != 0 && foreground_thread != current_thread;
+    let attach_target = target_thread != 0 && target_thread != current_thread;
+
+    if attach_foreground {
+        let _ = AttachThreadInput(foreground_thread, current_thread, true);
+    }
+    if attach_target {
+        let _ = AttachThreadInput(target_thread, current_thread, true);
+    }
+
+    if IsIconic(hwnd).as_bool() {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+    }
+    let _ = BringWindowToTop(hwnd);
+    let _ = SetWindowPos(
+        hwnd,
+        Some(HWND_TOPMOST),
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+    );
+    let _ = SetWindowPos(
+        hwnd,
+        Some(HWND_NOTOPMOST),
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+    );
+    let _ = SetForegroundWindow(hwnd);
+    let _ = SetActiveWindow(hwnd);
+    let _ = SetFocus(Some(hwnd));
+
+    // ponytail: detach input queues before the settle delay so physical or
+    // macro-driven key events do not get stuck in a shared thread state.
+    if attach_target {
+        let _ = AttachThreadInput(target_thread, current_thread, false);
+    }
+    if attach_foreground {
+        let _ = AttachThreadInput(foreground_thread, current_thread, false);
+    }
+    thread::sleep(Duration::from_millis(settle_ms));
 }
 
 pub(super) fn apply_window_preset_for_macro(preset: &WindowPreset) -> Result<()> {
@@ -361,33 +365,38 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
             continue;
         }
 
-        let titles: Vec<&str> = std::iter::once(cell.target_window_title.as_deref())
-            .chain(
-                cell.extra_target_window_titles
-                    .iter()
-                    .map(|s| Some(s.as_str())),
-            )
-            .flatten()
-            .collect();
-
         let hwnd: Option<HWND> = unsafe {
-            let mut found = None;
             let snapshot = super::runtime_open_windows_snapshot();
-            for title in &titles {
-                if let Some(entry) = snapshot.iter().find(|entry| {
-                    !used_hwnds.contains(&entry.hwnd)
+            let find_matching = |target_title: &str| {
+                snapshot.iter().find_map(|entry| {
+                    if !used_hwnds.contains(&entry.hwnd)
                         && super::title_matches_window_target(
                             &entry.title,
                             HWND(entry.hwnd as *mut std::ffi::c_void),
-                            title,
+                            target_title,
                             cell.match_duplicate_window_titles,
                         )
-                }) {
-                    found = Some(HWND(entry.hwnd as *mut std::ffi::c_void));
-                    break;
+                    {
+                        Some(HWND(entry.hwnd as *mut std::ffi::c_void))
+                    } else {
+                        None
+                    }
+                })
+            };
+
+            let mut found = cell.target_window_title.as_deref().and_then(find_matching);
+            if found.is_none() {
+                for extra_title in &cell.extra_target_window_titles {
+                    if let Some(h) = find_matching(extra_title) {
+                        found = Some(h);
+                        break;
+                    }
                 }
             }
-            if found.is_none() && titles.is_empty() {
+            if found.is_none()
+                && cell.target_window_title.is_none()
+                && cell.extra_target_window_titles.is_empty()
+            {
                 let fg = GetForegroundWindow();
                 if !fg.0.is_null() && !used_hwnds.contains(&(fg.0 as isize)) {
                     found = Some(fg);
@@ -485,49 +494,7 @@ pub(super) fn apply_window_layout(layout: &crate::model::WindowLayout) -> Result
     if layout.focus_on_apply {
         for hwnd in focus_targets {
             unsafe {
-                let fg = GetForegroundWindow();
-                let cur_tid = GetCurrentThreadId();
-                let tgt_tid = GetWindowThreadProcessId(hwnd, None);
-                let fg_tid = if fg.0.is_null() {
-                    0
-                } else {
-                    GetWindowThreadProcessId(fg, None)
-                };
-                if fg_tid != 0 && fg_tid != cur_tid {
-                    let _ = AttachThreadInput(fg_tid, cur_tid, true);
-                }
-                if tgt_tid != 0 && tgt_tid != cur_tid {
-                    let _ = AttachThreadInput(tgt_tid, cur_tid, true);
-                }
-                let _ = BringWindowToTop(hwnd);
-                let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_TOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
-                let _ = SetWindowPos(
-                    hwnd,
-                    Some(HWND_NOTOPMOST),
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
-                );
-                let _ = SetForegroundWindow(hwnd);
-                let _ = SetActiveWindow(hwnd);
-                let _ = SetFocus(Some(hwnd));
-                if fg_tid != 0 && fg_tid != cur_tid {
-                    let _ = AttachThreadInput(fg_tid, cur_tid, false);
-                }
-                if tgt_tid != 0 && tgt_tid != cur_tid {
-                    let _ = AttachThreadInput(tgt_tid, cur_tid, false);
-                }
-                thread::sleep(Duration::from_millis(15));
+                force_focus_hwnd(hwnd, 15);
             }
         }
     }

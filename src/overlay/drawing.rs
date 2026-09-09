@@ -36,12 +36,7 @@ pub(crate) unsafe fn add_tray_icon(hwnd: HWND) -> Result<()> {
         )?
         .0,
     );
-    let tip = "MacroNest".encode_utf16().collect::<Vec<_>>();
-    for (index, value) in tip.into_iter().enumerate() {
-        if index >= data.szTip.len().saturating_sub(1) {
-            break;
-        }
-
+    for (index, value) in "MacroNest".encode_utf16().take(data.szTip.len().saturating_sub(1)).enumerate() {
         data.szTip[index] = value;
     }
 

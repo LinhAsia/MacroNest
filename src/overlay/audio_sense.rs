@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use std::thread;
 
 use super::{HOOK_STATE, is_ui_in_foreground, set_text_variable_value, set_variable_value};
@@ -37,18 +36,13 @@ pub(crate) fn stop_all_audio_sense() {
     hook_state.active_audio_sense_snapshots.clear();
 }
 
-pub(crate) fn audio_sense_preset_by_id(spec: &str) -> Result<AudioSensePreset> {
-    let preset_id = spec
-        .trim()
-        .parse::<u32>()
-        .context("AudioSense preset id is invalid")?;
+pub(crate) fn audio_sense_preset_by_id(preset_id: u32) -> Option<AudioSensePreset> {
     HOOK_STATE
         .lock()
         .audio_sense_presets
         .iter()
         .find(|preset| preset.id == preset_id)
         .cloned()
-        .context("AudioSense preset was not found")
 }
 
 pub(crate) fn write_pitch_snapshot_vars(
@@ -138,7 +132,7 @@ pub(crate) fn start_audio_sense_from_step(
     match step.action {
         MacroAction::StartAudioSensePreset => {
             if let Some(preset_id) = step.audio_sense_preset_id {
-                if let Ok(mut preset) = audio_sense_preset_by_id(&preset_id.to_string()) {
+                if let Some(mut preset) = audio_sense_preset_by_id(preset_id) {
                     if !step
                         .audio_sense_spec
                         .pitch
