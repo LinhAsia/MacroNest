@@ -583,14 +583,6 @@ impl PointerScanLimits {
     };
 }
 
-pub fn capture_pointer_map(
-    pid: u32,
-    modules: &[(String, usize, usize)],
-    pointer_width: usize,
-    progress: Arc<AtomicUsize>,
-) -> io::Result<PointerMap> {
-    capture_pointer_map_with_budget(pid, modules, pointer_width, usize::MAX, progress)
-}
 
 pub fn capture_pointer_map_with_budget(
     pid: u32,
@@ -777,54 +769,6 @@ impl PointerMap {
     }
 }
 
-pub fn scan_pointer_paths(
-    pid: u32,
-    target: usize,
-    modules: &[(String, usize, usize)],
-    pointer_width: usize,
-    max_offset: usize,
-    max_depth: usize,
-    result_limit: usize,
-    progress: Arc<AtomicUsize>,
-) -> io::Result<Vec<PointerPath>> {
-    scan_pointer_paths_with_budget(
-        pid,
-        target,
-        modules,
-        pointer_width,
-        max_offset,
-        max_depth,
-        result_limit,
-        usize::MAX,
-        progress,
-    )
-}
-
-pub fn scan_pointer_paths_with_budget(
-    pid: u32,
-    target: usize,
-    modules: &[(String, usize, usize)],
-    pointer_width: usize,
-    max_offset: usize,
-    max_depth: usize,
-    result_limit: usize,
-    max_bytes: usize,
-    progress: Arc<AtomicUsize>,
-) -> io::Result<Vec<PointerPath>> {
-    scan_pointer_paths_with_budget_options(
-        pid,
-        target,
-        modules,
-        pointer_width,
-        max_offset,
-        max_depth,
-        result_limit,
-        max_bytes,
-        false,
-        progress,
-        Arc::new(AtomicBool::new(false)),
-    )
-}
 
 pub fn scan_pointer_paths_to_targets_with_budget(
     pid: u32,
@@ -885,25 +829,6 @@ pub fn scan_pointer_paths_with_budget_options(
         result_limit,
         include_system_modules,
     ))
-}
-
-fn find_pointer_paths(
-    pointers: &[(usize, usize)],
-    target: usize,
-    modules: &[(String, usize, usize)],
-    max_offset: usize,
-    max_depth: usize,
-    result_limit: usize,
-) -> Vec<PointerPath> {
-    find_pointer_paths_to_any(
-        pointers,
-        &[target],
-        modules,
-        max_offset,
-        max_depth,
-        result_limit,
-        false,
-    )
 }
 
 #[derive(Clone, Debug)]
@@ -1284,38 +1209,6 @@ pub fn query_memory_region(pid: u32, address: usize) -> io::Result<MemoryRegionI
         size: information.region_size,
         protect: information.protect,
     })
-}
-
-pub fn adjacent_readable_memory_region(
-    pid: u32,
-    address: usize,
-    forward: bool,
-) -> io::Result<Option<MemoryRegionInfo>> {
-    let process = ScanProcess::open(pid, false)?;
-    let regions = scan_regions_for(
-        &process,
-        MemoryScanOptions {
-            writable: false,
-            executable: true,
-            copy_on_write: true,
-            active_memory_only: false,
-            mem_private: true,
-            mem_image: true,
-            mem_mapped: true,
-            alignment: None,
-        },
-    );
-    let candidate = if forward {
-        regions.into_iter().find(|region| region.base >= address)
-    } else {
-        regions
-            .into_iter()
-            .rev()
-            .find(|region| region.base.saturating_add(region.size) <= address)
-    };
-    candidate
-        .map(|region| query_memory_region(pid, region.base))
-        .transpose()
 }
 
 pub fn read_memory_bytes(pid: u32, address: usize, length: usize) -> io::Result<Vec<u8>> {
@@ -1803,24 +1696,6 @@ fn greatest_common_divisor(mut left: usize, mut right: usize) -> usize {
         (left, right) = (right, left % right);
     }
     left
-}
-
-pub fn scan_memory_with_progress(
-    pid: u32,
-    exact: Option<ScanValue>,
-    value_type: ScanValueType,
-    result_limit: usize,
-    total: Arc<AtomicUsize>,
-) -> io::Result<Vec<ScanCandidate>> {
-    scan_memory_range_with_progress(
-        pid,
-        exact,
-        None,
-        value_type,
-        result_limit,
-        MemoryScanOptions::default(),
-        total,
-    )
 }
 
 pub fn scan_memory_range_with_progress(
@@ -2350,30 +2225,6 @@ pub fn scan_aob_memory_range_with_progress(
             current: pattern_str.to_owned(),
         })
         .collect())
-}
-
-pub fn filter_aob_scan_candidates(
-    pid: u32,
-    candidates: Vec<TextScanCandidate>,
-    pattern_str: &str,
-) -> io::Result<Vec<TextScanCandidate>> {
-    let pattern = parse_aob_pattern(pattern_str)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid AOB pattern format"))?;
-    let process = ScanProcess::open(pid, false)?;
-    let mut bytes = vec![0; pattern.len()];
-    let mut kept = Vec::new();
-    for candidate in candidates {
-        if process.read(candidate.address, &mut bytes).ok() == Some(pattern.len())
-            && aob_bytes_equal(&bytes, &pattern)
-        {
-            kept.push(TextScanCandidate {
-                address: candidate.address,
-                previous: candidate.current,
-                current: pattern_str.to_owned(),
-            });
-        }
-    }
-    Ok(kept)
 }
 
 pub fn filter_aob_scan_candidates_numeric(
@@ -2913,83 +2764,6 @@ pub fn refresh_scan_candidates(
     })
 }
 
-fn scan_value_matches(
-    comparison: ScanComparison,
-    current: ScanValue,
-    previous: ScanValue,
-    exact: Option<ScanValue>,
-) -> bool {
-    macro_rules! compare {
-        ($current:expr, $previous:expr, $variant:path) => {{
-            let exact = exact.and_then(|value| match value {
-                $variant(value) => Some(value),
-                _ => None,
-            });
-            match comparison {
-                ScanComparison::Exact => exact.is_some_and(|expected| {
-                    scan_exact_matches($variant($current), $variant(expected))
-                }),
-                ScanComparison::Less => exact.is_some_and(|value| $current < value),
-                ScanComparison::Greater => exact.is_some_and(|value| $current > value),
-                ScanComparison::Changed => $current != $previous,
-                ScanComparison::Unchanged => $current == $previous,
-                ScanComparison::Increased => $current > $previous,
-                ScanComparison::Decreased => $current < $previous,
-                ScanComparison::Between => false,
-            }
-        }};
-    }
-    match (current, previous) {
-        (ScanValue::I8(current), ScanValue::I8(previous)) => {
-            compare!(current, previous, ScanValue::I8)
-        }
-        (ScanValue::I16(current), ScanValue::I16(previous)) => {
-            compare!(current, previous, ScanValue::I16)
-        }
-        (ScanValue::I32(current), ScanValue::I32(previous)) => {
-            compare!(current, previous, ScanValue::I32)
-        }
-        (ScanValue::I64(current), ScanValue::I64(previous)) => {
-            compare!(current, previous, ScanValue::I64)
-        }
-        (ScanValue::F32(current), ScanValue::F32(previous)) => match comparison {
-            ScanComparison::Changed => current.to_bits() != previous.to_bits(),
-            ScanComparison::Unchanged => current.to_bits() == previous.to_bits(),
-            _ => compare!(current, previous, ScanValue::F32),
-        },
-        (ScanValue::F64(current), ScanValue::F64(previous)) => match comparison {
-            ScanComparison::Changed => current.to_bits() != previous.to_bits(),
-            ScanComparison::Unchanged => current.to_bits() == previous.to_bits(),
-            _ => compare!(current, previous, ScanValue::F64),
-        },
-        _ => false,
-    }
-}
-
-fn scan_exact_matches(current: ScanValue, expected: ScanValue) -> bool {
-    match (current, expected) {
-        (ScanValue::F32(current), ScanValue::F32(expected)) => {
-            current.is_finite()
-                && expected.is_finite()
-                && (current - expected).abs() <= (expected.abs() * 1e-6).max(1e-5)
-        }
-        (ScanValue::F64(current), ScanValue::F64(expected)) => {
-            current.is_finite()
-                && expected.is_finite()
-                && (current - expected).abs() <= (expected.abs() * 1e-12).max(1e-9)
-        }
-        _ => current == expected,
-    }
-}
-
-fn is_valid_unknown_scan_value(value: ScanValue) -> bool {
-    match value {
-        ScanValue::F32(v) => v.is_finite() && (v == 0.0 || (v.abs() >= 1e-30 && v.abs() <= 1e30)),
-        ScanValue::F64(v) => v.is_finite() && (v == 0.0 || (v.abs() >= 1e-300 && v.abs() <= 1e300)),
-        _ => true,
-    }
-}
-
 fn scan_regions_for(process: &ScanProcess, options: MemoryScanOptions) -> Vec<ScanRegion> {
     let mut regions = Vec::new();
     let mut address = 0usize;
@@ -3436,6 +3210,7 @@ pub struct RawMemorySnapshotChunk {
 pub struct RawMemorySnapshot {
     pub chunks: Vec<RawMemorySnapshotChunk>,
     pub total_slots: usize,
+    #[allow(dead_code)]
     pub value_type: ScanValueType,
     pub alignment: usize,
 }
@@ -4481,23 +4256,6 @@ fn extract_candidates_from_chunk(
     }
 }
 
-fn scan_value_between(value: ScanValue, min: ScanValue, max: ScanValue) -> bool {
-    macro_rules! between {
-        ($variant:path) => {
-            if let ($variant(value), $variant(min), $variant(max)) = (value, min, max) {
-                return value >= min && value <= max;
-            }
-        };
-    }
-    between!(ScanValue::I8);
-    between!(ScanValue::I16);
-    between!(ScanValue::I32);
-    between!(ScanValue::F32);
-    between!(ScanValue::I64);
-    between!(ScanValue::F64);
-    false
-}
-
 fn claim_result_slots(total: &AtomicUsize, requested: usize, limit: usize) -> usize {
     let previous = total
         .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
@@ -4531,100 +4289,6 @@ pub fn read_value(pid: u32, address: usize, value_type: MemoryValueType) -> io::
         MemoryValueType::I64 => i64::from_le_bytes(bytes).to_string(),
         MemoryValueType::F64 => f64::from_le_bytes(bytes).to_string(),
     })
-}
-
-pub fn write_value(
-    pid: u32,
-    address: usize,
-    value_type: MemoryValueType,
-    value: &str,
-) -> io::Result<()> {
-    let mut bytes = [0u8; 8];
-    let width = match value_type {
-        MemoryValueType::I8 => {
-            bytes[0] = value
-                .parse::<i8>()
-                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
-                .to_le_bytes()[0];
-            1
-        }
-        MemoryValueType::I16 => {
-            bytes[..2].copy_from_slice(
-                &value
-                    .parse::<i16>()
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
-                    .to_le_bytes(),
-            );
-            2
-        }
-        MemoryValueType::I32 => {
-            bytes[..4].copy_from_slice(
-                &value
-                    .parse::<i32>()
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
-                    .to_le_bytes(),
-            );
-            4
-        }
-        MemoryValueType::F32 => {
-            bytes[..4].copy_from_slice(
-                &value
-                    .parse::<f32>()
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
-                    .to_le_bytes(),
-            );
-            4
-        }
-        MemoryValueType::I64 => {
-            bytes.copy_from_slice(
-                &value
-                    .parse::<i64>()
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
-                    .to_le_bytes(),
-            );
-            8
-        }
-        MemoryValueType::F64 => {
-            bytes.copy_from_slice(
-                &value
-                    .parse::<f64>()
-                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?
-                    .to_le_bytes(),
-            );
-            8
-        }
-    };
-    let handle = unsafe {
-        OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE,
-            0,
-            pid,
-        )
-    };
-    if handle.is_null() {
-        return Err(io::Error::last_os_error());
-    }
-    let mut written = 0;
-    let succeeded = unsafe {
-        WriteProcessMemory(
-            handle,
-            address as *mut c_void,
-            bytes.as_ptr().cast(),
-            width,
-            &mut written,
-        )
-    } != 0;
-    unsafe { CloseHandle(handle) };
-    if !succeeded {
-        return Err(io::Error::last_os_error());
-    }
-    if written != width {
-        return Err(io::Error::new(
-            io::ErrorKind::WriteZero,
-            "partial process-memory write",
-        ));
-    }
-    Ok(())
 }
 
 unsafe extern "system" {
