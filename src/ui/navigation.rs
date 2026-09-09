@@ -10,6 +10,9 @@ impl CrosshairApp {
     }
 
     pub(crate) fn versions_are_equal(v1: &str, v2: &str) -> bool {
+        if v1 == v2 {
+            return true;
+        }
         let mut parts1: Vec<u32> = v1
             .split('.')
             .map(|s| s.parse::<u32>().unwrap_or(0))
@@ -209,5 +212,19 @@ impl CrosshairApp {
             .fill(fill)
             .stroke(egui::Stroke::new(1.0, stroke))
             .corner_radius(10.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CrosshairApp;
+
+    #[test]
+    fn versions_are_equal_handles_exact_match_and_trailing_zeros() {
+        assert!(CrosshairApp::versions_are_equal("1.2.7", "1.2.7"));
+        assert!(CrosshairApp::versions_are_equal("1.2.0", "1.2"));
+        assert!(CrosshairApp::versions_are_equal("1.2", "1.2.0.0"));
+        assert!(!CrosshairApp::versions_are_equal("1.2.7", "1.2.8"));
+        assert!(!CrosshairApp::versions_are_equal("2.0.0", "1.0.0"));
     }
 }

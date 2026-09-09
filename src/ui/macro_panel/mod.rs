@@ -13870,8 +13870,6 @@ if supports_move_mouse || show_detection_tuning {
                                                         Self::render_custom_ocr_inline_controls(
                                                             ui,
                                                             language,
-                                                            self.state.vietnamese_input_enabled,
-                                                            self.state.vietnamese_input_mode,
                                                             group.id,
                                                             preset.id,
                                                             step_index,
