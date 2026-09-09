@@ -274,12 +274,10 @@ impl EspGpuRenderer {
 
                 let dx = (*x2 - *x1) as f32;
                 let dy = (*y2 - *y1) as f32;
-                let len = (dx * dx + dy * dy).sqrt().max(1.0);
+                let len = dx.hypot(dy).max(1.0);
                 let ux = dx / len;
                 let uy = dy / len;
-                let angle = 28.0_f32.to_radians();
-                let sin_a = angle.sin();
-                let cos_a = angle.cos();
+                let (sin_a, cos_a) = 28.0_f32.to_radians().sin_cos();
                 for side in [-1.0_f32, 1.0_f32] {
                     let rx = ux * cos_a - side * uy * sin_a;
                     let ry = uy * cos_a + side * ux * sin_a;
@@ -338,10 +336,7 @@ impl EspGpuRenderer {
                 thickness,
             } => {
                 if points.len() == 4 {
-                    let min_x = points.iter().map(|p| p.0).min().unwrap_or(0);
-                    let max_x = points.iter().map(|p| p.0).max().unwrap_or(0);
-                    let min_y = points.iter().map(|p| p.1).min().unwrap_or(0);
-                    let max_y = points.iter().map(|p| p.1).max().unwrap_or(0);
+                    let (min_x, max_x, min_y, max_y) = quad_bounds(points);
                     let is_axis_aligned = points
                         .iter()
                         .all(|p| (p.0 == min_x || p.0 == max_x) && (p.1 == min_y || p.1 == max_y));
@@ -396,9 +391,21 @@ impl EspGpuRenderer {
                     right: (right - ox) as f32,
                     bottom: (bottom - oy) as f32,
                 };
-                let utf16 = text.text.encode_utf16().collect::<Vec<_>>();
+                let mut stack_buf = [0u16; 64];
+                let heap_buf;
+                let utf16: &[u16] = if text.text.len() <= stack_buf.len() {
+                    let mut count = 0;
+                    for ch in text.text.encode_utf16() {
+                        stack_buf[count] = ch;
+                        count += 1;
+                    }
+                    &stack_buf[..count]
+                } else {
+                    heap_buf = text.text.encode_utf16().collect::<Vec<_>>();
+                    &heap_buf
+                };
                 self.d2d.DrawText(
-                    &utf16,
+                    utf16,
                     &format,
                     &rect,
                     &brush,
@@ -575,5 +582,42 @@ fn d2d_color([r, g, b, a]: [u8; 4]) -> D2D1_COLOR_F {
         g: g as f32 / 255.0,
         b: b as f32 / 255.0,
         a: a as f32 / 255.0,
+    }
+}
+
+fn quad_bounds(points: &[(i32, i32)]) -> (i32, i32, i32, i32) {
+    if points.is_empty() {
+        return (0, 0, 0, 0);
+    }
+    let mut min_x = points[0].0;
+    let mut max_x = points[0].0;
+    let mut min_y = points[0].1;
+    let mut max_y = points[0].1;
+    for p in &points[1..] {
+        min_x = min_x.min(p.0);
+        max_x = max_x.max(p.0);
+        min_y = min_y.min(p.1);
+        max_y = max_y.max(p.1);
+    }
+    (min_x, max_x, min_y, max_y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{d2d_color, quad_bounds};
+
+    #[test]
+    fn quad_bounds_finds_accurate_extents() {
+        let pts = [(10, 20), (5, 80), (100, 30), (50, 5)];
+        assert_eq!(quad_bounds(&pts), (5, 100, 5, 80));
+    }
+
+    #[test]
+    fn d2d_color_maps_rgba_to_floats() {
+        let color = d2d_color([255, 0, 128, 255]);
+        assert_eq!(color.r, 1.0);
+        assert_eq!(color.g, 0.0);
+        assert!((color.b - 128.0 / 255.0).abs() < 1e-4);
+        assert_eq!(color.a, 1.0);
     }
 }
