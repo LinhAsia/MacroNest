@@ -38,11 +38,8 @@ impl CrosshairApp {
     }
 
     pub(crate) fn truncate_window_title(title: &str, max_chars: usize) -> String {
-        let chars: Vec<char> = title.chars().collect();
-        if chars.len() > max_chars {
-            let mut truncated: String = chars[..max_chars].iter().collect();
-            truncated.push_str("...");
-            truncated
+        if let Some((idx, _)) = title.char_indices().nth(max_chars) {
+            format!("{}...", &title[..idx])
         } else {
             title.to_owned()
         }
@@ -70,5 +67,31 @@ impl CrosshairApp {
         } else {
             simplified
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CrosshairApp;
+
+    #[test]
+    fn truncate_window_title_leaves_short_title_untouched() {
+        assert_eq!(CrosshairApp::truncate_window_title("Notepad", 10), "Notepad");
+    }
+
+    #[test]
+    fn truncate_window_title_truncates_long_ascii() {
+        assert_eq!(
+            CrosshairApp::truncate_window_title("VeryLongWindowTitleName", 8),
+            "VeryLong..."
+        );
+    }
+
+    #[test]
+    fn truncate_window_title_handles_unicode_correctly() {
+        assert_eq!(
+            CrosshairApp::truncate_window_title("Trình quản lý tác vụ", 5),
+            "Trình..."
+        );
     }
 }

@@ -16,7 +16,7 @@ impl CrosshairApp {
         step: &mut MacroStep,
         live_sync: &mut bool,
     ) {
-        let outputs_label = Self::tr_lang(language, "Outputs", "Outputs").to_owned();
+        let outputs_label = Self::tr_lang(language, "Outputs", "Outputs");
 
         egui::ComboBox::from_id_salt((group_id, preset_id, step_index, "ocr-outputs"))
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
@@ -175,9 +175,7 @@ impl CrosshairApp {
         }
 
         egui::ComboBox::from_id_salt((group_id, preset_id, step_index, "ocr-language-step"))
-            .selected_text(
-                crate::ocr::compact_label_for_language_code(&step.ocr_language).to_owned(),
-            )
+            .selected_text(crate::ocr::compact_label_for_language_code(&step.ocr_language))
             .width(92.0)
             .show_ui(ui, |ui| {
                 for pack in crate::ocr::ocr_language_packs() {
@@ -201,8 +199,7 @@ impl CrosshairApp {
                         })
                         .inner;
                     if row.clicked() {
-                        step.ocr_language = pack.code.to_owned();
-                        step.ocr_language = crate::ocr::normalize_language_code(&step.ocr_language);
+                        step.ocr_language = crate::ocr::normalize_language_code(pack.code);
                         *live_sync = true;
                     }
                 }

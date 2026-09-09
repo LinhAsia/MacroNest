@@ -1,6 +1,6 @@
 use crate::model::*;
 use crate::ui::{CrosshairApp, CrosshairColorTarget, VisionCaptureTarget};
-use eframe::egui::{self, *};
+use eframe::egui::{self, Button, DragValue, RichText, TextEdit, vec2};
 use std::time::Duration;
 
 impl CrosshairApp {

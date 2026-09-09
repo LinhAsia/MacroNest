@@ -1,7 +1,10 @@
 use crate::audio;
 use crate::model::*;
 use crate::ui::{AudioCardOutcome, AudioEditorTarget, CrosshairApp};
-use eframe::egui::{self, *};
+use eframe::egui::{
+    self, Button, Color32, DragValue, Frame, RichText, Sense, Slider, Stroke, StrokeKind, TextEdit,
+    vec2,
+};
 
 #[derive(Clone, Copy, Default)]
 struct AudioTrimTimelineOutcome {

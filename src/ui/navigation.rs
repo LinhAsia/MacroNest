@@ -60,9 +60,8 @@ impl CrosshairApp {
 
     pub(crate) fn language_button_text(&self) -> RichText {
         match self.state.ui_language {
-            UiLanguage::English => RichText::new("EN").strong(),
             UiLanguage::Vietnamese => RichText::new("VI").strong(),
-            UiLanguage::Icon => RichText::new("EN").strong(),
+            UiLanguage::English | UiLanguage::Icon => RichText::new("EN").strong(),
         }
     }
 
@@ -74,14 +73,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn startup_loading_text(&self) -> &'static str {
-        match self.state.ui_language {
-            UiLanguage::English => "loading macro tools, overlays, and UI",
-            UiLanguage::Vietnamese => self.tr(
-                "loading macro tools, overlays, and UI",
-                "loading macro tools, overlays, and UI",
-            ),
-            UiLanguage::Icon => "loading macro tools, overlays, and UI",
-        }
+        "loading macro tools, overlays, and UI"
     }
 
     pub(crate) fn titlebar_language_tooltip(&self) -> &'static str {
