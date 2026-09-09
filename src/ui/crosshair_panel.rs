@@ -418,7 +418,7 @@ impl CrosshairApp {
             let mut pending_color_pick_target_for_preset = None;
             let is_selected = self.state.selected_profile.as_deref()
                 == Some(self.state.profiles[index].name.as_str());
-            let preset_snapshot = self.state.profiles[index].clone();
+            let original_name = self.state.profiles[index].name.clone();
             {
                 let preset = &mut self.state.profiles[index];
                 Self::show_preset_card(ui, preset.enabled, |ui| {
@@ -469,7 +469,7 @@ impl CrosshairApp {
                             )
                             .clicked()
                             {
-                                copy_crosshair_profile = Some(preset_snapshot.clone());
+                                copy_crosshair_profile = Some(preset.clone());
                             }
 
                             if Self::sound_style_remove_button(ui).clicked() {
@@ -574,7 +574,7 @@ impl CrosshairApp {
             if preset_changed {
                 if is_selected {
                     let preset = &self.state.profiles[index];
-                    if preset.name != preset_snapshot.name {
+                    if preset.name != original_name {
                         self.state.selected_profile = Some(preset.name.clone());
                         self.save_name = preset.name.clone();
                     }

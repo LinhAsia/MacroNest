@@ -51,11 +51,7 @@ impl CrosshairApp {
             AppPanel::Memory => "Memory",
             AppPanel::Network => "Network",
         };
-        if panel == AppPanel::Ocr {
-            Self::tr_lang(self.state.ui_language, "OCR", "OCR")
-        } else {
-            Self::tr_lang(self.state.ui_language, english, english)
-        }
+        Self::tr_lang(self.state.ui_language, english, english)
     }
 
     pub(crate) fn language_button_text(&self) -> RichText {
