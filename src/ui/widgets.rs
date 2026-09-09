@@ -104,29 +104,33 @@ impl CrosshairApp {
             output
         });
 
+        Self::paint_card_hover(ui, &res.response, dark_mode);
+        res.inner
+    }
+
+    fn paint_card_hover(ui: &egui::Ui, response: &egui::Response, dark_mode: bool) {
         // ponytail: collapsed cards are header-height; expanded cards should stay visually clear.
-        if res.response.hovered() && res.response.rect.height() <= 44.0 {
-            let hover_fill = if dark_mode {
-                Color32::from_rgba_unmultiplied(255, 255, 255, 14)
+        if response.hovered() && response.rect.height() <= 44.0 {
+            let (hover_fill, hover_stroke) = if dark_mode {
+                (
+                    Color32::from_rgba_unmultiplied(255, 255, 255, 14),
+                    Color32::from_rgba_unmultiplied(155, 220, 255, 92),
+                )
             } else {
-                Color32::from_rgba_unmultiplied(24, 64, 104, 18)
-            };
-            let hover_stroke = if dark_mode {
-                Color32::from_rgba_unmultiplied(155, 220, 255, 92)
-            } else {
-                Color32::from_rgba_unmultiplied(42, 106, 166, 110)
+                (
+                    Color32::from_rgba_unmultiplied(24, 64, 104, 18),
+                    Color32::from_rgba_unmultiplied(42, 106, 166, 110),
+                )
             };
             ui.painter()
-                .rect_filled(res.response.rect, egui::CornerRadius::same(6), hover_fill);
+                .rect_filled(response.rect, egui::CornerRadius::same(6), hover_fill);
             ui.painter().rect_stroke(
-                res.response.rect,
+                response.rect,
                 egui::CornerRadius::same(6),
                 egui::Stroke::new(1.0, hover_stroke),
                 egui::StrokeKind::Middle,
             );
         }
-
-        res.inner
     }
 
     pub(crate) fn show_macro_preset_card<R>(
@@ -229,28 +233,7 @@ impl CrosshairApp {
                 output
             });
 
-        // ponytail: collapsed cards are header-height; expanded cards should stay visually clear.
-        if res.response.hovered() && res.response.rect.height() <= 44.0 {
-            let hover_fill = if dark_mode {
-                Color32::from_rgba_unmultiplied(255, 255, 255, 14)
-            } else {
-                Color32::from_rgba_unmultiplied(24, 64, 104, 18)
-            };
-            let hover_stroke = if dark_mode {
-                Color32::from_rgba_unmultiplied(155, 220, 255, 92)
-            } else {
-                Color32::from_rgba_unmultiplied(42, 106, 166, 110)
-            };
-            ui.painter()
-                .rect_filled(res.response.rect, egui::CornerRadius::same(6), hover_fill);
-            ui.painter().rect_stroke(
-                res.response.rect,
-                egui::CornerRadius::same(6),
-                egui::Stroke::new(1.0, hover_stroke),
-                egui::StrokeKind::Middle,
-            );
-        }
-
+        Self::paint_card_hover(ui, &res.response, dark_mode);
         res.inner
     }
 
@@ -308,14 +291,14 @@ impl CrosshairApp {
         let message_response = ui.add_sized(
             [170.0, 18.0],
             egui::Label::new(
-                RichText::new(feedback.message.clone())
+                RichText::new(&feedback.message)
                     .size(11.0)
                     .color(Color32::from_rgb(255, 170, 170)),
             )
             .wrap_mode(egui::TextWrapMode::Truncate),
         );
         if message_response.hovered() {
-            let _ = message_response.on_hover_text(feedback.message.clone());
+            let _ = message_response.on_hover_text(&feedback.message);
         }
         if feedback.open_groq_settings
             && Self::add_sized_with_show_hover(
@@ -515,18 +498,12 @@ impl CrosshairApp {
             egui::color_picker::Alpha::Opaque => 6,
             _ => 8,
         };
-        let mut cleaned: String = draft
-            .chars()
-            .filter(|c| c.is_ascii_hexdigit())
-            .map(|c| c.to_ascii_uppercase())
-            .collect();
-        cleaned.truncate(max_len);
-        if cleaned != draft {
-            draft = cleaned.clone();
-        }
+        draft.retain(|c| c.is_ascii_hexdigit());
+        draft.make_ascii_uppercase();
+        draft.truncate(max_len);
 
         let changed = if response.changed() {
-            Self::apply_rgba_hex_string(color, alpha_mode, &cleaned)
+            Self::apply_rgba_hex_string(color, alpha_mode, &draft)
         } else {
             false
         };
@@ -565,29 +542,27 @@ impl CrosshairApp {
     ) -> bool {
         let before = (color.r, color.g, color.b, color.a);
 
-        if cleaned.len() == 6 {
-            if let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
-                && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
-                && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
-            {
-                color.r = r;
-                color.g = g;
-                color.b = b;
-                if matches!(alpha_mode, egui::color_picker::Alpha::Opaque) {
+        if let Ok(value) = u32::from_str_radix(cleaned, 16) {
+            match (cleaned.len(), alpha_mode) {
+                (6, egui::color_picker::Alpha::Opaque) => {
+                    color.r = (value >> 16) as u8;
+                    color.g = (value >> 8) as u8;
+                    color.b = value as u8;
                     color.a = 255;
                 }
+                (6, _) => {
+                    color.r = (value >> 16) as u8;
+                    color.g = (value >> 8) as u8;
+                    color.b = value as u8;
+                }
+                (8, mode) if !matches!(mode, egui::color_picker::Alpha::Opaque) => {
+                    color.r = (value >> 24) as u8;
+                    color.g = (value >> 16) as u8;
+                    color.b = (value >> 8) as u8;
+                    color.a = value as u8;
+                }
+                _ => {}
             }
-        } else if cleaned.len() == 8
-            && !matches!(alpha_mode, egui::color_picker::Alpha::Opaque)
-            && let Ok(r) = u8::from_str_radix(&cleaned[0..2], 16)
-            && let Ok(g) = u8::from_str_radix(&cleaned[2..4], 16)
-            && let Ok(b) = u8::from_str_radix(&cleaned[4..6], 16)
-            && let Ok(a) = u8::from_str_radix(&cleaned[6..8], 16)
-        {
-            color.r = r;
-            color.g = g;
-            color.b = b;
-            color.a = a;
         }
 
         before != (color.r, color.g, color.b, color.a)
@@ -694,23 +669,17 @@ impl CrosshairApp {
 
             // Draw cursor indicator
             let cursor_x = rect.left() + (*h) * rect.width();
-            ui.painter().line_segment(
-                [
-                    egui::pos2(cursor_x, rect.top() - 2.0),
-                    egui::pos2(cursor_x, rect.bottom() + 2.0),
-                ],
-                egui::Stroke::new(2.0, egui::Color32::WHITE),
-            );
-            ui.painter().line_segment(
-                [
-                    egui::pos2(cursor_x, rect.top() - 2.0),
-                    egui::pos2(cursor_x, rect.bottom() + 2.0),
-                ],
-                egui::Stroke::new(1.0, egui::Color32::BLACK),
-            );
+            Self::paint_slider_cursor(ui.painter(), cursor_x, rect.top(), rect.bottom());
         }
 
         changed
+    }
+
+    fn paint_slider_cursor(painter: &egui::Painter, x: f32, top: f32, bottom: f32) {
+        let p1 = egui::pos2(x, top - 2.0);
+        let p2 = egui::pos2(x, bottom + 2.0);
+        painter.line_segment([p1, p2], egui::Stroke::new(2.0, egui::Color32::WHITE));
+        painter.line_segment([p1, p2], egui::Stroke::new(1.0, egui::Color32::BLACK));
     }
 
     fn premium_alpha_slider(ui: &mut egui::Ui, a: &mut f32, h: f32, s: f32, v: f32) -> bool {
@@ -724,30 +693,34 @@ impl CrosshairApp {
         }
 
         if ui.is_rect_visible(rect) {
-            // Draw checkers background
+            // Draw checkers background with a single base rect and batched mesh
             let cell_size = rect.height() / 2.0;
             let checkers_count = (rect.width() / cell_size).ceil() as i32;
+            let color1 = egui::Color32::from_gray(60);
+            let color2 = egui::Color32::from_gray(120);
+            ui.painter().rect_filled(rect, 0.0, color1);
+
+            let mut checker_mesh = egui::epaint::Mesh::default();
             for i in 0..checkers_count {
                 let x = rect.left() + i as f32 * cell_size;
-                let color1 = egui::Color32::from_gray(60);
-                let color2 = egui::Color32::from_gray(120);
-                ui.painter().rect_filled(
-                    egui::Rect::from_min_size(
-                        egui::pos2(x, rect.top()),
-                        egui::vec2(cell_size, cell_size),
-                    ),
-                    0.0,
-                    if i % 2 == 0 { color1 } else { color2 },
+                let top_y = if i % 2 == 0 {
+                    rect.top() + cell_size
+                } else {
+                    rect.top()
+                };
+                let r = egui::Rect::from_min_size(
+                    egui::pos2(x, top_y),
+                    egui::vec2(cell_size, cell_size),
                 );
-                ui.painter().rect_filled(
-                    egui::Rect::from_min_size(
-                        egui::pos2(x, rect.top() + cell_size),
-                        egui::vec2(cell_size, cell_size),
-                    ),
-                    0.0,
-                    if i % 2 == 0 { color2 } else { color1 },
-                );
+                let idx = checker_mesh.vertices.len() as u32;
+                checker_mesh.colored_vertex(r.left_top(), color2);
+                checker_mesh.colored_vertex(r.left_bottom(), color2);
+                checker_mesh.colored_vertex(r.right_top(), color2);
+                checker_mesh.colored_vertex(r.right_bottom(), color2);
+                checker_mesh.add_triangle(idx, idx + 1, idx + 2);
+                checker_mesh.add_triangle(idx + 1, idx + 2, idx + 3);
             }
+            ui.painter().add(egui::epaint::Shape::mesh(checker_mesh));
 
             // Draw alpha gradient overlay
             let mut mesh = egui::epaint::Mesh::default();
@@ -777,22 +750,84 @@ impl CrosshairApp {
 
             // Draw cursor indicator
             let cursor_x = rect.left() + (*a) * rect.width();
-            ui.painter().line_segment(
-                [
-                    egui::pos2(cursor_x, rect.top() - 2.0),
-                    egui::pos2(cursor_x, rect.bottom() + 2.0),
-                ],
-                egui::Stroke::new(2.0, egui::Color32::WHITE),
-            );
-            ui.painter().line_segment(
-                [
-                    egui::pos2(cursor_x, rect.top() - 2.0),
-                    egui::pos2(cursor_x, rect.bottom() + 2.0),
-                ],
-                egui::Stroke::new(1.0, egui::Color32::BLACK),
-            );
+            Self::paint_slider_cursor(ui.painter(), cursor_x, rect.top(), rect.bottom());
         }
 
         changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_rgba_hex_string_parses_6_and_8_digit_hex() {
+        let mut color = crate::model::RgbaColor {
+            r: 10,
+            g: 20,
+            b: 30,
+            a: 40,
+        };
+
+        // 6-digit opaque sets alpha to 255
+        assert!(CrosshairApp::apply_rgba_hex_string(
+            &mut color,
+            egui::color_picker::Alpha::Opaque,
+            "FFA012"
+        ));
+        assert_eq!(color.r, 0xFF);
+        assert_eq!(color.g, 0xA0);
+        assert_eq!(color.b, 0x12);
+        assert_eq!(color.a, 255);
+
+        // Same color again -> no change
+        assert!(!CrosshairApp::apply_rgba_hex_string(
+            &mut color,
+            egui::color_picker::Alpha::Opaque,
+            "FFA012"
+        ));
+
+        // 6-digit blend preserves alpha
+        color.a = 77;
+        assert!(CrosshairApp::apply_rgba_hex_string(
+            &mut color,
+            egui::color_picker::Alpha::OnlyBlend,
+            "112233"
+        ));
+        assert_eq!(color.r, 0x11);
+        assert_eq!(color.g, 0x22);
+        assert_eq!(color.b, 0x33);
+        assert_eq!(color.a, 77);
+
+        // 8-digit blend updates all components including alpha
+        assert!(CrosshairApp::apply_rgba_hex_string(
+            &mut color,
+            egui::color_picker::Alpha::OnlyBlend,
+            "A1B2C3D4"
+        ));
+        assert_eq!(color.r, 0xA1);
+        assert_eq!(color.g, 0xB2);
+        assert_eq!(color.b, 0xC3);
+        assert_eq!(color.a, 0xD4);
+
+        // 8-digit in opaque mode is ignored
+        assert!(!CrosshairApp::apply_rgba_hex_string(
+            &mut color,
+            egui::color_picker::Alpha::Opaque,
+            "A1B2C3D4"
+        ));
+
+        // Invalid hex or invalid length
+        assert!(!CrosshairApp::apply_rgba_hex_string(
+            &mut color,
+            egui::color_picker::Alpha::OnlyBlend,
+            "12345"
+        ));
+        assert!(!CrosshairApp::apply_rgba_hex_string(
+            &mut color,
+            egui::color_picker::Alpha::OnlyBlend,
+            "ZZZZZZ"
+        ));
     }
 }
