@@ -47,7 +47,7 @@ mod windows_overlay {
     use super::{MacroRecordingEvent, MacroRecordingSession};
     use crate::ui::{MouseMoveAbsoluteCaptureTarget, VisionCaptureMode, VisionCaptureTarget};
     use anyhow::{Context, Result, bail};
-    use arboard::{Clipboard, ImageData};
+    use arboard::Clipboard;
     use crossbeam_channel::{Receiver, Sender};
     use eframe::egui;
     use once_cell::sync::Lazy;
@@ -179,7 +179,7 @@ mod windows_overlay {
             MousePathEventKind, MousePathPreset, MouseSensitivityPreset, PinOverlayStyle,
             PinPreset, ProfileRecord, QuickKeyDisplayMode, RgbaColor,
             SoundPreset, TimerPreset, VisionPreset, VisionSettings, WindowAnchor,
-            WindowExpandControls, WindowExpandDirection, WindowFocusPreset, WindowPreset,
+            WindowFocusPreset, WindowPreset,
         },
         render::render_crosshair,
         storage::AppPaths,
@@ -1796,8 +1796,6 @@ mod windows_overlay {
         UpdateWindowFocusPresets(Vec<WindowFocusPreset>),
         UpdateWindowLayouts(Vec<crate::model::WindowLayout>),
         ApplyWindowLayout(crate::model::WindowLayout),
-        #[allow(dead_code)]
-        UpdateWindowExpandControls(WindowExpandControls),
         UpdatePinPresets(Vec<PinPreset>),
         UpdateMousePathPresets(Vec<MousePathPreset>),
         PreviewMousePath(Option<(u32, Vec<MousePathEvent>, Option<u64>)>),
@@ -2004,17 +2002,6 @@ mod windows_overlay {
         TextSessionConfirm,
         TextSessionDelete,
         TextSessionVietnamese,
-    }
-
-    #[allow(dead_code)]
-    #[derive(Clone)]
-    enum ScreenDrawCaptureMode {
-        MouseDrag,
-        HoldTrigger(HotkeyBinding),
-        VideoRegionSelect,
-        VideoHoldTrigger(HotkeyBinding),
-        OcrRegionSelect { language: String, freeze: bool },
-        OcrHoldTrigger { trigger: HotkeyBinding, language: String, freeze: bool },
     }
 
     impl Default for ScreenDrawControl {
@@ -2374,9 +2361,6 @@ mod windows_overlay {
             width: i32,
             height: i32,
         },
-        TriggerInstantScreenshot,
-        TriggerInstantOcr,
-        TriggerVideoRecordRegionSelect,
         CrosshairDrawFinished {
             profile_name: String,
             asset_name: Option<String>,
@@ -2597,7 +2581,6 @@ mod windows_overlay {
         window_presets: Vec<WindowPreset>,
         window_focus_presets: Vec<WindowFocusPreset>,
         window_layouts: Vec<crate::model::WindowLayout>,
-        window_expand_controls: WindowExpandControls,
         pin_presets: Vec<PinPreset>,
         mouse_path_presets: Vec<MousePathPreset>,
         mouse_sensitivity_presets: Vec<MouseSensitivityPreset>,
@@ -2711,7 +2694,6 @@ mod windows_overlay {
                 window_presets: Vec::new(),
                 window_focus_presets: Vec::new(),
                 window_layouts: Vec::new(),
-                window_expand_controls: WindowExpandControls::default(),
                 pin_presets: Vec::new(),
                 mouse_path_presets: Vec::new(),
                 mouse_sensitivity_presets: Vec::new(),
@@ -4746,7 +4728,6 @@ mod windows_overlay {
                 let mut hook_state = HOOK_STATE.lock();
                 hook_state.ui_tx = None;
                 hook_state.window_presets.clear();
-                hook_state.window_expand_controls = WindowExpandControls::default();
                 hook_state.macro_groups.clear();
                 hook_state.locked_inputs.clear();
                 hook_state.mouse_move_locks = MouseMoveLockCounts::default();
@@ -9880,10 +9861,6 @@ mod windows_overlay {
                     let _ = sync_window_hotkeys(hwnd, runtime);
                 }
 
-                OverlayCommand::UpdateWindowExpandControls(controls) => {
-                    HOOK_STATE.lock().window_expand_controls = controls;
-                }
-
                 OverlayCommand::UpdatePinPresets(presets) => {
                     let mut hook_state = HOOK_STATE.lock();
                     hook_state.pin_presets = presets.clone();
@@ -12666,8 +12643,6 @@ mod windows_overlay {
     }
 
     fn screen_draw_handle_button_down(point: POINT, right_button: bool) -> bool {
-        let capture_mode = None;
-        let capture_session_id = 0u64;
         let mut should_trigger_native_capture = false;
         let mut should_sync_config = false;
         let mut should_deactivate = false;
@@ -13039,7 +13014,7 @@ mod windows_overlay {
                 }
             }
         }
-        if state.active && capture_mode.is_none() {
+        if state.active {
             mark_screen_draw_repaint_pending(&mut state);
         }
         drop(state);
@@ -13052,10 +13027,6 @@ mod windows_overlay {
         }
         if should_sync_config {
             send_screen_draw_config_to_ui();
-        }
-        if let Some(capture_mode) = capture_mode {
-            request_screen_draw_overlay_sync();
-            begin_screen_draw_region_capture(capture_mode, capture_session_id);
         }
         if should_trigger_native_capture {
             start_native_screen_draw_region_capture();
@@ -13071,30 +13042,9 @@ mod windows_overlay {
         });
     }
 
-    fn begin_video_region_capture(mode: ScreenDrawCaptureMode) -> bool {
+    fn begin_screen_draw_ocr_capture(trigger: HotkeyBinding, language: String, freeze: bool) -> bool {
         if SCREEN_DRAW_HWND.load(Ordering::Relaxed) == 0 {
             return false;
-        }
-        let is_hold_trigger = matches!(
-            &mode,
-            ScreenDrawCaptureMode::VideoHoldTrigger(_)
-                | ScreenDrawCaptureMode::OcrHoldTrigger { .. }
-                | ScreenDrawCaptureMode::HoldTrigger(_)
-        );
-        let should_restore_ui = !is_hold_trigger;
-
-        #[cfg(windows)]
-        unsafe {
-            if !is_hold_trigger {
-                // Sleep briefly so the egui render frame that triggered this completes
-                // before we hide the window. Without this, send_viewport_cmd and ShowWindow
-                // race from two threads and crash.
-                thread::sleep(Duration::from_millis(50));
-                if let Some(hwnd) = find_app_ui_window() {
-                    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
-                    let _ = ShowWindow(hwnd, SW_HIDE);
-                }
-            }
         }
         let should_capture_freeze = {
             let state = SCREEN_DRAW_STATE.lock();
@@ -13104,11 +13054,7 @@ mod windows_overlay {
             if state.active {
                 false
             } else {
-                match &mode {
-                    ScreenDrawCaptureMode::OcrRegionSelect { freeze, .. }
-                    | ScreenDrawCaptureMode::OcrHoldTrigger { freeze, .. } => *freeze,
-                    _ => state.freeze_screen,
-                }
+                freeze
             }
         };
         let captured_frame = if should_capture_freeze {
@@ -13140,15 +13086,7 @@ mod windows_overlay {
                 state.freeze_screen = should_capture_freeze;
                 activate_screen_draw(&mut state, captured_frame);
             }
-            if should_restore_ui {
-                state.restore_ui_on_deactivate = true;
-            }
-            let trigger = match &mode {
-                ScreenDrawCaptureMode::VideoHoldTrigger(trigger) => Some(trigger.clone()),
-                ScreenDrawCaptureMode::OcrHoldTrigger { trigger, .. } => Some(trigger.clone()),
-                _ => None,
-            };
-            let Some(id) = begin_screen_draw_capture_session(&mut state, trigger) else {
+            let Some(id) = begin_screen_draw_capture_session(&mut state, Some(trigger.clone())) else {
                 return false;
             };
             state.capture_deactivate_on_finish = started_inactive;
@@ -13156,13 +13094,13 @@ mod windows_overlay {
         }
         reset_screen_draw_capture_overlay_state();
         request_screen_draw_overlay_sync();
-        begin_screen_draw_region_capture(mode, session_id);
+        begin_screen_draw_ocr_region_capture_worker(trigger, language, session_id);
         true
     }
 
     pub fn screen_draw_begin_ocr_region_capture(trigger: HotkeyBinding, language: String, freeze: bool) -> bool {
         thread::spawn(move || {
-            begin_video_region_capture(ScreenDrawCaptureMode::OcrHoldTrigger { trigger, language, freeze });
+            begin_screen_draw_ocr_capture(trigger, language, freeze);
         });
         true
     }
@@ -13256,117 +13194,53 @@ mod windows_overlay {
         elapsed < Duration::from_millis(SCREEN_DRAW_TRIGGER_TAP_TOGGLE_MS)
     }
 
-    fn begin_screen_draw_region_capture(capture_mode: ScreenDrawCaptureMode, session_id: u64) {
+    fn begin_screen_draw_ocr_region_capture_worker(
+        trigger: HotkeyBinding,
+        language: String,
+        session_id: u64,
+    ) {
         let hwnd_raw = SCREEN_DRAW_HWND.load(Ordering::Relaxed);
         thread::spawn(move || {
             let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_screen_draw_region_capture_flow(capture_mode, session_id, hwnd_raw)
+                run_screen_draw_ocr_capture_flow(trigger, language, session_id, hwnd_raw)
             }))
             .unwrap_or_else(|_| "OCR/Region capture encountered an unexpected error.".to_owned());
             send_ui_command(UiCommand::ScreenDrawCaptureStatus(status));
         });
     }
 
-    fn run_screen_draw_region_capture_flow(
-        capture_mode: ScreenDrawCaptureMode,
+    fn run_screen_draw_ocr_capture_flow(
+        trigger: HotkeyBinding,
+        language: String,
         session_id: u64,
         hwnd_raw: isize,
     ) -> String {
-        if let ScreenDrawCaptureMode::OcrHoldTrigger { trigger, language, .. } = capture_mode {
-            let selected = select_screen_draw_capture_region_from_trigger(&trigger, session_id);
-            let frame = match selected {
-                Ok(Some((x, y, width, height))) => {
-                    build_screen_draw_capture_region(x, y, width, height).ok()
-                }
-                _ => None,
-            };
-            let rect = match selected {
-                Ok(Some((x, y, width, height))) => Some(windows::Win32::Foundation::RECT {
-                    left: x,
-                    top: y,
-                    right: x + width,
-                    bottom: y + height,
-                }),
-                _ => None,
-            };
-            let ui_language = PROTRACTOR_STATE.lock().ui_language;
-            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
-            return match (selected, frame) {
-                (Ok(Some(_)), Some(capture)) => {
-                    perform_ocr_on_capture_and_copy(capture, &language, rect, ui_language)
-                }
-                (Ok(None), _) => "OCR region selection cancelled.".to_owned(),
-                (Err(error), _) => format!("OCR region selection failed: {error}"),
-                (Ok(Some(_)), None) => "Failed to capture the selected screen region.".to_owned(),
-            };
-        }
-        if let ScreenDrawCaptureMode::OcrRegionSelect { language, .. } = capture_mode {
-            let selected = select_screen_draw_capture_region(session_id);
-            let frame = match selected {
-                Ok(Some((x, y, width, height))) => {
-                    build_screen_draw_capture_region(x, y, width, height).ok()
-                }
-                _ => None,
-            };
-            let rect = match selected {
-                Ok(Some((x, y, width, height))) => Some(windows::Win32::Foundation::RECT {
-                    left: x,
-                    top: y,
-                    right: x + width,
-                    bottom: y + height,
-                }),
-                _ => None,
-            };
-            let ui_language = PROTRACTOR_STATE.lock().ui_language;
-            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
-            return match (selected, frame) {
-                (Ok(Some(_)), Some(capture)) => {
-                    perform_ocr_on_capture_and_copy(capture, &language, rect, ui_language)
-                }
-                (Ok(None), _) => "OCR region selection cancelled.".to_owned(),
-                (Err(error), _) => format!("OCR region selection failed: {error}"),
-                (Ok(Some(_)), None) => "Failed to capture the selected screen region.".to_owned(),
-            };
-        }
-        if let ScreenDrawCaptureMode::VideoHoldTrigger(trigger) = capture_mode {
-            let result = match select_screen_draw_capture_region_from_trigger(&trigger, session_id) {
-                Ok(Some(region)) => {
-                    thread::spawn(move || {
-                        thread::sleep(Duration::from_millis(35));
-                        crate::video_recorder::start_region_async(region);
-                    });
-                    "Starting region recording.".to_owned()
-                }
-                Ok(None) => "Video region selection cancelled.".to_owned(),
-                Err(error) => format!("Video region selection failed: {error}"),
-            };
-            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
-            return result;
-        }
-        if matches!(capture_mode, ScreenDrawCaptureMode::VideoRegionSelect) {
-            let result = match select_screen_draw_capture_region(session_id) {
-                Ok(Some((x, y, width, height))) => {
-                    send_ui_command(UiCommand::VideoRecordRegionSelected {
-                        x,
-                        y,
-                        width,
-                        height,
-                    });
-                    "Video recording region selected.".to_owned()
-                }
-                Ok(None) => "Video region selection cancelled.".to_owned(),
-                Err(error) => format!("Video region selection failed: {error}"),
-            };
-            restore_screen_draw_after_region_capture(hwnd_raw, session_id);
-            return result;
-        }
-        let result = match capture_screen_draw_region_to_clipboard(capture_mode, session_id) {
-            Ok(copied) if copied => "Copied annotated screen region to clipboard.".to_owned(),
-            Ok(_) => "Screen draw capture cancelled.".to_owned(),
-            Err(error) => format!("Screen draw capture failed: {error}"),
+        let selected = select_screen_draw_capture_region_from_trigger(&trigger, session_id);
+        let frame = match selected {
+            Ok(Some((x, y, width, height))) => {
+                build_screen_draw_capture_region(x, y, width, height).ok()
+            }
+            _ => None,
         };
+        let rect = match selected {
+            Ok(Some((x, y, width, height))) => Some(windows::Win32::Foundation::RECT {
+                left: x,
+                top: y,
+                right: x + width,
+                bottom: y + height,
+            }),
+            _ => None,
+        };
+        let ui_language = PROTRACTOR_STATE.lock().ui_language;
         restore_screen_draw_after_region_capture(hwnd_raw, session_id);
-        result
+        match (selected, frame) {
+            (Ok(Some(_)), Some(capture)) => {
+                perform_ocr_on_capture_and_copy(capture, &language, rect, ui_language)
+            }
+            (Ok(None), _) => "OCR region selection cancelled.".to_owned(),
+            (Err(error), _) => format!("OCR region selection failed: {error}"),
+            (Ok(Some(_)), None) => "Failed to capture the selected screen region.".to_owned(),
+        }
     }
 
     fn perform_ocr_on_capture_and_copy(
@@ -13700,143 +13574,6 @@ mod windows_overlay {
         }
     }
 
-    fn capture_screen_draw_region_to_clipboard(
-        capture_mode: ScreenDrawCaptureMode,
-        session_id: u64,
-    ) -> Result<bool> {
-        if !screen_draw_capture_session_is_current(session_id) {
-            return Ok(false);
-        }
-        let selected = match capture_mode {
-            ScreenDrawCaptureMode::MouseDrag => select_screen_draw_capture_region(session_id)?,
-            ScreenDrawCaptureMode::HoldTrigger(trigger) => {
-                select_screen_draw_capture_region_from_trigger(&trigger, session_id)?
-            }
-            ScreenDrawCaptureMode::VideoRegionSelect
-            | ScreenDrawCaptureMode::VideoHoldTrigger(_)
-            | ScreenDrawCaptureMode::OcrRegionSelect { .. }
-            | ScreenDrawCaptureMode::OcrHoldTrigger { .. } => return Ok(false),
-        };
-        let Some((x, y, width, height)) = selected else {
-            return Ok(false);
-        };
-        let capture = build_screen_draw_capture_region(x, y, width, height)?;
-        copy_screen_draw_capture_to_clipboard(&capture)?;
-        Ok(true)
-    }
-
-    fn select_screen_draw_capture_region(session_id: u64) -> Result<Option<(i32, i32, i32, i32)>> {
-        let is_down = |vk: i32| unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 };
-
-        // 1. Wait until user releases left mouse button from clicking the UI button
-        while is_down(0x01) {
-            if is_down(0x1B) || is_down(0x02) {
-                reset_screen_draw_capture_overlay_state();
-                return Ok(None);
-            }
-            thread::sleep(Duration::from_millis(5));
-        }
-
-        // Wait a small delay so mouse click from UI is settled
-        thread::sleep(Duration::from_millis(40));
-
-        // 2. Loop waiting for user to click and drag
-        let mut origin = POINT::default();
-        let mut dragging = false;
-        let mut last_preview_at = Instant::now();
-
-        loop {
-            if !screen_draw_capture_session_is_current(session_id) || is_down(0x1B) || is_down(0x02) {
-                reset_screen_draw_capture_overlay_state();
-                return Ok(None);
-            }
-            if cancel_screen_draw_mouse_capture_from_trigger_press() {
-                reset_screen_draw_capture_overlay_state();
-                return Ok(None);
-            }
-
-            let mut pt = POINT::default();
-            let has_pos = unsafe { GetCursorPos(&mut pt).is_ok() };
-
-            if is_down(0x01) {
-                if !dragging {
-                    if has_pos {
-                        origin = pt;
-                        dragging = true;
-                        update_screen_draw_region_capture_preview(origin, origin);
-                        last_preview_at = Instant::now();
-                    }
-                } else if has_pos && last_preview_at.elapsed() >= Duration::from_millis(16) {
-                    update_screen_draw_region_capture_preview(origin, pt);
-                    last_preview_at = Instant::now();
-                }
-            } else if dragging {
-                let cur = if has_pos { pt } else { origin };
-                let x = origin.x.min(cur.x);
-                let y = origin.y.min(cur.y);
-                let width = (origin.x - cur.x).abs();
-                let height = (origin.y - cur.y).abs();
-                reset_screen_draw_capture_overlay_state();
-                if width >= 4 && height >= 4 {
-                    return Ok(Some((x, y, width, height)));
-                } else {
-                    dragging = false;
-                }
-            }
-
-            thread::sleep(Duration::from_millis(2));
-        }
-    }
-
-    fn should_cancel_screen_draw_mouse_capture_from_trigger_press(
-        capturing_region: bool,
-        capture_trigger_present: bool,
-        trigger_down: bool,
-    ) -> bool {
-        capturing_region && !capture_trigger_present && trigger_down
-    }
-
-    fn cancel_screen_draw_mouse_capture_from_trigger_press() -> bool {
-        let (trigger, capturing_region, capture_trigger_present) = {
-            let state = SCREEN_DRAW_STATE.lock();
-            (
-                state.trigger.clone(),
-                state.capturing_region,
-                state.capture_trigger.is_some(),
-            )
-        };
-        let trigger_down = trigger
-            .as_ref()
-            .is_some_and(screen_draw_trigger_binding_is_down);
-        let should_cancel = should_cancel_screen_draw_mouse_capture_from_trigger_press(
-            capturing_region,
-            capture_trigger_present,
-            trigger_down,
-        );
-        if !should_cancel {
-            return false;
-        }
-
-        let trigger_to_sync = {
-            let state = SCREEN_DRAW_STATE.lock();
-            state.trigger.clone()
-        };
-        {
-            let mut state = SCREEN_DRAW_STATE.lock();
-            if !state.active || !state.capturing_region || state.capture_trigger.is_some() {
-                return false;
-            }
-            state.capture_session_id = state.capture_session_id.wrapping_add(1).max(1);
-            deactivate_screen_draw(&mut state);
-        }
-        if let Some(trigger) = trigger_to_sync.as_ref() {
-            sync_trigger_binding_input_state(trigger);
-        }
-        request_screen_draw_overlay_sync();
-        request_ui_repaint();
-        true
-    }
-
     fn select_screen_draw_capture_region_from_trigger(
         trigger: &HotkeyBinding,
         session_id: u64,
@@ -14147,19 +13884,6 @@ mod windows_overlay {
             }
         }
         Ok(())
-    }
-
-    fn copy_screen_draw_capture_to_clipboard(
-        capture: &window_list::ScreenCaptureFrame,
-    ) -> Result<()> {
-        let mut clipboard = Clipboard::new().context("Failed to open the clipboard")?;
-        clipboard
-            .set_image(ImageData {
-                width: capture.width,
-                height: capture.height,
-                bytes: Cow::Owned(capture.rgba.clone()),
-            })
-            .context("Failed to copy the annotated screenshot to the clipboard")
     }
 
     fn restore_screen_draw_after_region_capture(hwnd_raw: isize, session_id: u64) {
@@ -32624,21 +32348,6 @@ mod windows_overlay {
             assert_eq!(rectangle, POINT { x: 140, y: 140 });
         }
 
-        #[test]
-        fn screen_draw_mouse_capture_trigger_cancel_only_applies_to_camera_capture() {
-            assert!(should_cancel_screen_draw_mouse_capture_from_trigger_press(
-                true, false, true,
-            ));
-            assert!(!should_cancel_screen_draw_mouse_capture_from_trigger_press(
-                false, false, true,
-            ));
-            assert!(!should_cancel_screen_draw_mouse_capture_from_trigger_press(
-                true, true, true,
-            ));
-            assert!(!should_cancel_screen_draw_mouse_capture_from_trigger_press(
-                true, false, false,
-            ));
-        }
 
         #[test]
         fn screen_draw_color_pick_end_restores_prior_freeze_state() {
@@ -36419,45 +36128,7 @@ mod windows_overlay {
         window_preset::restore_window_title_bar_for_preset(preset)
     }
 
-    #[allow(dead_code)]
-    fn expand_window_edge(direction: WindowExpandDirection, amount_px: i32) -> Result<()> {
-        unsafe {
-            let target = resolve_window_target(None, &[], false, false);
-            if target.0.is_null() {
-                bail!("No foreground window is available");
-            }
 
-            let target_root = GetAncestor(target, GA_ROOT);
-            if !target_root.0.is_null()
-                && window_belongs_to_current_process(target_root)
-                && !is_internal_app_window(target_root)
-            {
-                return Ok(());
-            }
-
-            ensure_window_restored(target);
-            let mut rect = RECT::default();
-            GetWindowRect(target, &mut rect)?;
-            match direction {
-                WindowExpandDirection::Up => rect.top -= amount_px,
-                WindowExpandDirection::Down => rect.bottom += amount_px,
-                WindowExpandDirection::Left => rect.left -= amount_px,
-                WindowExpandDirection::Right => rect.right += amount_px,
-            }
-
-            let _ = SetWindowPos(
-                target,
-                None,
-                rect.left,
-                rect.top,
-                (rect.right - rect.left).max(1),
-                (rect.bottom - rect.top).max(1),
-                SWP_NOACTIVATE | SWP_NOZORDER,
-            );
-        }
-
-        Ok(())
-    }
 
     fn animate_window_rect(target: HWND, start: RECT, end: RECT, duration_ms: u64) -> Result<()> {
         let start_width = (start.right - start.left).max(1);
@@ -37542,7 +37213,6 @@ mod windows_overlay {
         {
             let mut hook_state = HOOK_STATE.lock();
             hook_state.window_presets.clear();
-            hook_state.window_expand_controls = WindowExpandControls::default();
             hook_state.pin_presets.clear();
             hook_state.active_pin_preset_id = None;
             hook_state.macro_groups.clear();
@@ -38402,7 +38072,6 @@ mod fallback {
         UpdateWindowFocusPresets(Vec<WindowFocusPreset>),
         UpdateWindowLayouts(Vec<WindowLayout>),
         ApplyWindowLayout(WindowLayout),
-        UpdateWindowExpandControls(WindowExpandControls),
         UpdateMacroPresets(Vec<MacroGroup>),
         SetActiveMacroFolderScope(MacroFolderScope),
         UpdateAudioSettings(AudioSettings),
@@ -38481,9 +38150,6 @@ mod fallback {
             asset_scale: Option<f32>,
             status: String,
         },
-        TriggerInstantScreenshot,
-        TriggerInstantOcr,
-        TriggerVideoRecordRegionSelect,
         MacroStepInlineFeedback {
             preset_id: u32,
             step_index: usize,
