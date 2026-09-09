@@ -16,8 +16,16 @@ impl CrosshairApp {
         let ocr_test_y = self.state.ocr_test_y;
         let ocr_test_width = self.state.ocr_test_width;
         let ocr_test_height = self.state.ocr_test_height;
-        let ocr_test_error = self.state.ocr_test_error.clone();
-        let ocr_test_result = self.state.ocr_test_result.clone();
+        let (ocr_test_error, ocr_test_result) = if self.state.ocr_test_error.is_some()
+            || self.state.ocr_test_result.is_some()
+        {
+            (
+                self.state.ocr_test_error.clone(),
+                self.state.ocr_test_result.clone(),
+            )
+        } else {
+            (None, None)
+        };
 
         ui.add_space(2.0);
 
