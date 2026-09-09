@@ -67,7 +67,7 @@ impl CrosshairApp {
         let mut run_test_preset_id = None;
         let mut preview_toggled_preset_id = None;
         let mut start_ocr_capture_preset_id = None;
-        let mut start_ocr_download_language_code = None;
+        let mut start_ocr_download = false;
         let mut copy_ocr_preset = None;
         let mut paste_ocr_after = None;
         let can_paste_ocr = matches!(
@@ -182,11 +182,8 @@ impl CrosshairApp {
                                             );
                                             if is_downloading {
                                                 ui.add_sized([82.0, 18.0], egui::Spinner::new());
-                                            } else if !installed {
-                                                if ui.small_button("Download").clicked() {
-                                                    start_ocr_download_language_code =
-                                                        Some(pack.code.to_owned());
-                                                }
+                                            } else if !installed && ui.small_button("Download").clicked() {
+                                                start_ocr_download = true;
                                             }
                                             label_response
                                         })
@@ -499,8 +496,8 @@ impl CrosshairApp {
         if let Some(preset_id) = start_ocr_capture_preset_id {
             self.begin_region_capture(ui.ctx(), VisionCaptureTarget::OcrPreset(preset_id));
         }
-        if let Some(language_code) = start_ocr_download_language_code {
-            self.start_ocr_download_for(&language_code);
+        if start_ocr_download {
+            self.start_ocr_download();
         }
 
         if live_sync {

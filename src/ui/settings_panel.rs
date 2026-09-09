@@ -1090,7 +1090,7 @@ impl CrosshairApp {
                     )
                     .clicked()
                     {
-                        self.start_ocr_download_for(crate::ocr::OCR_DEFAULT_CODE);
+                        self.start_ocr_download();
                     }
                 },
             );
@@ -1960,7 +1960,7 @@ impl CrosshairApp {
         }));
     }
 
-    pub(crate) fn start_ocr_download_for(&mut self, _language_code: &str) {
+    pub(crate) fn start_ocr_download(&mut self) {
         if self.ocr_download_job.is_some() {
             return;
         }

@@ -157,7 +157,7 @@ impl CrosshairApp {
         live_sync: &mut bool,
         pending_ocr_step_capture: &mut Option<(u32, u32, usize)>,
         is_ocr_download_running: bool,
-        pending_ocr_language_download: &mut Option<String>,
+        pending_ocr_download: &mut bool,
     ) {
         let ctrl_height = ui.spacing().interact_size.y;
 
@@ -192,7 +192,7 @@ impl CrosshairApp {
                             if is_downloading {
                                 ui.add_sized([58.0, 18.0], egui::Spinner::new());
                             } else if !installed && ui.small_button("Dl").clicked() {
-                                *pending_ocr_language_download = Some(pack.code.to_owned());
+                                *pending_ocr_download = true;
                             }
                             label_response
                         })
