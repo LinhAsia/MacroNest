@@ -4064,7 +4064,7 @@ impl CrosshairApp {
             let target = preset
                 .event_target_window_title
                 .as_deref()
-                .map(Self::simplify_window_title)
+                .map(|t| Self::simplify_window_title(t).into_owned())
                 .unwrap_or_else(|| {
                     Self::tr_lang(language, "Any focused window", "Any focused window").to_owned()
                 });
@@ -4183,7 +4183,7 @@ impl CrosshairApp {
                 .as_deref()
                 .map(Self::simplify_window_title)
                 .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Any focused window", "Any focused window").to_owned()
+                    std::borrow::Cow::Borrowed(Self::tr_lang(language, "Any focused window", "Any focused window"))
                 });
             return format!("Focus: {target}");
         }
@@ -8695,13 +8695,13 @@ impl CrosshairApp {
             let title = Self::simplify_window_title(&window.title);
             if let Some((_, selectors)) = groups
                 .iter_mut()
-                .find(|(existing_title, _)| existing_title == &title)
+                .find(|(existing_title, _)| existing_title == title.as_ref())
             {
                 if !selectors.iter().any(|existing| existing == selector) {
                     selectors.push(selector.clone());
                 }
             } else {
-                groups.push((title, vec![selector.clone()]));
+                groups.push((title.into_owned(), vec![selector.clone()]));
             }
         }
         groups
@@ -8716,8 +8716,8 @@ impl CrosshairApp {
                     || window.title == selector
                     || window_list::strip_rule_suffix(&window.title) == clean_target
             })
-            .map(|window| Self::simplify_window_title(&window.title))
-            .unwrap_or_else(|| Self::simplify_window_title(clean_target))
+            .map(|window| Self::simplify_window_title(&window.title).into_owned())
+            .unwrap_or_else(|| Self::simplify_window_title(clean_target).into_owned())
     }
 
     fn window_or_process_icon_texture(

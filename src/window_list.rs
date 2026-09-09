@@ -514,13 +514,13 @@ mod windows_impl {
         clean_target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
+        let base = selector_base_title(clean_target);
         let mut matches = if match_duplicate_window_titles {
-            title == selector_base_title(clean_target) || selector == clean_target
+            title == base || selector == clean_target
         } else {
             title == clean_target
                 || selector == clean_target
-                || (selector_base_title(clean_target) != clean_target
-                    && title == selector_base_title(clean_target))
+                || (base != clean_target && title == base)
         };
         if !matches {
             matches = matches_browser_suffix(clean_target, title);
@@ -551,10 +551,11 @@ mod windows_impl {
         title_or_selector: &str,
         match_duplicate_window_titles: bool,
     ) -> Vec<HWND> {
+        let clean_target = strip_rule_suffix(title_or_selector);
         let mut candidates = Vec::new();
         unsafe {
             let mut payload = (
-                title_or_selector,
+                clean_target,
                 match_duplicate_window_titles,
                 &mut candidates,
             );
@@ -567,9 +568,19 @@ mod windows_impl {
     }
 
     fn find_first_window_by_exact_selector(title_or_selector: &str) -> Option<HWND> {
+        let clean = strip_rule_suffix(title_or_selector);
+        if let Some(prefix) = clean.strip_suffix(')')
+            && let Some((_, hex)) = prefix.rsplit_once(" (0x")
+            && let Ok(val) = usize::from_str_radix(hex, 16)
+        {
+            let hwnd = HWND(val as *mut _);
+            if exact_selector_window_matches(hwnd, clean) {
+                return Some(hwnd);
+            }
+        }
         let mut found = None;
         unsafe {
-            let mut payload = (title_or_selector, &mut found);
+            let mut payload = (clean, &mut found);
             let _ = EnumWindows(
                 Some(find_window_by_exact_selector_proc),
                 LPARAM((&mut payload) as *mut _ as isize),
@@ -582,9 +593,10 @@ mod windows_impl {
         title_or_selector: &str,
         match_duplicate_window_titles: bool,
     ) -> Option<HWND> {
+        let clean_target = strip_rule_suffix(title_or_selector);
         let mut found = None;
         unsafe {
-            let mut payload = (title_or_selector, match_duplicate_window_titles, &mut found);
+            let mut payload = (clean_target, match_duplicate_window_titles, &mut found);
             let _ = EnumWindows(
                 Some(find_window_by_candidate_proc),
                 LPARAM((&mut payload) as *mut _ as isize),
@@ -631,21 +643,15 @@ mod windows_impl {
         format!("{title} (0x{:X})", hwnd.0 as usize)
     }
 
-    fn visible_window_title_and_selector(hwnd: HWND) -> Option<(String, String)> {
-        if !unsafe { IsWindowVisible(hwnd).as_bool() } {
-            return None;
-        }
-        let title = window_title(hwnd)?;
-        let selector = window_selector(hwnd, &title);
-        Some((title, selector))
-    }
-
     fn exact_selector_window_matches(hwnd: HWND, target_selector: &str) -> bool {
         let clean_selector = strip_rule_suffix(target_selector);
-        let Some((_, selector)) = visible_window_title_and_selector(hwnd) else {
+        if !unsafe { IsWindowVisible(hwnd).as_bool() } {
+            return false;
+        }
+        let Some(title) = window_title(hwnd) else {
             return false;
         };
-        selector == clean_selector
+        window_selector(hwnd, &title) == clean_selector
     }
 
     fn candidate_window_matches(
@@ -654,8 +660,16 @@ mod windows_impl {
         match_duplicate_window_titles: bool,
     ) -> bool {
         let clean_title = strip_rule_suffix(target_title);
-        let Some((title, selector)) = visible_window_title_and_selector(hwnd) else {
+        if !unsafe { IsWindowVisible(hwnd).as_bool() } {
             return false;
+        }
+        let Some(title) = window_title(hwnd) else {
+            return false;
+        };
+        let selector = if looks_like_window_selector(clean_title) {
+            window_selector(hwnd, &title)
+        } else {
+            String::new()
         };
         window_matches_candidate_title(
             &title,
@@ -678,10 +692,16 @@ mod windows_impl {
         target
     }
 
-    pub fn clean_invisible_chars(s: &str) -> String {
-        s.chars()
-            .filter(|&c| c != '\u{200B}' && c != '\u{200C}' && c != '\u{200D}' && c != '\u{FEFF}')
-            .collect()
+    pub fn clean_invisible_chars(s: &str) -> std::borrow::Cow<'_, str> {
+        if !s.chars().any(|c| matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')) {
+            std::borrow::Cow::Borrowed(s)
+        } else {
+            std::borrow::Cow::Owned(
+                s.chars()
+                    .filter(|&c| !matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}'))
+                    .collect(),
+            )
+        }
     }
 
     const BROWSER_SUFFIXES: &[&str] = &[
@@ -724,29 +744,44 @@ mod windows_impl {
         false
     }
 
-    pub fn simplify_window_title(title: &str) -> String {
-        let title = strip_rule_suffix(title);
-        let clean = clean_invisible_chars(title);
-        let base = selector_base_title(&clean);
-
-        if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
-            return "Antigravity IDE".to_owned();
-        }
-
-        for suffix in BROWSER_SUFFIXES {
-            if base.ends_with(suffix) {
-                return suffix.trim_start_matches(" - ").to_owned();
+    pub fn simplify_window_title(title: &str) -> std::borrow::Cow<'_, str> {
+        let stripped = strip_rule_suffix(title);
+        if !stripped.chars().any(|c| matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')) {
+            let base = selector_base_title(stripped);
+            if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
+                return std::borrow::Cow::Borrowed("Antigravity IDE");
             }
-        }
-
-        if let Some((_, last)) = base.rsplit_once(" - ") {
-            let trimmed = last.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_owned();
+            for suffix in BROWSER_SUFFIXES {
+                if base.ends_with(suffix) {
+                    return std::borrow::Cow::Borrowed(suffix.trim_start_matches(" - "));
+                }
             }
+            if let Some((_, last)) = base.rsplit_once(" - ") {
+                let trimmed = last.trim();
+                if !trimmed.is_empty() {
+                    return std::borrow::Cow::Borrowed(trimmed);
+                }
+            }
+            std::borrow::Cow::Borrowed(base)
+        } else {
+            let cleaned = clean_invisible_chars(stripped);
+            let base = selector_base_title(&cleaned);
+            if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
+                return std::borrow::Cow::Borrowed("Antigravity IDE");
+            }
+            for suffix in BROWSER_SUFFIXES {
+                if base.ends_with(suffix) {
+                    return std::borrow::Cow::Borrowed(suffix.trim_start_matches(" - "));
+                }
+            }
+            if let Some((_, last)) = base.rsplit_once(" - ") {
+                let trimmed = last.trim();
+                if !trimmed.is_empty() {
+                    return std::borrow::Cow::Owned(trimmed.to_owned());
+                }
+            }
+            std::borrow::Cow::Owned(base.to_owned())
         }
-
-        base.to_owned()
     }
 
     pub fn window_title(hwnd: HWND) -> Option<String> {
@@ -759,10 +794,15 @@ mod windows_impl {
         if copied <= 0 {
             return None;
         }
-        let title = String::from_utf16_lossy(&buffer[..copied as usize])
-            .trim()
-            .to_owned();
-        if title.is_empty() { None } else { Some(title) }
+        let s = String::from_utf16_lossy(&buffer[..copied as usize]);
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            None
+        } else if trimmed.len() == s.len() {
+            Some(s)
+        } else {
+            Some(trimmed.to_owned())
+        }
     }
 
     unsafe fn client_rect_on_screen(hwnd: HWND) -> Option<RECT> {
@@ -1609,3 +1649,56 @@ mod fallback {
 
 #[cfg(not(windows))]
 pub use fallback::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    #[test]
+    fn clean_invisible_chars_borrows_clean_string() {
+        let clean = "Normal Window Title";
+        assert!(matches!(clean_invisible_chars(clean), Cow::Borrowed(_)));
+        assert_eq!(clean_invisible_chars(clean), "Normal Window Title");
+    }
+
+    #[test]
+    fn clean_invisible_chars_cleans_zero_width_and_bom() {
+        let dirty = "A\u{200B}B\u{200C}C\u{200D}D\u{FEFF}E";
+        assert!(matches!(clean_invisible_chars(dirty), Cow::Owned(_)));
+        assert_eq!(clean_invisible_chars(dirty), "ABCDE");
+    }
+
+    #[test]
+    fn selector_base_title_extracts_base() {
+        assert_eq!(selector_base_title("Calculator (0x1234)"), "Calculator");
+        assert_eq!(selector_base_title("Plain Title"), "Plain Title");
+    }
+
+    #[test]
+    fn simplify_window_title_borrows_typical_strings() {
+        let chrome = "GitHub - Google Chrome";
+        let simplified = simplify_window_title(chrome);
+        assert!(matches!(simplified, Cow::Borrowed(_)));
+        assert_eq!(simplified, "Google Chrome");
+
+        let ide = "main.rs - Antigravity IDE";
+        assert_eq!(simplify_window_title(ide), "Antigravity IDE");
+
+        let dash = "Project Name - Subtitle";
+        assert_eq!(simplify_window_title(dash), "Subtitle");
+    }
+
+    #[test]
+    fn window_match_rules_and_browser_matching() {
+        assert_eq!(strip_rule_suffix("Window [Lowest]"), "Window");
+        assert_eq!(parse_window_match_rule("Window [Lowest]").1, Some(WindowMatchRule::Lowest));
+
+        assert!(window_matches_candidate_title(
+            "Doc - Google Chrome",
+            "Doc - Google Chrome (0x100)",
+            "Other - Google Chrome",
+            false
+        ));
+    }
+}

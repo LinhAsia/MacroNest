@@ -1156,7 +1156,7 @@ impl CrosshairApp {
                     .map(|(_, n)| n.to_owned())
                     .unwrap_or_else(|| stripped.to_owned())
             } else if let Some(w) = self.open_window_infos.iter().find(|w| w.selector == selector) {
-                Self::simplify_window_title(&w.title)
+                Self::simplify_window_title(&w.title).into_owned()
             } else if !path.is_empty() {
                 std::path::Path::new(&path)
                     .file_name()
@@ -2180,13 +2180,13 @@ impl CrosshairApp {
                         self.open_window_infos
                             .iter()
                             .find(|window| window.selector == self.memory_panel.process_selector)
-                            .map(|window| Self::simplify_window_title(&window.title))
+                            .map(|window| Self::simplify_window_title(&window.title).into_owned())
                             .unwrap_or_else(|| select_process_str.to_owned())
                     };
                     let missing_process = self.memory_panel.process_pid.is_none();
                     if missing_process {
-                        if let Some(last) = self.memory_panel.last_selected_process.clone() {
-                            let label = last.name;
+                        if let Some(last) = &self.memory_panel.last_selected_process {
+                            let label = &last.name;
                             if ui
                                 .button(
                                     RichText::new(label)
@@ -2223,7 +2223,7 @@ impl CrosshairApp {
                                     if self.memory_panel.process_choices.is_empty() && !self.memory_panel.process_choices_loading {
                                         self.schedule_memory_process_choices_refresh(ui.ctx());
                                     }
-                                    if let Some(last) = self.memory_panel.last_selected_process.clone() {
+                                    if let Some(last) = &self.memory_panel.last_selected_process {
                                         let is_current = self.memory_panel.process_pid.is_some()
                                             && (self.memory_panel.process_selector == last.selector
                                                 || self.memory_panel.process_pid == Some(last.last_pid));

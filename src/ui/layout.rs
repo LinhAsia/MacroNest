@@ -45,7 +45,7 @@ impl CrosshairApp {
         }
     }
 
-    pub(crate) fn simplify_window_title(title: &str) -> String {
+    pub(crate) fn simplify_window_title(title: &str) -> std::borrow::Cow<'_, str> {
         window_list::simplify_window_title(title)
     }
 
@@ -67,7 +67,7 @@ impl CrosshairApp {
         {
             Self::selector_base_title(selector).to_owned()
         } else {
-            simplified
+            simplified.into_owned()
         }
     }
 }
