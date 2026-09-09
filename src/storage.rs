@@ -517,7 +517,11 @@ impl AppPaths {
         }
         if state.macro_folders.len() == 1 {
             let folder = &state.macro_folders[0];
-            let is_auto_default_folder = folder.name == format!("Folder {}", folder.id)
+            let is_auto_default_folder = folder
+                .name
+                .strip_prefix("Folder ")
+                .and_then(|id| id.parse::<u32>().ok())
+                == Some(folder.id)
                 && state
                     .macro_groups
                     .iter()
@@ -529,17 +533,11 @@ impl AppPaths {
                 state.macro_folders.clear();
             }
         }
-        let valid_folder_ids = state
-            .macro_folders
-            .iter()
-            .map(|folder| folder.id)
-            .collect::<std::collections::HashSet<_>>();
         for group in &mut state.macro_groups {
-            if group
-                .folder_id
-                .is_some_and(|folder_id| !valid_folder_ids.contains(&folder_id))
-            {
-                group.folder_id = None;
+            if let Some(folder_id) = group.folder_id {
+                if !state.macro_folders.iter().any(|folder| folder.id == folder_id) {
+                    group.folder_id = None;
+                }
             }
         }
         let next_macro_folder_id = state
@@ -549,9 +547,8 @@ impl AppPaths {
             .max()
             .unwrap_or(0)
             + 1;
-        if state.next_macro_folder_id < next_macro_folder_id {
-            state.next_macro_folder_id = next_macro_folder_id;
-        }
+        state.next_macro_folder_id = state.next_macro_folder_id.max(next_macro_folder_id);
+
         let next_macro_group_id = state
             .macro_groups
             .iter()
@@ -559,9 +556,8 @@ impl AppPaths {
             .max()
             .unwrap_or(0)
             + 1;
-        if state.next_macro_group_id < next_macro_group_id {
-            state.next_macro_group_id = next_macro_group_id;
-        }
+        state.next_macro_group_id = state.next_macro_group_id.max(next_macro_group_id);
+
         let next_macro_preset_id = state
             .macro_groups
             .iter()
@@ -569,9 +565,8 @@ impl AppPaths {
             .max()
             .unwrap_or(0)
             + 1;
-        if state.next_macro_preset_id < next_macro_preset_id {
-            state.next_macro_preset_id = next_macro_preset_id;
-        }
+        state.next_macro_preset_id = state.next_macro_preset_id.max(next_macro_preset_id);
+
         let next_sound_preset_id = state
             .audio_settings
             .presets
@@ -580,9 +575,9 @@ impl AppPaths {
             .max()
             .unwrap_or(0)
             + 1;
-        if state.audio_settings.next_preset_id < next_sound_preset_id {
-            state.audio_settings.next_preset_id = next_sound_preset_id;
-        }
+        state.audio_settings.next_preset_id =
+            state.audio_settings.next_preset_id.max(next_sound_preset_id);
+
         let next_sound_library_id = state
             .audio_settings
             .library
@@ -591,9 +586,11 @@ impl AppPaths {
             .max()
             .unwrap_or(0)
             + 1;
-        if state.audio_settings.next_library_item_id < next_sound_library_id {
-            state.audio_settings.next_library_item_id = next_sound_library_id;
-        }
+        state.audio_settings.next_library_item_id = state
+            .audio_settings
+            .next_library_item_id
+            .max(next_sound_library_id);
+
         for preset in &mut state.audio_settings.presets {
             preset.collapsed = true;
         }
@@ -607,9 +604,8 @@ impl AppPaths {
             .max()
             .unwrap_or(0)
             + 1;
-        if state.next_zoom_preset_id < next_zoom_preset_id {
-            state.next_zoom_preset_id = next_zoom_preset_id;
-        }
+        state.next_zoom_preset_id = state.next_zoom_preset_id.max(next_zoom_preset_id);
+
         let next_master_preset_id = state
             .master_presets
             .iter()
@@ -617,9 +613,8 @@ impl AppPaths {
             .max()
             .unwrap_or(0)
             + 1;
-        if state.next_master_preset_id < next_master_preset_id {
-            state.next_master_preset_id = next_master_preset_id;
-        }
+        state.next_master_preset_id = state.next_master_preset_id.max(next_master_preset_id);
+
         for preset in &mut state.master_presets {
             preset.collapsed = true;
         }
@@ -641,68 +636,47 @@ impl AppPaths {
         for preset in &mut state.zoom_presets {
             preset.collapsed = true;
         }
+
+        let normalize_op = |op: &mut String| {
+            if op.is_empty() || op == "=" {
+                *op = "==".to_owned();
+            }
+        };
+
         for group in &mut state.macro_groups {
             group.collapsed = true;
             for preset in &mut group.presets {
                 preset.collapsed = true;
-                if preset.hold_stop_step.if_operator.is_empty()
-                    || preset.hold_stop_step.if_operator == "="
-                {
-                    preset.hold_stop_step.if_operator = "==".to_string();
-                }
+                normalize_op(&mut preset.hold_stop_step.if_operator);
                 for cond in &mut preset.hold_stop_step.extra_conditions {
-                    if cond.operator.is_empty() || cond.operator == "=" {
-                        cond.operator = "==".to_string();
-                    }
+                    normalize_op(&mut cond.operator);
                 }
-                if preset.press_stop_step.if_operator.is_empty()
-                    || preset.press_stop_step.if_operator == "="
-                {
-                    preset.press_stop_step.if_operator = "==".to_string();
-                }
+                normalize_op(&mut preset.press_stop_step.if_operator);
                 for cond in &mut preset.press_stop_step.extra_conditions {
-                    if cond.operator.is_empty() || cond.operator == "=" {
-                        cond.operator = "==".to_string();
-                    }
+                    normalize_op(&mut cond.operator);
                 }
                 for step in &mut preset.steps {
-                    if step.if_operator.is_empty() || step.if_operator == "=" {
-                        step.if_operator = "==".to_string();
-                    }
+                    normalize_op(&mut step.if_operator);
                     for cond in &mut step.extra_conditions {
-                        if cond.operator.is_empty() || cond.operator == "=" {
-                            cond.operator = "==".to_string();
-                        }
+                        normalize_op(&mut cond.operator);
                     }
                 }
             }
         }
 
         // Fully remove legacy groups that failed old deserialization (IfConditionType::Unknown) from the database
+        let step_has_unknown = |s: &crate::model::MacroStep| {
+            s.if_condition_type == crate::model::IfConditionType::Unknown
+                || s.extra_conditions
+                    .iter()
+                    .any(|c| c.condition_type == crate::model::IfConditionType::Unknown)
+        };
         state.macro_groups.retain(|group| {
-            let has_unknown = group.presets.iter().any(|preset| {
-                preset.hold_stop_step.if_condition_type == crate::model::IfConditionType::Unknown
-                    || preset
-                        .hold_stop_step
-                        .extra_conditions
-                        .iter()
-                        .any(|c| c.condition_type == crate::model::IfConditionType::Unknown)
-                    || preset.press_stop_step.if_condition_type
-                        == crate::model::IfConditionType::Unknown
-                    || preset
-                        .press_stop_step
-                        .extra_conditions
-                        .iter()
-                        .any(|c| c.condition_type == crate::model::IfConditionType::Unknown)
-                    || preset.steps.iter().any(|step| {
-                        step.if_condition_type == crate::model::IfConditionType::Unknown
-                            || step
-                                .extra_conditions
-                                .iter()
-                                .any(|c| c.condition_type == crate::model::IfConditionType::Unknown)
-                    })
-            });
-            !has_unknown
+            !group.presets.iter().any(|preset| {
+                step_has_unknown(&preset.hold_stop_step)
+                    || step_has_unknown(&preset.press_stop_step)
+                    || preset.steps.iter().any(step_has_unknown)
+            })
         });
 
         Ok(state)

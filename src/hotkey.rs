@@ -79,10 +79,6 @@ pub fn split_binding_entries(spec: &str) -> impl Iterator<Item = &str> {
         .filter(|part| !part.is_empty())
 }
 
-pub fn split_binding_list(spec: &str) -> Vec<String> {
-    split_binding_entries(spec).map(str::to_owned).collect()
-}
-
 pub fn parse_binding_list(spec: &str) -> Vec<HotkeyBinding> {
     split_binding_entries(spec)
         .filter_map(parse_binding)
