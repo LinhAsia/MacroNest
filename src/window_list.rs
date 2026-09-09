@@ -102,7 +102,12 @@ mod windows_impl {
                 LPARAM(&mut windows as *mut Vec<WindowInfo> as isize),
             );
         }
-        windows.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        windows.sort_by(|a, b| {
+            a.title
+                .chars()
+                .map(|c| c.to_ascii_lowercase())
+                .cmp(b.title.chars().map(|c| c.to_ascii_lowercase()))
+        });
         windows
     }
 
@@ -744,43 +749,36 @@ mod windows_impl {
         false
     }
 
+    fn extract_simplified_title<'a>(base: &'a str) -> Option<&'a str> {
+        if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
+            return Some("Antigravity IDE");
+        }
+        for suffix in BROWSER_SUFFIXES {
+            if base.ends_with(suffix) {
+                return Some(suffix.trim_start_matches(" - "));
+            }
+        }
+        if let Some((_, last)) = base.rsplit_once(" - ") {
+            let trimmed = last.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+        None
+    }
+
     pub fn simplify_window_title(title: &str) -> std::borrow::Cow<'_, str> {
         let stripped = strip_rule_suffix(title);
         if !stripped.chars().any(|c| matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}')) {
             let base = selector_base_title(stripped);
-            if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
-                return std::borrow::Cow::Borrowed("Antigravity IDE");
-            }
-            for suffix in BROWSER_SUFFIXES {
-                if base.ends_with(suffix) {
-                    return std::borrow::Cow::Borrowed(suffix.trim_start_matches(" - "));
-                }
-            }
-            if let Some((_, last)) = base.rsplit_once(" - ") {
-                let trimmed = last.trim();
-                if !trimmed.is_empty() {
-                    return std::borrow::Cow::Borrowed(trimmed);
-                }
-            }
-            std::borrow::Cow::Borrowed(base)
+            std::borrow::Cow::Borrowed(extract_simplified_title(base).unwrap_or(base))
         } else {
             let cleaned = clean_invisible_chars(stripped);
             let base = selector_base_title(&cleaned);
-            if base.contains(" - Antigravity IDE - ") || base.ends_with(" - Antigravity IDE") {
-                return std::borrow::Cow::Borrowed("Antigravity IDE");
+            match extract_simplified_title(base) {
+                Some(s) => std::borrow::Cow::Owned(s.to_owned()),
+                None => std::borrow::Cow::Owned(base.to_owned()),
             }
-            for suffix in BROWSER_SUFFIXES {
-                if base.ends_with(suffix) {
-                    return std::borrow::Cow::Borrowed(suffix.trim_start_matches(" - "));
-                }
-            }
-            if let Some((_, last)) = base.rsplit_once(" - ") {
-                let trimmed = last.trim();
-                if !trimmed.is_empty() {
-                    return std::borrow::Cow::Owned(trimmed.to_owned());
-                }
-            }
-            std::borrow::Cow::Owned(base.to_owned())
         }
     }
 
@@ -789,12 +787,24 @@ mod windows_impl {
         if length <= 0 {
             return None;
         }
-        let mut buffer = vec![0u16; length as usize + 1];
-        let copied = unsafe { GetWindowTextW(hwnd, &mut buffer) };
-        if copied <= 0 {
-            return None;
-        }
-        let s = String::from_utf16_lossy(&buffer[..copied as usize]);
+        let needed = length as usize + 1;
+        let mut stack_buf = [0u16; 256];
+        let mut heap_buf;
+        let slice: &[u16] = if needed <= stack_buf.len() {
+            let copied = unsafe { GetWindowTextW(hwnd, &mut stack_buf) };
+            if copied <= 0 {
+                return None;
+            }
+            &stack_buf[..copied as usize]
+        } else {
+            heap_buf = vec![0u16; needed];
+            let copied = unsafe { GetWindowTextW(hwnd, &mut heap_buf) };
+            if copied <= 0 {
+                return None;
+            }
+            &heap_buf[..copied as usize]
+        };
+        let s = String::from_utf16_lossy(slice);
         let trimmed = s.trim();
         if trimmed.is_empty() {
             None
