@@ -16971,27 +16971,6 @@ impl CrosshairApp {
             .unwrap_or(if scroll_offset < 0 { 0 } else { usize::MAX })
     }
 
-    fn memory_view_read_window(
-        desired_start: usize,
-        requested_size: usize,
-        region: Option<&MemoryRegionInfo>,
-    ) -> (usize, usize) {
-        let Some(region) = region else {
-            return (desired_start, requested_size);
-        };
-        let region_end = region.base.saturating_add(region.size);
-        let latest_start = region_end.saturating_sub(requested_size).max(region.base);
-        let start = desired_start.clamp(region.base, latest_start);
-        (start, region_end.saturating_sub(start).min(requested_size))
-    }
-
-    fn memory_regions_are_contiguous(
-        lower: &MemoryRegionInfo,
-        upper: &MemoryRegionInfo,
-    ) -> bool {
-        lower.base.saturating_add(lower.size) == upper.base
-    }
-
     fn memory_address_stride(first: &str, second: &str) -> Option<usize> {
         Some(parse_memory_address(first)?.abs_diff(parse_memory_address(second)?))
     }
@@ -17033,21 +17012,6 @@ impl CrosshairApp {
         let new_base = Self::memory_view_window_start(dialog.address, unit * columns, 0);
         dialog.memory_columns = columns;
         dialog.scroll_offset = Self::memory_view_offset_between(old_start, new_base);
-    }
-
-    fn move_memory_view_highlight(
-        dialog: &mut MemoryViewDialog,
-        address: usize,
-        row_bytes: usize,
-    ) {
-        let start = Self::memory_view_window_start(
-            dialog.address,
-            row_bytes,
-            dialog.scroll_offset,
-        );
-        dialog.address = address;
-        let base = Self::memory_view_window_start(address, row_bytes, 0);
-        dialog.scroll_offset = Self::memory_view_offset_between(start, base);
     }
 
     fn track_memory_changes(
@@ -17514,21 +17478,6 @@ impl CrosshairApp {
         self.memory_panel.edit_value_position = None;
         self.sync_memory_freeze_targets();
         self.persist_memory_pointers();
-    }
-
-    fn reindex_saved_selection_after_delete(&mut self, deleted: usize) {
-        self.memory_panel.selected_saved = self
-            .memory_panel
-            .selected_saved
-            .drain()
-            .filter_map(|index| {
-                if index == deleted {
-                    None
-                } else {
-                    Some(if index > deleted { index - 1 } else { index })
-                }
-            })
-            .collect();
     }
 
     fn capture_memory_hotkey(&mut self, ctx: &egui::Context) {
@@ -19004,10 +18953,6 @@ fn generate_multi_aob_pattern(samples: &[&[u8]]) -> (String, usize, usize) {
         }
     }
     (parts.join(" "), total_bytes, wildcard_count)
-}
-
-fn generate_aob_pattern(sample_1: &[u8], sample_2: &[u8]) -> String {
-    generate_multi_aob_pattern(&[sample_1, sample_2]).0
 }
 
 fn parse_manual_aob_tokens(input: &str) -> Vec<Option<u8>> {

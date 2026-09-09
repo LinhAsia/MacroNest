@@ -518,17 +518,6 @@ mod windows_platform {
         }
     }
 
-    pub fn make_frame_no_activate(frame: &Frame) -> bool {
-        let Ok(window_handle) = frame.window_handle() else {
-            return false;
-        };
-        let hwnd = match window_handle.as_raw() {
-            RawWindowHandle::Win32(handle) => HWND(handle.hwnd.get() as *mut _),
-            _ => return false,
-        };
-        make_hwnd_no_activate(hwnd)
-    }
-
     static MAIN_HWND: parking_lot::Mutex<Option<isize>> = parking_lot::Mutex::new(None);
     static RECORDING_HICON: parking_lot::Mutex<Option<isize>> = parking_lot::Mutex::new(None);
 
@@ -663,82 +652,6 @@ mod windows_platform {
         }
     }
 
-    pub fn make_hwnd_no_activate(hwnd: HWND) -> bool {
-        unsafe {
-            let mut style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            if style & WS_EX_NOACTIVATE.0 == 0 {
-                style |= WS_EX_NOACTIVATE.0;
-                let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, style as i32);
-                let _ = SetWindowPos(
-                    hwnd,
-                    None,
-                    0,
-                    0,
-                    0,
-                    0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE,
-                );
-            }
-        }
-        true
-    }
-
-    struct EnumThreadWindowsCtx {
-        target_title: String,
-        found_hwnd: Option<HWND>,
-    }
-
-    unsafe extern "system" fn enum_thread_windows_proc(
-        hwnd: HWND,
-        lparam: windows::Win32::Foundation::LPARAM,
-    ) -> windows::core::BOOL {
-        let ctx = unsafe { &mut *(lparam.0 as *mut EnumThreadWindowsCtx) };
-        let len = unsafe { GetWindowTextLengthW(hwnd) };
-        if len > 0 {
-            let mut buf = vec![0u16; (len + 1) as usize];
-            let actual_len = unsafe { GetWindowTextW(hwnd, &mut buf) };
-            if actual_len > 0 {
-                let title = String::from_utf16_lossy(&buf[..actual_len as usize]);
-                if title == ctx.target_title {
-                    ctx.found_hwnd = Some(hwnd);
-                    return windows::core::BOOL::from(false); // Stop enumeration
-                }
-            }
-        }
-        windows::core::BOOL::from(true) // Continue enumeration
-    }
-
-    /// Apply WS_EX_NOACTIVATE to a window found by its title.
-    /// Returns true if the window was found and the style applied.
-    pub fn make_window_title_no_activate(title: &str) -> bool {
-        let mut ctx = EnumThreadWindowsCtx {
-            target_title: title.to_string(),
-            found_hwnd: None,
-        };
-        unsafe {
-            let thread_id = GetCurrentThreadId();
-            let _ = EnumThreadWindows(
-                thread_id,
-                Some(enum_thread_windows_proc),
-                windows::Win32::Foundation::LPARAM(&mut ctx as *mut _ as isize),
-            );
-        }
-        if let Some(hwnd) = ctx.found_hwnd {
-            make_hwnd_no_activate(hwnd)
-        } else {
-            // Fallback to FindWindowW if thread enumeration fails or doesn't find it yet
-            let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
-            let hwnd = unsafe {
-                FindWindowW(PCWSTR::null(), PCWSTR(title_wide.as_ptr()))
-                    .unwrap_or(HWND(std::ptr::null_mut()))
-            };
-            if hwnd.0.is_null() {
-                return false;
-            }
-            make_hwnd_no_activate(hwnd)
-        }
-    }
-
     fn taskbar_windows() -> Vec<HWND> {
         let mut windows = Vec::new();
         unsafe {
@@ -831,27 +744,6 @@ mod windows_platform {
             .arg(format!("/select,{}", path.display()))
             .spawn()
             .with_context(|| format!("Failed to reveal {}", path.display()))?;
-        Ok(())
-    }
-
-    pub fn open_file(path: &Path) -> Result<()> {
-        if !path.is_file() {
-            bail!("File does not exist: {}", path.display());
-        }
-        let path_wide = widestring(path.as_os_str().to_string_lossy().as_ref());
-        unsafe {
-            let result = ShellExecuteW(
-                Some(HWND(std::ptr::null_mut())),
-                w!("open"),
-                PCWSTR(path_wide.as_ptr()),
-                PCWSTR::null(),
-                PCWSTR::null(),
-                SW_SHOWNORMAL,
-            );
-            if (result.0 as usize) <= 32 {
-                bail!("Failed to open file: {}", path.display());
-            }
-        }
         Ok(())
     }
 
@@ -1024,10 +916,6 @@ mod fallback {
     }
 
     pub fn reveal_file_in_explorer(_path: &std::path::Path) -> Result<()> {
-        Ok(())
-    }
-
-    pub fn open_file(_path: &std::path::Path) -> Result<()> {
         Ok(())
     }
 

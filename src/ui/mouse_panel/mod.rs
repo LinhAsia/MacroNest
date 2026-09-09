@@ -3176,31 +3176,6 @@ fn arduino_port_score(port: &serialport::SerialPortInfo, spoof_type: u32) -> u32
     score
 }
 
-fn wait_for_serial_port_openable(
-    port: &str,
-    baud_rate: u32,
-    timeout: std::time::Duration,
-) -> anyhow::Result<()> {
-    let start = std::time::Instant::now();
-    let mut last_error = None;
-    while start.elapsed() < timeout {
-        match serialport::new(port, baud_rate)
-            .timeout(std::time::Duration::from_millis(250))
-            .open()
-        {
-            Ok(_) => return Ok(()),
-            Err(error) => {
-                last_error = Some(error.to_string());
-                std::thread::sleep(std::time::Duration::from_millis(150));
-            }
-        }
-    }
-
-    anyhow::bail!(
-        "{}",
-        last_error.unwrap_or_else(|| "serial port was not available".to_owned())
-    )
-}
 fn wait_for_serial_port_present(port: &str, timeout: std::time::Duration) -> anyhow::Result<()> {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {

@@ -354,19 +354,6 @@ mod windows_impl {
         unsafe { capture_screen_region_from_desktop(left, top, width.max(1), height.max(1)) }
     }
 
-    pub fn is_window_topmost(selector: &str) -> bool {
-        let Some(hwnd) = find_window_handle(Some(selector)) else {
-            return false;
-        };
-        unsafe {
-            if !IsWindow(Some(hwnd)).as_bool() {
-                return false;
-            }
-            let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-            (ex_style & WS_EX_TOPMOST.0) != 0
-        }
-    }
-
     #[allow(dead_code)]
     pub fn set_window_topmost(selector: &str, topmost: bool) -> bool {
         let Some(hwnd) = find_window_handle(Some(selector)) else {
@@ -1672,10 +1659,6 @@ mod fallback {
         _match_duplicate_window_titles: bool,
     ) -> Option<ScreenCaptureFrame> {
         None
-    }
-
-    pub fn is_window_topmost(_selector: &str) -> bool {
-        false
     }
 
     #[allow(dead_code)]

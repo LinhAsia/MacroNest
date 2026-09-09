@@ -1481,10 +1481,6 @@ impl CrosshairApp {
         );
     }
 
-    fn lock_settings_card_width(ui: &mut egui::Ui) {
-        Self::lock_settings_card_width_to(ui, ui.available_width());
-    }
-
     fn lock_settings_card_width_to(ui: &mut egui::Ui, width: f32) {
         ui.set_min_width(width);
         ui.set_width(width);

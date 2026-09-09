@@ -425,9 +425,6 @@ mod windows_overlay {
     pub static ACTIVE_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
         Lazy::new(|| Mutex::new(HashSet::new()));
 
-    static GEOMETRY_SVG_CACHE: Lazy<
-        Mutex<HashMap<(Arc<str>, u32, u32, u32, i32), RenderedSvgImage>>,
-    > = Lazy::new(|| Mutex::new(HashMap::new()));
     static ESP_PRESET_REVISION: AtomicU64 = AtomicU64::new(0);
     static ESP_SAMPLER_ALIVE: AtomicBool = AtomicBool::new(false);
     const ESP_WORKER_STALL_TIMEOUT: Duration = Duration::from_secs(2);
@@ -16297,64 +16294,6 @@ mod windows_overlay {
         true
     }
 
-    fn next_screen_draw_color(color: RgbaColor) -> RgbaColor {
-        const PALETTE: [RgbaColor; 8] = [
-            RgbaColor {
-                r: 0,
-                g: 255,
-                b: 170,
-                a: 255,
-            },
-            RgbaColor {
-                r: 255,
-                g: 96,
-                b: 96,
-                a: 255,
-            },
-            RgbaColor {
-                r: 255,
-                g: 224,
-                b: 96,
-                a: 255,
-            },
-            RgbaColor {
-                r: 96,
-                g: 176,
-                b: 255,
-                a: 255,
-            },
-            RgbaColor {
-                r: 255,
-                g: 128,
-                b: 224,
-                a: 255,
-            },
-            RgbaColor {
-                r: 255,
-                g: 255,
-                b: 255,
-                a: 255,
-            },
-            RgbaColor {
-                r: 32,
-                g: 32,
-                b: 32,
-                a: 255,
-            },
-            RgbaColor {
-                r: 126,
-                g: 224,
-                b: 182,
-                a: 255,
-            },
-        ];
-        let index = PALETTE
-            .iter()
-            .position(|entry| entry.r == color.r && entry.g == color.g && entry.b == color.b)
-            .unwrap_or(0);
-        PALETTE[(index + 1) % PALETTE.len()]
-    }
-
     fn sample_screen_draw_color_at_local_point(
         state: &ScreenDrawState,
         point: POINT,
@@ -17895,37 +17834,6 @@ mod windows_overlay {
         }
     }
 
-    fn copy_screen_draw_rgba_to_bgra_region(
-        src: &[u8],
-        dst: &mut [u8],
-        width: usize,
-        rect: ScreenDrawDirtyRect,
-    ) {
-        for y in rect.top..rect.bottom {
-            let row_start = (y * width + rect.left) * 4;
-            let row_end = (y * width + rect.right) * 4;
-            if row_end > src.len() || row_end > dst.len() || row_start > row_end {
-                continue;
-            }
-            let src_row = &src[row_start..row_end];
-            let dst_row = &mut dst[row_start..row_end];
-            for (src_chunk, dst_chunk) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
-                let pixel =
-                    u32::from_ne_bytes([src_chunk[0], src_chunk[1], src_chunk[2], src_chunk[3]]);
-                let r = (pixel) & 0xFF;
-                let g = (pixel >> 8) & 0xFF;
-                let b = (pixel >> 16) & 0xFF;
-                let a = (pixel >> 24) & 0xFF;
-                let bgra = b | (g << 8) | (r << 16) | (a << 24);
-                let out = bgra.to_ne_bytes();
-                dst_chunk[0] = out[0];
-                dst_chunk[1] = out[1];
-                dst_chunk[2] = out[2];
-                dst_chunk[3] = out[3];
-            }
-        }
-    }
-
     fn extract_screen_draw_rgba_region(
         src: &[u8],
         width: usize,
@@ -18304,37 +18212,6 @@ mod windows_overlay {
             .collect()
     }
 
-    fn draw_screen_draw_slider_skia(
-        pixmap: &mut tiny_skia::Pixmap,
-        x: f32,
-        y: f32,
-        slider_width: f32,
-        value: f32,
-    ) {
-        fill_skia_rounded_rect(
-            pixmap,
-            x,
-            y - 3.0,
-            slider_width,
-            6.0,
-            3.0,
-            [90, 108, 132, 224],
-        );
-        fill_skia_rounded_rect(
-            pixmap,
-            x,
-            y - 3.0,
-            value.clamp(0.0, 1.0) * slider_width,
-            6.0,
-            3.0,
-            [120, 214, 176, 224],
-        );
-        let knob_x = x + value.clamp(0.0, 1.0) * slider_width;
-        draw_skia_circle_fill(pixmap, knob_x, y, 11.0, [244, 248, 255, 255]);
-        draw_skia_circle_outline(pixmap, knob_x, y, 11.0, [255, 255, 255, 66], 1.0);
-        draw_skia_circle_fill(pixmap, knob_x, y, 4.0, [64, 84, 108, 140]);
-    }
-
     fn draw_screen_draw_color_pick_panel_rgba(
         pixels: &mut [u8],
         width: usize,
@@ -18511,40 +18388,6 @@ mod windows_overlay {
             0.0,
             false,
         );
-    }
-
-    fn show_color_picker_dialog(
-        hwnd: windows::Win32::Foundation::HWND,
-        initial_color: RgbaColor,
-    ) -> Option<RgbaColor> {
-        use windows::Win32::Foundation::COLORREF;
-        use windows::Win32::UI::Controls::Dialogs::{
-            CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW, ChooseColorW,
-        };
-
-        let mut custom_colors = [COLORREF(0xFFFFFF); 16];
-        let rgb_val = (initial_color.r as u32)
-            | ((initial_color.g as u32) << 8)
-            | ((initial_color.b as u32) << 16);
-
-        let mut cc = CHOOSECOLORW::default();
-        cc.lStructSize = std::mem::size_of::<CHOOSECOLORW>() as u32;
-        cc.hwndOwner = hwnd;
-        cc.rgbResult = COLORREF(rgb_val);
-        cc.lpCustColors = custom_colors.as_mut_ptr();
-        cc.Flags = CC_FULLOPEN | CC_RGBINIT;
-
-        unsafe {
-            if ChooseColorW(&mut cc).as_bool() {
-                let res = cc.rgbResult.0;
-                let r = (res & 0xFF) as u8;
-                let g = ((res >> 8) & 0xFF) as u8;
-                let b = ((res >> 16) & 0xFF) as u8;
-                Some(RgbaColor { r, g, b, a: 255 })
-            } else {
-                None
-            }
-        }
     }
 
     fn draw_screen_draw_toolbar_rgba(
@@ -18955,95 +18798,6 @@ mod windows_overlay {
                     src_r,
                     src_g,
                     src_b,
-                    src_a,
-                );
-            }
-        }
-    }
-
-    fn draw_toolbar_svg_icon(
-        pixmap: &mut tiny_skia::Pixmap,
-        svg: &str,
-        x: i32,
-        y: i32,
-        target_width: u32,
-        target_height: u32,
-    ) {
-        let cache_key = (
-            Arc::<str>::from(svg),
-            target_width,
-            target_height,
-            255u32,
-            0i32,
-        );
-        let rendered = {
-            let mut cache = GEOMETRY_SVG_CACHE.lock();
-            if let Some(existing) = cache.get(&cache_key) {
-                existing.clone()
-            } else {
-                match render_svg_image(svg, target_width, target_height, 1.0, 0.0) {
-                    Ok(rendered) => {
-                        cache.insert(cache_key.clone(), rendered.clone());
-                        rendered
-                    }
-                    Err(_) => return,
-                }
-            }
-        };
-
-        let src_w = rendered.width as usize;
-        let src_h = rendered.height as usize;
-        let mut min_x = src_w;
-        let mut min_y = src_h;
-        let mut max_x = 0usize;
-        let mut max_y = 0usize;
-        let mut found = false;
-        for py in 0..src_h {
-            for px in 0..src_w {
-                let src_offset = (py * src_w + px) * 4;
-                if rendered.rgba[src_offset + 3] == 0 {
-                    continue;
-                }
-                found = true;
-                min_x = min_x.min(px);
-                min_y = min_y.min(py);
-                max_x = max_x.max(px);
-                max_y = max_y.max(py);
-            }
-        }
-        if !found {
-            return;
-        }
-
-        let content_w = (max_x - min_x + 1) as i32;
-        let content_h = (max_y - min_y + 1) as i32;
-        let dst_origin_x = x + ((target_width as i32 - content_w) / 2);
-        let dst_origin_y = y + ((target_height as i32 - content_h) / 2);
-
-        let dst_w = pixmap.width() as usize;
-        let dst_h = pixmap.height() as usize;
-        let dst = pixmap.data_mut();
-        for py in 0..src_h {
-            let dst_y = dst_origin_y + (py as i32 - min_y as i32);
-            if dst_y < 0 || dst_y >= dst_h as i32 {
-                continue;
-            }
-            for px in 0..src_w {
-                let dst_x = dst_origin_x + (px as i32 - min_x as i32);
-                if dst_x < 0 || dst_x >= dst_w as i32 {
-                    continue;
-                }
-                let src_offset = (py * src_w + px) * 4;
-                let src_a = rendered.rgba[src_offset + 3];
-                if src_a == 0 {
-                    continue;
-                }
-                let dst_offset = (dst_y as usize * dst_w + dst_x as usize) * 4;
-                blend_premultiplied_rgba(
-                    &mut dst[dst_offset..dst_offset + 4],
-                    rendered.rgba[src_offset],
-                    rendered.rgba[src_offset + 1],
-                    rendered.rgba[src_offset + 2],
                     src_a,
                 );
             }
@@ -19850,27 +19604,6 @@ mod windows_overlay {
         apply_window_opacity(runtime, target);
     }
 
-    fn angle_between(angle: f32, start: f32, end: f32) -> bool {
-        let mut s = start % 360.0;
-        if s < 0.0 {
-            s += 360.0;
-        }
-        let mut e = end % 360.0;
-        if e < 0.0 {
-            e += 360.0;
-        }
-        let mut a = angle % 360.0;
-        if a < 0.0 {
-            a += 360.0;
-        }
-
-        if s <= e {
-            a >= s && a <= e
-        } else {
-            a >= s || a <= e
-        }
-    }
-
     fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 4] {
         let c = v * s;
         let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
@@ -19894,163 +19627,6 @@ mod windows_overlay {
             ((b + m) * 255.0) as u8,
             235,
         ]
-    }
-
-    fn blend_rgba_pixel(buf: &mut [u8], w: usize, _h: usize, x: i32, y: i32, color: [u8; 4]) {
-        if x < 0 || y < 0 {
-            return;
-        }
-        let (x, y) = (x as usize, y as usize);
-        if x >= w {
-            return;
-        }
-        let off = (y * w + x) * 4;
-        if off + 3 >= buf.len() {
-            return;
-        }
-        let sa = color[3] as u32;
-        let da = buf[off + 3] as u32;
-        let out_a = sa + da * (255 - sa) / 255;
-        if out_a == 0 {
-            return;
-        }
-        buf[off] = ((color[0] as u32 * sa + buf[off] as u32 * da * (255 - sa) / 255) / out_a) as u8;
-        buf[off + 1] =
-            ((color[1] as u32 * sa + buf[off + 1] as u32 * da * (255 - sa) / 255) / out_a) as u8;
-        buf[off + 2] =
-            ((color[2] as u32 * sa + buf[off + 2] as u32 * da * (255 - sa) / 255) / out_a) as u8;
-        buf[off + 3] = out_a as u8;
-    }
-
-    fn draw_line_rgba(
-        buf: &mut [u8],
-        w: usize,
-        h: usize,
-        x0: i32,
-        y0: i32,
-        x1: i32,
-        y1: i32,
-        color: [u8; 4],
-    ) {
-        let (mut x0, mut y0) = (x0, y0);
-        let (x1, y1) = (x1, y1);
-        let dx = (x1 - x0).abs();
-        let dy = (y1 - y0).abs();
-        let sx = if x0 < x1 { 1i32 } else { -1i32 };
-        let sy = if y0 < y1 { 1i32 } else { -1i32 };
-        let mut err = dx - dy;
-        loop {
-            blend_rgba_pixel(buf, w, h, x0, y0, color);
-            if x0 == x1 && y0 == y1 {
-                break;
-            }
-            let e2 = 2 * err;
-            if e2 > -dy {
-                err -= dy;
-                x0 += sx;
-            }
-            if e2 < dx {
-                err += dx;
-                y0 += sy;
-            }
-        }
-    }
-
-    fn draw_line_thick_rgba(
-        buf: &mut [u8],
-        w: usize,
-        h: usize,
-        x0: i32,
-        y0: i32,
-        x1: i32,
-        y1: i32,
-        color: [u8; 4],
-        thickness: i32,
-    ) {
-        let half = thickness / 2;
-        for t in -half..=half {
-            let len = ((x1 - x0).pow(2) + (y1 - y0).pow(2)) as f32;
-            if len < 0.001 {
-                break;
-            }
-            let nx = -(y1 - y0) as f32 / len.sqrt();
-            let ny = (x1 - x0) as f32 / len.sqrt();
-            let ox = (nx * t as f32).round() as i32;
-            let oy = (ny * t as f32).round() as i32;
-            draw_line_rgba(buf, w, h, x0 + ox, y0 + oy, x1 + ox, y1 + oy, color);
-        }
-    }
-
-    fn fill_ellipse_rgba(
-        buf: &mut [u8],
-        w: usize,
-        h: usize,
-        bx: i32,
-        by: i32,
-        bw: i32,
-        bh: i32,
-        color: [u8; 4],
-    ) {
-        let cx = bx + bw / 2;
-        let cy = by + bh / 2;
-        let rx = (bw / 2).max(1) as f32;
-        let ry = (bh / 2).max(1) as f32;
-        for py in by..by + bh {
-            for px in bx..bx + bw {
-                let dx = (px - cx) as f32 / rx;
-                let dy = (py - cy) as f32 / ry;
-                if dx * dx + dy * dy <= 1.0 {
-                    blend_rgba_pixel(buf, w, h, px, py, color);
-                }
-            }
-        }
-    }
-
-    fn draw_ellipse_outline_thick_rgba(
-        buf: &mut [u8],
-        w: usize,
-        h: usize,
-        bx: i32,
-        by: i32,
-        bw: i32,
-        bh: i32,
-        color: [u8; 4],
-        thickness: i32,
-    ) {
-        let cx = bx + bw / 2;
-        let cy = by + bh / 2;
-        let rx = (bw / 2).max(1) as f32;
-        let ry = (bh / 2).max(1) as f32;
-        let steps = ((rx.max(ry) * std::f32::consts::PI * 2.0) as i32).max(64);
-        for i in 0..steps {
-            let t = (i as f32 / steps as f32) * std::f32::consts::PI * 2.0;
-            let x = cx + (rx * t.cos()) as i32;
-            let y = cy + (ry * t.sin()) as i32;
-            for tx in -thickness..=thickness {
-                for ty in -thickness..=thickness {
-                    if tx * tx + ty * ty <= thickness * thickness {
-                        blend_rgba_pixel(buf, w, h, x + tx, y + ty, color);
-                    }
-                }
-            }
-        }
-    }
-
-    fn fill_rect_rgba(
-        buf: &mut [u8],
-        w: usize,
-        h: usize,
-        x: i32,
-        y: i32,
-        rw: i32,
-        rh: i32,
-        color: [u8; 4],
-    ) {
-        for py in y..y + rh {
-            for px in x..x + rw {
-                blend_rgba_pixel(buf, w, h, px, py, color);
-            }
-        }
     }
 
     fn draw_skia_line(
@@ -29026,33 +28602,6 @@ mod windows_overlay {
         .cloned()
     }
 
-    fn trigger_custom_preset_by_id(spec: &str) -> Result<()> {
-        let spec = spec.trim();
-        let preset = find_command_preset_by_spec(spec).context("Custom preset was not found")?;
-        if !preset.enabled {
-            bail!("Custom preset is disabled");
-        }
-
-        if preset.target_window_title.is_some() || !preset.extra_target_window_titles.is_empty() {
-            let matches = foreground_matches_any_window_target(
-                preset.target_window_title.as_deref(),
-                &preset.extra_target_window_titles,
-                preset.match_duplicate_window_titles,
-            );
-            if !matches {
-                return Ok(());
-            }
-        }
-
-        let command_text = ai::normalize_command_text(&preset.command);
-        if command_text.is_empty() {
-            bail!("Custom preset command is empty");
-        }
-
-        spawn_custom_command(Some(preset.id), preset.use_powershell, command_text);
-        Ok(())
-    }
-
     fn trigger_command_preset_step(step: &MacroStep) -> Result<()> {
         let spec = step.key.trim();
         if spec.is_empty() {
@@ -37426,24 +36975,6 @@ mod windows_overlay {
         unsafe { find_app_ui_window() }
     }
 
-    pub fn update_ui_window_metrics(
-        visible: bool,
-        is_foreground: bool,
-        left: i32,
-        top: i32,
-        right: i32,
-        bottom: i32,
-    ) {
-        UI_WINDOW_VISIBLE.store(visible, Ordering::Relaxed);
-        UI_WINDOW_FOREGROUND.store(is_foreground, Ordering::Relaxed);
-        if visible {
-            UI_WINDOW_RECT_LEFT.store(left, Ordering::Relaxed);
-            UI_WINDOW_RECT_TOP.store(top, Ordering::Relaxed);
-            UI_WINDOW_RECT_RIGHT.store(right, Ordering::Relaxed);
-            UI_WINDOW_RECT_BOTTOM.store(bottom, Ordering::Relaxed);
-        }
-    }
-
     fn schedule_window_focus_trigger(hwnd: HWND) {
         let mut hook_state = HOOK_STATE.lock();
         if hwnd.0.is_null() {
@@ -37667,33 +37198,6 @@ mod windows_overlay {
 
     static SAVED_UI_WINDOW_POS: parking_lot::Mutex<Option<(i32, i32)>> = parking_lot::Mutex::new(None);
 
-    fn hide_ui_window_native() {
-        unsafe {
-            let Some(app) = find_app_ui_window() else {
-                return;
-            };
-            if app.0.is_null() {
-                return;
-            }
-
-            let mut rect = RECT::default();
-            if GetWindowRect(app, &mut rect).is_ok() {
-                if rect.left != -10000 {
-                    *SAVED_UI_WINDOW_POS.lock() = Some((rect.left, rect.top));
-                }
-            }
-            let _ = SetWindowPos(
-                app,
-                None,
-                -10000,
-                -10000,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            );
-        }
-    }
-
     fn show_ui_window_native() {
         unsafe {
             let Some(app) = find_app_ui_window() else {
@@ -37719,86 +37223,8 @@ mod windows_overlay {
         }
     }
 
-    fn restore_ui_window_native() {
-        unsafe {
-            let Some(app) = find_app_ui_window() else {
-                return;
-            };
-            if app.0.is_null() {
-                return;
-            }
-
-            if let Some((x, y)) = SAVED_UI_WINDOW_POS.lock().take() {
-                let _ = SetWindowPos(
-                    app,
-                    None,
-                    x,
-                    y,
-                    0,
-                    0,
-                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-                );
-            } else {
-                let _ = ShowWindow(app, SW_SHOWNA);
-            }
-        }
-    }
-
-    fn apply_window_preset_for_macro(preset: &WindowPreset) -> Result<()> {
-        window_preset::apply_window_preset_for_macro(preset)
-    }
-
     fn apply_window_preset(preset: &WindowPreset) -> Result<()> {
         window_preset::apply_window_preset(preset)
-    }
-
-    fn apply_window_preset_impl(preset: &WindowPreset, require_enabled: bool) -> Result<()> {
-        if require_enabled && !preset.enabled {
-            return Ok(());
-        }
-
-        unsafe {
-            let target = resolve_window_target(
-                preset.target_window_title.as_deref(),
-                &preset.extra_target_window_titles,
-                preset.match_duplicate_window_titles,
-                false,
-            );
-            if target.0.is_null() {
-                bail!("No foreground window is available");
-            }
-
-            let target_root = GetAncestor(target, GA_ROOT);
-            if !target_root.0.is_null()
-                && window_belongs_to_current_process(target_root)
-                && !is_internal_app_window(target_root)
-            {
-                return Ok(());
-            }
-
-            ensure_window_restored(target);
-            if preset.remove_title_bar {
-                let _ = remove_window_title_bar(target);
-            } else {
-                let _ = restore_window_title_bar(target);
-            }
-            wait_for_window_frame_to_settle(target);
-
-            let bounds = calculate_window_bounds(target, preset)?;
-            let _ = SetWindowPos(
-                target,
-                None,
-                bounds.left,
-                bounds.top,
-                bounds.right - bounds.left,
-                bounds.bottom - bounds.top,
-                windows::Win32::UI::WindowsAndMessaging::SWP_FRAMECHANGED
-                    | SWP_NOACTIVATE
-                    | SWP_NOZORDER,
-            );
-        }
-
-        Ok(())
     }
 
     fn apply_window_preset_animated(preset: &WindowPreset) -> Result<()> {
@@ -38962,17 +38388,6 @@ mod windows_overlay {
             crate::window_list::strip_rule_suffix(target),
             match_duplicate_window_titles,
         )
-    }
-
-    unsafe fn window_matches_selector_with_duplicate_titles(
-        hwnd: HWND,
-        target: &str,
-        match_duplicate_window_titles: bool,
-    ) -> bool {
-        let Some(title) = crate::window_list::window_title(hwnd) else {
-            return false;
-        };
-        window_matches_selector_title(&title, hwnd, target, match_duplicate_window_titles)
     }
 
     unsafe fn paint_timer_hwnd(hwnd: HWND, preset: &TimerPreset, text: &str) -> Result<()> {

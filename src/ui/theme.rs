@@ -24,12 +24,6 @@ pub fn text_has_cjk(text: &str) -> bool {
     })
 }
 
-pub fn app_state_needs_cjk_fallback(state: &AppState) -> bool {
-    serde_json::to_string(state)
-        .map(|json| text_has_cjk(&json))
-        .unwrap_or(false)
-}
-
 #[cfg(windows)]
 fn add_windows_cjk_fallback_fonts(fonts: &mut FontDefinitions) {
     for (font_key, path) in [
