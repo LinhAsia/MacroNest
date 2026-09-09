@@ -39,10 +39,13 @@ pub fn format_binding(binding: Option<&HotkeyBinding>) -> String {
 
 
 pub fn is_modifier_key_name(name: &str) -> bool {
-    matches!(
-        name.trim().to_ascii_lowercase().as_str(),
-        "ctrl" | "control" | "alt" | "shift" | "win" | "meta"
-    )
+    let trimmed = name.trim();
+    trimmed.eq_ignore_ascii_case("ctrl")
+        || trimmed.eq_ignore_ascii_case("control")
+        || trimmed.eq_ignore_ascii_case("alt")
+        || trimmed.eq_ignore_ascii_case("shift")
+        || trimmed.eq_ignore_ascii_case("win")
+        || trimmed.eq_ignore_ascii_case("meta")
 }
 
 pub fn split_key_list(spec: &str) -> Vec<String> {
@@ -55,7 +58,7 @@ pub fn split_key_list(spec: &str) -> Vec<String> {
         .split(|ch: char| matches!(ch, ',' | ';' | '+' | ' ' | '\t' | '\n'))
         .filter_map(|part| {
             let key = part.trim();
-            (!key.is_empty()).then(|| normalize_key_name(key))
+            (!key.is_empty()).then(|| normalize_key_name(key).to_owned())
         })
         .collect()
 }
@@ -70,25 +73,19 @@ pub fn parse_binding(spec: &str) -> Option<HotkeyBinding> {
     binding_from_keys(std::mem::take(&mut combo_keys))
 }
 
-pub fn split_binding_list(spec: &str) -> Vec<String> {
-    let trimmed = spec.trim();
-    if trimmed.is_empty() {
-        return Vec::new();
-    }
+pub fn split_binding_entries(spec: &str) -> impl Iterator<Item = &str> {
+    spec.split(|ch: char| matches!(ch, ',' | ';' | '|' | '\n' | '\r'))
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+}
 
-    trimmed
-        .split(|ch: char| matches!(ch, ',' | ';' | '|' | '\n' | '\r'))
-        .filter_map(|part| {
-            let binding = part.trim();
-            (!binding.is_empty()).then(|| binding.to_owned())
-        })
-        .collect()
+pub fn split_binding_list(spec: &str) -> Vec<String> {
+    split_binding_entries(spec).map(str::to_owned).collect()
 }
 
 pub fn parse_binding_list(spec: &str) -> Vec<HotkeyBinding> {
-    split_binding_list(spec)
-        .into_iter()
-        .filter_map(|entry| parse_binding(&entry))
+    split_binding_entries(spec)
+        .filter_map(parse_binding)
         .collect()
 }
 
@@ -112,10 +109,8 @@ pub fn append_binding_to_list(spec: &mut String, binding: &HotkeyBinding) -> boo
     if normalized == "Not set" {
         return false;
     }
-    let entries = split_binding_list(spec);
-    if entries
-        .iter()
-        .filter_map(|entry| parse_binding(entry))
+    if split_binding_entries(spec)
+        .filter_map(parse_binding)
         .any(|existing| binding_matches(&existing, binding))
     {
         return false;
@@ -146,43 +141,50 @@ pub fn is_mouse_key_name(name: &str) -> bool {
 }
 
 pub fn binding_key_names(binding: &HotkeyBinding) -> Vec<String> {
-    let keys = if binding.combo_keys.is_empty() {
-        let mut legacy = Vec::new();
-        if binding.ctrl {
-            legacy.push("Ctrl".to_owned());
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    let mut add_key = |k: &str| {
+        let normalized = normalize_key_name(k);
+        let lower = normalized.trim().to_ascii_lowercase();
+        if !lower.is_empty() && seen.insert(lower) {
+            result.push(normalized.to_owned());
         }
-        if binding.alt {
-            legacy.push("Alt".to_owned());
-        }
-        if binding.shift {
-            legacy.push("Shift".to_owned());
-        }
-        if binding.win {
-            legacy.push("Win".to_owned());
-        }
-        if !binding.key.trim().is_empty() {
-            legacy.push(binding.key.trim().to_owned());
-        }
-        legacy
-    } else {
-        binding.combo_keys.clone()
     };
 
-    let mut seen = HashSet::new();
-    keys.into_iter()
-        .filter_map(|key| {
-            let normalized = normalize_key_name(&key);
-            let lower = normalized.trim().to_ascii_lowercase();
-            if lower.is_empty() || !seen.insert(lower) {
-                None
-            } else {
-                Some(normalized)
-            }
-        })
-        .collect()
+    if binding.combo_keys.is_empty() {
+        if binding.ctrl {
+            add_key("Ctrl");
+        }
+        if binding.alt {
+            add_key("Alt");
+        }
+        if binding.shift {
+            add_key("Shift");
+        }
+        if binding.win {
+            add_key("Win");
+        }
+        let key_trimmed = binding.key.trim();
+        if !key_trimmed.is_empty() {
+            add_key(key_trimmed);
+        }
+    } else {
+        for key in &binding.combo_keys {
+            add_key(key);
+        }
+    }
+    result
 }
 
 pub fn binding_matches(expected: &HotkeyBinding, observed: &HotkeyBinding) -> bool {
+    if expected == observed {
+        return expected.ctrl
+            || expected.alt
+            || expected.shift
+            || expected.win
+            || !expected.key.trim().is_empty()
+            || expected.combo_keys.iter().any(|k| !k.trim().is_empty());
+    }
     let expected_keys = binding_key_signature(expected);
     let observed_keys = binding_key_signature(observed);
     !expected_keys.is_empty() && expected_keys == observed_keys
@@ -213,7 +215,10 @@ fn binding_non_modifier_signature(binding: &HotkeyBinding) -> Vec<String> {
     let mut keys: Vec<String> = binding_key_names(binding)
         .into_iter()
         .filter(|key| !is_modifier_key_name(key))
-        .map(|key| key.to_ascii_lowercase())
+        .map(|mut key| {
+            key.make_ascii_lowercase();
+            key
+        })
         .collect();
     keys.sort();
     keys
@@ -222,7 +227,10 @@ fn binding_non_modifier_signature(binding: &HotkeyBinding) -> Vec<String> {
 fn binding_key_signature(binding: &HotkeyBinding) -> Vec<String> {
     let mut keys = binding_key_names(binding)
         .into_iter()
-        .map(|key| key.to_ascii_lowercase())
+        .map(|mut key| {
+            key.make_ascii_lowercase();
+            key
+        })
         .collect::<Vec<_>>();
     keys.sort();
     keys
@@ -258,14 +266,14 @@ fn binding_from_keys(mut combo_keys: Vec<String>) -> Option<HotkeyBinding> {
     })
 }
 
-fn normalize_key_name(key: &str) -> String {
+fn normalize_key_name<'a>(key: &'a str) -> &'a str {
     let trimmed = key.trim();
     if let Some(vk) = key_name_to_vk(trimmed)
         && let Some(name) = vk_to_key_name(vk)
     {
-        return name.to_owned();
+        return name;
     }
-    trimmed.to_owned()
+    trimmed
 }
 
 #[cfg(windows)]
@@ -283,20 +291,22 @@ pub fn to_windows_registration(
     let mut modifiers = HOT_KEY_MODIFIERS(0);
     let mut vk = None;
     for key in keys {
-        match key.to_ascii_lowercase().as_str() {
-            "ctrl" | "control" => modifiers |= MOD_CONTROL,
-            "alt" => modifiers |= MOD_ALT,
-            "shift" => modifiers |= MOD_SHIFT,
-            "win" | "meta" => modifiers |= MOD_WIN,
-            _ => {
-                if is_mouse_key_name(&key) {
-                    return None;
-                }
-                if vk.is_some() {
-                    return None;
-                }
-                vk = key_name_to_vk(&key);
+        if key.eq_ignore_ascii_case("ctrl") || key.eq_ignore_ascii_case("control") {
+            modifiers |= MOD_CONTROL;
+        } else if key.eq_ignore_ascii_case("alt") {
+            modifiers |= MOD_ALT;
+        } else if key.eq_ignore_ascii_case("shift") {
+            modifiers |= MOD_SHIFT;
+        } else if key.eq_ignore_ascii_case("win") || key.eq_ignore_ascii_case("meta") {
+            modifiers |= MOD_WIN;
+        } else {
+            if is_mouse_key_name(&key) {
+                return None;
             }
+            if vk.is_some() {
+                return None;
+            }
+            vk = key_name_to_vk(&key);
         }
     }
 
@@ -307,7 +317,15 @@ pub fn to_windows_registration(
 
 #[cfg(windows)]
 pub fn key_name_to_vk(name: &str) -> Option<u32> {
-    Some(match name.to_ascii_uppercase().as_str() {
+    if name.is_empty() || name.len() > 16 || !name.is_ascii() {
+        return None;
+    }
+    let mut buf = [0u8; 16];
+    for (i, b) in name.bytes().enumerate() {
+        buf[i] = b.to_ascii_uppercase();
+    }
+    let upper = std::str::from_utf8(&buf[..name.len()]).ok()?;
+    Some(match upper {
         "MOUSELEFT" | "LEFTBUTTON" | "LBUTTON" | "MOUSE LEFT" => 0x01,
         "MOUSERIGHT" | "RIGHTBUTTON" | "RBUTTON" | "MOUSE RIGHT" => 0x02,
         "MOUSEMIDDLE" | "MIDDLEBUTTON" | "MBUTTON" | "MOUSE MIDDLE" => 0x04,
@@ -617,5 +635,33 @@ mod tests {
         };
         assert!(binding_matches_allow_held_modifiers(&expected_combo, &observed_with_ctrl));
         assert!(!binding_matches_allow_held_modifiers(&expected_combo, &observed_clean));
+    }
+
+    #[test]
+    fn split_binding_entries_and_append_list() {
+        let entries: Vec<&str> = split_binding_entries("Ctrl+A, Alt+B; F1\nF2").collect();
+        assert_eq!(entries, vec!["Ctrl+A", "Alt+B", "F1", "F2"]);
+
+        let mut list = String::new();
+        let b1 = HotkeyBinding {
+            key: "A".to_owned(),
+            ctrl: true,
+            ..Default::default()
+        };
+        assert!(append_binding_to_list(&mut list, &b1));
+        assert_eq!(list, "Ctrl+A");
+        // Duplicate should not be appended
+        assert!(!append_binding_to_list(&mut list, &b1));
+        assert_eq!(list, "Ctrl+A");
+    }
+
+    #[test]
+    fn key_name_to_vk_zero_alloc() {
+        assert_eq!(key_name_to_vk("ctrl"), Some(0x11));
+        assert_eq!(key_name_to_vk("f12"), Some(0x7B));
+        assert_eq!(key_name_to_vk("Space"), Some(0x20));
+        assert_eq!(key_name_to_vk(""), None);
+        assert_eq!(key_name_to_vk("this_is_way_too_long_key_name"), None);
+        assert_eq!(key_name_to_vk("việt"), None);
     }
 }

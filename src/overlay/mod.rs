@@ -6383,6 +6383,14 @@ mod windows_overlay {
     }
 
     fn trigger_binding_matches(expected: &HotkeyBinding, observed: &HotkeyBinding) -> bool {
+        if expected == observed {
+            return expected.ctrl
+                || expected.alt
+                || expected.shift
+                || expected.win
+                || !expected.key.trim().is_empty()
+                || expected.combo_keys.iter().any(|k| !k.trim().is_empty());
+        }
         let expected_keys = hotkey::binding_key_names(expected);
         if expected_keys.is_empty() {
             return false;
@@ -36676,23 +36684,7 @@ mod windows_overlay {
     }
 
     fn macro_preset_trigger_matches(preset: &MacroPreset, binding: &HotkeyBinding) -> bool {
-        if preset
-            .hotkey
-            .as_ref()
-            .is_some_and(|hotkey| trigger_binding_matches(hotkey, binding))
-        {
-            return true;
-        }
-
-        let trigger_keys = preset.trigger_keys.trim();
-        if trigger_keys.is_empty() {
-            return false;
-        }
-
-        hotkey::split_binding_list(trigger_keys)
-            .iter()
-            .filter_map(|entry| hotkey::parse_binding(entry))
-            .any(|expected| trigger_binding_matches(&expected, binding))
+        preset_trigger_matches(preset.hotkey.as_ref(), &preset.trigger_keys, binding)
     }
 
     fn preset_trigger_matches(
@@ -36709,9 +36701,8 @@ mod windows_overlay {
             return false;
         }
 
-        hotkey::split_binding_list(trigger_keys)
-            .iter()
-            .filter_map(|entry| hotkey::parse_binding(entry))
+        hotkey::split_binding_entries(trigger_keys)
+            .filter_map(hotkey::parse_binding)
             .any(|expected| trigger_binding_matches(&expected, binding))
     }
 

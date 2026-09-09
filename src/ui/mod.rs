@@ -3908,8 +3908,8 @@ impl CrosshairApp {
 
         let mut removed = false;
         let mut remaining = Vec::new();
-        for entry in hotkey::split_binding_list(trigger_keys) {
-            let matches_binding = hotkey::parse_binding(&entry)
+        for entry in hotkey::split_binding_entries(trigger_keys) {
+            let matches_binding = hotkey::parse_binding(entry)
                 .is_some_and(|existing| hotkey::binding_matches(&existing, binding));
             if !removed && matches_binding {
                 removed = true;
@@ -4034,8 +4034,8 @@ impl CrosshairApp {
 
         let mut removed = false;
         let mut remaining = Vec::new();
-        for entry in hotkey::split_binding_list(&preset.trigger_keys) {
-            let matches_binding = hotkey::parse_binding(&entry)
+        for entry in hotkey::split_binding_entries(&preset.trigger_keys) {
+            let matches_binding = hotkey::parse_binding(entry)
                 .is_some_and(|existing| hotkey::binding_matches(&existing, binding));
             if !removed && matches_binding {
                 removed = true;
@@ -12754,17 +12754,15 @@ impl CrosshairApp {
         )
     }
 
-    fn split_key_list(value: &str) -> Vec<String> {
+    fn split_key_entries(value: &str) -> impl Iterator<Item = &str> {
         value
             .split(',')
             .map(str::trim)
             .filter(|part| !part.is_empty())
-            .map(str::to_owned)
-            .collect()
     }
 
-    fn join_key_list(keys: &[String]) -> String {
-        keys.join(",")
+    fn split_key_list(value: &str) -> Vec<String> {
+        Self::split_key_entries(value).map(str::to_owned).collect()
     }
 
     fn append_key_list_value(list: &mut String, key: &str) -> bool {
@@ -12772,13 +12770,17 @@ impl CrosshairApp {
         if key.is_empty() {
             return false;
         }
-        let existing = Self::split_key_list(list);
-        if existing.iter().any(|part| part.eq_ignore_ascii_case(key)) {
+        if Self::split_key_entries(list).any(|part| part.eq_ignore_ascii_case(key)) {
             return false;
         }
-        let mut updated = existing;
-        updated.push(key.to_owned());
-        *list = Self::join_key_list(&updated);
+        let trimmed = list.trim();
+        if trimmed.is_empty() {
+            *list = key.to_owned();
+        } else {
+            let mut updated = Self::split_key_list(list);
+            updated.push(key.to_owned());
+            *list = updated.join(",");
+        }
         true
     }
 
@@ -12787,16 +12789,19 @@ impl CrosshairApp {
         if key.is_empty() {
             return false;
         }
-        let existing = Self::split_key_list(list);
-        let original_len = existing.len();
-        let remaining: Vec<String> = existing
-            .into_iter()
-            .filter(|part| !part.eq_ignore_ascii_case(key))
-            .collect();
-        if remaining.len() == original_len {
+        let mut removed = false;
+        let mut remaining = Vec::new();
+        for part in Self::split_key_entries(list) {
+            if !removed && part.eq_ignore_ascii_case(key) {
+                removed = true;
+            } else {
+                remaining.push(part);
+            }
+        }
+        if !removed {
             return false;
         }
-        *list = Self::join_key_list(&remaining);
+        *list = remaining.join(",");
         true
     }
 
@@ -13347,12 +13352,10 @@ impl CrosshairApp {
                             && step.get_break_loop_mode() == "StopKey")
                     {
                         let key = binding.key;
-                        let was_empty = Self::split_key_list(&step.key).is_empty();
-                        if !was_empty
-                            && Self::split_key_list(&step.key)
-                                .iter()
-                                .any(|part| part.eq_ignore_ascii_case(&key))
-                        {
+                        let is_duplicate = Self::split_key_entries(&step.key)
+                            .any(|part| part.eq_ignore_ascii_case(&key));
+                        let was_empty = step.key.trim().is_empty();
+                        if is_duplicate {
                             self.status = if step.action == MacroAction::StopIfKeyPressed {
                                 format!("Key {key} is already in that stop key list.")
                             } else {
@@ -16997,3 +17000,27 @@ impl eframe::App for CrosshairApp {
         self.persist_blocking();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CrosshairApp;
+
+    #[test]
+    fn key_list_append_and_remove_handles_whitespace_and_case() {
+        let mut list = String::new();
+        assert!(CrosshairApp::append_key_list_value(&mut list, "Ctrl"));
+        assert_eq!(list, "Ctrl");
+        // Duplicate case-insensitive
+        assert!(!CrosshairApp::append_key_list_value(&mut list, "ctrl"));
+        assert_eq!(list, "Ctrl");
+
+        assert!(CrosshairApp::append_key_list_value(&mut list, "Shift"));
+        assert_eq!(list, "Ctrl,Shift");
+
+        assert!(CrosshairApp::remove_key_list_value(&mut list, "CTRL"));
+        assert_eq!(list, "Shift");
+        assert!(!CrosshairApp::remove_key_list_value(&mut list, "Alt"));
+        assert_eq!(list, "Shift");
+    }
+}
+
