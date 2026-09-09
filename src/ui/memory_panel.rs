@@ -19082,7 +19082,6 @@ mod tests {
         state.raw_snapshot = Some(std::sync::Arc::new(crate::process_memory::RawMemorySnapshot {
             chunks: Vec::new(),
             total_slots: 50_000,
-            value_type: ScanValueType::I32,
             alignment: 4,
         }));
         assert_eq!(state.total_result_count(), 50_000);

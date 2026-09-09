@@ -3210,8 +3210,6 @@ pub struct RawMemorySnapshotChunk {
 pub struct RawMemorySnapshot {
     pub chunks: Vec<RawMemorySnapshotChunk>,
     pub total_slots: usize,
-    #[allow(dead_code)]
-    pub value_type: ScanValueType,
     pub alignment: usize,
 }
 
@@ -3260,7 +3258,6 @@ pub fn capture_memory_snapshot(
     Ok(RawMemorySnapshot {
         chunks,
         total_slots,
-        value_type,
         alignment,
     })
 }
@@ -3386,7 +3383,6 @@ pub fn filter_memory_snapshot_with_progress(
         Ok(SnapshotFilterResult::Snapshot(RawMemorySnapshot {
             chunks,
             total_slots: total_matches,
-            value_type,
             alignment,
         }))
     } else {

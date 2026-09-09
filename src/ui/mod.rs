@@ -10643,10 +10643,10 @@ impl CrosshairApp {
                 WindowAnchor::Bottom => (((screen_width - width) / 2), (screen_height - height)),
                 WindowAnchor::BottomRight => ((screen_width - width), (screen_height - height)),
             };
-            return Some(position);
+            Some(position)
         }
 
-        #[allow(unreachable_code)]
+        #[cfg(not(windows))]
         None
     }
 
@@ -11242,7 +11242,6 @@ impl CrosshairApp {
         message
     }
 
-    #[allow(deprecated)]
     fn show_instant_hover_tooltip(
         _ui: &egui::Ui,
         response: &egui::Response,
@@ -13730,7 +13729,6 @@ impl CrosshairApp {
     }
 
 
-    #[allow(unreachable_code)]
     fn startup_splash_progress(&mut self, ctx: &egui::Context) -> Option<f32> {
         if self.startup_splash.duration_sec <= 0.0 {
             return None;
