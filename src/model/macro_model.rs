@@ -655,30 +655,24 @@ impl MacroStep {
     }
 
     pub fn get_duration_ms(&self) -> u64 {
-        match self.action {
+        let trimmed = self.duration_expr.trim();
+        let is_timed_action = matches!(
+            self.action,
             MacroAction::EnableCrosshairProfile
-            | MacroAction::EnablePinPreset
-            | MacroAction::ShowHud
-            | MacroAction::DrawGeometry => {
-                if self.timed_override && !self.duration_expr.trim().is_empty() {
-                    let trimmed = self.duration_expr.trim();
-                    let interpolated = crate::overlay::interpolate_variables(trimmed);
-                    let val = crate::overlay::evaluate_math_expression(&interpolated);
-                    val.max(0) as u64
-                } else {
-                    0
-                }
-            }
-            _ => {
-                if !self.duration_expr.trim().is_empty() {
-                    let trimmed = self.duration_expr.trim();
-                    let interpolated = crate::overlay::interpolate_variables(trimmed);
-                    let val = crate::overlay::evaluate_math_expression(&interpolated);
-                    val.max(0) as u64
-                } else {
-                    self.duration_override_ms
-                }
-            }
+                | MacroAction::EnablePinPreset
+                | MacroAction::ShowHud
+                | MacroAction::DrawGeometry
+        );
+        if is_timed_action && !self.timed_override {
+            return 0;
+        }
+        if !trimmed.is_empty() {
+            let interpolated = crate::overlay::interpolate_variables(trimmed);
+            crate::overlay::evaluate_math_expression(&interpolated).max(0) as u64
+        } else if is_timed_action {
+            0
+        } else {
+            self.duration_override_ms
         }
     }
 
@@ -724,14 +718,9 @@ impl MacroStep {
 
     pub fn format_mouse_speed_multiplier(multiplier: f32) -> String {
         let clamped = multiplier.clamp(0.1, 100.0);
-        let mut number = format!("{clamped:.2}");
-        while number.contains('.') && number.ends_with('0') {
-            number.pop();
-        }
-        if number.ends_with('.') {
-            number.pop();
-        }
-        format!("x{number}")
+        let formatted = format!("{clamped:.2}");
+        let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+        format!("x{trimmed}")
     }
 
     pub fn resolve_mouse_speed_multiplier(expr: &str) -> Option<f32> {
@@ -743,8 +732,7 @@ impl MacroStep {
         let interpolated = crate::overlay::interpolate_variables(trimmed);
         let normalized = interpolated
             .trim()
-            .trim_start_matches('x')
-            .trim_start_matches('X')
+            .trim_start_matches(['x', 'X'])
             .trim();
 
         if normalized.is_empty() {
@@ -776,11 +764,14 @@ impl MacroStep {
     }
 
     pub fn is_infinite_loop(&self) -> bool {
-        self.action == MacroAction::LoopStart
-            && matches!(
-                self.key.trim().to_ascii_lowercase().as_str(),
-                "infinite" | "inf" | "forever" | "-1"
-            )
+        if self.action != MacroAction::LoopStart {
+            return false;
+        }
+        let trimmed = self.key.trim();
+        trimmed.eq_ignore_ascii_case("infinite")
+            || trimmed.eq_ignore_ascii_case("inf")
+            || trimmed.eq_ignore_ascii_case("forever")
+            || trimmed == "-1"
     }
 
     fn legacy_mouse_speed_multiplier(&self) -> f32 {
@@ -1063,5 +1054,40 @@ mod tests {
         assert_eq!(restored.action, MacroAction::AiResponse);
         assert_eq!(restored.key, "Translate this: hello");
         assert_eq!(restored.if_variable_name, "translated_text");
+    }
+
+    #[test]
+    fn format_mouse_speed_multiplier_trims_trailing_zeros() {
+        assert_eq!(MacroStep::format_mouse_speed_multiplier(1.0), "x1");
+        assert_eq!(MacroStep::format_mouse_speed_multiplier(1.5), "x1.5");
+        assert_eq!(MacroStep::format_mouse_speed_multiplier(2.25), "x2.25");
+        assert_eq!(MacroStep::format_mouse_speed_multiplier(0.05), "x0.1");
+        assert_eq!(MacroStep::format_mouse_speed_multiplier(150.0), "x100");
+    }
+
+    #[test]
+    fn is_infinite_loop_recognizes_aliases_case_insensitively() {
+        use super::MacroAction;
+        let mut step = MacroStep::default();
+        step.action = MacroAction::LoopStart;
+
+        step.key = "infinite".to_string();
+        assert!(step.is_infinite_loop());
+
+        step.key = "INF".to_string();
+        assert!(step.is_infinite_loop());
+
+        step.key = "Forever".to_string();
+        assert!(step.is_infinite_loop());
+
+        step.key = "-1".to_string();
+        assert!(step.is_infinite_loop());
+
+        step.key = "5".to_string();
+        assert!(!step.is_infinite_loop());
+
+        step.action = MacroAction::KeyPress;
+        step.key = "infinite".to_string();
+        assert!(!step.is_infinite_loop());
     }
 }
