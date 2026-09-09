@@ -24,7 +24,6 @@ impl CrosshairApp {
         self.sync_window_layouts();
         self.sync_mouse_sensitivity_presets();
         self.sync_mouse_sensitivity_settings();
-        self.sync_mouse_driver_settings();
         self.sync_keyboard_arrow_mouse_settings();
         self.sync_macro_delay_settings();
         self.sync_macro_presets();

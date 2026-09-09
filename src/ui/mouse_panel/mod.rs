@@ -2143,8 +2143,6 @@ impl CrosshairApp {
             });
     }
 
-    pub(crate) fn sync_mouse_driver_settings(&self) {}
-
     pub(crate) fn sync_keyboard_arrow_mouse_settings(&self) {
         let _ = self
             .overlay_tx

@@ -128,35 +128,6 @@ pub(super) fn apply_window_preset_animated(preset: &WindowPreset) -> Result<()> 
     Ok(())
 }
 
-pub(super) fn restore_window_title_bar_for_preset(preset: &WindowPreset) -> Result<()> {
-    if !preset.restore_titlebar_enabled {
-        return Ok(());
-    }
-    unsafe {
-        super::invalidate_runtime_open_window_snapshot();
-        let target = resolve_window_target(
-            preset.target_window_title.as_deref(),
-            &preset.extra_target_window_titles,
-            preset.match_duplicate_window_titles,
-            false,
-        );
-        if target.0.is_null() {
-            bail!("No foreground window is available");
-        }
-        let target_root = GetAncestor(target, GA_ROOT);
-        if !target_root.0.is_null()
-            && window_belongs_to_current_process(target_root)
-            && !is_internal_app_window(target_root)
-        {
-            return Ok(());
-        }
-
-        let _ = ShowWindow(target, SW_RESTORE);
-        restore_window_title_bar(target)?;
-    }
-    Ok(())
-}
-
 fn focus_window_for_title(
     target_title: Option<&str>,
     extra_target_titles: &[String],

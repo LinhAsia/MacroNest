@@ -3263,12 +3263,10 @@ mod windows_overlay {
         }
     }
 
-    #[allow(dead_code)]
     enum WindowHotkeyAction {
         Apply(WindowPreset),
         Focus(WindowFocusPreset),
         Animate(WindowPreset),
-        RestoreTitleBar(WindowPreset),
         ApplyLayout(crate::model::WindowLayout),
     }
 
@@ -4499,10 +4497,6 @@ mod windows_overlay {
                                 thread::spawn(move || {
                                     let _ = apply_window_preset_animated(&preset);
                                 });
-                            }
-
-                            WindowHotkeyAction::RestoreTitleBar(preset) => {
-                                let _ = restore_window_title_bar_for_preset(preset);
                             }
 
                             WindowHotkeyAction::ApplyLayout(layout) => {
@@ -6628,10 +6622,6 @@ mod windows_overlay {
                         });
                     }
 
-                    WindowHotkeyAction::RestoreTitleBar(preset) => {
-                        let _ = restore_window_title_bar_for_preset(&preset);
-                    }
-
                     WindowHotkeyAction::ApplyLayout(layout) => {
                         thread::spawn(move || {
                             let _ = window_preset::apply_window_layout(&layout);
@@ -6736,10 +6726,6 @@ mod windows_overlay {
                     thread::spawn(move || {
                         let _ = apply_window_preset_animated(&preset);
                     });
-                }
-
-                WindowHotkeyAction::RestoreTitleBar(preset) => {
-                    let _ = restore_window_title_bar_for_preset(&preset);
                 }
 
                 WindowHotkeyAction::ApplyLayout(layout) => {
@@ -36089,10 +36075,6 @@ mod windows_overlay {
 
     fn apply_window_preset_animated(preset: &WindowPreset) -> Result<()> {
         window_preset::apply_window_preset_animated(preset)
-    }
-
-    fn restore_window_title_bar_for_preset(preset: &WindowPreset) -> Result<()> {
-        window_preset::restore_window_title_bar_for_preset(preset)
     }
 
 
