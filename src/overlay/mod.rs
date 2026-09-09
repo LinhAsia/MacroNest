@@ -2305,13 +2305,10 @@ mod windows_overlay {
             }
         }
     }
-
-    #[allow(dead_code)]
     #[derive(Debug, Clone)]
     pub enum UiCommand {
         ShowWindow,
         Exit,
-        StartupIconLoaded(std::sync::Arc<eframe::egui::IconData>),
         StartupStateLoaded {
             state: crate::model::AppState,
             startup_state_dirty: bool,
@@ -2323,8 +2320,6 @@ mod windows_overlay {
         MemoryTrackedCodeResolved {
             pid: u32,
             alias_name: String,
-            code_module: String,
-            code_offset: usize,
             captured_address: usize,
         },
         MemoryTrackedCodeInvalidated {
@@ -2340,17 +2335,13 @@ mod windows_overlay {
             preset_id: u32,
             timeout_ms: Option<u64>,
         },
-        StopEspScan {
-            preset_id: u32,
-        },
+        StopEspScan,
         EspCalibrationUpdated {
             preset_id: u32,
-            sample_count: usize,
             result: Option<crate::model::EspCalibrationResult>,
             status: String,
         },
         SetMacrosMasterEnabled(bool, String),
-        SetVietnameseInputEnabled(bool, String),
         MousePathRecordingStarted(u32, String),
         MousePathRecordingFinished(u32, Vec<MousePathEvent>, String),
         MousePathDrawCaptureCancelled(String),
@@ -2396,14 +2387,11 @@ mod windows_overlay {
             screen_x: i32,
             screen_y: i32,
         },
-        UpdateCheckStarted,
         UpdateAvailable(String, String, String), // version, body, download_url
 
         MacroRecordingStarted(u32, String),
         MacroRecordingFinished(u32, u32, Vec<MacroRecordingEvent>, String),
         MacroRealtimeStepAdded(u32, u32, crate::model::MacroStep),
-        MacroRealtimeStepRemoved(u32, u32),
-        UpdateDownloadStarted,
         UpdateDownloadFinished(String), // new_exe_path
 
         UpdateError(String),
@@ -2433,7 +2421,6 @@ mod windows_overlay {
             match_duplicate_window_titles: bool,
             frame: Option<crate::window_list::WindowPreviewFrame>,
         },
-        SetInteractivePinEnabled(bool),
         SetProtractorEnabled(bool),
         UpdateProtractorConfig {
             scale: f32,
@@ -9936,7 +9923,6 @@ mod windows_overlay {
                     ESP_CALIBRATION_SAMPLES.lock().remove(&preset_id);
                     send_ui_command(UiCommand::EspCalibrationUpdated {
                         preset_id,
-                        sample_count: 0,
                         result: None,
                         status: "ESP calibration samples cleared".to_owned(),
                     });
@@ -26108,10 +26094,6 @@ mod windows_overlay {
                 Err(error) => {
                     send_ui_command(UiCommand::EspCalibrationUpdated {
                         preset_id: preset.id,
-                        sample_count: ESP_CALIBRATION_SAMPLES
-                            .lock()
-                            .get(&preset.id)
-                            .map_or(0, Vec::len),
                         result: None,
                         status: format!("ESP calibration: {error}"),
                     });
@@ -26122,7 +26104,6 @@ mod windows_overlay {
         else {
             send_ui_command(UiCommand::EspCalibrationUpdated {
                 preset_id: preset.id,
-                sample_count: 0,
                 result: None,
                 status: "ESP calibration: camera and target positions are identical".to_owned(),
             });
@@ -26159,7 +26140,6 @@ mod windows_overlay {
         drop(all_samples);
         send_ui_command(UiCommand::EspCalibrationUpdated {
             preset_id: preset.id,
-            sample_count,
             result,
             status,
         });
@@ -29518,10 +29498,8 @@ mod windows_overlay {
                 }
 
                 MacroAction::StopEspScan => {
-                    if let Some(esp_preset_id) = step.esp_preset_id {
-                        send_ui_command(UiCommand::StopEspScan {
-                            preset_id: esp_preset_id,
-                        });
+                    if step.esp_preset_id.is_some() {
+                        send_ui_command(UiCommand::StopEspScan);
                     }
                 }
 
@@ -30329,10 +30307,8 @@ mod windows_overlay {
                 }
 
                 MacroAction::StopEspScan => {
-                    if let Some(esp_preset_id) = step.esp_preset_id {
-                        send_ui_command(UiCommand::StopEspScan {
-                            preset_id: esp_preset_id,
-                        });
+                    if step.esp_preset_id.is_some() {
+                        send_ui_command(UiCommand::StopEspScan);
                     }
                 }
 
@@ -31750,8 +31726,6 @@ mod windows_overlay {
                 send_ui_command(UiCommand::MemoryTrackedCodeResolved {
                     pid,
                     alias_name: alias_name.clone(),
-                    code_module: code_module.clone(),
-                    code_offset,
                     captured_address: data_address,
                 });
                 MEMORY_TRACKED_VALIDATIONS
@@ -38080,7 +38054,6 @@ mod fallback {
     pub enum UiCommand {
         ShowWindow,
         Exit,
-        StartupIconLoaded(std::sync::Arc<eframe::egui::IconData>),
         StartupStateLoaded {
             state: crate::model::AppState,
             startup_state_dirty: bool,
@@ -38105,7 +38078,6 @@ mod fallback {
             message: String,
             open_groq_settings: bool,
         },
-        MacroRealtimeStepRemoved(u32, u32),
         CustomCommandResult {
             preset_id: u32,
             output: String,
@@ -38125,9 +38097,7 @@ mod fallback {
             preset_id: u32,
             timeout_ms: Option<u64>,
         },
-        StopEspScan {
-            preset_id: u32,
-        },
+        StopEspScan,
         UpdateScreenDrawConfig {
             color: crate::model::RgbaColor,
             brush_size: f32,

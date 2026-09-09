@@ -796,7 +796,6 @@ pub struct CrosshairApp {
     vietnamese_input_disabled_texture: Option<TextureHandle>,
     titlebar_app_icon_texture: Option<TextureHandle>,
     guides_author_logo_texture: Option<TextureHandle>,
-    normal_app_icon: Option<std::sync::Arc<eframe::egui::IconData>>,
     recording_icon_applied: bool,
     active_mouse_record_preset_id: Option<u32>,
     active_macro_record_preset_id: Option<u32>,
@@ -1172,7 +1171,6 @@ impl CrosshairApp {
             vietnamese_input_disabled_texture: None,
             titlebar_app_icon_texture: None,
             guides_author_logo_texture: None,
-            normal_app_icon: crate::app_icon::icon_data(64).ok().map(std::sync::Arc::new),
             recording_icon_applied: false,
             active_mouse_record_preset_id: None,
             active_macro_record_preset_id: None,
@@ -14673,10 +14671,6 @@ impl eframe::App for CrosshairApp {
                     self.persist();
                     ctx.request_repaint();
                 }
-                UiCommand::StartupIconLoaded(icon) => {
-                    self.normal_app_icon = Some(icon.clone());
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(icon)));
-                }
                 UiCommand::StartupStateLoaded {
                     state,
                     startup_state_dirty,
@@ -14720,7 +14714,6 @@ impl eframe::App for CrosshairApp {
                     pid,
                     alias_name,
                     captured_address,
-                    ..
                 } => {
                     let mut resolved = 0;
                     for entry in &mut self.state.memory_pointer_list {
@@ -14779,7 +14772,7 @@ impl eframe::App for CrosshairApp {
                         ctx.request_repaint();
                     }
                 }
-                UiCommand::StopEspScan { preset_id: _ } => {
+                UiCommand::StopEspScan => {
                     #[cfg(windows)]
                     {
                         self.stop_esp_entity_root_capture(Some("Stopped by macro"));
@@ -14788,7 +14781,6 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::EspCalibrationUpdated {
                     preset_id,
-                    sample_count: _,
                     result,
                     status,
                 } => {
@@ -14813,13 +14805,6 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::SetMacrosMasterEnabled(enabled, status) => {
                     self.state.macros_master_enabled = enabled;
-                    self.persist();
-                    self.status = status;
-                    ctx.request_repaint();
-                }
-                UiCommand::SetVietnameseInputEnabled(enabled, status) => {
-                    self.state.vietnamese_input_enabled = enabled;
-                    self.sync_vietnamese_input_enabled();
                     self.persist();
                     self.status = status;
                     ctx.request_repaint();
@@ -14875,25 +14860,6 @@ impl eframe::App for CrosshairApp {
                             .insert((group_id, preset_id, insert_idx));
                         self.last_selected_macro_step =
                             Some((group_id, preset_id, insert_idx));
-                    }
-                    ctx.request_repaint();
-                }
-                UiCommand::MacroRealtimeStepRemoved(group_id, preset_id) => {
-                    if let Ok((group_index, preset_index)) =
-                        self.macro_preset_indices(group_id, preset_id)
-                    {
-                        let preset =
-                            &mut self.state.macro_groups[group_index].presets[preset_index];
-                        if let Some((g, p, ref mut idx)) = self.macro_record_insert_index {
-                            if g == group_id && p == preset_id && *idx > 0 && *idx <= preset.steps.len() {
-                                *idx -= 1;
-                                preset.steps.remove(*idx);
-                            } else {
-                                preset.steps.pop();
-                            }
-                        } else {
-                            preset.steps.pop();
-                        }
                     }
                     ctx.request_repaint();
                 }
@@ -15528,9 +15494,6 @@ impl eframe::App for CrosshairApp {
                     }
                     ctx.request_repaint();
                 }
-                UiCommand::UpdateCheckStarted => {
-                    self.update_status = UpdateStatus::Checking;
-                }
                 UiCommand::UpdateAvailable(version, body, url) => {
                     if self.update_check_was_automatic {
                         let message = match self.state.ui_language {
@@ -15543,9 +15506,6 @@ impl eframe::App for CrosshairApp {
                     }
                     self.update_status = UpdateStatus::Available(version, body, url);
                     self.update_check_was_automatic = false;
-                }
-                UiCommand::UpdateDownloadStarted => {
-                    self.update_status = UpdateStatus::Downloading;
                 }
                 UiCommand::UpdateDownloadFinished(new_exe_path) => {
                     self.update_status = UpdateStatus::ReadyToRestart(new_exe_path);
@@ -15758,13 +15718,6 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::PersistFailed(error) => {
                     self.status = error;
-                    ctx.request_repaint();
-                }
-
-                UiCommand::SetInteractivePinEnabled(enabled) => {
-                    self.state.interactive_window_pin_enabled = enabled;
-                    self.sync_interactive_pin_state();
-                    self.persist();
                     ctx.request_repaint();
                 }
 
