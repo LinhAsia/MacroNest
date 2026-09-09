@@ -31,6 +31,16 @@ const PREFIX_GROUP_V5: &str = "MN5_GROUP:";
 const Z85_ALPHABET: &[u8; 85] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
 
+const Z85_DECODE_MAP: [u8; 256] = {
+    let mut map = [0xFF; 256];
+    let mut i = 0;
+    while i < 85 {
+        map[Z85_ALPHABET[i] as usize] = i as u8;
+        i += 1;
+    }
+    map
+};
+
 fn compress_bytes(data: &[u8]) -> Result<Vec<u8>> {
     let mut encoder = DeflateEncoder::new(Vec::new(), Compression::best());
     encoder.write_all(data)?;
@@ -47,14 +57,15 @@ fn decompress_bytes(data: &[u8], kind: &str) -> Result<Vec<u8>> {
 }
 
 fn z85_encode(bytes: &[u8]) -> String {
-    let mut payload = Vec::with_capacity(bytes.len() + 4);
+    let padding = (4 - (bytes.len() % 4)) % 4;
+    let total_len = bytes.len() + 4 + padding;
+    let mut payload = Vec::with_capacity(total_len);
     payload.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
     payload.extend_from_slice(bytes);
-    while payload.len() % 4 != 0 {
-        payload.push(0);
-    }
+    payload.resize(total_len, 0);
 
-    let mut output = String::with_capacity((payload.len() / 4) * 5);
+    let chunk_count = total_len / 4;
+    let mut output_bytes = Vec::with_capacity(chunk_count * 5);
     for chunk in payload.chunks_exact(4) {
         let mut value = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         let mut encoded = [0u8; 5];
@@ -62,16 +73,20 @@ fn z85_encode(bytes: &[u8]) -> String {
             encoded[index] = Z85_ALPHABET[(value % 85) as usize];
             value /= 85;
         }
-        output.push_str(std::str::from_utf8(&encoded).unwrap_or_default());
+        output_bytes.extend_from_slice(&encoded);
     }
-    output
+    // pony-tail: Z85_ALPHABET contains only ASCII bytes, so output_bytes is always valid UTF-8
+    unsafe { String::from_utf8_unchecked(output_bytes) }
 }
 
+#[inline]
 fn z85_value(byte: u8) -> Option<u32> {
-    Z85_ALPHABET
-        .iter()
-        .position(|candidate| *candidate == byte)
-        .map(|index| index as u32)
+    let val = Z85_DECODE_MAP[byte as usize];
+    if val != 0xFF {
+        Some(val as u32)
+    } else {
+        None
+    }
 }
 
 fn z85_decode(encoded: &str) -> Result<Vec<u8>> {
@@ -392,13 +407,13 @@ fn expand_fields(
     sparse: SparseFields,
     mut defaults: serde_json::Map<String, serde_json::Value>,
 ) -> serde_json::Map<String, serde_json::Value> {
-    let names: std::collections::HashMap<_, _> = defaults
-        .keys()
-        .map(|name| (stable_field_id(name), name.clone()))
-        .collect();
     for (field_id, value) in sparse {
-        if let Some(name) = names.get(&field_id) {
-            defaults.insert(name.clone(), value);
+        if let Some(name) = defaults
+            .keys()
+            .find(|k| stable_field_id(k) == field_id)
+            .cloned()
+        {
+            defaults.insert(name, value);
         }
     }
     defaults
@@ -841,5 +856,15 @@ mod tests {
                 a: 255
             })
         );
+    }
+
+    #[test]
+    fn z85_round_trip_with_padding() {
+        for len in 0..32 {
+            let data: Vec<u8> = (0..len).map(|b| (b * 7 + 13) as u8).collect();
+            let encoded = z85_encode(&data);
+            let decoded = z85_decode(&encoded).expect("z85 decode");
+            assert_eq!(decoded, data);
+        }
     }
 }
