@@ -17,14 +17,14 @@ mod windows_impl {
             },
             UI::Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGetFileInfoW},
             UI::WindowsAndMessaging::{
-                BringWindowToTop, DI_NORMAL, DestroyIcon, DrawIconEx, EnumWindows, GWL_EXSTYLE,
+                BringWindowToTop, DI_NORMAL, DestroyIcon, DrawIconEx, EnumWindows,
                 GetClassLongPtrW, GET_CLASS_LONG_INDEX, GetClientRect, GetForegroundWindow,
-                GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextLengthW,
+                GetSystemMetrics, GetWindowRect, GetWindowTextLengthW,
                 GetWindowTextW, GetWindowThreadProcessId, HICON, HWND_NOTOPMOST, HWND_TOPMOST,
                 IsIconic, IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN,
                 SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SMTO_ABORTIFHUNG,
                 SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SendMessageTimeoutW,
-                SetForegroundWindow, SetWindowPos, ShowWindow, WM_GETICON, WS_EX_TOPMOST,
+                SetForegroundWindow, SetWindowPos, ShowWindow, WM_GETICON,
             },
         },
         core::{BOOL, PCWSTR},
@@ -42,8 +42,8 @@ mod windows_impl {
             Graphics::{
                 Direct3D::D3D_DRIVER_TYPE_HARDWARE,
                 Direct3D11::{
-                    D3D11_BIND_FLAG, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                    D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_RESOURCE_MISC_FLAG,
+                    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
                     D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
                     D3D11CreateDevice, ID3D11Device, ID3D11Texture2D,
                 },
@@ -1154,8 +1154,6 @@ mod windows_impl {
     unsafe impl Send for WgcSession {}
     unsafe impl Sync for WgcSession {}
 
-    type ID11Device = ID3D11Device;
-
     impl Drop for WgcSession {
         fn drop(&mut self) {
             let _ = self.session.Close();
@@ -1409,24 +1407,6 @@ mod windows_impl {
 
             self.write_idx = 1 - write_idx;
             Ok(true)
-        }
-
-        pub(crate) fn poll_next_frame(&mut self) -> anyhow::Result<Option<ScreenCaptureFrame>> {
-            let mut rect = RECT::default();
-            let _ = unsafe { GetWindowRect(self.hwnd, &mut rect) };
-            let mut buf = Vec::new();
-            if self.poll_into_buffer(&mut buf, 0, 0)? {
-                let (_, w, h) = self.staging_textures.as_ref().unwrap();
-                Ok(Some(ScreenCaptureFrame {
-                    screen_x: rect.left,
-                    screen_y: rect.top,
-                    width: *w as usize,
-                    height: *h as usize,
-                    rgba: buf,
-                }))
-            } else {
-                Ok(None)
-            }
         }
 
         pub(crate) fn get_next_frame(&mut self) -> anyhow::Result<ScreenCaptureFrame> {

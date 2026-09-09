@@ -21,7 +21,7 @@ mod windows_platform {
                 DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
             },
             System::Threading::{
-                CreateMutexW, GetCurrentProcess, GetCurrentThreadId, HIGH_PRIORITY_CLASS,
+                CreateMutexW, GetCurrentProcess, HIGH_PRIORITY_CLASS,
                 SetPriorityClass,
             },
             System::{
@@ -32,12 +32,10 @@ mod windows_platform {
                 Controls::MARGINS,
                 Shell::{DROPFILES, IsUserAnAdmin, ShellExecuteW},
                 WindowsAndMessaging::{
-                    BringWindowToTop, EnumThreadWindows, FindWindowExW, FindWindowW, GWL_EXSTYLE,
-                    GetWindowLongW, GetWindowTextLengthW, GetWindowTextW, HWND_NOTOPMOST,
+                    BringWindowToTop, FindWindowExW, FindWindowW, HWND_NOTOPMOST,
                     HWND_TOPMOST, IsWindowVisible, SW_HIDE, SW_RESTORE, SW_SHOWNA, SW_SHOWNORMAL,
-                    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
-                    SetForegroundWindow, SetWindowLongW, SetWindowPos, ShowWindow,
-                    WS_EX_NOACTIVATE,
+                    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+                    SetForegroundWindow, SetWindowPos, ShowWindow,
                 },
             },
         },

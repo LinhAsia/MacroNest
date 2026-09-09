@@ -1,7 +1,7 @@
 use crate::model::*;
 use crate::ocr::perform_ocr;
 use crate::overlay::OverlayCommand;
-use crate::ui::{CrosshairApp, VisionCaptureMode, VisionCaptureTarget};
+use crate::ui::{CrosshairApp, VisionCaptureTarget};
 use crate::window_list::capture_virtual_screen_region;
 use eframe::egui::{self, Color32, RichText};
 

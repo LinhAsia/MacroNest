@@ -3,7 +3,6 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,7 +13,7 @@ use opencv::{
 };
 
 use super::{
-    HOOK_STATE, UiCommand, find_preset_by_spec, resolve_text_variable_value,
+    HOOK_STATE, UiCommand, find_preset_by_spec,
     send_mouse_left_click_backend, set_text_variable_value, set_variable_value,
     settle_image_search_mouse_move,
 };
@@ -85,11 +84,6 @@ pub(crate) fn image_search_following_is_active(preset_id: u32) -> bool {
         .lock()
         .vision_following_presets
         .contains(&preset_id)
-}
-
-pub(crate) fn image_search_wait_generation(preset_id: u32) -> u64 {
-    let gens = IMAGE_SEARCH_WAIT_GENERATIONS.lock();
-    gens.get(&preset_id).copied().unwrap_or(0)
 }
 
 pub(crate) fn set_image_search_following_active(preset_id: u32, active: bool) {
@@ -1762,133 +1756,3 @@ mod tests {
     }
 }
 
-pub(crate) fn trigger_vision_move(spec: &str) -> Result<()> {
-    let preset = vision_preset_by_id(spec)?;
-    let status = run_vision_once(&preset)?;
-    if let Some(tx) = HOOK_STATE.lock().ui_tx.clone() {
-        let _ = tx.send(UiCommand::VisionFinished(format!(
-            "{}: {status}",
-            preset.name
-        )));
-    }
-
-    Ok(())
-}
-
-use super::{
-    MacroRunFlow, MouseMoveLockMask, STOP_REQUESTED_MACRO_PRESETS, macro_runtime_target_matches,
-    trigger_nested_macro_preset,
-};
-
-pub(crate) fn trigger_vision_move_with_options(
-    preset: &VisionPreset,
-    move_cursor: bool,
-    wait_until_found: bool,
-    trigger_macro_enabled: bool,
-    trigger_macro_preset_id: Option<u32>,
-    macro_preset_id: u32,
-    press_locked_keys: &mut Vec<String>,
-    press_locked_mouse_masks: &mut Vec<MouseMoveLockMask>,
-    stop_immediately_on_retrigger: bool,
-    target_window_title: Option<&str>,
-    extra_target_window_titles: &[String],
-    match_duplicate_window_titles: bool,
-    variable_override: Option<&str>,
-) -> MacroRunFlow {
-    let ui_tx = HOOK_STATE.lock().ui_tx.clone();
-    let wait_generation = image_search_wait_generation(preset.id);
-    let mut sent_wait_status = false;
-    loop {
-        if !macro_runtime_target_matches(
-            target_window_title,
-            extra_target_window_titles,
-            match_duplicate_window_titles,
-        ) {
-            return MacroRunFlow::StopExecution;
-        }
-
-        if stop_immediately_on_retrigger
-            && STOP_REQUESTED_MACRO_PRESETS
-                .lock()
-                .contains(&macro_preset_id)
-        {
-            return MacroRunFlow::StopExecution;
-        }
-
-        if image_search_wait_generation(preset.id) != wait_generation {
-            if let Some(tx) = ui_tx.as_ref() {
-                let _ = tx.send(UiCommand::VisionFinished(format!(
-                    "{}: waiting cancelled.",
-                    preset.name
-                )));
-            }
-
-            return MacroRunFlow::Continue;
-        }
-
-        let outcome = match run_vision_once_with_options(
-            preset,
-            move_cursor,
-            false,
-            variable_override,
-            None,
-            None,
-            None,
-            VisionMoveAxisLock::None,
-            false,
-            0,
-            0,
-            preset.non_interception_move_passes,
-            preset.non_interception_move_delay_ms,
-            preset.color_tolerance,
-        ) {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                eprintln!("Vision macro step failed: {error}");
-                return MacroRunFlow::Continue;
-            }
-        };
-        if outcome.matched {
-            if let Some(tx) = ui_tx.as_ref() {
-                let _ = tx.send(UiCommand::VisionFinished(format!(
-                    "{}: {}",
-                    preset.name, outcome.status
-                )));
-            }
-
-            if trigger_macro_enabled {
-                if let Some(trigger_preset_id) = trigger_macro_preset_id {
-                    let _ = trigger_nested_macro_preset(
-                        &trigger_preset_id.to_string(),
-                        press_locked_keys,
-                        press_locked_mouse_masks,
-                        stop_immediately_on_retrigger,
-                        target_window_title,
-                        extra_target_window_titles,
-                        match_duplicate_window_titles,
-                        true,
-                    );
-                }
-            }
-
-            return MacroRunFlow::Continue;
-        }
-
-        if !wait_until_found {
-            return MacroRunFlow::Continue;
-        }
-
-        if !sent_wait_status {
-            if let Some(tx) = ui_tx.as_ref() {
-                let _ = tx.send(UiCommand::VisionFinished(format!(
-                    "{}: waiting...",
-                    preset.name
-                )));
-            }
-
-            sent_wait_status = true;
-        }
-
-        thread::sleep(Duration::from_millis(25));
-    }
-}

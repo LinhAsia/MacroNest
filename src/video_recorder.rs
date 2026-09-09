@@ -18,11 +18,8 @@ use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use windows::Win32::{
     Foundation::{HWND, RECT},
-    Graphics::{
-        Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
-        Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect},
-    },
-    UI::WindowsAndMessaging::{GetForegroundWindow, IsIconic, IsWindow, SW_RESTORE, ShowWindow},
+    Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect},
+    UI::WindowsAndMessaging::{GetForegroundWindow, IsWindow},
 };
 
 use crate::{

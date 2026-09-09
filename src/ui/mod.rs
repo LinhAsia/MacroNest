@@ -26,7 +26,7 @@ use crate::{
         GeometryPreset, GeometrySpec, GroqSettings, HotkeyBinding, HudPreset, MacroAction,
         MacroFolder, MacroGroup, MacroPreset, MacroStep, MacroTriggerMode, MascotStyle,
         MasterMacroGroupState, MasterMacroPresetState, MasterPreset, MasterWindowFocusPresetState,
-        MasterWindowPresetState, MasterZoomPresetState, MousePathEvent, MousePathEventKind,
+        MasterWindowPresetState, MasterZoomPresetState, MousePathEventKind,
         MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset, ProfileRecord,
         QuickKeyDisplayMode, QuickScreenDrawTool, QuickVideoRecordMode, RgbaColor, SoundPreset,
         TimerPreset, UiLanguage, UiThemeMode, VietnameseInputMode, VisionPreset, VisionSettings,
@@ -68,7 +68,6 @@ pub use theme::{configure_fonts, text_has_cjk};
 #[cfg(windows)]
 pub(crate) use windows::Win32::{
     Foundation::POINT,
-    Graphics::Dwm::DwmFlush,
     UI::{
         Input::KeyboardAndMouse::GetAsyncKeyState,
         WindowsAndMessaging::{GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN},

@@ -43,7 +43,7 @@ use crate::memory_debugger::debugger::{
     AccessWatch, AddressAccessWatch, ProcessInfo, WatchEvent, WriteWatch, disassemble_from,
     get_instruction_aob_signature, get_instruction_bytes, instruction_writes_memory,
     is_instruction_compatible,
-    list_process_details, module_offset_for_address, normalize_instruction, process_modules,
+    list_process_details, module_offset_for_address, process_modules,
     process_pointer_width, resolve_module_offset,
 };
 

@@ -1,7 +1,7 @@
 use crate::model::*;
 use crate::overlay::OverlayCommand;
 use crate::ui::CrosshairApp;
-use eframe::egui::{self, Color32, RichText, Sense, Slider, TextBuffer, TextEdit, vec2};
+use eframe::egui::{self, Color32, RichText, Sense, Slider, TextEdit, vec2};
 
 impl CrosshairApp {
     pub(crate) fn render_hud_panel(&mut self, ui: &mut egui::Ui) {

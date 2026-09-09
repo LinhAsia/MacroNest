@@ -3,7 +3,7 @@ use crate::model::*;
 use crate::overlay::OverlayCommand;
 use crate::ui::{CrosshairApp, VisionCaptureTarget, ZoomPreviewView};
 use crate::window_list;
-use eframe::egui::{self, Button, Color32, DragValue, RichText, Sense, TextBuffer, TextEdit, vec2};
+use eframe::egui::{self, Button, Color32, DragValue, RichText, Sense, TextEdit, vec2};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 

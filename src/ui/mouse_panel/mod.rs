@@ -4,12 +4,9 @@ use crate::overlay::{OverlayCommand, UiCommand};
 use crate::ui::{CrosshairApp, MouseCaptureKind, MouseMoveAbsoluteCaptureTarget};
 use crate::window_list;
 use eframe::egui::{
-    self, Button, Color32, DragValue, RichText, Sense, Slider, TextBuffer, TextEdit, vec2,
+    self, Button, Color32, DragValue, RichText, Sense, Slider, TextEdit, vec2,
 };
 use std::time::Duration;
-
-#[cfg(windows)]
-use crate::ui::{GetCursorPos, POINT};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MouseInputBackendMode {

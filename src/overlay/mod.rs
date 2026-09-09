@@ -88,12 +88,11 @@ mod windows_overlay {
                     BITMAPINFOHEADER, BLACKNESS, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
                     ClientToScreen, CombineRgn, CreateBitmap, CreateCompatibleDC, CreateDIBSection,
                     CreateFontW, CreateRectRgn, CreateRoundRectRgn, DEFAULT_CHARSET,
-                    DIB_RGB_COLORS, DT_CALCRECT, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS,
-                    DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DT_WORDBREAK, DeleteDC, DeleteObject,
+                    DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
                     DrawTextW, EndPaint, FF_DONTCARE, FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW,
                     GetTextExtentPoint32W, GetTextMetricsW, HDC, HGDIOBJ, MONITOR_DEFAULTTONEAREST,
                     MONITORINFO, MonitorFromWindow, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PatBlt,
-                    RGN_DIFF, ReleaseDC, SRCCOPY, SelectObject, SetBkColor, SetBkMode,
+                    RGN_DIFF, ReleaseDC, SRCCOPY, SelectObject, SetBkMode,
                     SetTextAlign, SetTextColor, SetWindowRgn, StretchDIBits, TA_BASELINE,
                     TA_CENTER, TEXTMETRICW, TRANSPARENT, TextOutW,
                 },
@@ -123,21 +122,18 @@ mod windows_overlay {
                     MapVirtualKeyW, RegisterHotKey, SendInput, ToUnicode, UnregisterHotKey,
                     VIRTUAL_KEY,
                 },
-                Shell::{
-                    NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
-                    NOTIFYICONDATAW, Shell_NotifyIconW,
-                },
+                Shell::{NIM_DELETE, Shell_NotifyIconW},
                 WindowsAndMessaging::{
                     AppendMenuW, CREATESTRUCTW, CallNextHookEx, ClipCursor, CreateIconIndirect,
-                    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyCursor, DestroyIcon,
-                    DestroyMenu, DestroyWindow, DispatchMessageW, EnumWindows, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
+                    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyCursor,
+                    DestroyMenu, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
                     GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor, GetClassNameW,
                     GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
                     GetWindowThreadProcessId, HC_ACTION, HCURSOR, HHOOK, HMENU, HTCLIENT,
-                    HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS, IMAGE_ICON,
-                    IsIconic, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LR_LOADFROMFILE, LWA_ALPHA, LoadCursorW,
-                    LoadImageW, MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
+                    HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS,
+                    IsIconic, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LWA_ALPHA, LoadCursorW,
+                    MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
                     PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN,
                     SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
                     SPI_GETMOUSESPEED, SPI_SETMOUSESPEED, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNA,
@@ -147,19 +143,19 @@ mod windows_overlay {
                     SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
                     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
-                    WINDOW_EX_STYLE, WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
+                    WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
                     WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
                     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE,
                     WM_NCHITTEST, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_SYSKEYDOWN,
-                    WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW, WS_CAPTION,
-                    WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+                    WM_SYSKEYUP, WM_TIMER, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
+                    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
                     WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_OVERLAPPEDWINDOW, WS_POPUP,
                     WindowFromPoint,
                 },
             },
         },
-        core::{PCSTR, PCWSTR, w},
+        core::{PCWSTR, w},
     };
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum InterceptionRuntimeStatus {
@@ -8652,15 +8648,6 @@ mod windows_overlay {
             .collect()
     }
 
-    fn quick_key_display_lane_width(slot_widths: &[i32], entry_gap: i32) -> i32 {
-        if slot_widths.is_empty() {
-            0
-        } else {
-            slot_widths.iter().sum::<i32>()
-                + entry_gap * (slot_widths.len().saturating_sub(1) as i32)
-        }
-    }
-
     fn quick_key_display_layout_size(
         entries: &[QuickKeyDisplayEntry],
         _slot_labels: &HashMap<(QuickKeyDisplayLane, usize), String>,
@@ -8745,30 +8732,6 @@ mod windows_overlay {
             (right * scale).round() as i32,
             (bottom * scale).round() as i32,
         )
-    }
-
-    fn push_quick_key_display_mascot_row(
-        keys: &mut Vec<QuickKeyDisplayMascotKey>,
-        base_x: f32,
-        y: f32,
-        key_w: f32,
-        key_h: f32,
-        gap: f32,
-        row: &[(&'static str, &'static [&'static str], f32)],
-    ) {
-        let mut x = base_x;
-        for (label, aliases, span) in row {
-            let width = key_w * *span + gap * (span.ceil().max(1.0) - 1.0);
-            keys.push(QuickKeyDisplayMascotKey {
-                label,
-                aliases,
-                x,
-                y,
-                w: width,
-                h: key_h,
-            });
-            x += width + gap;
-        }
     }
 
     fn quick_key_display_mascot_keys() -> &'static [QuickKeyDisplayMascotKey] {
@@ -8896,30 +8859,6 @@ mod windows_overlay {
         aliases
             .iter()
             .any(|alias| key_name.eq_ignore_ascii_case(alias))
-    }
-
-    fn quick_key_display_recent_entry_strength(
-        aliases: &[&str],
-        entries: &[QuickKeyDisplayEntry],
-        now: Instant,
-    ) -> f32 {
-        let mut strength: f32 = 0.0;
-        for entry in entries {
-            if !entry
-                .combo_keys
-                .iter()
-                .any(|key_name| quick_key_display_alias_match(key_name, aliases))
-            {
-                continue;
-            }
-            let age = now
-                .saturating_duration_since(entry.shown_at)
-                .as_secs_f32()
-                .min(1.0);
-            let pulse = (1.0 - age / 0.05).clamp(0.0, 1.0); // Ultra fast decay for responsive hand retraction
-            strength = strength.max(pulse);
-        }
-        strength
     }
 
     fn quick_key_display_mascot_key_activity(

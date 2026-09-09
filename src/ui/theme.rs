@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Color32, FontData, FontDefinitions, FontFamily};
 
-use crate::model::{AppState, UiThemeMode};
+use crate::model::UiThemeMode;
 
 pub(crate) const MATERIAL_ICONS_FONT: &str = "material_icons";
 const UI_SANS_FONT: &str = "ui_sans";
