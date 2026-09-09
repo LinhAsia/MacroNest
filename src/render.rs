@@ -209,15 +209,14 @@ fn render_builtin(style: &CrosshairStyle) -> Result<RenderedCrosshair> {
 }
 
 fn render_custom_asset(style: &CrosshairStyle, path: &Path) -> Result<RenderedCrosshair> {
-    let ext = path
+    let is_svg = path
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| ext.to_ascii_lowercase())
-        .unwrap_or_default();
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("svg"));
 
     let target_size = style.custom_scale.clamp(16.0, 4096.0) as u32;
 
-    let pixmap = if ext == "svg" {
+    let pixmap = if is_svg {
         render_svg(path, target_size)?
     } else {
         render_raster(path, target_size)?
@@ -346,6 +345,13 @@ fn to_skia_color(color: RgbaColor) -> Color {
 
 fn apply_global_alpha(rgba: &mut [u8], alpha: f32) {
     let factor = alpha.clamp(0.0, 1.0);
+    if factor >= 1.0 {
+        return;
+    }
+    if factor <= 0.0 {
+        rgba.fill(0);
+        return;
+    }
     for pixel in rgba.chunks_exact_mut(4) {
         pixel[0] = (pixel[0] as f32 * factor).round() as u8;
         pixel[1] = (pixel[1] as f32 * factor).round() as u8;
@@ -356,10 +362,19 @@ fn apply_global_alpha(rgba: &mut [u8], alpha: f32) {
 
 fn premultiply_rgba(rgba: &mut [u8]) {
     for pixel in rgba.chunks_exact_mut(4) {
-        let alpha = pixel[3] as f32 / 255.0;
-        pixel[0] = (pixel[0] as f32 * alpha).round() as u8;
-        pixel[1] = (pixel[1] as f32 * alpha).round() as u8;
-        pixel[2] = (pixel[2] as f32 * alpha).round() as u8;
+        let alpha = pixel[3] as u32;
+        if alpha == 255 {
+            continue;
+        }
+        if alpha == 0 {
+            pixel[0] = 0;
+            pixel[1] = 0;
+            pixel[2] = 0;
+            continue;
+        }
+        pixel[0] = ((pixel[0] as u32 * alpha + 127) / 255) as u8;
+        pixel[1] = ((pixel[1] as u32 * alpha + 127) / 255) as u8;
+        pixel[2] = ((pixel[2] as u32 * alpha + 127) / 255) as u8;
     }
 }
 
@@ -388,6 +403,30 @@ mod tests {
         let mut rgba = vec![200, 100, 50, 128];
         apply_global_alpha(&mut rgba, 0.25);
         assert_eq!(rgba, vec![50, 25, 13, 32]);
+
+        // Boundary: factor >= 1.0 (fast return, untouched)
+        let mut unchanged = vec![200, 100, 50, 128];
+        apply_global_alpha(&mut unchanged, 1.0);
+        assert_eq!(unchanged, vec![200, 100, 50, 128]);
+
+        // Boundary: factor <= 0.0 (fast zero fill)
+        let mut zeroed = vec![200, 100, 50, 128];
+        apply_global_alpha(&mut zeroed, 0.0);
+        assert_eq!(zeroed, vec![0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn premultiply_rgba_scales_rgb_by_alpha() {
+        let mut pixels = vec![
+            255, 128, 64, 255, // alpha 255 -> untouched
+            255, 128, 64, 0,   // alpha 0 -> all zeros
+            200, 100, 50, 128, // alpha 128 -> scaled
+        ];
+        premultiply_rgba(&mut pixels);
+        assert_eq!(pixels[0..4], [255, 128, 64, 255]);
+        assert_eq!(pixels[4..8], [0, 0, 0, 0]);
+        // 200 * 128 + 127 / 255 = 100; 100 * 128 + 127 / 255 = 50; 50 * 128 + 127 / 255 = 25
+        assert_eq!(pixels[8..12], [100, 50, 25, 128]);
     }
 }
 
@@ -405,13 +444,12 @@ pub fn render_svg_image(
         render_svg_code_to_pixmap(trimmed, target_width, target_height)?
     } else {
         let path = Path::new(path_or_code);
-        let ext = path
+        let is_svg = path
             .extension()
             .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .unwrap_or_default();
+            .is_some_and(|e| e.eq_ignore_ascii_case("svg"));
 
-        if ext == "svg" {
+        if is_svg {
             render_svg_to_pixmap(path, target_width, target_height)?
         } else {
             render_raster_to_pixmap(path, target_width, target_height)?
@@ -438,8 +476,24 @@ pub fn render_svg_image(
 
 fn render_svg_code_to_pixmap(code: &str, target_width: u32, target_height: u32) -> Result<Pixmap> {
     let options = resvg::usvg::Options::default();
-    let bytes = code.as_bytes();
-    let tree = resvg::usvg::Tree::from_data(bytes, &options).context("Invalid SVG inline code")?;
+    let tree = resvg::usvg::Tree::from_data(code.as_bytes(), &options)
+        .context("Invalid SVG inline code")?;
+    render_svg_tree_to_pixmap(&tree, target_width, target_height)
+}
+
+fn render_svg_to_pixmap(path: &Path, target_width: u32, target_height: u32) -> Result<Pixmap> {
+    let options = resvg::usvg::Options::default();
+    let bytes = fs::read(path).with_context(|| format!("Failed to read SVG {}", path.display()))?;
+    let tree = resvg::usvg::Tree::from_data(&bytes, &options)
+        .with_context(|| format!("Invalid SVG {}", path.display()))?;
+    render_svg_tree_to_pixmap(&tree, target_width, target_height)
+}
+
+fn render_svg_tree_to_pixmap(
+    tree: &resvg::usvg::Tree,
+    target_width: u32,
+    target_height: u32,
+) -> Result<Pixmap> {
     let size = tree.size();
     let (out_w, out_h) = resolve_dimensions(
         size.width().round() as u32,
@@ -452,7 +506,7 @@ fn render_svg_code_to_pixmap(code: &str, target_width: u32, target_height: u32) 
     let mut pixmap =
         Pixmap::new(out_w.max(1), out_h.max(1)).context("Failed to create SVG pixmap")?;
     let transform = Transform::from_scale(scale_x, scale_y);
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    resvg::render(tree, transform, &mut pixmap.as_mut());
     Ok(pixmap)
 }
 
@@ -487,27 +541,6 @@ fn resolve_dimensions(
         }
         (w, h) => (w, h),
     }
-}
-
-fn render_svg_to_pixmap(path: &Path, target_width: u32, target_height: u32) -> Result<Pixmap> {
-    let options = resvg::usvg::Options::default();
-    let bytes = fs::read(path).with_context(|| format!("Failed to read SVG {}", path.display()))?;
-    let tree = resvg::usvg::Tree::from_data(&bytes, &options)
-        .with_context(|| format!("Invalid SVG {}", path.display()))?;
-    let size = tree.size();
-    let (out_w, out_h) = resolve_dimensions(
-        size.width().round() as u32,
-        size.height().round() as u32,
-        target_width,
-        target_height,
-    );
-    let scale_x = out_w as f32 / size.width();
-    let scale_y = out_h as f32 / size.height();
-    let mut pixmap =
-        Pixmap::new(out_w.max(1), out_h.max(1)).context("Failed to create SVG pixmap")?;
-    let transform = Transform::from_scale(scale_x, scale_y);
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
-    Ok(pixmap)
 }
 
 fn render_raster_to_pixmap(path: &Path, target_width: u32, target_height: u32) -> Result<Pixmap> {
