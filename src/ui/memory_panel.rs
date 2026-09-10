@@ -2997,11 +2997,19 @@ impl CrosshairApp {
                 Color32::from_rgba_premultiplied(196, 82, 82, 72),
             );
         }
-        if response.hovered() || selected {
+        if response.hovered() && !selected {
             ui.painter().rect_filled(
                 full_row_rect,
                 3.0,
-                Color32::from_rgba_premultiplied(84, 178, 222, if selected { 58 } else { 42 }),
+                Color32::from_rgba_premultiplied(84, 178, 222, 32),
+            );
+        }
+        if selected {
+            ui.painter().rect_stroke(
+                full_row_rect.shrink(1.0),
+                3.0,
+                egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
+                egui::StrokeKind::Inside,
             );
         }
         ui.allocate_ui_at_rect(full_row_rect, |ui| {
@@ -3355,7 +3363,13 @@ impl CrosshairApp {
             }
         } else {
             if !additive {
+                let was_only_selected = self.memory_panel.selected_results.len() == 1
+                    && self.memory_panel.selected_results.contains(&index);
                 self.memory_panel.selected_results.clear();
+                if was_only_selected {
+                    self.memory_panel.selection_anchor = None;
+                    return;
+                }
             }
             if selected {
                 self.memory_panel.selected_results.insert(index);
@@ -3388,7 +3402,13 @@ impl CrosshairApp {
             self.memory_panel.selected_saved.extend(start..=end);
         } else {
             if !additive {
+                let was_only_selected = self.memory_panel.selected_saved.len() == 1
+                    && self.memory_panel.selected_saved.contains(&index);
                 self.memory_panel.selected_saved.clear();
+                if was_only_selected {
+                    self.memory_panel.saved_selection_anchor = None;
+                    return;
+                }
             }
             if additive && selected {
                 self.memory_panel.selected_saved.remove(&index);
@@ -19247,5 +19267,48 @@ mod tests {
         assert_eq!(filter_match("5678"), vec![1]);
         assert_eq!(filter_match("game"), vec![1]);
         assert_eq!(filter_match("nonexistent"), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn test_single_selection_toggle_unselect() {
+        let mut selected = std::collections::HashSet::new();
+        let mut anchor = None;
+
+        let select_item = |index: usize, additive: bool, selected_set: &mut std::collections::HashSet<usize>, anchor_ref: &mut Option<usize>| {
+            if !additive {
+                let was_only_selected = selected_set.len() == 1 && selected_set.contains(&index);
+                selected_set.clear();
+                if was_only_selected {
+                    *anchor_ref = None;
+                    return;
+                }
+            }
+            selected_set.insert(index);
+            *anchor_ref = Some(index);
+        };
+
+        // First click selects
+        select_item(2, false, &mut selected, &mut anchor);
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&2));
+        assert_eq!(anchor, Some(2));
+
+        // Second click on same item toggles unselect
+        select_item(2, false, &mut selected, &mut anchor);
+        assert!(selected.is_empty());
+        assert_eq!(anchor, None);
+
+        // Click again selects
+        select_item(2, false, &mut selected, &mut anchor);
+        assert_eq!(selected.len(), 1);
+
+        // Click different item switches selection
+        select_item(5, false, &mut selected, &mut anchor);
+        assert_eq!(selected.len(), 1);
+        assert!(selected.contains(&5));
+
+        // Click item 5 again unselects
+        select_item(5, false, &mut selected, &mut anchor);
+        assert!(selected.is_empty());
     }
 }
