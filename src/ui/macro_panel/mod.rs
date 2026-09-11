@@ -224,6 +224,7 @@ impl CrosshairApp {
         step_index: usize,
         is_hold_stop: bool,
         begin_capture: &mut Option<MouseMoveAbsoluteCaptureTarget>,
+        cancel_capture: &mut bool,
         active_capture: Option<MouseMoveAbsoluteCaptureTarget>,
     ) -> bool {
         let mut changed = false;
@@ -356,13 +357,13 @@ impl CrosshairApp {
             };
             let is_capturing = active_capture == Some(this_capture_target);
             let pick_btn = if is_capturing {
-                Button::new(Self::material_icon_text(0xe55c, 14.0))
+                Button::new(Self::pick_point_button_text(language, true))
                     .fill(Color32::from_rgb(88, 84, 44))
             } else {
-                Button::new(Self::material_icon_text(0xe55c, 14.0))
+                Button::new(Self::pick_point_button_text(language, false))
             };
             let pick_resp = ui
-                .add_sized([18.0, 18.0], pick_btn)
+                .add_sized([62.0, 18.0], pick_btn)
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Click to pick coordinates from screen (minimizes window). If no target window is set, also picks the window.",
@@ -370,7 +371,7 @@ impl CrosshairApp {
                 ));
             if pick_resp.clicked() {
                 if is_capturing {
-                    *begin_capture = None;
+                    *cancel_capture = true;
                 } else {
                     *begin_capture = Some(this_capture_target);
                 }
@@ -9407,6 +9408,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                0,
                                                                true,
                                                                &mut begin_mouse_move_absolute_capture_target,
+                                                               &mut cancel_mouse_move_absolute_capture,
                                                                self.mouse_move_absolute_capture_target,
                                                            );
                                                       } else if step.action == MacroAction::SetVariable {
@@ -11747,6 +11749,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               0,
                                                               true,
                                                               &mut begin_mouse_move_absolute_capture_target,
+                                                              &mut cancel_mouse_move_absolute_capture,
                                                               self.mouse_move_absolute_capture_target,
                                                           );
                                                       } else if step.action == MacroAction::SetVariable {
@@ -15249,6 +15252,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               step_index,
                                                               false,
                                                               &mut begin_mouse_move_absolute_capture_target,
+                                                              &mut cancel_mouse_move_absolute_capture,
                                                               self.mouse_move_absolute_capture_target,
                                                           );
                                                       } else if step.action == MacroAction::SetVariable {
