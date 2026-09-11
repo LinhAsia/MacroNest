@@ -60,51 +60,61 @@ impl CrosshairApp {
         let mut changed = false;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
-            let process_label = step
-                .memory_target_window
-                .as_deref()
-                .map(|selector| Self::display_title_for_selector(selector, open_windows))
-                .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Focused process", "Process đang focus").to_owned()
-                });
-            egui::ComboBox::from_id_salt(ui.id().with("memory-process"))
-                .width(145.0)
-                .selected_text(Self::truncate_window_title(&process_label, 22))
-                .show_ui(ui, |ui| {
+        let live_open_windows = crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
+        let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
+        let process_label = step
+            .memory_target_window
+            .as_deref()
+            .map(|selector| Self::display_title_for_selector(selector, effective_open_windows))
+            .unwrap_or_else(|| {
+                Self::tr_lang(language, "Focused process", "Process đang focus").to_owned()
+            });
+        let combo_resp = egui::ComboBox::from_id_salt(ui.id().with("memory-process"))
+            .width(145.0)
+            .selected_text(Self::truncate_window_title(&process_label, 22))
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(
+                        step.memory_target_window.is_none(),
+                        Self::tr_lang(language, "Focused process", "Process đang focus"),
+                    )
+                    .clicked()
+                {
+                    step.memory_target_window = None;
+                    changed = true;
+                }
+                for window in effective_open_windows {
+                    let clean_title = crate::window_list::strip_rule_suffix(&window.title);
+                    let is_selected = step.memory_target_window.as_deref().map_or(false, |s| {
+                        s == window.selector
+                            || s == window.title
+                            || crate::window_list::strip_rule_suffix(s) == clean_title
+                    });
                     if ui
                         .selectable_label(
-                            step.memory_target_window.is_none(),
-                            Self::tr_lang(language, "Focused process", "Process đang focus"),
+                            is_selected,
+                            Self::truncate_window_title(
+                                &Self::simplify_window_title(&window.title),
+                                40,
+                            ),
                         )
+                        .on_hover_text(&window.selector)
                         .clicked()
                     {
-                        step.memory_target_window = None;
+                        step.memory_target_window = Some(window.title.clone());
                         changed = true;
                     }
-                    for window in open_windows {
-                        let clean_title = crate::window_list::strip_rule_suffix(&window.title);
-                        let is_selected = step.memory_target_window.as_deref().map_or(false, |s| {
-                            s == window.selector
-                                || s == window.title
-                                || crate::window_list::strip_rule_suffix(s) == clean_title
-                        });
-                        if ui
-                            .selectable_label(
-                                is_selected,
-                                Self::truncate_window_title(
-                                    &Self::simplify_window_title(&window.title),
-                                    40,
-                                ),
-                            )
-                            .on_hover_text(&window.selector)
-                            .clicked()
-                        {
-                            step.memory_target_window = Some(window.title.clone());
-                            changed = true;
-                        }
-                    }
-                });
-            egui::ComboBox::from_id_salt(ui.id().with("memory-type"))
+                }
+            });
+        if combo_resp.response.clicked() {
+            let ctx = ui.ctx().clone();
+            std::thread::spawn(move || {
+                let windows = crate::window_list::list_open_windows();
+                *crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
+                ctx.request_repaint();
+            });
+        }
+        egui::ComboBox::from_id_salt(ui.id().with("memory-type"))
                 .width(105.0)
                 .selected_text(match step.memory_value_type {
                     MemoryValueType::I8 => "1 Byte (integer)",
@@ -231,14 +241,16 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
 
+            let live_open_windows = crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
+            let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
             let window_label = step
                 .background_target_window
                 .as_deref()
-                .map(|selector| Self::display_title_for_selector(selector, open_windows))
+                .map(|selector| Self::display_title_for_selector(selector, effective_open_windows))
                 .unwrap_or_else(|| {
                     Self::tr_lang(language, "Focused window", "Cửa sổ đang focus").to_owned()
                 });
-            egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-click-window")))
+            let combo_resp = egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-click-window")))
                 .width(135.0)
                 .selected_text(Self::truncate_window_title(&window_label, 18))
                 .show_ui(ui, |ui| {
@@ -252,7 +264,7 @@ impl CrosshairApp {
                         step.background_target_window = None;
                         changed = true;
                     }
-                    for window in open_windows {
+                    for window in effective_open_windows {
                         let clean_title = crate::window_list::strip_rule_suffix(&window.title);
                         let is_selected = step.background_target_window.as_deref().map_or(false, |s| {
                             s == window.selector
@@ -275,6 +287,14 @@ impl CrosshairApp {
                         }
                     }
                 });
+            if combo_resp.response.clicked() {
+                let ctx = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let windows = crate::window_list::list_open_windows();
+                    *crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
+                    ctx.request_repaint();
+                });
+            }
 
             let button_label = match step.background_mouse_button.as_str() {
                 "Left" => Self::tr_lang(language, "Left Click", "Click Trái"),
@@ -546,28 +566,30 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
 
+            let live_open_windows = crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
+            let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
             let window_label = step
                 .background_target_window
                 .as_deref()
-                .map(|selector| Self::display_title_for_selector(selector, open_windows))
+                .map(|selector| Self::display_title_for_selector(selector, effective_open_windows))
                 .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Focused window", "Cá»­a sá»• Ä‘ang focus").to_owned()
+                    Self::tr_lang(language, "Focused window", "Cửa sổ đang focus").to_owned()
                 });
-            egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-key-window")))
+            let combo_resp = egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-key-window")))
                 .width(135.0)
                 .selected_text(Self::truncate_window_title(&window_label, 18))
                 .show_ui(ui, |ui| {
                     if ui
                         .selectable_label(
                             step.background_target_window.is_none(),
-                            Self::tr_lang(language, "Focused window", "Cá»­a sá»• Ä‘ang focus"),
+                            Self::tr_lang(language, "Focused window", "Cửa sổ đang focus"),
                         )
                         .clicked()
                     {
                         step.background_target_window = None;
                         changed = true;
                     }
-                    for window in open_windows {
+                    for window in effective_open_windows {
                         let clean_title = crate::window_list::strip_rule_suffix(&window.title);
                         let is_selected = step.background_target_window.as_deref().map_or(false, |s| {
                             s == window.selector
@@ -590,6 +612,14 @@ impl CrosshairApp {
                         }
                     }
                 });
+            if combo_resp.response.clicked() {
+                let ctx = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let windows = crate::window_list::list_open_windows();
+                    *crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
+                    ctx.request_repaint();
+                });
+            }
 
             let current_mode = if step.background_key_mode.is_empty() {
                 "Press".to_string()

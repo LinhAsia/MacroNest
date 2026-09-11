@@ -610,7 +610,7 @@ mod windows_impl {
             && let Ok(val) = usize::from_str_radix(hex, 16)
         {
             let hwnd = HWND(val as *mut _);
-            if exact_selector_window_matches(hwnd, clean) {
+            if unsafe { IsWindow(Some(hwnd)).as_bool() } {
                 return Some(hwnd);
             }
         }
@@ -696,21 +696,18 @@ mod windows_impl {
         match_duplicate_window_titles: bool,
     ) -> bool {
         let clean_title = strip_rule_suffix(target_title);
-        if !unsafe { IsWindowVisible(hwnd).as_bool() } {
+        let base_title = selector_base_title(clean_title);
+        if !unsafe { IsWindow(Some(hwnd)).as_bool() } {
             return false;
         }
         let Some(title) = window_title(hwnd) else {
             return false;
         };
-        let selector = if looks_like_window_selector(clean_title) {
-            window_selector(hwnd, &title)
-        } else {
-            String::new()
-        };
+        let selector = window_selector(hwnd, &title);
         window_matches_candidate_title(
             &title,
             &selector,
-            clean_title,
+            base_title,
             match_duplicate_window_titles,
         )
     }

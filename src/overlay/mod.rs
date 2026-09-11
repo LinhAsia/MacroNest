@@ -34656,9 +34656,43 @@ mod windows_overlay {
     }
 
     unsafe fn find_background_input_child(hwnd: HWND) -> HWND {
-        // 1. If it's a Chromium / Electron app (Discord, Slack, Spotify, VS Code, Chrome, Edge):
+        // 1. Try finding active / focused control via GetGUIThreadInfo first:
+        let target_thread = GetWindowThreadProcessId(hwnd, None);
+        if target_thread != 0 {
+            let mut gui_info = GUITHREADINFO {
+                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                ..Default::default()
+            };
+            if GetGUIThreadInfo(target_thread, &mut gui_info).is_ok() {
+                if !gui_info.hwndFocus.0.is_null()
+                    && (gui_info.hwndFocus == hwnd || IsChild(hwnd, gui_info.hwndFocus).as_bool())
+                {
+                    return gui_info.hwndFocus;
+                }
+                if !gui_info.hwndActive.0.is_null() && IsChild(hwnd, gui_info.hwndActive).as_bool() {
+                    return gui_info.hwndActive;
+                }
+            }
+        }
+
+        // 2. Try AttachThreadInput to query GetFocus():
+        let current_thread = GetCurrentThreadId();
+        if current_thread != target_thread && target_thread != 0 {
+            if AttachThreadInput(current_thread, target_thread, true).as_bool() {
+                let focus = GetFocus();
+                let _ = AttachThreadInput(current_thread, target_thread, false);
+                if !focus.0.is_null() && (focus == hwnd || IsChild(hwnd, focus).as_bool()) {
+                    return focus;
+                }
+            }
+        }
+
+        // 3. If it's a Chromium / Electron app (Discord, Slack, Spotify, VS Code, Chrome, Edge):
         let mut render_child = None;
         unsafe extern "system" fn enum_chromium_proc(child: HWND, lparam: LPARAM) -> windows::core::BOOL {
+            if !IsWindowVisible(child).as_bool() {
+                return true.into();
+            }
             let mut class_buf = [0u16; 64];
             let len = GetClassNameW(child, &mut class_buf);
             if len > 0 {
@@ -34678,31 +34712,6 @@ mod windows_overlay {
         );
         if let Some(child) = render_child {
             return child;
-        }
-
-        // 2. Try AttachThreadInput to query GetFocus() without activating the window:
-        let current_thread = GetCurrentThreadId();
-        let target_thread = GetWindowThreadProcessId(hwnd, None);
-        if current_thread != target_thread && target_thread != 0 {
-            if AttachThreadInput(current_thread, target_thread, true).as_bool() {
-                let focus = GetFocus();
-                let _ = AttachThreadInput(current_thread, target_thread, false);
-                if !focus.0.is_null() && (focus == hwnd || IsChild(hwnd, focus).as_bool()) {
-                    return focus;
-                }
-            }
-        }
-
-        // 3. Try GetGUIThreadInfo:
-        let mut gui_info = GUITHREADINFO {
-            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
-            ..Default::default()
-        };
-        if GetGUIThreadInfo(target_thread, &mut gui_info).is_ok()
-            && !gui_info.hwndFocus.0.is_null()
-            && (gui_info.hwndFocus == hwnd || IsChild(hwnd, gui_info.hwndFocus).as_bool())
-        {
-            return gui_info.hwndFocus;
         }
 
         // 4. Try finding an Edit/RichEdit child control:
@@ -34774,14 +34783,6 @@ mod windows_overlay {
                         WPARAM(unit as usize),
                         LPARAM(1),
                     );
-                    if target != hwnd {
-                        let _ = PostMessageW(
-                            Some(hwnd),
-                            WM_CHAR,
-                            WPARAM(unit as usize),
-                            LPARAM(1),
-                        );
-                    }
                     thread::sleep(Duration::from_millis(10));
                 }
                 return Ok(());
@@ -34821,36 +34822,27 @@ mod windows_overlay {
                 }
             };
 
+            let fg = GetForegroundWindow();
+            let is_fg = !fg.0.is_null() && (fg == hwnd || fg == target || IsChild(hwnd, fg).as_bool());
+            let should_send_wm_char = !is_fg && (step.background_send_wm_char || char_to_send.is_some());
+
             match step.background_key_mode.as_str() {
                 "Down" => {
                     let _ = PostMessageW(Some(target), msg_down, WPARAM(vk as usize), lparam_down);
-                    if target != hwnd {
-                        let _ = PostMessageW(Some(hwnd), msg_down, WPARAM(vk as usize), lparam_down);
-                    }
-                    if let Some(c) = char_to_send {
-                        let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(c as usize), lparam_down);
-                    }
                 }
                 "Up" => {
                     let _ = PostMessageW(Some(target), msg_up, WPARAM(vk as usize), lparam_up);
-                    if target != hwnd {
-                        let _ = PostMessageW(Some(hwnd), msg_up, WPARAM(vk as usize), lparam_up);
-                    }
                 }
                 _ => {
                     // Default: "Press" (Down, small delay, Up)
                     let _ = PostMessageW(Some(target), msg_down, WPARAM(vk as usize), lparam_down);
-                    if target != hwnd {
-                        let _ = PostMessageW(Some(hwnd), msg_down, WPARAM(vk as usize), lparam_down);
-                    }
-                    if let Some(c) = char_to_send {
-                        let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(c as usize), lparam_down);
+                    if should_send_wm_char {
+                        if let Some(c) = char_to_send {
+                            let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(c as usize), lparam_down);
+                        }
                     }
                     thread::sleep(Duration::from_millis(20));
                     let _ = PostMessageW(Some(target), msg_up, WPARAM(vk as usize), lparam_up);
-                    if target != hwnd {
-                        let _ = PostMessageW(Some(hwnd), msg_up, WPARAM(vk as usize), lparam_up);
-                    }
                 }
             }
         }

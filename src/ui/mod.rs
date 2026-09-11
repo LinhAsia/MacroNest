@@ -104,7 +104,7 @@ pub(crate) static VIETNAMESE_INPUT_CONFIG: Lazy<Mutex<VietnameseInputConfig>> = 
         mode: VietnameseInputMode::Telex,
     })
 });
-static LIVE_WINDOW_TARGET_COMBO_WINDOWS: Lazy<Mutex<Option<Vec<WindowInfo>>>> =
+pub(crate) static LIVE_WINDOW_TARGET_COMBO_WINDOWS: Lazy<Mutex<Option<Vec<WindowInfo>>>> =
     Lazy::new(|| Mutex::new(None));
 static PROCESS_ICON_TEXTURES: Lazy<Mutex<HashMap<String, Option<TextureHandle>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
