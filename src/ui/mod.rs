@@ -9368,6 +9368,7 @@ impl CrosshairApp {
             MacroAction::AiResponse => "AiResponse",
             MacroAction::JumpToStep => "JumpToStep",
             MacroAction::BackgroundClick => "BackgroundClick",
+            MacroAction::BackgroundKey => "BackgroundKey",
             _ => "Legacy (Deprecated)",
         }
     }
@@ -9736,6 +9737,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.background_click",
                 "Send mouse click directly to a background window without moving or stealing the cursor.",
             ),
+            MacroAction::BackgroundKey => (
+                "macro_action_tooltip.background_key",
+                "Send key press or text directly to a background window without stealing focus or interrupting your work.",
+            ),
             _ => ("macro_action_tooltip.legacy", "Legacy (Deprecated)"),
         };
         match language {
@@ -9841,6 +9846,7 @@ impl CrosshairApp {
             MacroAction::AiResponse => 0xeb8e,
             MacroAction::JumpToStep => 0xe5c8,
             MacroAction::BackgroundClick => 0xe323,
+            MacroAction::BackgroundKey => 0xe312,
             _ => 0xe8b5,
         };
         char::from_u32(codepoint).unwrap_or('?')
@@ -10022,6 +10028,9 @@ impl CrosshairApp {
             MacroAction::JumpToStep => ("macro_action_short_label.jump_to_step", "Jump"),
             MacroAction::BackgroundClick => {
                 ("macro_action_short_label.background_click", "BgClick")
+            }
+            MacroAction::BackgroundKey => {
+                ("macro_action_short_label.background_key", "BgKey")
             }
             _ => ("macro_action_short_label.legacy", "Legacy"),
         };
@@ -10257,6 +10266,7 @@ impl CrosshairApp {
                 | MacroAction::ReadMemory
                 | MacroAction::WriteMemory
                 | MacroAction::BackgroundClick
+                | MacroAction::BackgroundKey
                 | MacroAction::FunnyMemeReply
                 | MacroAction::AiResponse
                 | MacroAction::DisableCrosshair

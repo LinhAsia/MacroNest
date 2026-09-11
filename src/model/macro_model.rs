@@ -122,6 +122,8 @@ pub enum MacroAction {
     JumpToStep,
     #[serde(alias = "BackgroundMouseClick", alias = "BackgroundMouse")]
     BackgroundClick,
+    #[serde(alias = "BackgroundKeyPress", alias = "BackgroundKeyboard")]
+    BackgroundKey,
     #[serde(other)]
     Legacy,
 }
@@ -447,6 +449,14 @@ pub struct MacroStep {
     pub background_find_child: bool,
     #[serde(default = "default_false")]
     pub background_restore_minimized: bool,
+    #[serde(default = "default_background_key_mode")]
+    pub background_key_mode: String,
+    #[serde(default = "default_false")]
+    pub background_send_wm_char: bool,
+}
+
+fn default_background_key_mode() -> String {
+    "Press".to_string()
 }
 
 fn default_background_mouse_button() -> String {
@@ -578,6 +588,8 @@ impl Default for MacroStep {
             background_client_coords: true,
             background_find_child: true,
             background_restore_minimized: false,
+            background_key_mode: "Press".to_string(),
+            background_send_wm_char: false,
         }
     }
 }
@@ -1017,7 +1029,7 @@ impl Default for MacroGroup {
 
 #[cfg(test)]
 mod tests {
-    use super::{LazyMacroStep, MacroPreset, MacroStep};
+    use super::{LazyMacroStep, MacroAction, MacroPreset, MacroStep};
 
     #[test]
     fn default_stop_steps_are_omitted_from_macro_preset_json() {
@@ -1111,6 +1123,40 @@ mod tests {
         }
         let parsed: ActionOnly = serde_json::from_str(alias_json).expect("parse alias");
         assert_eq!(parsed.action, MacroAction::BackgroundClick);
+    }
+
+    #[test]
+    fn background_key_defaults_and_serialization() {
+        let mut step = MacroStep::default();
+        assert_eq!(step.background_key_mode, "Press");
+        assert!(!step.background_send_wm_char);
+
+        step.action = MacroAction::BackgroundKey;
+        step.background_target_window = Some("GameWindow".to_string());
+        step.key = "Enter".to_string();
+        step.background_key_mode = "TypeText".to_string();
+        step.background_send_wm_char = true;
+
+        let json = serde_json::to_string(&step).expect("serialize step");
+        let restored: MacroStep = serde_json::from_str(&json).expect("deserialize step");
+
+        assert_eq!(restored.action, MacroAction::BackgroundKey);
+        assert_eq!(restored.background_target_window.as_deref(), Some("GameWindow"));
+        assert_eq!(restored.key, "Enter");
+        assert_eq!(restored.background_key_mode, "TypeText");
+        assert!(restored.background_send_wm_char);
+
+        let alias_json = r#"{"action":"BackgroundKeyPress"}"#;
+        #[derive(serde::Deserialize)]
+        struct ActionOnly {
+            action: MacroAction,
+        }
+        let parsed: ActionOnly = serde_json::from_str(alias_json).expect("parse alias");
+        assert_eq!(parsed.action, MacroAction::BackgroundKey);
+
+        let alias_json2 = r#"{"action":"BackgroundKeyboard"}"#;
+        let parsed2: ActionOnly = serde_json::from_str(alias_json2).expect("parse alias 2");
+        assert_eq!(parsed2.action, MacroAction::BackgroundKey);
     }
 
     #[test]

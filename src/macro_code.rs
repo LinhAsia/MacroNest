@@ -595,6 +595,9 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
     if field.starts_with("ai_response_") {
         return action == MacroAction::AiResponse;
     }
+    if field.starts_with("background_") {
+        return matches!(action, MacroAction::BackgroundClick | MacroAction::BackgroundKey);
+    }
     true
 }
 

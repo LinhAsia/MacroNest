@@ -434,7 +434,212 @@ impl CrosshairApp {
         });
         changed
     }
+    fn render_background_key_step_fields(
+        ui: &mut egui::Ui,
+        step: &mut MacroStep,
+        open_windows: &[crate::window_list::WindowInfo],
+        language: UiLanguage,
+        _timer_names: &[String],
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: VietnameseInputMode,
+        id_source: impl std::hash::Hash,
+        capture_target: CaptureRequest,
+        capture_target_snapshot: Option<&CaptureRequest>,
+        next_capture_target: &mut Option<CaptureRequest>,
+        cancel_active_capture: &mut bool,
+    ) -> bool {
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
 
+            let window_label = step
+                .background_target_window
+                .as_deref()
+                .map(|selector| Self::display_title_for_selector(selector, open_windows))
+                .unwrap_or_else(|| {
+                    Self::tr_lang(language, "Focused window", "Cá»­a sá»• Ä‘ang focus").to_owned()
+                });
+            egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-key-window")))
+                .width(135.0)
+                .selected_text(Self::truncate_window_title(&window_label, 18))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            step.background_target_window.is_none(),
+                            Self::tr_lang(language, "Focused window", "Cá»­a sá»• Ä‘ang focus"),
+                        )
+                        .clicked()
+                    {
+                        step.background_target_window = None;
+                        changed = true;
+                    }
+                    for window in open_windows {
+                        let clean_title = crate::window_list::strip_rule_suffix(&window.title);
+                        let is_selected = step.background_target_window.as_deref().map_or(false, |s| {
+                            s == window.selector
+                                || s == window.title
+                                || crate::window_list::strip_rule_suffix(s) == clean_title
+                        });
+                        if ui
+                            .selectable_label(
+                                is_selected,
+                                Self::truncate_window_title(
+                                    &Self::simplify_window_title(&window.title),
+                                    35,
+                                ),
+                            )
+                            .on_hover_text(&window.selector)
+                            .clicked()
+                        {
+                            step.background_target_window = Some(window.title.clone());
+                            changed = true;
+                        }
+                    }
+                });
+
+            let current_mode = if step.background_key_mode.is_empty() {
+                "Press".to_string()
+            } else {
+                step.background_key_mode.clone()
+            };
+            let mode_label = match current_mode.as_str() {
+                "Down" => Self::tr_lang(language, "Down", "Nháº¥n giá»¯"),
+                "Up" => Self::tr_lang(language, "Up", "Tháº£"),
+                "TypeText" => Self::tr_lang(language, "TypeText", "GÃµ chá»¯"),
+                _ => Self::tr_lang(language, "Press", "Nháº¥n"),
+            };
+            egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-key-mode")))
+                .width(70.0)
+                .selected_text(mode_label)
+                .show_ui(ui, |ui| {
+                    for (val, display_en, display_vi) in [
+                        ("Press", "Press", "Nháº¥n"),
+                        ("Down", "Down", "Nháº¥n giá»¯"),
+                        ("Up", "Up", "Tháº£"),
+                        ("TypeText", "TypeText", "GÃµ chá»¯"),
+                    ] {
+                        let is_sel = current_mode == val;
+                        if ui.selectable_label(is_sel, Self::tr_lang(language, display_en, display_vi)).clicked() {
+                            step.background_key_mode = val.to_string();
+                            changed = true;
+                        }
+                    }
+                });
+
+            if current_mode == "TypeText" {
+                let id = ui.id().with((&id_source, "bg-key-text"));
+                let response = Self::render_interpolated_text_edit(
+                    ui,
+                    &mut step.key,
+                    id,
+                    140.0,
+                    260.0,
+                    18.0,
+                    36.0,
+                    Self::tr_lang(language, "Text to type", "VÄƒn báº£n"),
+                    true,
+                );
+                changed |= response.changed();
+                Self::apply_vietnamese_input_if_changed(
+                    &response,
+                    vietnamese_input_enabled,
+                    vietnamese_input_mode,
+                    &mut step.key,
+                );
+            } else {
+                let is_capturing = capture_target_snapshot == Some(&capture_target);
+                let btn = if is_capturing {
+                    Button::new(
+                        RichText::new(Self::tr_lang(language, "Press key...", "Nháº¥n phÃ­m..."))
+                            .color(Color32::YELLOW)
+                            .size(MACRO_STEP_TEXT_SIZE),
+                    )
+                    .fill(Color32::from_rgb(88, 84, 44))
+                } else {
+                    let key_text = if step.key.is_empty() {
+                        "-".to_string()
+                    } else {
+                        step.key.clone()
+                    };
+                    Button::new(RichText::new(key_text).size(MACRO_STEP_TEXT_SIZE))
+                };
+                let btn_resp = ui.add_sized([70.0, 18.0], btn).on_hover_text(Self::tr_lang(
+                    language,
+                    "Click to record a key, or right-click to clear",
+                    "Nháº¥p Ä‘á»ƒ ghi phÃ­m, hoáº·c chuá»™t pháº£i Ä‘á»ƒ xÃ³a",
+                ));
+                if btn_resp.clicked() {
+                    if is_capturing {
+                        *cancel_active_capture = true;
+                    } else {
+                        *next_capture_target = Some(capture_target);
+                    }
+                }
+                if btn_resp.secondary_clicked() {
+                    step.key.clear();
+                    changed = true;
+                }
+
+                if current_mode == "Press" {
+                    ui.label(RichText::new(Self::tr_lang(language, "Hold:", "Giá»¯:")).size(MACRO_STEP_TEXT_SIZE));
+                    changed |= ui
+                        .add(
+                            egui::DragValue::new(&mut step.mouse_click_delay_ms)
+                                .range(0..=10_000)
+                                .suffix(" ms"),
+                        )
+                        .changed();
+                }
+            }
+
+            let popup_id = ui.id().with((&id_source, "bg-key-options-popup"));
+            let mut options_open = ui.ctx().data(|d| d.get_temp::<bool>(popup_id)).unwrap_or(false);
+            let btn_resp = ui.add(Button::new(Self::material_icon_text(0xe8b8, 14.0)))
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Background key settings (Focused child, Minimized restore, WM_CHAR)",
+                    "CÃ i Ä‘áº·t phÃ­m ngáº§m (Control focus, KhÃ´i phá»¥c thu nhá», WM_CHAR)",
+                ));
+            if btn_resp.clicked() {
+                options_open = !options_open;
+                ui.ctx().data_mut(|d| d.insert_temp(popup_id, options_open));
+            }
+            if options_open {
+                egui::Popup::from_response(&btn_resp)
+                    .id(popup_id)
+                    .open_bool(&mut options_open)
+                    .show(|ui| {
+                        changed |= ui.checkbox(
+                            &mut step.background_find_child,
+                            Self::tr_lang(language, "Auto-find focused child control", "Tá»± tÃ¬m control con Ä‘ang focus"),
+                        ).on_hover_text(Self::tr_lang(
+                            language,
+                            "Route key message directly to the focused child HWND (e.g. edit box, chat box) inside the window.",
+                            "Gá»­i phÃ­m trá»±c tiáº¿p tá»›i HWND con Ä‘ang focus (Ã´ nháº­p, Ã´ chat...) bÃªn trong cá»­a sá»•.",
+                        )).changed();
+
+                        changed |= ui.checkbox(
+                            &mut step.background_restore_minimized,
+                            Self::tr_lang(language, "Restore if minimized (no focus)", "KhÃ´i phá»¥c náº¿u bá»‹ thu nhá» (khÃ´ng cÆ°á»›p focus)"),
+                        ).on_hover_text(Self::tr_lang(
+                            language,
+                            "If the target window is minimized to taskbar, restore it without taking foreground focus so it can receive keys.",
+                            "Náº¿u cá»­a sá»• Ä‘ang bá»‹ áº©n/minimize xuá»‘ng taskbar, má»Ÿ láº¡i ngáº§m khÃ´ng chiáº¿m focus Ä‘á»ƒ nháº­n phÃ­m.",
+                        )).changed();
+
+                        changed |= ui.checkbox(
+                            &mut step.background_send_wm_char,
+                            Self::tr_lang(language, "Also send WM_CHAR message", "Gá»­i kÃ¨m thÃ´ng Ä‘iá»‡p WM_CHAR"),
+                        ).on_hover_text(Self::tr_lang(
+                            language,
+                            "Send WM_CHAR along with WM_KEYDOWN (helps some chat boxes, notepads, and emulators).",
+                            "Gá»­i thÃªm WM_CHAR cÃ¹ng vá»›i WM_KEYDOWN (há»— trá»£ má»™t sá»‘ Ã´ chat, notepad, giáº£ láº­p).",
+                        )).changed();
+                    });
+            }
+        });
+        changed
+    }
     fn default_macro_step_hud_preset(text_override: &str) -> HudPreset {
         let mut preset = HudPreset::default_step_preview();
         if !text_override.trim().is_empty() {
@@ -7567,6 +7772,7 @@ impl CrosshairApp {
                                                             MacroAction::KeyDown,
                                                             MacroAction::KeyUp,
                                                             MacroAction::TypeText,
+                                                            MacroAction::BackgroundKey,
                                                             MacroAction::ApplyWindowPreset,
                                                             MacroAction::FocusWindowPreset,
                                                             MacroAction::TriggerCommandPreset,
@@ -9411,6 +9617,21 @@ if supports_move_mouse || show_detection_tuning {
                                                                &mut cancel_mouse_move_absolute_capture,
                                                                self.mouse_move_absolute_capture_target,
                                                            );
+                                                                                                            } else if step.action == MacroAction::BackgroundKey {
+                                                          live_sync |= Self::render_background_key_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                              &timer_names,
+                                                              self.state.vietnamese_input_enabled,
+                                                              self.state.vietnamese_input_mode,
+                                                              (group.id, preset.id, "hold-stop-bg-key"),
+                                                              CaptureRequest::MacroPresetHoldStopInput(group.id, preset.id),
+                                                              capture_target_snapshot.as_ref(),
+                                                              &mut next_capture_target,
+                                                              &mut cancel_active_capture,
+                                                          );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -9556,7 +9777,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 }
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if step.action == MacroAction::BackgroundClick || Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([70.0, 20.0], egui::Label::new(""));
@@ -9912,6 +10133,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                             MacroAction::KeyDown,
                                                             MacroAction::KeyUp,
                                                             MacroAction::TypeText,
+                                                            MacroAction::BackgroundKey,
                                                             MacroAction::ApplyWindowPreset,
                                                             MacroAction::FocusWindowPreset,
                                                             MacroAction::TriggerCommandPreset,
@@ -11752,6 +11974,21 @@ if supports_move_mouse || show_detection_tuning {
                                                               &mut cancel_mouse_move_absolute_capture,
                                                               self.mouse_move_absolute_capture_target,
                                                           );
+                                                                                                            } else if step.action == MacroAction::BackgroundKey {
+                                                          live_sync |= Self::render_background_key_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                              &timer_names,
+                                                              self.state.vietnamese_input_enabled,
+                                                              self.state.vietnamese_input_mode,
+                                                              (group.id, preset.id, "press-stop-bg-key"),
+                                                              CaptureRequest::MacroPresetPressStopInput(group.id, preset.id),
+                                                              capture_target_snapshot.as_ref(),
+                                                              &mut next_capture_target,
+                                                              &mut cancel_active_capture,
+                                                          );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -11897,7 +12134,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 }
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if step.action == MacroAction::BackgroundClick || Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([70.0, 20.0], egui::Label::new(""));
@@ -13156,6 +13393,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 MacroAction::KeyDown,
                                                                 MacroAction::KeyUp,
                                                                 MacroAction::TypeText,
+                                                                MacroAction::BackgroundKey,
                                                                 MacroAction::ApplyWindowPreset,
                                                                 MacroAction::FocusWindowPreset,
                                                                 MacroAction::TriggerCommandPreset,
@@ -15255,6 +15493,26 @@ if supports_move_mouse || show_detection_tuning {
                                                               &mut cancel_mouse_move_absolute_capture,
                                                               self.mouse_move_absolute_capture_target,
                                                           );
+                                                                                                            } else if step.action == MacroAction::BackgroundKey {
+                                                          live_sync |= Self::render_background_key_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                              &timer_names,
+                                                              self.state.vietnamese_input_enabled,
+                                                              self.state.vietnamese_input_mode,
+                                                              (group.id, preset.id, step_index, "main-bg-key"),
+                                                              CaptureRequest::MacroStepInput {
+                                                                  group_id: group.id,
+                                                                  preset_id: preset.id,
+                                                                  step_index,
+                                                                  extra_cond_index: None,
+                                                              },
+                                                              capture_target_snapshot.as_ref(),
+                                                              &mut next_capture_target,
+                                                              &mut cancel_active_capture,
+                                                          );
                                                       } else if step.action == MacroAction::SetVariable {
                                                           ui.scope(|ui| {
                                                               ui.spacing_mut().item_spacing.x = 2.0;
@@ -15528,7 +15786,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 ui.add_space(2.0);
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if step.action == MacroAction::BackgroundClick || Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([146.0, 21.0], egui::Label::new("-"));

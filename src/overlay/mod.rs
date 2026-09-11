@@ -100,7 +100,7 @@ mod windows_overlay {
                 Input::KeyboardAndMouse::{
                     GetAsyncKeyState, GetKeyboardState, INPUT, INPUT_0, INPUT_KEYBOARD,
                     INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-                    KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC, MOD_ALT, MOD_CONTROL,
+                    KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, MAPVK_VK_TO_CHAR, MAPVK_VK_TO_VSC, MOD_ALT, MOD_CONTROL,
                     MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
                     MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
                     MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
@@ -114,8 +114,8 @@ mod windows_overlay {
                     CreateIconIndirect, CreatePopupMenu, CreateWindowExW,
                     CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, DefWindowProcW, DestroyCursor,
                     DestroyMenu, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
-                    GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor, GetClassNameW,
-                    GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
+                    GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GUITHREADINFO, GetAncestor, GetClassNameW,
+                    GetClientRect, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetMessageW,
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
                     GetWindowThreadProcessId, HC_ACTION, HCURSOR, HMENU, HTCLIENT,
                     HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS,
@@ -130,7 +130,7 @@ mod windows_overlay {
                     SetWindowPos, SetWindowsHookExW, ShowWindow, SystemParametersInfoW,
                     TPM_BOTTOMALIGN, TPM_LEFTALIGN, TrackPopupMenu, TranslateMessage, ULW_ALPHA,
                     UnhookWindowsHookEx, UpdateLayeredWindow, WH_KEYBOARD_LL, WH_MOUSE_LL,
-                    WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP,
+                    WINDOW_LONG_PTR_INDEX, WINEVENT_OUTOFCONTEXT, WM_APP, WM_CHAR,
                     WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP,
                     WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
                     WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOVE, WM_NCCREATE,
@@ -33942,6 +33942,7 @@ mod windows_overlay {
             | MacroAction::MouseMoveAbsolute
             | MacroAction::MouseMoveRelative => return send_mouse_event(step),
             MacroAction::BackgroundClick => return send_background_click(step),
+            MacroAction::BackgroundKey => return send_background_key(step),
             MacroAction::TypeText => {
                 let text = interpolate_variables(&step.key);
                 return if step.type_text_paste {
@@ -34648,6 +34649,114 @@ mod windows_overlay {
                         thread::sleep(Duration::from_millis(delay_ms));
                     }
                     let _ = PostMessageW(Some(target), WM_LBUTTONUP, WPARAM(0), lparam);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn send_background_key(step: &MacroStep) -> Result<()> {
+        let hwnd = if let Some(target_title) = step.background_target_window.as_deref() {
+            crate::window_list::find_window_handle(Some(target_title))
+        } else {
+            let fg = unsafe { GetForegroundWindow() };
+            if fg.0.is_null() {
+                None
+            } else {
+                Some(fg)
+            }
+        };
+
+        let Some(hwnd) = hwnd else {
+            return Ok(());
+        };
+        if hwnd.0.is_null() {
+            return Ok(());
+        }
+
+        unsafe {
+            if step.background_restore_minimized && IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOWNA);
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            let mut target = hwnd;
+            if step.background_find_child {
+                let target_thread = GetWindowThreadProcessId(hwnd, None);
+                let mut gui_info = GUITHREADINFO {
+                    cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                    ..Default::default()
+                };
+                if GetGUIThreadInfo(target_thread, &mut gui_info).is_ok()
+                    && !gui_info.hwndFocus.0.is_null()
+                {
+                    target = gui_info.hwndFocus;
+                }
+            }
+
+            let delay_ms = step.mouse_click_delay_ms as u64;
+
+            if step.background_key_mode == "TypeText" {
+                let text = interpolate_variables(&step.key);
+                for unit in text.encode_utf16() {
+                    let _ = PostMessageW(
+                        Some(target),
+                        WM_CHAR,
+                        WPARAM(unit as usize),
+                        LPARAM(1),
+                    );
+                    if delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(delay_ms));
+                    }
+                }
+                return Ok(());
+            }
+
+            let key_str = interpolate_variables(&step.key);
+            let Some(vk) = hotkey::key_name_to_vk(&key_str) else {
+                bail!("Unsupported macro key: {}", key_str);
+            };
+
+            let scan = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC);
+            let extended_bit: u32 = if is_extended_key(vk) { 1 << 24 } else { 0 };
+            let is_syskey = matches!(vk, 0x12 | 0xA4 | 0xA5 | 0x79);
+            let (msg_down, msg_up) = if is_syskey {
+                (WM_SYSKEYDOWN, WM_SYSKEYUP)
+            } else {
+                (WM_KEYDOWN, WM_KEYUP)
+            };
+
+            let lparam_down = LPARAM((1u32 | ((scan & 0xFF) << 16) | extended_bit) as isize);
+            let lparam_up = LPARAM(
+                (1u32 | ((scan & 0xFF) << 16) | extended_bit | (1 << 30) | (1 << 31)) as isize,
+            );
+
+            match step.background_key_mode.as_str() {
+                "Down" => {
+                    let _ = PostMessageW(Some(target), msg_down, WPARAM(vk as usize), lparam_down);
+                    if step.background_send_wm_char {
+                        let ch = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_CHAR);
+                        if ch > 0 && ch < 0x8000 {
+                            let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(ch as usize), lparam_down);
+                        }
+                    }
+                }
+                "Up" => {
+                    let _ = PostMessageW(Some(target), msg_up, WPARAM(vk as usize), lparam_up);
+                }
+                _ => {
+                    // Default: "Press" (Down, optional hold delay, Up)
+                    let _ = PostMessageW(Some(target), msg_down, WPARAM(vk as usize), lparam_down);
+                    if step.background_send_wm_char {
+                        let ch = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_CHAR);
+                        if ch > 0 && ch < 0x8000 {
+                            let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(ch as usize), lparam_down);
+                        }
+                    }
+                    if delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(delay_ms));
+                    }
+                    let _ = PostMessageW(Some(target), msg_up, WPARAM(vk as usize), lparam_up);
                 }
             }
         }
