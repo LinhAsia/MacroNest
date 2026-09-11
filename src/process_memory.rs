@@ -449,6 +449,7 @@ fn entity_root_key(
     })
 }
 
+#[derive(Clone, Debug)]
 pub struct PointerMap {
     pointers: Vec<(usize, usize)>,
     modules: Vec<(String, usize, usize)>,
@@ -739,7 +740,22 @@ fn capture_pointer_map_with_budget_cancel(
     })
 }
 
+pub fn parse_must_end_offsets(text: &str) -> Vec<usize> {
+    text.split([',', ';', ' ', '\t', '\n', '\r'])
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| {
+            let digits = part
+                .strip_prefix("0x")
+                .or_else(|| part.strip_prefix("0X"))
+                .unwrap_or(part);
+            usize::from_str_radix(digits, 16).ok()
+        })
+        .collect()
+}
+
 impl PointerMap {
+    #[allow(dead_code)]
     pub fn paths_to(
         &self,
         target: usize,
@@ -747,15 +763,16 @@ impl PointerMap {
         max_depth: usize,
         result_limit: usize,
     ) -> Vec<PointerPath> {
-        self.paths_to_any(&[target], max_offset, max_depth, result_limit)
+        self.paths_to_with_must_end(&[target], max_offset, max_depth, result_limit, &[])
     }
 
-    pub fn paths_to_any(
+    pub fn paths_to_with_must_end(
         &self,
         targets: &[usize],
         max_offset: usize,
         max_depth: usize,
         result_limit: usize,
+        must_end_offsets: &[usize],
     ) -> Vec<PointerPath> {
         find_pointer_paths_to_any(
             &self.pointers,
@@ -765,11 +782,24 @@ impl PointerMap {
             max_depth,
             result_limit,
             false,
+            must_end_offsets,
         )
+    }
+
+    #[allow(dead_code)]
+    pub fn paths_to_any(
+        &self,
+        targets: &[usize],
+        max_offset: usize,
+        max_depth: usize,
+        result_limit: usize,
+    ) -> Vec<PointerPath> {
+        self.paths_to_with_must_end(targets, max_offset, max_depth, result_limit, &[])
     }
 }
 
 
+#[allow(dead_code)]
 pub fn scan_pointer_paths_to_targets_with_budget(
     pid: u32,
     targets: &[usize],
@@ -781,6 +811,33 @@ pub fn scan_pointer_paths_to_targets_with_budget(
     max_bytes: usize,
     progress: Arc<AtomicUsize>,
 ) -> io::Result<Vec<(usize, Vec<PointerPath>)>> {
+    scan_pointer_map_and_paths_to_targets_must_end(
+        pid,
+        targets,
+        modules,
+        pointer_width,
+        max_offset,
+        max_depth,
+        result_limit,
+        max_bytes,
+        &[],
+        progress,
+    )
+    .map(|(_, paths)| paths)
+}
+
+pub fn scan_pointer_map_and_paths_to_targets_must_end(
+    pid: u32,
+    targets: &[usize],
+    modules: &[(String, usize, usize)],
+    pointer_width: usize,
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+    max_bytes: usize,
+    must_end_offsets: &[usize],
+    progress: Arc<AtomicUsize>,
+) -> io::Result<(PointerMap, Vec<(usize, Vec<PointerPath>)>)> {
     let map = capture_pointer_map_with_budget_cancel(
         pid,
         modules,
@@ -789,14 +846,15 @@ pub fn scan_pointer_paths_to_targets_with_budget(
         progress,
         None,
     )?;
-    Ok(targets
+    let paths = targets
         .iter()
         .copied()
         .map(|target| {
-            let paths = map.paths_to(target, max_offset, max_depth, result_limit);
+            let paths = map.paths_to_with_must_end(&[target], max_offset, max_depth, result_limit, must_end_offsets);
             (target, paths)
         })
-        .collect())
+        .collect();
+    Ok((map, paths))
 }
 
 pub fn scan_pointer_paths_with_budget_options(
@@ -809,6 +867,36 @@ pub fn scan_pointer_paths_with_budget_options(
     result_limit: usize,
     max_bytes: usize,
     include_system_modules: bool,
+    progress: Arc<AtomicUsize>,
+    cancel: Arc<AtomicBool>,
+) -> io::Result<Vec<PointerPath>> {
+    scan_pointer_paths_with_budget_options_must_end(
+        pid,
+        target,
+        modules,
+        pointer_width,
+        max_offset,
+        max_depth,
+        result_limit,
+        max_bytes,
+        include_system_modules,
+        &[],
+        progress,
+        cancel,
+    )
+}
+
+pub fn scan_pointer_paths_with_budget_options_must_end(
+    pid: u32,
+    target: usize,
+    modules: &[(String, usize, usize)],
+    pointer_width: usize,
+    max_offset: usize,
+    max_depth: usize,
+    result_limit: usize,
+    max_bytes: usize,
+    include_system_modules: bool,
+    must_end_offsets: &[usize],
     progress: Arc<AtomicUsize>,
     cancel: Arc<AtomicBool>,
 ) -> io::Result<Vec<PointerPath>> {
@@ -828,6 +916,7 @@ pub fn scan_pointer_paths_with_budget_options(
         max_depth,
         result_limit,
         include_system_modules,
+        must_end_offsets,
     ))
 }
 
@@ -883,6 +972,7 @@ fn find_pointer_paths_to_any(
     max_depth: usize,
     result_limit: usize,
     include_system_modules: bool,
+    must_end_offsets: &[usize],
 ) -> Vec<PointerPath> {
     let max_frontier = result_limit.saturating_mul(4).clamp(10_000, 100_000);
     let mut results = Vec::new();
@@ -922,31 +1012,44 @@ fn find_pointer_paths_to_any(
         }
     }
 
-    for _ in 0..max_depth.max(1) {
+    for depth in 0..max_depth.max(1) {
         let mut next = Vec::new();
+        let req_offset = must_end_offsets.get(depth).copied();
         for (node, suffix) in frontier {
-            let minimum = node.saturating_sub(max_offset);
-            let start = pointers.partition_point(|(value, _)| *value < minimum);
-            let end = pointers.partition_point(|(value, _)| *value <= node);
+            let (start, end) = if let Some(req) = req_offset {
+                let Some(wanted_value) = node.checked_sub(req) else {
+                    continue;
+                };
+                let s = pointers.partition_point(|(value, _)| *value < wanted_value);
+                let e = pointers.partition_point(|(value, _)| *value <= wanted_value);
+                (s, e)
+            } else {
+                let minimum = node.saturating_sub(max_offset);
+                let s = pointers.partition_point(|(value, _)| *value < minimum);
+                let e = pointers.partition_point(|(value, _)| *value <= node);
+                (s, e)
+            };
             for &(value, location) in &pointers[start..end] {
                 let offset = node - value;
                 let Some(new_suffix) = suffix.pushed(offset) else {
                     continue;
                 };
 
-                let mod_idx = fast_modules.partition_point(|m| m.base <= location);
-                if mod_idx > 0 {
-                    let m = &fast_modules[mod_idx - 1];
-                    if location < m.end && (include_system_modules || !m.is_system) {
-                        let module_offset = location - m.base;
-                        if seen_results.insert((mod_idx, module_offset, new_suffix)) {
-                            results.push(PointerPath {
-                                module: m.name.clone(),
-                                module_offset,
-                                offsets: new_suffix.to_reversed_vec(),
-                            });
-                            if results.len() >= result_limit.max(1) {
-                                return results;
+                if (new_suffix.len as usize) >= must_end_offsets.len() {
+                    let mod_idx = fast_modules.partition_point(|m| m.base <= location);
+                    if mod_idx > 0 {
+                        let m = &fast_modules[mod_idx - 1];
+                        if location < m.end && (include_system_modules || !m.is_system) {
+                            let module_offset = location - m.base;
+                            if seen_results.insert((mod_idx, module_offset, new_suffix)) {
+                                results.push(PointerPath {
+                                    module: m.name.clone(),
+                                    module_offset,
+                                    offsets: new_suffix.to_reversed_vec(),
+                                });
+                                if results.len() >= result_limit.max(1) {
+                                    return results;
+                                }
                             }
                         }
                     }
@@ -4554,11 +4657,80 @@ mod tests {
             3,
             8,
             false,
+            &[],
         );
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].module, "game.exe");
         assert_eq!(paths[0].module_offset, 0x10);
         assert_eq!(paths[0].offsets, vec![0x10, 0x20]);
+    }
+
+    #[test]
+    fn pointer_paths_must_end_with_specific_offsets() {
+        let pointers = [(0x1FF0, 0x1010), (0x2FE0, 0x2000)];
+        let modules = [("game.exe".to_owned(), 0x1000, 0x100)];
+
+        // Matching both offsets: Offset 0 = 0x20 (hop to target 0x3000), Offset 1 = 0x10
+        let paths = find_pointer_paths_to_any(
+            &pointers,
+            &[0x3000],
+            &modules,
+            0x100,
+            2,
+            8,
+            false,
+            &[0x20, 0x10],
+        );
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].offsets, vec![0x10, 0x20]);
+
+        // Matching only the final offset: Offset 0 = 0x20
+        let paths_one = find_pointer_paths_to_any(
+            &pointers,
+            &[0x3000],
+            &modules,
+            0x100,
+            3,
+            8,
+            false,
+            &[0x20],
+        );
+        assert_eq!(paths_one.len(), 1);
+        assert_eq!(paths_one[0].offsets, vec![0x10, 0x20]);
+
+        // Wrong final offset: must return 0 results
+        let paths_mismatch = find_pointer_paths_to_any(
+            &pointers,
+            &[0x3000],
+            &modules,
+            0x100,
+            3,
+            8,
+            false,
+            &[0x99],
+        );
+        assert!(paths_mismatch.is_empty());
+
+        // Requires 3 offsets but max path length is 2: must return 0 results
+        let paths_too_deep = find_pointer_paths_to_any(
+            &pointers,
+            &[0x3000],
+            &modules,
+            0x100,
+            3,
+            8,
+            false,
+            &[0x20, 0x10, 0x5],
+        );
+        assert!(paths_too_deep.is_empty());
+    }
+
+    #[test]
+    fn test_parse_must_end_offsets() {
+        assert_eq!(parse_must_end_offsets("0, 58"), vec![0x0, 0x58]);
+        assert_eq!(parse_must_end_offsets("0x0, 0x58"), vec![0x0, 0x58]);
+        assert_eq!(parse_must_end_offsets("10; 20 30"), vec![0x10, 0x20, 0x30]);
+        assert_eq!(parse_must_end_offsets(""), Vec::<usize>::new());
     }
 
     #[test]

@@ -15,7 +15,7 @@ use crate::{
     hotkey,
     model::{
         AppPanel, EspPreset, HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture,
-        MemoryDebuggerMethod, MemoryPointerEntry,
+        MemoryDebuggerMethod, MemoryPointerEntry, UiLanguage,
     },
     process_memory::{
         EntityListCandidate, EntityListScanResult, EntityListValidation, MemoryRegionInfo,
@@ -30,7 +30,8 @@ use crate::{
         refresh_scan_candidates, scan_aob_memory_as_numeric, scan_aob_memory_as_text,
         scan_aob_memory_range_with_progress,
         scan_aob_memory_with_progress, scan_entity_lists_with_progress,
-        scan_memory_range_with_progress, scan_pointer_paths_to_targets_with_budget,
+        scan_memory_range_with_progress,
+        scan_pointer_map_and_paths_to_targets_must_end, parse_must_end_offsets,
         scan_pointer_paths_with_budget_options, scan_text_memory_with_progress,
         scan_view_projection_candidates, update_snapshot_baseline, validate_entity_list, write_code_bytes,
         write_scan_value, write_text_memory,
@@ -182,7 +183,7 @@ struct StablePointerCandidate {
 
 struct StablePointerJobResult {
     pid: u32,
-    result: Result<Vec<(usize, Vec<PointerPath>)>, String>,
+    result: Result<(Option<PointerMap>, Vec<(usize, Vec<PointerPath>)>), String>,
 }
 
 struct StablePointerFilterResult {
@@ -228,6 +229,10 @@ struct StablePointerDialog {
     rx: Option<Receiver<StablePointerJobResult>>,
     progress: Arc<AtomicUsize>,
     limits: PointerScanLimits,
+    cached_map: Option<Arc<PointerMap>>,
+    must_end_with_enabled: bool,
+    must_end_with_offsets: String,
+    must_end_order_ce: bool,
     filter: String,
     filter_value: String,
     filter_status: StablePointerStatusFilter,
@@ -241,7 +246,7 @@ struct StablePointerDialog {
 
 enum DeepPointerJobResult {
     MapA(Result<PointerMap, String>),
-    Compared(Result<DeepPointerComparisonResult, String>),
+    Compared(Result<(DeepPointerComparisonResult, Option<PointerMap>), String>),
 }
 
 struct DeepPointerComparisonResult {
@@ -262,6 +267,10 @@ struct DeepPointerComparisonStats {
 
 struct DeepPointerDialog {
     map_a: Option<Arc<PointerMap>>,
+    map_b: Option<Arc<PointerMap>>,
+    must_end_with_enabled: bool,
+    must_end_with_offsets: String,
+    must_end_order_ce: bool,
     source_addresses: Vec<usize>,
     value_type: ScanValueType,
     text_encoding: Option<TextEncoding>,
@@ -4752,7 +4761,7 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     ui.label("Levels");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut self.state.memory_pointer_scan_depth).range(3..=8))
+                        .add(egui::DragValue::new(&mut self.state.memory_pointer_scan_depth).range(1..=8))
                         .changed();
                     ui.label("Max offset (hex)");
                     changed |= ui
@@ -4773,6 +4782,20 @@ impl CrosshairApp {
                             .range(64..=PointerScanLimits::MAX_RESULT_LIMIT),
                         )
                         .changed();
+                });
+                ui.horizontal(|ui| {
+                    changed |= ui.checkbox(
+                        &mut self.state.memory_pointer_must_end_with_enabled,
+                        "Must end with specific offsets",
+                    ).on_hover_text("Lock specific trailing offsets (e.g. 0, 58) like Cheat Engine to quickly find new base after game update").changed();
+                    if self.state.memory_pointer_must_end_with_enabled {
+                        ui.label("Offsets:");
+                        changed |= ui.add(
+                            egui::TextEdit::singleline(&mut self.state.memory_pointer_must_end_with_offsets)
+                                .desired_width(120.0)
+                                .hint_text("0, 58")
+                        ).changed();
+                    }
                 });
                 ui.separator();
                 ui.label(self.tr("Scan Hotkeys", "Scan Hotkeys"));
@@ -4806,7 +4829,7 @@ impl CrosshairApp {
         .clamp(0x100, 0x10000);
         PointerScanLimits {
             max_offset: offset,
-            max_depth: self.state.memory_pointer_scan_depth.clamp(3, 8),
+            max_depth: self.state.memory_pointer_scan_depth.clamp(1, 8),
             result_limit: self
                 .state
                 .memory_pointer_scan_result_limit
@@ -6462,6 +6485,10 @@ impl CrosshairApp {
                 rx: None,
                 progress: Arc::new(AtomicUsize::new(0)),
                 limits: self.pointer_scan_limits(),
+                cached_map: None,
+                must_end_with_enabled: self.state.memory_pointer_must_end_with_enabled,
+                must_end_with_offsets: self.state.memory_pointer_must_end_with_offsets.clone(),
+                must_end_order_ce: true,
                 filter: String::new(),
                 filter_value: String::new(),
                 filter_status: StablePointerStatusFilter::All,
@@ -6580,6 +6607,10 @@ impl CrosshairApp {
                     rx: None,
                     progress,
                     limits,
+                    cached_map: None,
+                    must_end_with_enabled: self.state.memory_pointer_must_end_with_enabled,
+                    must_end_with_offsets: self.state.memory_pointer_must_end_with_offsets.clone(),
+                    must_end_order_ce: true,
                     filter: String::new(),
                     filter_value: String::new(),
                     filter_status: StablePointerStatusFilter::All,
@@ -6597,9 +6628,14 @@ impl CrosshairApp {
         let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
         let worker_targets = source_addresses.clone();
         let (tx, rx) = mpsc::channel();
+        let must_end = if self.state.memory_pointer_must_end_with_enabled {
+            parse_must_end_offsets(&self.state.memory_pointer_must_end_with_offsets)
+        } else {
+            Vec::new()
+        };
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                scan_pointer_paths_to_targets_with_budget(
+                scan_pointer_map_and_paths_to_targets_must_end(
                     pid,
                     &worker_targets,
                     &modules,
@@ -6608,10 +6644,12 @@ impl CrosshairApp {
                     limits.max_depth,
                     limits.result_limit,
                     limits.max_bytes,
+                    &must_end,
                     worker_progress,
                 )
             }))
             .unwrap_or_else(|_| Err(std::io::Error::other("Pointer scan thread encountered an error")))
+            .map(|(map, paths)| (Some(map), paths))
             .map_err(|error| error.to_string());
             let _ = tx.send(StablePointerJobResult { pid, result });
         });
@@ -6638,6 +6676,10 @@ impl CrosshairApp {
             rx: Some(rx),
             progress,
             limits,
+            cached_map: None,
+            must_end_with_enabled: self.state.memory_pointer_must_end_with_enabled,
+            must_end_with_offsets: self.state.memory_pointer_must_end_with_offsets.clone(),
+            must_end_order_ce: true,
             filter: String::new(),
             filter_value: String::new(),
             filter_status: StablePointerStatusFilter::All,
@@ -6681,6 +6723,10 @@ impl CrosshairApp {
                 } else {
                     self.memory_panel.deep_pointer_dialog = Some(DeepPointerDialog {
                         map_a: None,
+                        map_b: None,
+                        must_end_with_enabled: self.state.memory_pointer_must_end_with_enabled,
+                        must_end_with_offsets: self.state.memory_pointer_must_end_with_offsets.clone(),
+                        must_end_order_ce: true,
                         source_addresses,
                         value_type: saved.value_type,
                         text_encoding: saved.text_encoding,
@@ -6729,6 +6775,22 @@ impl CrosshairApp {
                 })
             })
         {
+            let (must_end_enabled, must_end_offsets_text, must_end_order_ce) = self
+                .memory_panel
+                .deep_pointer_dialog
+                .as_ref()
+                .map(|d| (d.must_end_with_enabled, d.must_end_with_offsets.clone(), d.must_end_order_ce))
+                .unwrap_or((self.state.memory_pointer_must_end_with_enabled, self.state.memory_pointer_must_end_with_offsets.clone(), true));
+            let must_end = if must_end_enabled {
+                let raw = parse_must_end_offsets(&must_end_offsets_text);
+                if must_end_order_ce {
+                    raw
+                } else {
+                    raw.into_iter().rev().collect()
+                }
+            } else {
+                Vec::new()
+            };
             let targets: Vec<usize> = if self.memory_panel.selected_saved.len() > 1 {
                 self.memory_panel
                     .selected_saved
@@ -6769,19 +6831,21 @@ impl CrosshairApp {
                     };
                     let (paths_a, paths_b) = std::thread::scope(|s| {
                         let handle_a = s.spawn(|| {
-                            map_a.paths_to_any(
+                            map_a.paths_to_with_must_end(
                                 &targets_a,
                                 limits.max_offset,
                                 limits.max_depth,
                                 comparison_limit,
+                                &must_end,
                             )
                         });
                         let handle_b = s.spawn(|| {
-                            map_b.paths_to_any(
+                            map_b.paths_to_with_must_end(
                                 &targets_b,
                                 limits.max_offset,
                                 limits.max_depth,
                                 comparison_limit,
+                                &must_end,
                             )
                         });
                         (handle_a.join().unwrap(), handle_b.join().unwrap())
@@ -6789,7 +6853,7 @@ impl CrosshairApp {
                     worker_stage.store(3, Ordering::Relaxed);
                     let paths_a_count = paths_a.len();
                     let paths_b_count = paths_b.len();
-                    DeepPointerComparisonResult {
+                    let comp_res = DeepPointerComparisonResult {
                         comparison: compare_pointer_paths(
                             paths_a,
                             paths_b,
@@ -6799,7 +6863,8 @@ impl CrosshairApp {
                         paths_a: paths_a_count,
                         paths_b: paths_b_count,
                         path_limit: comparison_limit,
-                    }
+                    };
+                    (comp_res, Some(map_b))
                 })
                 .map_err(|error| error.to_string());
                 let _ = tx.send(DeepPointerJobResult::Compared(result));
@@ -6833,6 +6898,10 @@ impl CrosshairApp {
             });
             self.memory_panel.deep_pointer_dialog = Some(DeepPointerDialog {
                 map_a: None,
+                map_b: None,
+                must_end_with_enabled: self.state.memory_pointer_must_end_with_enabled,
+                must_end_with_offsets: self.state.memory_pointer_must_end_with_offsets.clone(),
+                must_end_order_ce: true,
                 source_addresses,
                 value_type: saved.value_type,
                 text_encoding: saved.text_encoding,
@@ -8949,7 +9018,10 @@ impl CrosshairApp {
                 dialog.status = "The source process changed during pointer scan".to_owned();
             } else {
                 match outcome.result {
-                    Ok(paths_by_target) => {
+                    Ok((opt_map, paths_by_target)) => {
+                        if let Some(map) = opt_map {
+                            dialog.cached_map = Some(Arc::new(map));
+                        }
                         dialog.candidates = paths_by_target
                             .into_iter()
                             .flat_map(|(source_address, paths)| {
@@ -9066,6 +9138,7 @@ impl CrosshairApp {
 
         let mut validate = false;
         let mut add: Option<Vec<usize>> = None;
+        let mut rescan_requested = false;
         ui.label(&dialog.status);
         if dialog.rx.is_some() {
             let scanned = dialog.progress.load(Ordering::Relaxed);
@@ -9074,6 +9147,53 @@ impl CrosshairApp {
                 ui.label(RichText::new(format!("⏳ Scanning memory... read {:.1} MB", scanned as f64 / 1_048_576.0)).strong());
             });
         } else {
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Levels:");
+                    ui.add(egui::DragValue::new(&mut dialog.limits.max_depth).range(1..=8));
+                    ui.label("Max offset:");
+                    let mut hex_offset = format!("{:X}", dialog.limits.max_offset);
+                    if ui.add(egui::TextEdit::singleline(&mut hex_offset).desired_width(65.0)).changed() {
+                        if let Ok(v) = usize::from_str_radix(hex_offset.trim().trim_start_matches("0x").trim_start_matches("0X"), 16) {
+                            dialog.limits.max_offset = v.clamp(0x10, 0x100000);
+                        }
+                    }
+
+                    let rescan_label = if self.state.ui_language == UiLanguage::Vietnamese {
+                        "🔍 Quét lại (Re-scan)"
+                    } else {
+                        "🔍 Re-scan"
+                    };
+                    if ui.button(RichText::new(rescan_label).strong().color(Color32::from_rgb(105, 255, 150)))
+                        .on_hover_text(if dialog.cached_map.is_some() {
+                            if self.state.ui_language == UiLanguage::Vietnamese {
+                                "Chạy lại tìm kiếm con trỏ trong bộ nhớ đã lưu (tức thì ~5ms, không cần đọc lại game)"
+                            } else {
+                                "Re-run pointer search from cached memory map (instant ~5ms without re-reading process)"
+                            }
+                        } else {
+                            if self.state.ui_language == UiLanguage::Vietnamese {
+                                "Quét lại bộ nhớ tiến trình"
+                            } else {
+                                "Re-scan process memory"
+                            }
+                        })
+                        .clicked()
+                    {
+                        rescan_requested = true;
+                    }
+                });
+
+                render_must_end_with_controls(
+                    ui,
+                    &mut dialog.must_end_with_enabled,
+                    &mut dialog.must_end_with_offsets,
+                    &mut dialog.must_end_order_ce,
+                    dialog.source_addresses.first().copied(),
+                    self.state.ui_language,
+                );
+            });
+
             // Keep window list fresh to detect when game/app restarts
             self.ensure_open_windows_ready(false);
 
@@ -9688,6 +9808,75 @@ impl CrosshairApp {
                 });
         }
 
+        if rescan_requested {
+            dialog.candidates.clear();
+            dialog.selected.clear();
+            dialog.selection_anchor = None;
+            let (tx, rx) = mpsc::channel();
+            dialog.rx = Some(rx);
+            let worker_targets = dialog.source_addresses.clone();
+            let limits = dialog.limits;
+            let pid = dialog.source_pid;
+            let worker_progress = Arc::clone(&dialog.progress);
+            worker_progress.store(0, Ordering::Relaxed);
+            let must_end = if dialog.must_end_with_enabled {
+                let raw = parse_must_end_offsets(&dialog.must_end_with_offsets);
+                if dialog.must_end_order_ce {
+                    raw
+                } else {
+                    raw.into_iter().rev().collect()
+                }
+            } else {
+                Vec::new()
+            };
+
+            if let Some(cached_map) = dialog.cached_map.clone() {
+                dialog.status = "Searching pointer paths in cached map...".to_owned();
+                thread::spawn(move || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut paths_by_target = Vec::with_capacity(worker_targets.len());
+                        for &target in &worker_targets {
+                            let paths = cached_map.paths_to_with_must_end(
+                                &[target],
+                                limits.max_offset,
+                                limits.max_depth,
+                                limits.result_limit,
+                                &must_end,
+                            );
+                            paths_by_target.push((target, paths));
+                        }
+                        paths_by_target
+                    }))
+                    .map(|paths| (None, paths))
+                    .map_err(|_| "Pointer search encountered an error".to_string());
+                    let _ = tx.send(StablePointerJobResult { pid, result });
+                });
+            } else if let Ok(modules) = process_modules(pid) {
+                let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
+                dialog.status = "Scanning memory...".to_owned();
+                thread::spawn(move || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        scan_pointer_map_and_paths_to_targets_must_end(
+                            pid,
+                            &worker_targets,
+                            &modules,
+                            pointer_width,
+                            limits.max_offset,
+                            limits.max_depth,
+                            limits.result_limit,
+                            limits.max_bytes,
+                            &must_end,
+                            worker_progress,
+                        )
+                    }))
+                    .unwrap_or_else(|_| Err(std::io::Error::other("Pointer scan thread encountered an error")))
+                    .map(|(map, paths)| (Some(map), paths))
+                    .map_err(|error| error.to_string());
+                    let _ = tx.send(StablePointerJobResult { pid, result });
+                });
+            }
+        }
+
         if validate {
             self.validate_stable_pointer_candidates(&mut dialog);
         }
@@ -9720,7 +9909,10 @@ impl CrosshairApp {
                         dialog.source_addresses.len()
                     );
                 }
-                DeepPointerJobResult::Compared(Ok(result)) => {
+                DeepPointerJobResult::Compared(Ok((result, opt_map_b))) => {
+                    if let Some(map_b) = opt_map_b {
+                        dialog.map_b = Some(Arc::new(map_b));
+                    }
                     let comparison = result.comparison;
                     let exact_count = comparison.exact.len();
                     let entity_root_count = comparison.entity_roots.len();
@@ -9768,6 +9960,7 @@ impl CrosshairApp {
         let mut clear = false;
         let mut add = false;
         let mut add_one = None;
+        let mut recompare = false;
         let title = "Deep pointer scan - map comparison";
         let popup_id = "memory-deep-pointer-scan";
         let pinned = !self.memory_panel.unpinned_memory_popups.contains(popup_id);
@@ -9806,10 +9999,12 @@ impl CrosshairApp {
                                 self.state.vietnamese_input_enabled,
                                 self.state.vietnamese_input_mode,
                                 self.memory_panel.process_pid,
+                                self.state.ui_language,
                                 &mut dialog,
                                 &mut clear,
                                 &mut add,
                                 &mut add_one,
+                                &mut recompare,
                             );
                         });
                     Self::render_memory_popup_resize_handles(ctx);
@@ -9845,10 +10040,12 @@ impl CrosshairApp {
                         self.state.vietnamese_input_enabled,
                         self.state.vietnamese_input_mode,
                         self.memory_panel.process_pid,
+                        self.state.ui_language,
                         &mut dialog,
                         &mut clear,
                         &mut add,
                         &mut add_one,
+                        &mut recompare,
                     );
                 });
         }
@@ -9928,6 +10125,80 @@ impl CrosshairApp {
                 self.memory_panel.status = format!("Added {added} deep pointer(s) to Address list");
             }
         }
+        if recompare {
+            if let (Some(map_a), Some(map_b)) = (dialog.map_a.clone(), dialog.map_b.clone()) {
+                let (tx, rx) = mpsc::channel();
+                dialog.rx = Some(rx);
+                dialog.stage.store(1, Ordering::Relaxed);
+                let worker_stage = Arc::clone(&dialog.stage);
+                let targets_a = dialog.source_addresses.clone();
+                let targets_b = dialog.source_addresses.clone();
+                let limits = self.pointer_scan_limits();
+                let entity_stride = dialog.entity_stride as usize;
+                let entity_slots = dialog.entity_count as usize;
+                let entity_root_matching = dialog.entity_root_matching;
+                let must_end = if dialog.must_end_with_enabled {
+                    let raw = parse_must_end_offsets(&dialog.must_end_with_offsets);
+                    if dialog.must_end_order_ce {
+                        raw
+                    } else {
+                        raw.into_iter().rev().collect()
+                    }
+                } else {
+                    Vec::new()
+                };
+                thread::spawn(move || {
+                    worker_stage.store(1, Ordering::Relaxed);
+                    let comparison_limit = limits.result_limit.saturating_mul(16).clamp(10_000, 100_000);
+                    let targets_a = if entity_root_matching {
+                        expand_entity_slot_targets(&targets_a, entity_stride, entity_slots)
+                    } else {
+                        targets_a
+                    };
+                    let targets_b = if entity_root_matching {
+                        expand_entity_slot_targets(&targets_b, entity_stride, entity_slots)
+                    } else {
+                        targets_b
+                    };
+                    let (paths_a, paths_b) = std::thread::scope(|s| {
+                        let handle_a = s.spawn(|| {
+                            map_a.paths_to_with_must_end(
+                                &targets_a,
+                                limits.max_offset,
+                                limits.max_depth,
+                                comparison_limit,
+                                &must_end,
+                            )
+                        });
+                        let handle_b = s.spawn(|| {
+                            map_b.paths_to_with_must_end(
+                                &targets_b,
+                                limits.max_offset,
+                                limits.max_depth,
+                                comparison_limit,
+                                &must_end,
+                            )
+                        });
+                        (handle_a.join().unwrap(), handle_b.join().unwrap())
+                    });
+                    worker_stage.store(3, Ordering::Relaxed);
+                    let paths_a_count = paths_a.len();
+                    let paths_b_count = paths_b.len();
+                    let comp_res = DeepPointerComparisonResult {
+                        comparison: compare_pointer_paths(
+                            paths_a,
+                            paths_b,
+                            entity_root_matching.then_some(entity_stride).unwrap_or(0),
+                            limits.result_limit,
+                        ),
+                        paths_a: paths_a_count,
+                        paths_b: paths_b_count,
+                        path_limit: comparison_limit,
+                    };
+                    let _ = tx.send(DeepPointerJobResult::Compared(Ok((comp_res, None))));
+                });
+            }
+        }
         if clear {
             self.memory_panel.status = "Pointer map A cleared".to_owned();
         } else if open {
@@ -9942,10 +10213,12 @@ impl CrosshairApp {
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: crate::model::VietnameseInputMode,
         process_pid: Option<u32>,
+        language: UiLanguage,
         dialog: &mut DeepPointerDialog,
         clear: &mut bool,
         add: &mut bool,
         add_one: &mut Option<usize>,
+        recompare: &mut bool,
     ) {
         ui.label(&dialog.status);
         if let Some(stats) = dialog.comparison_stats {
@@ -10006,6 +10279,23 @@ impl CrosshairApp {
             if ui.button("Clear map A").clicked() {
                 *clear = true;
             }
+            if dialog.map_a.is_some() && dialog.map_b.is_some() {
+                let recompare_label = if language == UiLanguage::Vietnamese {
+                    "⟲ So sánh lại (Re-compare)"
+                } else {
+                    "⟲ Re-compare"
+                };
+                if ui.button(RichText::new(recompare_label).strong().color(Color32::from_rgb(105, 255, 150)))
+                    .on_hover_text(if language == UiLanguage::Vietnamese {
+                        "Chạy lại so sánh giữa Map A và Map B với cấu hình offsets/levels mới (tức thì từ bộ nhớ, không cần quét lại game)"
+                    } else {
+                        "Re-run comparison between Map A and Map B with new offsets/depth settings in-memory"
+                    })
+                    .clicked()
+                {
+                    *recompare = true;
+                }
+            }
             if ui
                 .button(RichText::new("Refresh live values").color(Color32::from_rgb(105, 211, 255)))
                 .on_hover_text("Refresh all candidate pointers and re-read their current values from live memory")
@@ -10025,6 +10315,16 @@ impl CrosshairApp {
                 &mut dialog.filter,
             );
             ui.checkbox(&mut dialog.exe_only, "EXE only");
+        });
+        ui.group(|ui| {
+            render_must_end_with_controls(
+                ui,
+                &mut dialog.must_end_with_enabled,
+                &mut dialog.must_end_with_offsets,
+                &mut dialog.must_end_order_ce,
+                dialog.source_addresses.first().copied(),
+                language,
+            );
         });
         ui.group(|ui| {
             ui.horizontal(|ui| {
@@ -17513,6 +17813,90 @@ fn format_pointer_path(path: &PointerPath) -> String {
     let mut root = format!("{}+{:X}", path.module, path.module_offset);
     format_hex_offsets(&mut root, &path.offsets);
     root
+}
+
+fn render_must_end_with_controls(
+    ui: &mut egui::Ui,
+    must_end_enabled: &mut bool,
+    must_end_offsets_text: &mut String,
+    must_end_order_ce: &mut bool,
+    target_address: Option<usize>,
+    language: UiLanguage,
+) -> Vec<usize> {
+    let cb_label = if language == UiLanguage::Vietnamese {
+        "Must end with specific offsets (Khóa offset cuối)"
+    } else {
+        "Must end with specific offsets"
+    };
+    ui.checkbox(must_end_enabled, RichText::new(cb_label).strong())
+        .on_hover_text(if language == UiLanguage::Vietnamese {
+            "Chỉ quét các pointer kết thúc bằng các offset này (ví dụ: 0, 58) giống Cheat Engine để tìm Base mới cực nhanh sau khi game update."
+        } else {
+            "Only match pointers that end with these specific offsets (e.g. 0, 58) like Cheat Engine to quickly recover Base after game update."
+        });
+
+    if *must_end_enabled {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Offsets (hex):").strong());
+            ui.add(
+                egui::TextEdit::singleline(must_end_offsets_text)
+                    .desired_width(120.0)
+                    .hint_text("0, 58"),
+            );
+
+            let order_label = if *must_end_order_ce {
+                if language == UiLanguage::Vietnamese { "Thứ tự CE (Offset 0 trước)" } else { "CE order (Offset 0 first)" }
+            } else {
+                if language == UiLanguage::Vietnamese { "Thứ tự deref (Offset đầu trước)" } else { "Deref order (1st offset first)" }
+            };
+            if ui.button(RichText::new(order_label).small()).on_hover_text(if language == UiLanguage::Vietnamese {
+                "Chuyển đổi giữa thứ tự Cheat Engine (Offset 0 là offset cuối trỏ vào target) và thứ tự deref thông thường."
+            } else {
+                "Toggle between Cheat Engine order (Offset 0 = final offset to target) and dereference order."
+            }).clicked() {
+                *must_end_order_ce = !*must_end_order_ce;
+            }
+
+            if ui.button(RichText::new("⇄").strong()).on_hover_text(if language == UiLanguage::Vietnamese {
+                "Đảo ngược thứ tự offset trong ô nhập"
+            } else {
+                "Reverse offset order in text input"
+            }).clicked() {
+                let mut parts: Vec<String> = must_end_offsets_text
+                    .split([',', ';', ' '])
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                parts.reverse();
+                *must_end_offsets_text = parts.join(", ");
+            }
+        });
+
+        let raw = parse_must_end_offsets(must_end_offsets_text);
+        let must_end_offsets = if *must_end_order_ce {
+            raw
+        } else {
+            raw.into_iter().rev().collect()
+        };
+
+        if !must_end_offsets.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Chain preview:").small().weak());
+                ui.monospace("... ➔ ");
+                for off in must_end_offsets.iter().rev() {
+                    ui.monospace(format!("[+ {:X}] ➔ ", off));
+                }
+                if let Some(target) = target_address {
+                    ui.monospace(format!("Target (0x{:X})", target));
+                } else {
+                    ui.monospace("Target");
+                }
+            });
+        }
+        must_end_offsets
+    } else {
+        Vec::new()
+    }
 }
 
 fn format_pointer_expression(pointer: &PointerSpec) -> String {
