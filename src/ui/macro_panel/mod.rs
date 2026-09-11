@@ -270,7 +270,7 @@ impl CrosshairApp {
                             .on_hover_text(&window.selector)
                             .clicked()
                         {
-                            step.background_target_window = Some(window.title.clone());
+                            step.background_target_window = Some(window.selector.clone());
                             changed = true;
                         }
                     }
@@ -434,12 +434,106 @@ impl CrosshairApp {
         });
         changed
     }
+    fn render_key_picker_menu(
+        ui: &mut egui::Ui,
+        key: &mut String,
+        language: UiLanguage,
+        icon_size: f32,
+    ) -> bool {
+        let mut selected = false;
+        let menu_response = ui.scope(|ui| {
+            ui.spacing_mut().button_padding = egui::vec2(2.0, 0.0);
+            ui.spacing_mut().interact_size = egui::vec2(20.0, 20.0);
+            ui.menu_button(Self::material_icon_text(0xe5d2, icon_size), |ui| {
+                ui.set_max_width(200.0);
+                ui.menu_button(Self::tr_lang(language, "Letters (A-Z)", "Letters (A-Z)"), |ui| {
+                    ui.set_max_width(120.0);
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                        for ch in b'A'..=b'Z' {
+                            let key_str = (ch as char).to_string();
+                            if ui.button(&key_str).clicked() {
+                                *key = key_str;
+                                selected = true;
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                });
+                ui.menu_button(Self::tr_lang(language, "Numbers & Symbols", "Numbers & Symbols"), |ui| {
+                    ui.set_max_width(140.0);
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                        for num in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"] {
+                            if ui.button(num).clicked() {
+                                *key = num.to_string();
+                                selected = true;
+                                ui.close_menu();
+                            }
+                        }
+                        ui.separator();
+                        for sym in [";", "=", ",", "-", ".", "/", "", "[", "\\", "]", "'"] {
+                            if ui.button(sym).clicked() {
+                                *key = sym.to_string();
+                                selected = true;
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                });
+                ui.menu_button(Self::tr_lang(language, "Navigation", "Navigation"), |ui| {
+                    ui.set_max_width(160.0);
+                    for k in ["Escape", "Enter", "Space", "Backspace", "Tab", "Insert", "Delete", "Home", "End", "PageUp", "PageDown", "Left", "Up", "Right", "Down", "PrintScreen", "Pause"] {
+                        if ui.button(k).clicked() {
+                            *key = k.to_string();
+                            selected = true;
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.menu_button(Self::tr_lang(language, "Function (F1-F24)", "Function (F1-F24)"), |ui| {
+                    ui.set_max_width(100.0);
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                        for num in 1..=24 {
+                            let key_str = format!("F{}", num);
+                            if ui.button(&key_str).clicked() {
+                                *key = key_str;
+                                selected = true;
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                });
+                ui.menu_button(Self::tr_lang(language, "Numpad", "Numpad"), |ui| {
+                    ui.set_max_width(160.0);
+                    for k in ["Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4", "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9", "NumpadMultiply", "NumpadAdd", "NumpadSubtract", "NumpadDecimal", "NumpadDivide"] {
+                        if ui.button(k).clicked() {
+                            *key = k.to_string();
+                            selected = true;
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.menu_button(Self::tr_lang(language, "Modifiers & Locks", "Modifiers & Locks"), |ui| {
+                    ui.set_max_width(150.0);
+                    for k in ["Ctrl", "Alt", "Shift", "Win", "CapsLock", "NumLock", "ScrollLock", "Apps"] {
+                        if ui.button(k).clicked() {
+                            *key = k.to_string();
+                            selected = true;
+                            ui.close_menu();
+                        }
+                    }
+                });
+            })
+        }).inner;
+        menu_response.response.on_hover_text(Self::tr_lang(language, "Manually select key", "Chá»n phÃ­m thá»§ cÃ´ng"));
+        selected
+    }
+
     fn render_background_key_step_fields(
         ui: &mut egui::Ui,
         step: &mut MacroStep,
         open_windows: &[crate::window_list::WindowInfo],
         language: UiLanguage,
-        _timer_names: &[String],
+        timer_names: &[String],
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
         id_source: impl std::hash::Hash,
@@ -491,7 +585,7 @@ impl CrosshairApp {
                             .on_hover_text(&window.selector)
                             .clicked()
                         {
-                            step.background_target_window = Some(window.title.clone());
+                            step.background_target_window = Some(window.selector.clone());
                             changed = true;
                         }
                     }
@@ -548,48 +642,68 @@ impl CrosshairApp {
                 );
             } else {
                 let is_capturing = capture_target_snapshot == Some(&capture_target);
-                let btn = if is_capturing {
-                    Button::new(
-                        RichText::new(Self::tr_lang(language, "Press key...", "Nháº¥n phÃ­m..."))
-                            .color(Color32::YELLOW)
-                            .size(MACRO_STEP_TEXT_SIZE),
-                    )
-                    .fill(Color32::from_rgb(88, 84, 44))
+                let mut display_key = if is_capturing {
+                    Self::tr_lang(language, "Capturing...", "Äang báº¯t...").to_owned()
                 } else {
-                    let key_text = if step.key.is_empty() {
-                        "-".to_string()
-                    } else {
-                        step.key.clone()
-                    };
-                    Button::new(RichText::new(key_text).size(MACRO_STEP_TEXT_SIZE))
+                    step.key.clone()
                 };
-                let btn_resp = ui.add_sized([70.0, 18.0], btn).on_hover_text(Self::tr_lang(
-                    language,
-                    "Click to record a key, or right-click to clear",
-                    "Nháº¥p Ä‘á»ƒ ghi phÃ­m, hoáº·c chuá»™t pháº£i Ä‘á»ƒ xÃ³a",
-                ));
-                if btn_resp.clicked() {
+
+                let key_id = ui.id().with((&id_source, "bg-key-input"));
+                let response = if is_capturing {
+                    let text_edit = egui::TextEdit::singleline(&mut display_key)
+                        .hint_text(Self::tr_lang(language, "Capturing...", "Äang báº¯t..."));
+                    ui.add_sized([60.0, 20.0], text_edit)
+                } else {
+                    Self::render_interpolated_text_edit(
+                        ui,
+                        &mut display_key,
+                        key_id,
+                        60.0,
+                        120.0,
+                        20.0,
+                        20.0,
+                        "Key / {var}",
+                        false,
+                    )
+                };
+                if !is_capturing {
+                    Self::apply_vietnamese_input_if_changed(
+                        &response,
+                        vietnamese_input_enabled,
+                        vietnamese_input_mode,
+                        &mut display_key,
+                    );
+                    if response.changed() || step.key != display_key {
+                        step.key = display_key;
+                        changed = true;
+                    }
+                    Self::render_variable_suggestions_braced(ui, &response, &mut step.key, timer_names, language);
+                }
+
+                let capture_width = if is_capturing { 76.0 } else { 22.0 };
+                let capture_btn = if is_capturing {
+                    Button::new(Self::capture_button_text(language, true))
+                        .fill(Color32::from_rgb(88, 84, 44))
+                } else {
+                    Button::new(Self::material_icon_text(0xe312, 12.0))
+                };
+                if ui
+                    .add_sized([capture_width, 20.0], capture_btn)
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Click to capture one key",
+                        "Nháº¥n Ä‘á»ƒ báº¯t phÃ­m",
+                    ))
+                    .clicked()
+                {
                     if is_capturing {
                         *cancel_active_capture = true;
                     } else {
                         *next_capture_target = Some(capture_target);
                     }
                 }
-                if btn_resp.secondary_clicked() {
-                    step.key.clear();
-                    changed = true;
-                }
 
-                if current_mode == "Press" {
-                    ui.label(RichText::new(Self::tr_lang(language, "Hold:", "Giá»¯:")).size(MACRO_STEP_TEXT_SIZE));
-                    changed |= ui
-                        .add(
-                            egui::DragValue::new(&mut step.mouse_click_delay_ms)
-                                .range(0..=10_000)
-                                .suffix(" ms"),
-                        )
-                        .changed();
-                }
+                changed |= Self::render_key_picker_menu(ui, &mut step.key, language, 12.0);
             }
 
             let popup_id = ui.id().with((&id_source, "bg-key-options-popup"));

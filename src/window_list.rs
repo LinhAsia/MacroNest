@@ -551,6 +551,16 @@ mod windows_impl {
         if !matches {
             matches = matches_browser_suffix(clean_target, title);
         }
+        if !matches {
+            let simplified_cand = simplify_window_title(title);
+            let simplified_target = simplify_window_title(clean_target);
+            if simplified_cand.eq_ignore_ascii_case(&simplified_target)
+                || title.to_lowercase().contains(&clean_target.to_lowercase())
+                || clean_target.to_lowercase().contains(&title.to_lowercase())
+            {
+                matches = true;
+            }
+        }
         matches
     }
 

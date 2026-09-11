@@ -93,12 +93,12 @@ mod windows_overlay {
                     CoUninitialize,
                 },
                 LibraryLoader::GetModuleHandleW,
-                Threading::{CREATE_NO_WINDOW, GetCurrentProcessId},
+                Threading::{AttachThreadInput, CREATE_NO_WINDOW, GetCurrentProcessId, GetCurrentThreadId},
             },
             UI::{
                 Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent},
                 Input::KeyboardAndMouse::{
-                    GetAsyncKeyState, GetKeyboardState, INPUT, INPUT_0, INPUT_KEYBOARD,
+                    GetAsyncKeyState, GetFocus, GetKeyboardState, INPUT, INPUT_0, INPUT_KEYBOARD,
                     INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
                     KEYEVENTF_SCANCODE, KEYEVENTF_UNICODE, MAPVK_VK_TO_CHAR, MAPVK_VK_TO_VSC, MOD_ALT, MOD_CONTROL,
                     MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
@@ -113,13 +113,13 @@ mod windows_overlay {
                     AppendMenuW, CREATESTRUCTW, CallNextHookEx, ChildWindowFromPointEx, ClipCursor,
                     CreateIconIndirect, CreatePopupMenu, CreateWindowExW,
                     CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, DefWindowProcW, DestroyCursor,
-                    DestroyMenu, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
+                    DestroyMenu, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, EnumChildWindows, GA_ROOT,
                     GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GUITHREADINFO, GetAncestor, GetClassNameW,
                     GetClientRect, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetMessageW,
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
                     GetWindowThreadProcessId, HC_ACTION, HCURSOR, HMENU, HTCLIENT,
                     HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS,
-                    IsIconic, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LWA_ALPHA, LoadCursorW,
+                    IsChild, IsIconic, IsWindowVisible, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LWA_ALPHA, LoadCursorW,
                     MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
                     PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN,
                     SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -34655,6 +34655,86 @@ mod windows_overlay {
         Ok(())
     }
 
+    unsafe fn find_background_input_child(hwnd: HWND) -> HWND {
+        // 1. If it's a Chromium / Electron app (Discord, Slack, Spotify, VS Code, Chrome, Edge):
+        let mut render_child = None;
+        unsafe extern "system" fn enum_chromium_proc(child: HWND, lparam: LPARAM) -> windows::core::BOOL {
+            let mut class_buf = [0u16; 64];
+            let len = GetClassNameW(child, &mut class_buf);
+            if len > 0 {
+                let name = String::from_utf16_lossy(&class_buf[..len as usize]);
+                if name == "Chrome_RenderWidgetHostHWND" {
+                    let out = &mut *(lparam.0 as *mut Option<HWND>);
+                    *out = Some(child);
+                    return false.into();
+                }
+            }
+            true.into()
+        }
+        let _ = EnumChildWindows(
+            Some(hwnd),
+            Some(enum_chromium_proc),
+            LPARAM((&mut render_child) as *mut _ as isize),
+        );
+        if let Some(child) = render_child {
+            return child;
+        }
+
+        // 2. Try AttachThreadInput to query GetFocus() without activating the window:
+        let current_thread = GetCurrentThreadId();
+        let target_thread = GetWindowThreadProcessId(hwnd, None);
+        if current_thread != target_thread && target_thread != 0 {
+            if AttachThreadInput(current_thread, target_thread, true).as_bool() {
+                let focus = GetFocus();
+                let _ = AttachThreadInput(current_thread, target_thread, false);
+                if !focus.0.is_null() && (focus == hwnd || IsChild(hwnd, focus).as_bool()) {
+                    return focus;
+                }
+            }
+        }
+
+        // 3. Try GetGUIThreadInfo:
+        let mut gui_info = GUITHREADINFO {
+            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        if GetGUIThreadInfo(target_thread, &mut gui_info).is_ok()
+            && !gui_info.hwndFocus.0.is_null()
+            && (gui_info.hwndFocus == hwnd || IsChild(hwnd, gui_info.hwndFocus).as_bool())
+        {
+            return gui_info.hwndFocus;
+        }
+
+        // 4. Try finding an Edit/RichEdit child control:
+        let mut edit_child = None;
+        unsafe extern "system" fn enum_edit_proc(child: HWND, lparam: LPARAM) -> windows::core::BOOL {
+            if !IsWindowVisible(child).as_bool() {
+                return true.into();
+            }
+            let mut class_buf = [0u16; 64];
+            let len = GetClassNameW(child, &mut class_buf);
+            if len > 0 {
+                let name = String::from_utf16_lossy(&class_buf[..len as usize]);
+                if name.contains("Edit") || name.contains("RichEdit") || name.contains("TextBox") {
+                    let out = &mut *(lparam.0 as *mut Option<HWND>);
+                    *out = Some(child);
+                    return false.into();
+                }
+            }
+            true.into()
+        }
+        let _ = EnumChildWindows(
+            Some(hwnd),
+            Some(enum_edit_proc),
+            LPARAM((&mut edit_child) as *mut _ as isize),
+        );
+        if let Some(child) = edit_child {
+            return child;
+        }
+
+        hwnd
+    }
+
     fn send_background_key(step: &MacroStep) -> Result<()> {
         let hwnd = if let Some(target_title) = step.background_target_window.as_deref() {
             crate::window_list::find_window_handle(Some(target_title))
@@ -34682,19 +34762,8 @@ mod windows_overlay {
 
             let mut target = hwnd;
             if step.background_find_child {
-                let target_thread = GetWindowThreadProcessId(hwnd, None);
-                let mut gui_info = GUITHREADINFO {
-                    cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
-                    ..Default::default()
-                };
-                if GetGUIThreadInfo(target_thread, &mut gui_info).is_ok()
-                    && !gui_info.hwndFocus.0.is_null()
-                {
-                    target = gui_info.hwndFocus;
-                }
+                target = find_background_input_child(hwnd);
             }
-
-            let delay_ms = step.mouse_click_delay_ms as u64;
 
             if step.background_key_mode == "TypeText" {
                 let text = interpolate_variables(&step.key);
@@ -34705,9 +34774,15 @@ mod windows_overlay {
                         WPARAM(unit as usize),
                         LPARAM(1),
                     );
-                    if delay_ms > 0 {
-                        thread::sleep(Duration::from_millis(delay_ms));
+                    if target != hwnd {
+                        let _ = PostMessageW(
+                            Some(hwnd),
+                            WM_CHAR,
+                            WPARAM(unit as usize),
+                            LPARAM(1),
+                        );
                     }
+                    thread::sleep(Duration::from_millis(10));
                 }
                 return Ok(());
             }
@@ -34731,32 +34806,51 @@ mod windows_overlay {
                 (1u32 | ((scan & 0xFF) << 16) | extended_bit | (1 << 30) | (1 << 31)) as isize,
             );
 
+            // Compute character to send for text controls / chats
+            let char_to_send = match vk {
+                0x0D => Some(0x0Du32), // Enter
+                0x08 => Some(0x08u32), // Backspace
+                0x09 => Some(0x09u32), // Tab
+                _ => {
+                    let ch = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_CHAR);
+                    if ch > 0 && ch < 0x8000 {
+                        Some(ch)
+                    } else {
+                        None
+                    }
+                }
+            };
+
             match step.background_key_mode.as_str() {
                 "Down" => {
                     let _ = PostMessageW(Some(target), msg_down, WPARAM(vk as usize), lparam_down);
-                    if step.background_send_wm_char {
-                        let ch = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_CHAR);
-                        if ch > 0 && ch < 0x8000 {
-                            let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(ch as usize), lparam_down);
-                        }
+                    if target != hwnd {
+                        let _ = PostMessageW(Some(hwnd), msg_down, WPARAM(vk as usize), lparam_down);
+                    }
+                    if let Some(c) = char_to_send {
+                        let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(c as usize), lparam_down);
                     }
                 }
                 "Up" => {
                     let _ = PostMessageW(Some(target), msg_up, WPARAM(vk as usize), lparam_up);
+                    if target != hwnd {
+                        let _ = PostMessageW(Some(hwnd), msg_up, WPARAM(vk as usize), lparam_up);
+                    }
                 }
                 _ => {
-                    // Default: "Press" (Down, optional hold delay, Up)
+                    // Default: "Press" (Down, small delay, Up)
                     let _ = PostMessageW(Some(target), msg_down, WPARAM(vk as usize), lparam_down);
-                    if step.background_send_wm_char {
-                        let ch = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_CHAR);
-                        if ch > 0 && ch < 0x8000 {
-                            let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(ch as usize), lparam_down);
-                        }
+                    if target != hwnd {
+                        let _ = PostMessageW(Some(hwnd), msg_down, WPARAM(vk as usize), lparam_down);
                     }
-                    if delay_ms > 0 {
-                        thread::sleep(Duration::from_millis(delay_ms));
+                    if let Some(c) = char_to_send {
+                        let _ = PostMessageW(Some(target), WM_CHAR, WPARAM(c as usize), lparam_down);
                     }
+                    thread::sleep(Duration::from_millis(20));
                     let _ = PostMessageW(Some(target), msg_up, WPARAM(vk as usize), lparam_up);
+                    if target != hwnd {
+                        let _ = PostMessageW(Some(hwnd), msg_up, WPARAM(vk as usize), lparam_up);
+                    }
                 }
             }
         }
