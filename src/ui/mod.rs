@@ -10255,6 +10255,7 @@ impl CrosshairApp {
                 | MacroAction::SetVariable
                 | MacroAction::ReadMemory
                 | MacroAction::WriteMemory
+                | MacroAction::BackgroundClick
                 | MacroAction::FunnyMemeReply
                 | MacroAction::AiResponse
                 | MacroAction::DisableCrosshair
