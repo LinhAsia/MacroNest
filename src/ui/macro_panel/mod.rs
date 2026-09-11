@@ -219,6 +219,12 @@ impl CrosshairApp {
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
         id_source: impl std::hash::Hash,
+        group_id: u32,
+        preset_id: u32,
+        step_index: usize,
+        is_hold_stop: bool,
+        begin_capture: &mut Option<MouseMoveAbsoluteCaptureTarget>,
+        active_capture: Option<MouseMoveAbsoluteCaptureTarget>,
     ) -> bool {
         let mut changed = false;
         ui.horizontal(|ui| {
@@ -340,6 +346,36 @@ impl CrosshairApp {
             }
             Self::render_variable_suggestions(ui, &y_resp, &mut step.y_expr, timer_names, language);
 
+            let this_capture_target = MouseMoveAbsoluteCaptureTarget {
+                group_id: Some(group_id),
+                preset_id,
+                step_index,
+                capture_kind: MouseCaptureKind::BackgroundClickPos,
+                extra_cond_index: None,
+                is_hold_stop,
+            };
+            let is_capturing = active_capture == Some(this_capture_target);
+            let pick_btn = if is_capturing {
+                Button::new(Self::material_icon_text(0xe55c, 14.0))
+                    .fill(Color32::from_rgb(88, 84, 44))
+            } else {
+                Button::new(Self::material_icon_text(0xe55c, 14.0))
+            };
+            let pick_resp = ui
+                .add_sized([18.0, 18.0], pick_btn)
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Click to pick coordinates from screen (minimizes window). If no target window is set, also picks the window.",
+                    "Nhấp để lấy tọa độ từ màn hình (thu nhỏ cửa sổ). Nếu chưa chọn cửa sổ, tự động chọn luôn cửa sổ.",
+                ));
+            if pick_resp.clicked() {
+                if is_capturing {
+                    *begin_capture = None;
+                } else {
+                    *begin_capture = Some(this_capture_target);
+                }
+            }
+
             ui.label(RichText::new(Self::tr_lang(language, "Hold:", "Giữ:")).size(MACRO_STEP_TEXT_SIZE));
             changed |= ui
                 .add(
@@ -351,7 +387,7 @@ impl CrosshairApp {
 
             let popup_id = ui.id().with((&id_source, "bg-click-options-popup"));
             let mut options_open = ui.ctx().data(|d| d.get_temp::<bool>(popup_id)).unwrap_or(false);
-            let btn_resp = ui.button(RichText::new("⚙").size(12.0))
+            let btn_resp = ui.add(Button::new(Self::material_icon_text(0xe8b8, 14.0)))
                 .on_hover_text(Self::tr_lang(
                     language,
                     "Background click settings (Client coords, Child controls, Minimized restore)",
@@ -9357,16 +9393,22 @@ if supports_move_mouse || show_detection_tuning {
                                                               language,
                                                           );
                                                       } else if step.action == MacroAction::BackgroundClick {
-                                                          live_sync |= Self::render_background_click_step_fields(
-                                                              ui,
-                                                              step,
-                                                              &self.open_window_infos,
-                                                              language,
-                                                              &timer_names,
-                                                              self.state.vietnamese_input_enabled,
-                                                              self.state.vietnamese_input_mode,
-                                                              (group.id, preset.id, "hold-stop-bg-click"),
-                                                          );
+                                                           live_sync |= Self::render_background_click_step_fields(
+                                                               ui,
+                                                               step,
+                                                               &self.open_window_infos,
+                                                               language,
+                                                               &timer_names,
+                                                               self.state.vietnamese_input_enabled,
+                                                               self.state.vietnamese_input_mode,
+                                                               (group.id, preset.id, "hold-stop-bg-click"),
+                                                               group.id,
+                                                               preset.id,
+                                                               0,
+                                                               true,
+                                                               &mut begin_mouse_move_absolute_capture_target,
+                                                               self.mouse_move_absolute_capture_target,
+                                                           );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -11700,6 +11742,12 @@ if supports_move_mouse || show_detection_tuning {
                                                               self.state.vietnamese_input_enabled,
                                                               self.state.vietnamese_input_mode,
                                                               (group.id, preset.id, "press-stop-bg-click"),
+                                                              group.id,
+                                                              preset.id,
+                                                              0,
+                                                              true,
+                                                              &mut begin_mouse_move_absolute_capture_target,
+                                                              self.mouse_move_absolute_capture_target,
                                                           );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
@@ -15196,14 +15244,20 @@ if supports_move_mouse || show_detection_tuning {
                                                               self.state.vietnamese_input_enabled,
                                                               self.state.vietnamese_input_mode,
                                                               (group.id, preset.id, step_index, "main-bg-click"),
+                                                              group.id,
+                                                              preset.id,
+                                                              step_index,
+                                                              false,
+                                                              &mut begin_mouse_move_absolute_capture_target,
+                                                              self.mouse_move_absolute_capture_target,
                                                           );
                                                       } else if step.action == MacroAction::SetVariable {
-                                                    ui.scope(|ui| {
-                                                        ui.spacing_mut().item_spacing.x = 2.0;
-                                                        ui.spacing_mut().interact_size.y = 18.0;
-                                                        ui.spacing_mut().button_padding.y = 0.0;
-                                                        ui.vertical(|ui| {
-                                                            ui.horizontal(|ui| {
+                                                          ui.scope(|ui| {
+                                                              ui.spacing_mut().item_spacing.x = 2.0;
+                                                              ui.spacing_mut().interact_size.y = 18.0;
+                                                              ui.spacing_mut().button_padding.y = 0.0;
+                                                              ui.vertical(|ui| {
+                                                                  ui.horizontal(|ui| {
                                                                   let var_name_id = ui.id().with((step_index, "regular-set-var-name"));
                                                                   let response = Self::render_variable_text_edit(
                                                                       ui,

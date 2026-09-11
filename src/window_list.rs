@@ -18,13 +18,13 @@ mod windows_impl {
             UI::Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGetFileInfoW},
             UI::WindowsAndMessaging::{
                 BringWindowToTop, DI_NORMAL, DestroyIcon, DrawIconEx, EnumWindows,
-                GetClassLongPtrW, GET_CLASS_LONG_INDEX, GetClientRect, GetForegroundWindow,
+                GA_ROOT, GetAncestor, GetClassLongPtrW, GET_CLASS_LONG_INDEX, GetClientRect, GetForegroundWindow,
                 GetSystemMetrics, GetWindowRect, GetWindowTextLengthW,
                 GetWindowTextW, GetWindowThreadProcessId, HICON,
                 IsIconic, IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN,
                 SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SMTO_ABORTIFHUNG,
                 SW_RESTORE, SendMessageTimeoutW,
-                SetForegroundWindow, ShowWindow, WM_GETICON,
+                SetForegroundWindow, ShowWindow, WindowFromPoint, WM_GETICON,
             },
         },
         core::{BOOL, PCWSTR},
@@ -128,6 +128,27 @@ mod windows_impl {
             rect.top,
             rect.right - rect.left,
             rect.bottom - rect.top,
+        ))
+    }
+
+    pub fn window_at_point(screen_x: i32, screen_y: i32) -> Option<(String, (i32, i32, i32, i32))> {
+        let pt = POINT { x: screen_x, y: screen_y };
+        let hwnd = unsafe { WindowFromPoint(pt) };
+        if hwnd.0.is_null() {
+            return None;
+        }
+        let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+        let target_hwnd = if !root.0.is_null() { root } else { hwnd };
+        let title = window_title(target_hwnd)?;
+        let rect = unsafe { client_rect_on_screen(target_hwnd)? };
+        Some((
+            title,
+            (
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+            ),
         ))
     }
 
@@ -1616,6 +1637,10 @@ mod fallback {
     }
 
     pub fn window_client_bounds(_selector: Option<&str>) -> Option<(i32, i32, i32, i32)> {
+        None
+    }
+
+    pub fn window_at_point(_screen_x: i32, _screen_y: i32) -> Option<(String, (i32, i32, i32, i32))> {
         None
     }
 

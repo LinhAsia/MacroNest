@@ -226,6 +226,7 @@ pub(crate) enum MouseCaptureKind {
     IfStartPixelColor,
     ExtraCondMousePos,
     ExtraCondPixelColor,
+    BackgroundClickPos,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

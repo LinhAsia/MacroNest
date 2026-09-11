@@ -2445,6 +2445,85 @@ impl CrosshairApp {
             return;
         }
 
+        if target.capture_kind == MouseCaptureKind::BackgroundClickPos {
+            self.mouse_move_absolute_capture_target = None;
+            self.restore_mouse_move_absolute_capture_window(ctx);
+
+            let step_result = if let Some(group_id) = target.group_id {
+                self.state
+                    .macro_groups
+                    .iter_mut()
+                    .find(|group| group.id == group_id)
+                    .and_then(|group| {
+                        group
+                            .presets
+                            .iter_mut()
+                            .find(|preset| preset.id == target.preset_id)
+                    })
+                    .and_then(|preset| {
+                        if target.is_hold_stop {
+                            Some(&mut *preset.hold_stop_step)
+                        } else {
+                            preset.steps.get_mut(target.step_index)
+                        }
+                    })
+            } else {
+                None
+            };
+
+            if let Some(step) = step_result {
+                let (final_x, final_y) = if step.background_client_coords {
+                    if let Some(ref title) = step.background_target_window {
+                        if let Some((left, top, _, _)) = crate::window_list::window_client_bounds(Some(title.as_str())) {
+                            (screen_x - left, screen_y - top)
+                        } else {
+                            (screen_x, screen_y)
+                        }
+                    } else if let Some((detected_title, (left, top, _, _))) = crate::window_list::window_at_point(screen_x, screen_y) {
+                        if !detected_title.trim().is_empty() {
+                            step.background_target_window = Some(detected_title);
+                        }
+                        (screen_x - left, screen_y - top)
+                    } else {
+                        (screen_x, screen_y)
+                    }
+                } else {
+                    if step.background_target_window.is_none() {
+                        if let Some((detected_title, _)) = crate::window_list::window_at_point(screen_x, screen_y) {
+                            if !detected_title.trim().is_empty() {
+                                step.background_target_window = Some(detected_title);
+                            }
+                        }
+                    }
+                    (screen_x, screen_y)
+                };
+
+                step.x = final_x;
+                step.y = final_y;
+                step.x_expr = final_x.to_string();
+                step.y_expr = final_y.to_string();
+            }
+
+            self.mouse_move_absolute_capture_raise_window = true;
+            self.status = match self.state.ui_language {
+                UiLanguage::Vietnamese => {
+                    format!("Đã lấy tọa độ Background Click {}, {}.", screen_x, screen_y)
+                }
+                _ => format!("Captured Background Click position {}, {}.", screen_x, screen_y),
+            };
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+            ctx.request_repaint_after(Duration::from_millis(33));
+            self.persist();
+            if target.group_id.is_some() {
+                self.sync_macro_presets();
+            }
+            return;
+        }
+
         // --- Handle IfStart captures ---
         if matches!(
             target.capture_kind,
