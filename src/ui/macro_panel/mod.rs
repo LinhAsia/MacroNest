@@ -210,6 +210,194 @@ impl CrosshairApp {
         changed
     }
 
+    fn render_background_click_step_fields(
+        ui: &mut egui::Ui,
+        step: &mut MacroStep,
+        open_windows: &[crate::window_list::WindowInfo],
+        language: UiLanguage,
+        timer_names: &[String],
+        vietnamese_input_enabled: bool,
+        vietnamese_input_mode: VietnameseInputMode,
+        id_source: impl std::hash::Hash,
+    ) -> bool {
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+
+            let window_label = step
+                .background_target_window
+                .as_deref()
+                .map(|selector| Self::display_title_for_selector(selector, open_windows))
+                .unwrap_or_else(|| {
+                    Self::tr_lang(language, "Focused window", "Cửa sổ đang focus").to_owned()
+                });
+            egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-click-window")))
+                .width(135.0)
+                .selected_text(Self::truncate_window_title(&window_label, 18))
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            step.background_target_window.is_none(),
+                            Self::tr_lang(language, "Focused window", "Cửa sổ đang focus"),
+                        )
+                        .clicked()
+                    {
+                        step.background_target_window = None;
+                        changed = true;
+                    }
+                    for window in open_windows {
+                        let clean_title = crate::window_list::strip_rule_suffix(&window.title);
+                        let is_selected = step.background_target_window.as_deref().map_or(false, |s| {
+                            s == window.selector
+                                || s == window.title
+                                || crate::window_list::strip_rule_suffix(s) == clean_title
+                        });
+                        if ui
+                            .selectable_label(
+                                is_selected,
+                                Self::truncate_window_title(
+                                    &Self::simplify_window_title(&window.title),
+                                    35,
+                                ),
+                            )
+                            .on_hover_text(&window.selector)
+                            .clicked()
+                        {
+                            step.background_target_window = Some(window.title.clone());
+                            changed = true;
+                        }
+                    }
+                });
+
+            let button_label = match step.background_mouse_button.as_str() {
+                "Left" => Self::tr_lang(language, "Left Click", "Click Trái"),
+                "Right" => Self::tr_lang(language, "Right Click", "Click Phải"),
+                "Middle" => Self::tr_lang(language, "Middle Click", "Click Giữa"),
+                "DoubleLeft" => Self::tr_lang(language, "Double Click", "Double Click"),
+                "LeftDown" => Self::tr_lang(language, "Left Down", "Nhấn Trái"),
+                "LeftUp" => Self::tr_lang(language, "Left Up", "Nhả Trái"),
+                "RightDown" => Self::tr_lang(language, "Right Down", "Nhấn Phải"),
+                "RightUp" => Self::tr_lang(language, "Right Up", "Nhả Phải"),
+                _ => "Left Click",
+            };
+            egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-click-btn")))
+                .width(90.0)
+                .selected_text(button_label)
+                .show_ui(ui, |ui| {
+                    let btn_options = [
+                        ("Left", Self::tr_lang(language, "Left Click", "Click Trái")),
+                        ("Right", Self::tr_lang(language, "Right Click", "Click Phải")),
+                        ("Middle", Self::tr_lang(language, "Middle Click", "Click Giữa")),
+                        ("DoubleLeft", Self::tr_lang(language, "Double Click", "Double Click")),
+                        ("LeftDown", Self::tr_lang(language, "Left Down", "Nhấn Trái")),
+                        ("LeftUp", Self::tr_lang(language, "Left Up", "Nhả Trái")),
+                        ("RightDown", Self::tr_lang(language, "Right Down", "Nhấn Phải")),
+                        ("RightUp", Self::tr_lang(language, "Right Up", "Nhả Phải")),
+                    ];
+                    for (val, label) in btn_options {
+                        if ui.selectable_label(step.background_mouse_button == val, label).clicked() {
+                            step.background_mouse_button = val.to_string();
+                            changed = true;
+                        }
+                    }
+                });
+
+            Self::ensure_coordinate_exprs(step);
+            let x_id = ui.id().with((&id_source, "bg-click-x"));
+            let y_id = ui.id().with((&id_source, "bg-click-y"));
+            let (x_resp, y_resp) = Self::render_coordinate_compact_pair(
+                ui,
+                &mut step.x_expr,
+                x_id,
+                "X or {x}",
+                &mut step.y_expr,
+                y_id,
+                "Y or {y}",
+                44.0,
+                20.0,
+            );
+            Self::apply_vietnamese_input_if_changed(
+                &x_resp,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                &mut step.x_expr,
+            );
+            if x_resp.changed() {
+                Self::sync_coordinate_expr_to_value(&step.x_expr, &mut step.x);
+                changed = true;
+            }
+            Self::render_variable_suggestions(ui, &x_resp, &mut step.x_expr, timer_names, language);
+
+            Self::apply_vietnamese_input_if_changed(
+                &y_resp,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                &mut step.y_expr,
+            );
+            if y_resp.changed() {
+                Self::sync_coordinate_expr_to_value(&step.y_expr, &mut step.y);
+                changed = true;
+            }
+            Self::render_variable_suggestions(ui, &y_resp, &mut step.y_expr, timer_names, language);
+
+            ui.label(RichText::new(Self::tr_lang(language, "Hold:", "Giữ:")).size(MACRO_STEP_TEXT_SIZE));
+            changed |= ui
+                .add(
+                    egui::DragValue::new(&mut step.mouse_click_delay_ms)
+                        .range(0..=10_000)
+                        .suffix(" ms"),
+                )
+                .changed();
+
+            let popup_id = ui.id().with((&id_source, "bg-click-options-popup"));
+            let mut options_open = ui.ctx().data(|d| d.get_temp::<bool>(popup_id)).unwrap_or(false);
+            let btn_resp = ui.button(RichText::new("⚙").size(12.0))
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Background click settings (Client coords, Child controls, Minimized restore)",
+                    "Cài đặt click ngầm (Tọa độ client, Tìm control con, Khôi phục thu nhỏ)",
+                ));
+            if btn_resp.clicked() {
+                options_open = !options_open;
+                ui.ctx().data_mut(|d| d.insert_temp(popup_id, options_open));
+            }
+            if options_open {
+                egui::Popup::from_response(&btn_resp)
+                    .id(popup_id)
+                    .open_bool(&mut options_open)
+                    .show(|ui| {
+                        changed |= ui.checkbox(
+                            &mut step.background_client_coords,
+                            Self::tr_lang(language, "Client coordinates (relative to window)", "Tọa độ Client (tương đối theo cửa sổ)"),
+                        ).on_hover_text(Self::tr_lang(
+                            language,
+                            "If checked, (X, Y) is relative to the client area inside the window borders and titlebar.",
+                            "Nếu bật, (X, Y) tính từ góc trên-trái bên trong vùng làm việc của cửa sổ.",
+                        )).changed();
+
+                        changed |= ui.checkbox(
+                            &mut step.background_find_child,
+                            Self::tr_lang(language, "Auto-find child control / button", "Tự tìm nút/control con dưới tọa độ"),
+                        ).on_hover_text(Self::tr_lang(
+                            language,
+                            "Route the click message directly to the child HWND (button, edit box, tab) at this position.",
+                            "Gửi trực tiếp thông điệp click tới HWND con (nút bấm, ô nhập, tab...) tại vị trí đó.",
+                        )).changed();
+
+                        changed |= ui.checkbox(
+                            &mut step.background_restore_minimized,
+                            Self::tr_lang(language, "Restore if minimized (no focus)", "Khôi phục nếu bị thu nhỏ (không cướp focus)"),
+                        ).on_hover_text(Self::tr_lang(
+                            language,
+                            "If the target window is minimized to taskbar, restore it without taking foreground focus so it can receive clicks.",
+                            "Nếu cửa sổ đang bị ẩn/minimize xuống taskbar, mở lại ngầm không chiếm focus để nhận click.",
+                        )).changed();
+                    });
+            }
+        });
+        changed
+    }
+
     fn default_macro_step_hud_preset(text_override: &str) -> HudPreset {
         let mut preset = HudPreset::default_step_preview();
         if !text_override.trim().is_empty() {
@@ -2236,6 +2424,7 @@ impl CrosshairApp {
             MacroAction::LockMouse,
             MacroAction::UnlockMouse,
             MacroAction::PlayMousePathPreset,
+            MacroAction::BackgroundClick,
         ]
     }
 
@@ -2334,6 +2523,7 @@ impl CrosshairApp {
             MacroAction::LockMouse,
             MacroAction::UnlockMouse,
             MacroAction::PlayMousePathPreset,
+            MacroAction::BackgroundClick,
         ]
     }
 
@@ -9166,6 +9356,17 @@ if supports_move_mouse || show_detection_tuning {
                                                               &self.open_window_infos,
                                                               language,
                                                           );
+                                                      } else if step.action == MacroAction::BackgroundClick {
+                                                          live_sync |= Self::render_background_click_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                              &timer_names,
+                                                              self.state.vietnamese_input_enabled,
+                                                              self.state.vietnamese_input_mode,
+                                                              (group.id, preset.id, "hold-stop-bg-click"),
+                                                          );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -9311,7 +9512,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 }
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([70.0, 20.0], egui::Label::new(""));
@@ -11489,6 +11690,17 @@ if supports_move_mouse || show_detection_tuning {
                                                               &self.open_window_infos,
                                                               language,
                                                           );
+                                                      } else if step.action == MacroAction::BackgroundClick {
+                                                          live_sync |= Self::render_background_click_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                              &timer_names,
+                                                              self.state.vietnamese_input_enabled,
+                                                              self.state.vietnamese_input_mode,
+                                                              (group.id, preset.id, "press-stop-bg-click"),
+                                                          );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -11634,7 +11846,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 }
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([70.0, 20.0], egui::Label::new(""));
@@ -14974,6 +15186,17 @@ if supports_move_mouse || show_detection_tuning {
                                                               &self.open_window_infos,
                                                               language,
                                                           );
+                                                      } else if step.action == MacroAction::BackgroundClick {
+                                                          live_sync |= Self::render_background_click_step_fields(
+                                                              ui,
+                                                              step,
+                                                              &self.open_window_infos,
+                                                              language,
+                                                              &timer_names,
+                                                              self.state.vietnamese_input_enabled,
+                                                              self.state.vietnamese_input_mode,
+                                                              (group.id, preset.id, step_index, "main-bg-click"),
+                                                          );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -15247,7 +15470,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 ui.add_space(2.0);
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([146.0, 21.0], egui::Label::new("-"));

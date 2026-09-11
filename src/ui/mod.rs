@@ -9366,6 +9366,7 @@ impl CrosshairApp {
             MacroAction::FunnyMemeReply => "MemeReply",
             MacroAction::AiResponse => "AiResponse",
             MacroAction::JumpToStep => "JumpToStep",
+            MacroAction::BackgroundClick => "BackgroundClick",
             _ => "Legacy (Deprecated)",
         }
     }
@@ -9730,6 +9731,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.jump_to_step",
                 "Jump to a specified step (1-indexed or math expression).",
             ),
+            MacroAction::BackgroundClick => (
+                "macro_action_tooltip.background_click",
+                "Send mouse click directly to a background window without moving or stealing the cursor.",
+            ),
             _ => ("macro_action_tooltip.legacy", "Legacy (Deprecated)"),
         };
         match language {
@@ -9834,6 +9839,7 @@ impl CrosshairApp {
             MacroAction::FunnyMemeReply => 0xe420,
             MacroAction::AiResponse => 0xeb8e,
             MacroAction::JumpToStep => 0xe5c8,
+            MacroAction::BackgroundClick => 0xe323,
             _ => 0xe8b5,
         };
         char::from_u32(codepoint).unwrap_or('?')
@@ -10013,6 +10019,9 @@ impl CrosshairApp {
             MacroAction::AiResponse => ("macro_action_short_label.ai_response", "AI"),
             MacroAction::OcrSearch => ("macro_action_short_label.ocr_search", "OCR"),
             MacroAction::JumpToStep => ("macro_action_short_label.jump_to_step", "Jump"),
+            MacroAction::BackgroundClick => {
+                ("macro_action_short_label.background_click", "BgClick")
+            }
             _ => ("macro_action_short_label.legacy", "Legacy"),
         };
         match language {

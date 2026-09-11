@@ -120,6 +120,8 @@ pub enum MacroAction {
     FunnyMemeReply,
     AiResponse,
     JumpToStep,
+    #[serde(alias = "BackgroundMouseClick", alias = "BackgroundMouse")]
+    BackgroundClick,
     #[serde(other)]
     Legacy,
 }
@@ -435,6 +437,20 @@ pub struct MacroStep {
     pub esp_aim_sens_scale: f64,
     #[serde(default)]
     pub trigger_macro_group_id: Option<u32>,
+    #[serde(default)]
+    pub background_target_window: Option<String>,
+    #[serde(default = "default_background_mouse_button")]
+    pub background_mouse_button: String,
+    #[serde(default = "default_true")]
+    pub background_client_coords: bool,
+    #[serde(default = "default_true")]
+    pub background_find_child: bool,
+    #[serde(default = "default_false")]
+    pub background_restore_minimized: bool,
+}
+
+fn default_background_mouse_button() -> String {
+    "Left".to_string()
 }
 
 fn default_esp_aim_smooth() -> f64 {
@@ -557,6 +573,11 @@ impl Default for MacroStep {
             esp_aim_smooth_speed: 1.0,
             esp_aim_sens_scale: 1.0,
             trigger_macro_group_id: None,
+            background_target_window: None,
+            background_mouse_button: "Left".to_string(),
+            background_client_coords: true,
+            background_find_child: true,
+            background_restore_minimized: false,
         }
     }
 }
@@ -1054,6 +1075,42 @@ mod tests {
         assert_eq!(restored.action, MacroAction::AiResponse);
         assert_eq!(restored.key, "Translate this: hello");
         assert_eq!(restored.if_variable_name, "translated_text");
+    }
+
+    #[test]
+    fn test_background_click_serialization() {
+        use super::MacroAction;
+        let mut step = MacroStep::default();
+        assert_eq!(step.background_mouse_button, "Left");
+        assert!(step.background_target_window.is_none());
+        assert!(step.background_client_coords);
+        assert!(!step.background_restore_minimized);
+        assert!(step.background_find_child);
+
+        step.action = MacroAction::BackgroundClick;
+        step.background_target_window = Some("GameWindow".to_string());
+        step.background_mouse_button = "Right".to_string();
+        step.x_expr = "150".to_string();
+        step.y_expr = "250".to_string();
+        step.background_find_child = false;
+
+        let json = serde_json::to_string(&step).expect("serialize step");
+        let restored: MacroStep = serde_json::from_str(&json).expect("deserialize step");
+
+        assert_eq!(restored.action, MacroAction::BackgroundClick);
+        assert_eq!(restored.background_target_window.as_deref(), Some("GameWindow"));
+        assert_eq!(restored.background_mouse_button, "Right");
+        assert_eq!(restored.x_expr, "150");
+        assert_eq!(restored.y_expr, "250");
+        assert!(!restored.background_find_child);
+
+        let alias_json = r#"{"action":"BackgroundMouseClick"}"#;
+        #[derive(serde::Deserialize)]
+        struct ActionOnly {
+            action: MacroAction,
+        }
+        let parsed: ActionOnly = serde_json::from_str(alias_json).expect("parse alias");
+        assert_eq!(parsed.action, MacroAction::BackgroundClick);
     }
 
     #[test]

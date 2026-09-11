@@ -72,7 +72,7 @@ mod windows_overlay {
                 Gdi::{
                     AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO,
                     BITMAPINFOHEADER, BLACKNESS, BLENDFUNCTION, BeginPaint, CLIP_DEFAULT_PRECIS,
-                    ClientToScreen, CombineRgn, CreateBitmap, CreateCompatibleDC, CreateDIBSection,
+                    ClientToScreen, ScreenToClient, CombineRgn, CreateBitmap, CreateCompatibleDC, CreateDIBSection,
                     CreateFontW, CreateRectRgn, CreateRoundRectRgn, DEFAULT_CHARSET,
                     DIB_RGB_COLORS, DT_CENTER, DT_SINGLELINE, DT_VCENTER, DeleteDC, DeleteObject,
                     DrawTextW, EndPaint, FF_DONTCARE, FW_BOLD, FW_MEDIUM, GetDC, GetMonitorInfoW,
@@ -110,8 +110,9 @@ mod windows_overlay {
                 },
                 Shell::{NIM_DELETE, Shell_NotifyIconW},
                 WindowsAndMessaging::{
-                    AppendMenuW, CREATESTRUCTW, CallNextHookEx, ClipCursor, CreateIconIndirect,
-                    CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyCursor,
+                    AppendMenuW, CREATESTRUCTW, CallNextHookEx, ChildWindowFromPointEx, ClipCursor,
+                    CreateIconIndirect, CreatePopupMenu, CreateWindowExW,
+                    CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, DefWindowProcW, DestroyCursor,
                     DestroyMenu, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GA_ROOT,
                     GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GetAncestor, GetClassNameW,
                     GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
@@ -33940,6 +33941,7 @@ mod windows_overlay {
             | MacroAction::MouseWheelDown
             | MacroAction::MouseMoveAbsolute
             | MacroAction::MouseMoveRelative => return send_mouse_event(step),
+            MacroAction::BackgroundClick => return send_background_click(step),
             MacroAction::TypeText => {
                 let text = interpolate_variables(&step.key);
                 return if step.type_text_paste {
@@ -34548,6 +34550,106 @@ mod windows_overlay {
         if let Err(first_error) = send_mouse_input(up, mouse_data) {
             // ponytail: one retry is enough to avoid a stuck button after a transient backend error.
             return send_mouse_input(up, mouse_data).map_err(|_| first_error);
+        }
+        Ok(())
+    }
+
+    fn send_background_click(step: &MacroStep) -> Result<()> {
+        let hwnd = crate::window_list::find_window_handle(step.background_target_window.as_deref());
+        let Some(hwnd) = hwnd else {
+            return Ok(());
+        };
+        if hwnd.0.is_null() {
+            return Ok(());
+        }
+
+        unsafe {
+            if step.background_restore_minimized && IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOWNA);
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            let x = step.get_x();
+            let y = step.get_y();
+
+            let mut screen_pt = POINT { x, y };
+            if step.background_client_coords {
+                let _ = ClientToScreen(hwnd, &mut screen_pt);
+            }
+
+            let mut target = hwnd;
+            if step.background_find_child {
+                let mut child_pt = screen_pt;
+                let _ = ScreenToClient(hwnd, &mut child_pt);
+                let child = ChildWindowFromPointEx(
+                    hwnd,
+                    child_pt,
+                    CWP_SKIPINVISIBLE | CWP_SKIPDISABLED,
+                );
+                if !child.0.is_null() && child != hwnd {
+                    target = child;
+                }
+            }
+
+            let mut target_pt = screen_pt;
+            let _ = ScreenToClient(target, &mut target_pt);
+
+            let lparam = LPARAM(((target_pt.y as u32 & 0xFFFF) << 16 | (target_pt.x as u32 & 0xFFFF)) as isize);
+
+            // Send WM_MOUSEMOVE first to trigger hover effects
+            let _ = PostMessageW(Some(target), WM_MOUSEMOVE, WPARAM(0), lparam);
+
+            let delay_ms = step.mouse_click_delay_ms as u64;
+
+            match step.background_mouse_button.as_str() {
+                "Right" => {
+                    let _ = PostMessageW(Some(target), WM_RBUTTONDOWN, WPARAM(0x0002), lparam);
+                    if delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(delay_ms));
+                    }
+                    let _ = PostMessageW(Some(target), WM_RBUTTONUP, WPARAM(0), lparam);
+                }
+                "Middle" => {
+                    let _ = PostMessageW(Some(target), WM_MBUTTONDOWN, WPARAM(0x0010), lparam);
+                    if delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(delay_ms));
+                    }
+                    let _ = PostMessageW(Some(target), WM_MBUTTONUP, WPARAM(0), lparam);
+                }
+                "DoubleLeft" => {
+                    let _ = PostMessageW(Some(target), WM_LBUTTONDOWN, WPARAM(0x0001), lparam);
+                    if delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(delay_ms));
+                    }
+                    let _ = PostMessageW(Some(target), WM_LBUTTONUP, WPARAM(0), lparam);
+                    thread::sleep(Duration::from_millis(50));
+                    let _ = PostMessageW(Some(target), WM_LBUTTONDBLCLK, WPARAM(0x0001), lparam);
+                    if delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(delay_ms));
+                    }
+                    let _ = PostMessageW(Some(target), WM_LBUTTONUP, WPARAM(0), lparam);
+                }
+                "LeftDown" => {
+                    let _ = PostMessageW(Some(target), WM_LBUTTONDOWN, WPARAM(0x0001), lparam);
+                }
+                "LeftUp" => {
+                    let _ = PostMessageW(Some(target), WM_LBUTTONUP, WPARAM(0), lparam);
+                }
+                "RightDown" => {
+                    let _ = PostMessageW(Some(target), WM_RBUTTONDOWN, WPARAM(0x0002), lparam);
+                }
+                "RightUp" => {
+                    let _ = PostMessageW(Some(target), WM_RBUTTONUP, WPARAM(0), lparam);
+                }
+                _ => {
+                    // Default: Left Click
+                    let _ = PostMessageW(Some(target), WM_LBUTTONDOWN, WPARAM(0x0001), lparam);
+                    if delay_ms > 0 {
+                        thread::sleep(Duration::from_millis(delay_ms));
+                    }
+                    let _ = PostMessageW(Some(target), WM_LBUTTONUP, WPARAM(0), lparam);
+                }
+            }
         }
         Ok(())
     }
