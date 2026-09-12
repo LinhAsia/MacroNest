@@ -1561,13 +1561,17 @@ impl CrosshairApp {
 
                                     if preset.permutation_debug_mode {
                                         let perms = crate::model::esp_debug_permutations();
-                                        let selected_perm = self.esp_selected_permutation.entry(preset.id).or_insert(1);
+                                        preset.selected_permutation = preset.selected_permutation.clamp(1, perms.len());
+                                        let selected_perm = &mut preset.selected_permutation;
+                                        self.esp_selected_permutation.insert(preset.id, *selected_perm);
                                         ui.label("Pick #:");
                                         ui.add(
                                             DragValue::new(selected_perm)
                                                 .range(1..=perms.len())
                                                 .speed(1.0),
                                         );
+                                        ui.checkbox(&mut preset.invert_yaw, "Mirror X");
+                                        ui.checkbox(&mut preset.invert_pitch, "Mirror Y");
                                         if let Some(target_cfg) = perms.iter().find(|c| c.index == *selected_perm) {
                                             ui.label(
                                                 RichText::new(&target_cfg.short_desc)
@@ -1591,8 +1595,6 @@ impl CrosshairApp {
                                                 preset.invert_vertical = target_cfg.invert_vertical;
                                                 preset.pitch_input = target_cfg.pitch_input;
                                                 preset.pitch_unit = target_cfg.pitch_unit;
-                                                preset.invert_yaw = false;
-                                                preset.invert_pitch = false;
                                                 preset.permutation_debug_mode = false;
                                             }
                                         }

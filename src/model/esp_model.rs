@@ -62,6 +62,10 @@ fn default_entity_auto_scan_duration_secs() -> f32 {
     1.0
 }
 
+fn default_selected_permutation() -> usize {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EspPreset {
@@ -177,6 +181,8 @@ pub struct EspPreset {
     pub debug_mode: bool,
     #[serde(default)]
     pub permutation_debug_mode: bool,
+    #[serde(default = "default_selected_permutation")]
+    pub selected_permutation: usize,
     pub target_audio_enabled: bool,
     pub target_audio_path: String,
     pub target_audio_loop: bool,
@@ -290,6 +296,7 @@ impl EspPreset {
             show_distance: false,
             debug_mode: false,
             permutation_debug_mode: false,
+            selected_permutation: 1,
             target_audio_enabled: false,
             target_audio_path: String::new(),
             target_audio_loop: true,

@@ -25264,7 +25264,7 @@ mod windows_overlay {
                     }
                     combined
                 };
-                let has_extra = !extra_shapes.is_empty();
+                let _has_extra = !extra_shapes.is_empty();
                 shapes.extend(extra_shapes);
 
                 let shapes_changed = shapes != last_painted_shapes;
@@ -25286,15 +25286,9 @@ mod windows_overlay {
                     paint_cooldown_frames = 0;
                     let hwnd_value = ESP_OVERLAY_HWND.load(Ordering::Acquire);
                     if hwnd_value != 0 {
-                        let hwnd = HWND(hwnd_value as _);
+                        let _hwnd = HWND(hwnd_value as _);
                         if let Some(gpu) = renderer.as_mut() {
                             let _ = gpu.paint(&[]);
-                        }
-                        if visible && !has_extra {
-                            unsafe {
-                                let _ = ShowWindow(hwnd, SW_HIDE);
-                            }
-                            visible = false;
                         }
                     }
                     continue;
@@ -26166,6 +26160,22 @@ mod windows_overlay {
                     height,
                 );
                 return (perm_shapes, None);
+            } else {
+                let msg = "Matrix Debug: Target coordinates not found. Check Target X, Y, Z in MacroNest.".to_string();
+                let cx = left + width / 2;
+                let cy = top + 36;
+                let shapes = vec![GeometryRenderShape {
+                    bounds: geometry_label_bounds(cx, cy, 13, &msg, 0.0),
+                    draw: GeometryRenderDraw::Label(GeometryRenderText {
+                        x: cx,
+                        y: cy,
+                        font_size: 13,
+                        color: [255, 100, 100, 255],
+                        rotation_deg: 0.0,
+                        text: msg,
+                    }),
+                }];
+                return (shapes, None);
             }
         }
         let mut shapes = Vec::new();
@@ -26205,6 +26215,48 @@ mod windows_overlay {
         (shapes, best_snapshot)
     }
 
+    fn format_index_ranges(indices: &[usize]) -> String {
+        if indices.is_empty() {
+            return String::new();
+        }
+        let mut sorted = indices.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+
+        let mut ranges = Vec::new();
+        let mut start = sorted[0];
+        let mut end = sorted[0];
+
+        for &val in &sorted[1..] {
+            if val == end + 1 {
+                end = val;
+            } else {
+                if start == end {
+                    ranges.push(format!("#{start}"));
+                } else if end == start + 1 {
+                    ranges.push(format!("#{start}, #{end}"));
+                } else {
+                    ranges.push(format!("#{start}..#{end}"));
+                }
+                start = val;
+                end = val;
+            }
+        }
+        if start == end {
+            ranges.push(format!("#{start}"));
+        } else if end == start + 1 {
+            ranges.push(format!("#{start}, #{end}"));
+        } else {
+            ranges.push(format!("#{start}..#{end}"));
+        }
+
+        if ranges.len() <= 3 {
+            ranges.join(", ")
+        } else {
+            format!("{}, {}, {} (+{} more)", ranges[0], ranges[1], ranges[2], ranges.len() - 3)
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn esp_shapes_for_permutations(
         preset: &crate::model::EspPreset,
@@ -26241,8 +26293,8 @@ mod windows_overlay {
             test_preset.invert_vertical = perm.invert_vertical;
             test_preset.pitch_input = perm.pitch_input;
             test_preset.pitch_unit = perm.pitch_unit;
-            test_preset.invert_yaw = false;
-            test_preset.invert_pitch = false;
+            test_preset.invert_yaw = preset.invert_yaw;
+            test_preset.invert_pitch = preset.invert_pitch;
 
             let perm_orientation = match test_preset.orientation_source {
                 crate::model::EspOrientationSource::Angles => Some((raw_yaw, pitch)),
@@ -26300,45 +26352,125 @@ mod windows_overlay {
             }
         }
 
+        if clusters.is_empty() {
+            let msg = format!(
+                "Matrix: Target ({:.1}, {:.1}, {:.1}) is off-screen. Look towards target in-game.",
+                target[0], target[1], target[2]
+            );
+            let cx = left + width / 2;
+            let cy = top + 36;
+            shapes.push(GeometryRenderShape {
+                bounds: geometry_label_bounds(cx, cy, 13, &msg, 0.0),
+                draw: GeometryRenderDraw::Label(GeometryRenderText {
+                    x: cx,
+                    y: cy,
+                    font_size: 13,
+                    color: [255, 200, 50, 255],
+                    rotation_deg: 0.0,
+                    text: msg,
+                }),
+            });
+            return shapes;
+        }
+
         for cluster in clusters {
             let px = cluster.px;
             let py = cluster.py;
-            let color = cluster.color;
-            let half_w = 10;
-            let half_h = 10;
-            let points = vec![
-                (px - half_w, py - half_h),
-                (px + half_w, py - half_h),
-                (px + half_w, py + half_h),
-                (px - half_w, py + half_h),
-            ];
-            shapes.push(GeometryRenderShape {
-                bounds: (px - half_w - 2, py - half_h - 2, px + half_w + 2, py + half_h + 2),
-                draw: GeometryRenderDraw::Polygon {
-                    points,
-                    stroke: color,
-                    fill: None,
-                    thickness: 2,
-                },
-            });
+            let is_selected = cluster.indices.contains(&preset.selected_permutation);
 
-            let text_y = py - 14;
-            let label = match cluster.indices.len() {
-                1 => format!("#{}", cluster.indices[0]),
-                2..=3 => cluster.indices.iter().map(|i| format!("#{i}")).collect::<Vec<_>>().join(" "),
-                _ => format!("#{}, #{} (+{}x)", cluster.indices[0], cluster.indices[1], cluster.indices.len() - 2),
-            };
-            shapes.push(GeometryRenderShape {
-                bounds: geometry_label_bounds(px, text_y, 12, &label, 0.0),
-                draw: GeometryRenderDraw::Label(GeometryRenderText {
-                    x: px,
-                    y: text_y,
-                    font_size: 12,
-                    color,
-                    rotation_deg: 0.0,
-                    text: label,
-                }),
-            });
+            if is_selected {
+                let half_w = 14;
+                let half_h = 14;
+                let points = vec![
+                    (px - half_w, py - half_h),
+                    (px + half_w, py - half_h),
+                    (px + half_w, py + half_h),
+                    (px - half_w, py + half_h),
+                ];
+                shapes.push(GeometryRenderShape {
+                    bounds: (px - half_w - 3, py - half_h - 3, px + half_w + 3, py + half_h + 3),
+                    draw: GeometryRenderDraw::Polygon {
+                        points,
+                        stroke: [255, 215, 0, 255],
+                        fill: Some([255, 215, 0, 45]),
+                        thickness: 3,
+                    },
+                });
+                shapes.push(GeometryRenderShape {
+                    bounds: (px - 6, py - 6, px + 6, py + 6),
+                    draw: GeometryRenderDraw::Line {
+                        x1: px - 6,
+                        y1: py,
+                        x2: px + 6,
+                        y2: py,
+                        stroke: [255, 215, 0, 255],
+                        thickness: 2,
+                    },
+                });
+                shapes.push(GeometryRenderShape {
+                    bounds: (px - 6, py - 6, px + 6, py + 6),
+                    draw: GeometryRenderDraw::Line {
+                        x1: px,
+                        y1: py - 6,
+                        x2: px,
+                        y2: py + 6,
+                        stroke: [255, 215, 0, 255],
+                        thickness: 2,
+                    },
+                });
+
+                let text_y = (py - 20).max(top + 10);
+                let range_str = format_index_ranges(&cluster.indices);
+                let label = if cluster.indices.len() == 1 {
+                    format!("★ #{} [PICKED]", preset.selected_permutation)
+                } else {
+                    format!("★ #{} [PICKED] ({})", preset.selected_permutation, range_str)
+                };
+                shapes.push(GeometryRenderShape {
+                    bounds: geometry_label_bounds(px, text_y, 13, &label, 0.0),
+                    draw: GeometryRenderDraw::Label(GeometryRenderText {
+                        x: px,
+                        y: text_y,
+                        font_size: 13,
+                        color: [255, 230, 80, 255],
+                        rotation_deg: 0.0,
+                        text: label,
+                    }),
+                });
+            } else {
+                let color = cluster.color;
+                let half_w = 10;
+                let half_h = 10;
+                let points = vec![
+                    (px - half_w, py - half_h),
+                    (px + half_w, py - half_h),
+                    (px + half_w, py + half_h),
+                    (px - half_w, py + half_h),
+                ];
+                shapes.push(GeometryRenderShape {
+                    bounds: (px - half_w - 2, py - half_h - 2, px + half_w + 2, py + half_h + 2),
+                    draw: GeometryRenderDraw::Polygon {
+                        points,
+                        stroke: color,
+                        fill: None,
+                        thickness: 2,
+                    },
+                });
+
+                let text_y = (py - 14).max(top + 10);
+                let label = format_index_ranges(&cluster.indices);
+                shapes.push(GeometryRenderShape {
+                    bounds: geometry_label_bounds(px, text_y, 11, &label, 0.0),
+                    draw: GeometryRenderDraw::Label(GeometryRenderText {
+                        x: px,
+                        y: text_y,
+                        font_size: 11,
+                        color,
+                        rotation_deg: 0.0,
+                        text: label,
+                    }),
+                });
+            }
         }
         shapes
     }
