@@ -26293,7 +26293,7 @@ mod windows_overlay {
             test_preset.invert_vertical = perm.invert_vertical;
             test_preset.pitch_input = perm.pitch_input;
             test_preset.pitch_unit = perm.pitch_unit;
-            test_preset.invert_yaw = preset.invert_yaw;
+            test_preset.invert_yaw = perm.invert_yaw;
             test_preset.invert_pitch = preset.invert_pitch;
 
             let perm_orientation = match test_preset.orientation_source {
@@ -26322,17 +26322,26 @@ mod windows_overlay {
                 continue;
             };
 
-            if !projection.on_screen {
+            if !projection.in_front {
                 continue;
             }
 
+            let (norm_x, norm_y) = if projection.on_screen {
+                (projection.normalized_x, projection.normalized_y)
+            } else {
+                (
+                    projection.normalized_x.clamp(-0.95, 0.95),
+                    projection.normalized_y.clamp(-0.95, 0.95),
+                )
+            };
+
             let px = left
-                + ((projection.normalized_x + 1.0) * 0.5 * width as f32
+                + ((norm_x + 1.0) * 0.5 * width as f32
                     + preset.screen_offset_x
                     + preset.marker_offset_x)
                     .round() as i32;
             let py = top
-                + ((1.0 - projection.normalized_y) * 0.5 * height as f32
+                + ((1.0 - norm_y) * 0.5 * height as f32
                     + preset.screen_offset_y
                     + preset.marker_offset_y)
                     .round() as i32;

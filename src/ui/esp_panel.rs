@@ -1593,6 +1593,7 @@ impl CrosshairApp {
                                                 preset.yaw_offset_degrees = target_cfg.yaw_offset_degrees;
                                                 preset.invert_camera_pitch = target_cfg.invert_camera_pitch;
                                                 preset.invert_vertical = target_cfg.invert_vertical;
+                                                preset.invert_yaw = target_cfg.invert_yaw;
                                                 preset.pitch_input = target_cfg.pitch_input;
                                                 preset.pitch_unit = target_cfg.pitch_unit;
                                                 preset.permutation_debug_mode = false;

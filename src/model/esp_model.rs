@@ -859,12 +859,14 @@ pub struct EspPermutationConfig {
     pub yaw_offset_degrees: f32,
     pub invert_camera_pitch: bool,
     pub invert_vertical: bool,
+    pub invert_yaw: bool,
     pub pitch_input: EspPitchInput,
     pub pitch_unit: EspAngleUnit,
     pub color: [u8; 4],
 }
 
 pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
+    let mirror_xs = [false, true];
     let swaps = [false, true];
     let inv_as = [false, true];
     let inv_bs = [false, true];
@@ -890,45 +892,49 @@ pub fn esp_debug_permutations() -> Vec<EspPermutationConfig> {
         [200, 255, 200, 255], // Mint Green
     ];
 
-    let mut configs = Vec::with_capacity(1024);
+    let mut configs = Vec::with_capacity(2048);
     let mut idx = 1;
-    for &swap in &swaps {
-        for &inv_a in &inv_as {
-            for &inv_b in &inv_bs {
-                for &rev_yaw in &rev_yaws {
-                    for &yaw_off in &yaw_offsets {
-                        for &rev_pitch in &rev_pitches {
-                            for &inv_elev in &inv_elevations {
-                                for &(p_in, p_unit, p_tag) in &pitch_modes {
-                                    let swap_str = if swap { "Swap" } else { "Norm" };
-                                    let inv_str = match (inv_a, inv_b) {
-                                        (false, false) => "NormA NormB",
-                                        (true, false) => "InvA NormB",
-                                        (false, true) => "NormA InvB",
-                                        (true, true) => "InvA InvB",
-                                    };
-                                    let rev_y_str = if rev_yaw { "RevY" } else { "NormY" };
-                                    let yaw_str = format!("{yaw_off:+.0}°");
-                                    let rev_p_str = if rev_pitch { "RevP" } else { "NormP" };
-                                    let elev_str = if inv_elev { "InvElev" } else { "NormElev" };
+    for &mirror_x in &mirror_xs {
+        for &swap in &swaps {
+            for &inv_a in &inv_as {
+                for &inv_b in &inv_bs {
+                    for &rev_yaw in &rev_yaws {
+                        for &yaw_off in &yaw_offsets {
+                            for &rev_pitch in &rev_pitches {
+                                for &inv_elev in &inv_elevations {
+                                    for &(p_in, p_unit, p_tag) in &pitch_modes {
+                                        let mx_str = if mirror_x { "MirrorX" } else { "NormX" };
+                                        let swap_str = if swap { "Swap" } else { "Norm" };
+                                        let inv_str = match (inv_a, inv_b) {
+                                            (false, false) => "NormA NormB",
+                                            (true, false) => "InvA NormB",
+                                            (false, true) => "NormA InvB",
+                                            (true, true) => "InvA InvB",
+                                        };
+                                        let rev_y_str = if rev_yaw { "RevY" } else { "NormY" };
+                                        let yaw_str = format!("{yaw_off:+.0}°");
+                                        let rev_p_str = if rev_pitch { "RevP" } else { "NormP" };
+                                        let elev_str = if inv_elev { "InvElev" } else { "NormElev" };
 
-                                    let short_desc = format!("{swap_str} | {inv_str} | {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {p_tag}");
+                                        let short_desc = format!("{mx_str} | {swap_str} | {inv_str} | {rev_y_str} {yaw_str} | {rev_p_str} {elev_str} {p_tag}");
 
-                                    configs.push(EspPermutationConfig {
-                                        index: idx,
-                                        short_desc,
-                                        swap_direction_pair: swap,
-                                        invert_direction_a: inv_a,
-                                        invert_direction_b: inv_b,
-                                        invert_camera_yaw: rev_yaw,
-                                        yaw_offset_degrees: yaw_off,
-                                        invert_camera_pitch: rev_pitch,
-                                        invert_vertical: inv_elev,
-                                        pitch_input: p_in,
-                                        pitch_unit: p_unit,
-                                        color: colors[(idx - 1) % colors.len()],
-                                    });
-                                    idx += 1;
+                                        configs.push(EspPermutationConfig {
+                                            index: idx,
+                                            short_desc,
+                                            swap_direction_pair: swap,
+                                            invert_direction_a: inv_a,
+                                            invert_direction_b: inv_b,
+                                            invert_camera_yaw: rev_yaw,
+                                            yaw_offset_degrees: yaw_off,
+                                            invert_camera_pitch: rev_pitch,
+                                            invert_vertical: inv_elev,
+                                            invert_yaw: mirror_x,
+                                            pitch_input: p_in,
+                                            pitch_unit: p_unit,
+                                            color: colors[(idx - 1) % colors.len()],
+                                        });
+                                        idx += 1;
+                                    }
                                 }
                             }
                         }
@@ -1509,14 +1515,17 @@ mod tests {
     #[test]
     fn permutations_cover_inversion_of_both_direction_axes() {
         let perms = esp_debug_permutations();
-        assert_eq!(perms.len(), 1024);
+        assert_eq!(perms.len(), 2048);
         let has_inv_a = perms.iter().any(|p| p.invert_direction_a && !p.invert_direction_b);
         let has_inv_b = perms.iter().any(|p| !p.invert_direction_a && p.invert_direction_b);
         let has_both = perms.iter().any(|p| p.invert_direction_a && p.invert_direction_b);
         let has_none = perms.iter().any(|p| !p.invert_direction_a && !p.invert_direction_b);
-        assert!(has_inv_a && has_inv_b && has_both && has_none);
+        let has_mx = perms.iter().any(|p| p.invert_yaw);
+        let has_norm_x = perms.iter().any(|p| !p.invert_yaw);
+        assert!(has_inv_a && has_inv_b && has_both && has_none && has_mx && has_norm_x);
         assert!(perms.iter().any(|p| p.short_desc.contains("InvA")));
         assert!(perms.iter().any(|p| p.short_desc.contains("InvB")));
+        assert!(perms.iter().any(|p| p.short_desc.contains("MirrorX")));
     }
 }
 
