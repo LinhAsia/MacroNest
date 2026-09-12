@@ -1,5 +1,6 @@
 {
-  "version": "1.2.7",
-  "notes": "Added multi-threaded SIMD memory scanner, Cheat Engine snapshot scans, 2-sample AOB signature generator, OBS Game Capture with NVENC zero-copy encoder, GPU DirectComposition overlay, interactive Window Pin overlay, macro recording improvements, and bug fixes.",
-  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.7/MacroNest.exe"
+  "version": "1.2.8",
+  "notes": "Added background key press (BackgroundKey) action with child window routing and thread input synchronization, dynamic window list refresh in macro dropdowns, duplicate keystroke prevention, and stability fixes.",
+  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.8/MacroNest.exe"
 }
+
