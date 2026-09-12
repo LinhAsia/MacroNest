@@ -119,7 +119,7 @@ mod windows_overlay {
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
                     GetWindowThreadProcessId, HC_ACTION, HCURSOR, HMENU, HTCLIENT,
                     HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS,
-                    IsChild, IsIconic, IsWindowVisible, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LWA_ALPHA, LoadCursorW,
+                    IsChild, IsIconic, IsWindow, IsWindowVisible, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LWA_ALPHA, LoadCursorW,
                     MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
                     PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN,
                     SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -34690,7 +34690,7 @@ mod windows_overlay {
         // 3. If it's a Chromium / Electron app (Discord, Slack, Spotify, VS Code, Chrome, Edge):
         let mut render_child = None;
         unsafe extern "system" fn enum_chromium_proc(child: HWND, lparam: LPARAM) -> windows::core::BOOL {
-            if !IsWindowVisible(child).as_bool() {
+            if !IsWindow(Some(child)).as_bool() {
                 return true.into();
             }
             let mut class_buf = [0u16; 64];
@@ -34717,7 +34717,7 @@ mod windows_overlay {
         // 4. Try finding an Edit/RichEdit child control:
         let mut edit_child = None;
         unsafe extern "system" fn enum_edit_proc(child: HWND, lparam: LPARAM) -> windows::core::BOOL {
-            if !IsWindowVisible(child).as_bool() {
+            if !IsWindow(Some(child)).as_bool() {
                 return true.into();
             }
             let mut class_buf = [0u16; 64];
@@ -34774,6 +34774,12 @@ mod windows_overlay {
                 target = find_background_input_child(hwnd);
             }
 
+            let current_thread = GetCurrentThreadId();
+            let target_thread = GetWindowThreadProcessId(target, None);
+            let attached = current_thread != target_thread
+                && target_thread != 0
+                && AttachThreadInput(current_thread, target_thread, true).as_bool();
+
             if step.background_key_mode == "TypeText" {
                 let text = interpolate_variables(&step.key);
                 for unit in text.encode_utf16() {
@@ -34785,11 +34791,17 @@ mod windows_overlay {
                     );
                     thread::sleep(Duration::from_millis(10));
                 }
+                if attached {
+                    let _ = AttachThreadInput(current_thread, target_thread, false);
+                }
                 return Ok(());
             }
 
             let key_str = interpolate_variables(&step.key);
             let Some(vk) = hotkey::key_name_to_vk(&key_str) else {
+                if attached {
+                    let _ = AttachThreadInput(current_thread, target_thread, false);
+                }
                 bail!("Unsupported macro key: {}", key_str);
             };
 
@@ -34844,6 +34856,10 @@ mod windows_overlay {
                     thread::sleep(Duration::from_millis(20));
                     let _ = PostMessageW(Some(target), msg_up, WPARAM(vk as usize), lparam_up);
                 }
+            }
+
+            if attached {
+                let _ = AttachThreadInput(current_thread, target_thread, false);
             }
         }
         Ok(())
