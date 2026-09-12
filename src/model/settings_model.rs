@@ -533,6 +533,8 @@ pub struct AppState {
     pub memory_pointer_must_end_with_enabled: bool,
     #[serde(default)]
     pub memory_pointer_must_end_with_offsets: String,
+    #[serde(default = "default_true")]
+    pub memory_pointer_strict_multi_scan: bool,
     pub memory_camera_x: String,
     pub memory_camera_y: String,
     pub memory_camera_z: String,
@@ -984,6 +986,7 @@ impl Default for AppState {
             memory_pointer_scan_result_limit: 256,
             memory_pointer_must_end_with_enabled: false,
             memory_pointer_must_end_with_offsets: String::new(),
+            memory_pointer_strict_multi_scan: true,
             memory_camera_x: String::new(),
             memory_camera_y: String::new(),
             memory_camera_z: String::new(),

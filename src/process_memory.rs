@@ -796,6 +796,11 @@ impl PointerMap {
     ) -> Vec<PointerPath> {
         self.paths_to_with_must_end(targets, max_offset, max_depth, result_limit, &[])
     }
+
+    #[cfg(test)]
+    pub fn new_for_test(pointers: Vec<(usize, usize)>, modules: Vec<(String, usize, usize)>) -> Self {
+        Self { pointers, modules }
+    }
 }
 
 

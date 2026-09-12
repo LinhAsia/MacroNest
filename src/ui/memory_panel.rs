@@ -242,6 +242,7 @@ struct StablePointerDialog {
     validation_rx: Option<Receiver<StablePointerValidationResult>>,
     filter_rx: Option<Receiver<StablePointerFilterResult>>,
     validation_rounds: usize,
+    strict_multi_scan: bool,
 }
 
 enum DeepPointerJobResult {
@@ -254,6 +255,7 @@ struct DeepPointerComparisonResult {
     paths_a: usize,
     paths_b: usize,
     path_limit: usize,
+    candidate_targets: HashMap<usize, usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -291,6 +293,9 @@ struct DeepPointerDialog {
     entity_root_matching: bool,
     using_entity_roots: bool,
     comparison_stats: Option<DeepPointerComparisonStats>,
+    strict_multi_scan: bool,
+    target_b_addresses: Vec<usize>,
+    candidate_targets: HashMap<usize, usize>,
 }
 
 fn expand_entity_slot_targets(
@@ -322,6 +327,160 @@ fn expand_entity_slot_targets(
         }
     }
     expanded
+}
+
+fn run_deep_pointer_comparison(
+    map_a: &PointerMap,
+    map_b: &PointerMap,
+    targets_a: &[usize],
+    targets_b: &[usize],
+    entity_stride: usize,
+    entity_slots: usize,
+    entity_root_matching: bool,
+    limits: PointerScanLimits,
+    must_end: &[usize],
+    strict_multi_scan: bool,
+) -> DeepPointerComparisonResult {
+    let comparison_limit = limits.result_limit.saturating_mul(16).clamp(10_000, 100_000);
+    let strict = strict_multi_scan && targets_a.len() > 1 && !targets_b.is_empty();
+
+    if strict {
+        let pairs_count = targets_a.len().min(targets_b.len());
+        let mut total_paths_a = 0;
+        let mut total_paths_b = 0;
+        let mut all_exact = Vec::new();
+        let mut all_entity_roots = Vec::new();
+        let mut seen_exact = HashSet::new();
+        let mut seen_roots = HashSet::new();
+        let mut candidate_targets = HashMap::new();
+
+        // ponytail: evaluate each target pair independently in parallel or sequentially.
+        // Parallel per-pair scan keeps multi-address scans fast and avoids any BFS cross-target interference
+        // or false-positive matching between different variables.
+        for i in 0..pairs_count {
+            let t_a = targets_a[i];
+            let t_b = targets_b[i];
+            let slot_targets_a = if entity_root_matching {
+                expand_entity_slot_targets(&[t_a], entity_stride, entity_slots)
+            } else {
+                vec![t_a]
+            };
+            let slot_targets_b = if entity_root_matching {
+                expand_entity_slot_targets(&[t_b], entity_stride, entity_slots)
+            } else {
+                vec![t_b]
+            };
+
+            let (paths_a, paths_b) = std::thread::scope(|s| {
+                let handle_a = s.spawn(|| {
+                    map_a.paths_to_with_must_end(
+                        &slot_targets_a,
+                        limits.max_offset,
+                        limits.max_depth,
+                        comparison_limit,
+                        must_end,
+                    )
+                });
+                let handle_b = s.spawn(|| {
+                    map_b.paths_to_with_must_end(
+                        &slot_targets_b,
+                        limits.max_offset,
+                        limits.max_depth,
+                        comparison_limit,
+                        must_end,
+                    )
+                });
+                (handle_a.join().unwrap(), handle_b.join().unwrap())
+            });
+
+            total_paths_a += paths_a.len();
+            total_paths_b += paths_b.len();
+
+            let comp = compare_pointer_paths(
+                paths_a,
+                paths_b,
+                entity_root_matching.then_some(entity_stride).unwrap_or(0),
+                limits.result_limit,
+            );
+
+            for path in comp.exact {
+                if seen_exact.insert(path.clone()) {
+                    let idx = all_exact.len();
+                    candidate_targets.insert(idx, t_a);
+                    all_exact.push(path);
+                }
+            }
+            for root in comp.entity_roots {
+                if seen_roots.insert(root.clone()) {
+                    all_entity_roots.push(root);
+                }
+            }
+        }
+
+        DeepPointerComparisonResult {
+            comparison: PointerPathComparison {
+                exact: all_exact,
+                entity_roots: all_entity_roots,
+            },
+            paths_a: total_paths_a,
+            paths_b: total_paths_b,
+            path_limit: comparison_limit,
+            candidate_targets,
+        }
+    } else {
+        let slot_targets_a = if entity_root_matching {
+            expand_entity_slot_targets(targets_a, entity_stride, entity_slots)
+        } else {
+            targets_a.to_vec()
+        };
+        let slot_targets_b = if entity_root_matching {
+            expand_entity_slot_targets(targets_b, entity_stride, entity_slots)
+        } else {
+            targets_b.to_vec()
+        };
+        let (paths_a, paths_b) = std::thread::scope(|s| {
+            let handle_a = s.spawn(|| {
+                map_a.paths_to_with_must_end(
+                    &slot_targets_a,
+                    limits.max_offset,
+                    limits.max_depth,
+                    comparison_limit,
+                    must_end,
+                )
+            });
+            let handle_b = s.spawn(|| {
+                map_b.paths_to_with_must_end(
+                    &slot_targets_b,
+                    limits.max_offset,
+                    limits.max_depth,
+                    comparison_limit,
+                    must_end,
+                )
+            });
+            (handle_a.join().unwrap(), handle_b.join().unwrap())
+        });
+        let paths_a_count = paths_a.len();
+        let paths_b_count = paths_b.len();
+        let comparison = compare_pointer_paths(
+            paths_a,
+            paths_b,
+            entity_root_matching.then_some(entity_stride).unwrap_or(0),
+            limits.result_limit,
+        );
+        let mut candidate_targets = HashMap::new();
+        if let Some(&first_target) = targets_a.first() {
+            for idx in 0..comparison.exact.len() {
+                candidate_targets.insert(idx, first_target);
+            }
+        }
+        DeepPointerComparisonResult {
+            comparison,
+            paths_a: paths_a_count,
+            paths_b: paths_b_count,
+            path_limit: comparison_limit,
+            candidate_targets,
+        }
+    }
 }
 
 struct DeepPointerResolvedRow {
@@ -6498,6 +6657,7 @@ impl CrosshairApp {
                 validation_rx: None,
                 filter_rx: None,
                 validation_rounds: 0,
+                strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
             });
             return;
         };
@@ -6546,10 +6706,17 @@ impl CrosshairApp {
                         }).unwrap_or_default();
                         text_targets.push((entry.address, text_val));
                     }
-                } else if entry.text_encoding.is_none() && entry.value_type == saved.value_type {
+                } else if entry.text_encoding.is_none() {
                     let val = entry.current.or_else(|| {
                         read_scan_value(pid, entry.address, entry.value_type).ok()
-                    }).unwrap_or(ScanValue::I64(0));
+                    }).unwrap_or_else(|| match entry.value_type {
+                        ScanValueType::I8 => ScanValue::I8(0),
+                        ScanValueType::I16 => ScanValue::I16(0),
+                        ScanValueType::I32 => ScanValue::I32(0),
+                        ScanValueType::F32 => ScanValue::F32(0.0),
+                        ScanValueType::I64 => ScanValue::I64(0),
+                        ScanValueType::F64 => ScanValue::F64(0.0),
+                    });
                     numeric_targets.push((entry.address, val));
                 }
             }
@@ -6620,6 +6787,7 @@ impl CrosshairApp {
                     validation_rx: None,
                     filter_rx: None,
                     validation_rounds: 0,
+                    strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
                 });
                 return;
             }
@@ -6689,6 +6857,7 @@ impl CrosshairApp {
             validation_rx: None,
             filter_rx: None,
             validation_rounds: 0,
+            strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
         });
     }
 
@@ -6747,6 +6916,9 @@ impl CrosshairApp {
                         entity_root_matching: false,
                         using_entity_roots: false,
                         comparison_stats: None,
+                        strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
+                        target_b_addresses: Vec::new(),
+                        candidate_targets: HashMap::new(),
                     });
                 }
                 return;
@@ -6759,7 +6931,7 @@ impl CrosshairApp {
         let worker_progress = Arc::clone(&progress);
         let worker_stage = Arc::clone(&stage);
         let (tx, rx) = mpsc::channel();
-        if let Some((map_a, targets_a, entity_stride, entity_slots, entity_root_matching)) = self
+        if let Some((map_a, targets_a, entity_stride, entity_slots, entity_root_matching, strict_multi_scan)) = self
             .memory_panel
             .deep_pointer_dialog
             .as_ref()
@@ -6771,6 +6943,7 @@ impl CrosshairApp {
                         dialog.entity_stride as usize,
                         dialog.entity_count as usize,
                         dialog.entity_root_matching,
+                        dialog.strict_multi_scan,
                     )
                 })
             })
@@ -6801,6 +6974,7 @@ impl CrosshairApp {
                 vec![saved.address]
             };
             let target_count = targets.len();
+            let targets_b_worker = targets.clone();
             thread::spawn(move || {
                 let result = capture_pointer_map_with_budget(
                     pid,
@@ -6811,74 +6985,39 @@ impl CrosshairApp {
                 )
                 .map(|map_b| {
                     worker_stage.store(1, Ordering::Relaxed);
-                    // ponytail: search past the display limit without explosive BFS; clamp to 10k-100k
-                    let comparison_limit = limits.result_limit.saturating_mul(16).clamp(
-                        10_000,
-                        100_000,
+                    let comp_res = run_deep_pointer_comparison(
+                        &map_a,
+                        &map_b,
+                        &targets_a,
+                        &targets_b_worker,
+                        entity_stride,
+                        entity_slots,
+                        entity_root_matching,
+                        limits,
+                        &must_end,
+                        strict_multi_scan,
                     );
-                    // Entity instances can occupy a different slot after restart. Searching
-                    // only the selected field address means the shared list root is never
-                    // enumerated, so comparing paths afterward cannot recover it.
-                    let targets_a = if entity_root_matching {
-                        expand_entity_slot_targets(&targets_a, entity_stride, entity_slots)
-                    } else {
-                        targets_a
-                    };
-                    let targets_b = if entity_root_matching {
-                        expand_entity_slot_targets(&targets, entity_stride, entity_slots)
-                    } else {
-                        targets
-                    };
-                    let (paths_a, paths_b) = std::thread::scope(|s| {
-                        let handle_a = s.spawn(|| {
-                            map_a.paths_to_with_must_end(
-                                &targets_a,
-                                limits.max_offset,
-                                limits.max_depth,
-                                comparison_limit,
-                                &must_end,
-                            )
-                        });
-                        let handle_b = s.spawn(|| {
-                            map_b.paths_to_with_must_end(
-                                &targets_b,
-                                limits.max_offset,
-                                limits.max_depth,
-                                comparison_limit,
-                                &must_end,
-                            )
-                        });
-                        (handle_a.join().unwrap(), handle_b.join().unwrap())
-                    });
                     worker_stage.store(3, Ordering::Relaxed);
-                    let paths_a_count = paths_a.len();
-                    let paths_b_count = paths_b.len();
-                    let comp_res = DeepPointerComparisonResult {
-                        comparison: compare_pointer_paths(
-                            paths_a,
-                            paths_b,
-                            entity_root_matching.then_some(entity_stride).unwrap_or(0),
-                            limits.result_limit,
-                        ),
-                        paths_a: paths_a_count,
-                        paths_b: paths_b_count,
-                        path_limit: comparison_limit,
-                    };
                     (comp_res, Some(map_b))
                 })
                 .map_err(|error| error.to_string());
                 let _ = tx.send(DeepPointerJobResult::Compared(result));
             });
             let dialog = self.memory_panel.deep_pointer_dialog.as_mut().unwrap();
+            dialog.target_b_addresses = targets.clone();
             dialog.value_type = saved.value_type;
             dialog.text_encoding = saved.text_encoding;
             dialog.text_byte_len = saved.text_byte_len;
-            dialog.status =
-                format!("Capturing map B and comparing {target_count} address(es) with map A...");
+            dialog.status = if dialog.strict_multi_scan && target_count > 1 {
+                format!("Capturing map B and strictly comparing {target_count} address pair(s) with map A (high accuracy)...")
+            } else {
+                format!("Capturing map B and comparing {target_count} address(es) with map A...")
+            };
             dialog.rx = Some(rx);
             dialog.progress = progress;
             dialog.stage = stage;
             dialog.candidates.clear();
+            dialog.candidate_targets.clear();
             dialog.resolved_rows.clear();
             dialog.selected.clear();
             dialog.selection_anchor = None;
@@ -6922,6 +7061,9 @@ impl CrosshairApp {
                 entity_root_matching: false,
                 using_entity_roots: false,
                 comparison_stats: None,
+                strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
+                target_b_addresses: Vec::new(),
+                candidate_targets: HashMap::new(),
             });
         }
     }
@@ -9192,6 +9334,24 @@ impl CrosshairApp {
                     dialog.source_addresses.first().copied(),
                     self.state.ui_language,
                 );
+
+                ui.horizontal(|ui| {
+                    if ui.checkbox(
+                        &mut dialog.strict_multi_scan,
+                        RichText::new(if self.state.ui_language == UiLanguage::Vietnamese {
+                            "🎯 Bảo toàn độ chính xác khi quét nhiều địa chỉ"
+                        } else {
+                            "🎯 High-accuracy multi-address scan"
+                        }).strong(),
+                    ).on_hover_text(if self.state.ui_language == UiLanguage::Vietnamese {
+                        "Quét độc lập từng địa chỉ với bộ nhớ đệm riêng biệt, bảo toàn đúng kiểu dữ liệu và mô tả gốc của từng biến đã chọn."
+                    } else {
+                        "Scans each address independently with dedicated budget, preserving exact data types and original descriptions."
+                    }).changed() {
+                        self.state.memory_pointer_strict_multi_scan = dialog.strict_multi_scan;
+                        self.persist();
+                    }
+                });
             });
 
             // Keep window list fresh to detect when game/app restarts
@@ -9635,7 +9795,7 @@ impl CrosshairApp {
                                             read_text_memory(pid, address, dialog.text_byte_len.max(1), enc).ok();
                                     } else {
                                         candidate.live_value =
-                                            read_scan_value(pid, address, dialog.value_type).ok();
+                                            read_scan_value(pid, address, candidate.expected_value.value_type()).ok();
                                     }
                                 }
                             }
@@ -9923,6 +10083,7 @@ impl CrosshairApp {
                         entity_roots: entity_root_count,
                         path_limit: result.path_limit,
                     });
+                    dialog.candidate_targets = result.candidate_targets;
                     dialog.using_entity_roots = exact_count == 0 && entity_root_count > 0;
                     dialog.candidates = if dialog.using_entity_roots {
                         comparison.entity_roots
@@ -9944,6 +10105,11 @@ impl CrosshairApp {
                         )
                     } else if exact_count == 0 {
                         "No identical pointer path found between map A and map B.".to_owned()
+                    } else if dialog.strict_multi_scan && dialog.source_addresses.len() > 1 {
+                        format!(
+                            "Compared map A and map B: {exact_count} identical pointer path(s) across {} target address pair(s) (high accuracy).",
+                            dialog.source_addresses.len()
+                        )
                     } else {
                         format!(
                             "Compared map A and map B: {exact_count} identical pointer path(s)."
@@ -10088,24 +10254,36 @@ impl CrosshairApp {
                     offsets: path.offsets,
                 };
                 if let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) {
-                    let current = if dialog.text_encoding.is_none() {
-                        read_scan_value(pid, address, dialog.display_type).ok()
+                    let orig_target = dialog.candidate_targets.get(&index).copied();
+                    let orig_entry = orig_target.and_then(|tgt| self.memory_panel.saved.iter().find(|s| s.address == tgt));
+                    let (val_type, text_enc, text_len, desc) = if let Some(orig) = orig_entry {
+                        let d = if orig.description.is_empty() {
+                            format!("{}+{:X}", path.module, path.module_offset)
+                        } else {
+                            format!("{}+{:X} ({})", path.module, path.module_offset, orig.description)
+                        };
+                        (orig.value_type, orig.text_encoding, orig.text_byte_len, d)
+                    } else {
+                        (dialog.display_type, dialog.text_encoding, dialog.text_byte_len, format!("{}+{:X}", path.module, path.module_offset))
+                    };
+                    let current = if text_enc.is_none() {
+                        read_scan_value(pid, address, val_type).ok()
                     } else {
                         None
                     };
-                    let current_text = if let Some(enc) = dialog.text_encoding {
-                        read_text_memory(pid, address, dialog.text_byte_len.max(1), enc).ok()
+                    let current_text = if let Some(enc) = text_enc {
+                        read_text_memory(pid, address, text_len.max(1), enc).ok()
                     } else {
                         None
                     };
                     self.memory_panel.saved.push(SavedMemoryAddress {
                         address,
-                        value_type: dialog.display_type,
+                        value_type: val_type,
                         current,
-                        text_encoding: dialog.text_encoding,
-                        text_byte_len: if dialog.text_encoding.is_some() { dialog.text_byte_len.max(1) } else { 0 },
+                        text_encoding: text_enc,
+                        text_byte_len: if text_enc.is_some() { text_len.max(1) } else { 0 },
                         current_text,
-                        description: format!("{}+{:X}", path.module, path.module_offset),
+                        description: desc,
                         group: String::new(),
                         hexadecimal: false,
                         pointer: Some(pointer),
@@ -10118,9 +10296,16 @@ impl CrosshairApp {
                 }
             }
             if total_selected > MAX_BATCH_ADD {
-                self.memory_panel.status = format!(
-                    "Added {added} deep pointer(s) (capped at {MAX_BATCH_ADD}). All candidates lead to the same address, so 1-2 pointers are enough!"
-                );
+                if dialog.source_addresses.len() > 1 {
+                    self.memory_panel.status = format!(
+                        "Added {added} deep pointer(s) across {} target addresses (capped at {MAX_BATCH_ADD}).",
+                        dialog.source_addresses.len()
+                    );
+                } else {
+                    self.memory_panel.status = format!(
+                        "Added {added} deep pointer(s) (capped at {MAX_BATCH_ADD}). All candidates lead to the same address, so 1-2 pointers are enough!"
+                    );
+                }
             } else {
                 self.memory_panel.status = format!("Added {added} deep pointer(s) to Address list");
             }
@@ -10132,11 +10317,16 @@ impl CrosshairApp {
                 dialog.stage.store(1, Ordering::Relaxed);
                 let worker_stage = Arc::clone(&dialog.stage);
                 let targets_a = dialog.source_addresses.clone();
-                let targets_b = dialog.source_addresses.clone();
+                let targets_b = if dialog.target_b_addresses.is_empty() {
+                    dialog.source_addresses.clone()
+                } else {
+                    dialog.target_b_addresses.clone()
+                };
                 let limits = self.pointer_scan_limits();
                 let entity_stride = dialog.entity_stride as usize;
                 let entity_slots = dialog.entity_count as usize;
                 let entity_root_matching = dialog.entity_root_matching;
+                let strict_multi_scan = dialog.strict_multi_scan;
                 let must_end = if dialog.must_end_with_enabled {
                     let raw = parse_must_end_offsets(&dialog.must_end_with_offsets);
                     if dialog.must_end_order_ce {
@@ -10149,55 +10339,26 @@ impl CrosshairApp {
                 };
                 thread::spawn(move || {
                     worker_stage.store(1, Ordering::Relaxed);
-                    let comparison_limit = limits.result_limit.saturating_mul(16).clamp(10_000, 100_000);
-                    let targets_a = if entity_root_matching {
-                        expand_entity_slot_targets(&targets_a, entity_stride, entity_slots)
-                    } else {
-                        targets_a
-                    };
-                    let targets_b = if entity_root_matching {
-                        expand_entity_slot_targets(&targets_b, entity_stride, entity_slots)
-                    } else {
-                        targets_b
-                    };
-                    let (paths_a, paths_b) = std::thread::scope(|s| {
-                        let handle_a = s.spawn(|| {
-                            map_a.paths_to_with_must_end(
-                                &targets_a,
-                                limits.max_offset,
-                                limits.max_depth,
-                                comparison_limit,
-                                &must_end,
-                            )
-                        });
-                        let handle_b = s.spawn(|| {
-                            map_b.paths_to_with_must_end(
-                                &targets_b,
-                                limits.max_offset,
-                                limits.max_depth,
-                                comparison_limit,
-                                &must_end,
-                            )
-                        });
-                        (handle_a.join().unwrap(), handle_b.join().unwrap())
-                    });
+                    let comp_res = run_deep_pointer_comparison(
+                        &map_a,
+                        &map_b,
+                        &targets_a,
+                        &targets_b,
+                        entity_stride,
+                        entity_slots,
+                        entity_root_matching,
+                        limits,
+                        &must_end,
+                        strict_multi_scan,
+                    );
                     worker_stage.store(3, Ordering::Relaxed);
-                    let paths_a_count = paths_a.len();
-                    let paths_b_count = paths_b.len();
-                    let comp_res = DeepPointerComparisonResult {
-                        comparison: compare_pointer_paths(
-                            paths_a,
-                            paths_b,
-                            entity_root_matching.then_some(entity_stride).unwrap_or(0),
-                            limits.result_limit,
-                        ),
-                        paths_a: paths_a_count,
-                        paths_b: paths_b_count,
-                        path_limit: comparison_limit,
-                    };
                     let _ = tx.send(DeepPointerJobResult::Compared(Ok((comp_res, None))));
                 });
             }
+        }
+        if dialog.strict_multi_scan != self.state.memory_pointer_strict_multi_scan {
+            self.state.memory_pointer_strict_multi_scan = dialog.strict_multi_scan;
+            self.persist();
         }
         if clear {
             self.memory_panel.status = "Pointer map A cleared".to_owned();
@@ -10356,13 +10517,41 @@ impl CrosshairApp {
             );
         });
 
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.checkbox(
+                    &mut dialog.strict_multi_scan,
+                    RichText::new(if language == UiLanguage::Vietnamese {
+                        "🎯 Bảo toàn độ chính xác khi quét nhiều địa chỉ"
+                    } else {
+                        "🎯 High-accuracy multi-address scan"
+                    }).strong(),
+                )
+                .on_hover_text(if language == UiLanguage::Vietnamese {
+                    "Quét và so sánh độc lập từng cặp địa chỉ mục tiêu (1-to-1) giữa 2 Map, tránh việc con trỏ bị lẫn lộn giữa các biến khác nhau."
+                } else {
+                    "Trace and match each target address pair (1-to-1) independently between maps, preventing cross-target false matches."
+                });
+            });
+        });
+
         ui.separator();
+        let show_target_col = dialog.source_addresses.len() > 1 && !dialog.candidate_targets.is_empty();
+        const TARGET_WIDTH: f32 = 120.0;
         const ROOT_WIDTH: f32 = 250.0;
         const OFFSETS_WIDTH: f32 = 180.0;
         const ADDRESS_WIDTH: f32 = 150.0;
         const VALUE_WIDTH: f32 = 130.0;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
+            if show_target_col {
+                Self::memory_label_cell(
+                    ui,
+                    TARGET_WIDTH,
+                    22.0,
+                    egui::Label::new(RichText::new("Target").strong()),
+                );
+            }
             Self::memory_label_cell(
                 ui,
                 ROOT_WIDTH,
@@ -10411,8 +10600,15 @@ impl CrosshairApp {
             .enumerate()
             .filter_map(|(index, path)| {
                 let module_lower = path.module.to_ascii_lowercase();
+                let matches_target = if show_target_col && !filter.is_empty() {
+                    dialog.candidate_targets.get(&index).copied().is_some_and(|t| {
+                        format!("{t:x}").contains(&filter) || format!("0x{t:x}").contains(&filter)
+                    })
+                } else {
+                    false
+                };
                 if (dialog.exe_only && !module_lower.ends_with(".exe"))
-                    || (!filter.is_empty() && !module_lower.contains(&filter))
+                    || (!filter.is_empty() && !module_lower.contains(&filter) && !matches_target)
                 {
                     None
                 } else {
@@ -10420,7 +10616,11 @@ impl CrosshairApp {
                 }
             })
             .collect();
-        let total_row_width = (ROOT_WIDTH + OFFSETS_WIDTH + ADDRESS_WIDTH + VALUE_WIDTH)
+        let total_row_width = (if show_target_col { TARGET_WIDTH } else { 0.0 }
+            + ROOT_WIDTH
+            + OFFSETS_WIDTH
+            + ADDRESS_WIDTH
+            + VALUE_WIDTH)
             .max(ui.available_width());
         egui::ScrollArea::both().show_rows(ui, 24.0, visible_indices.len(), |ui, rows| {
             ui.set_min_width(total_row_width);
@@ -10518,6 +10718,19 @@ impl CrosshairApp {
                 ui.allocate_ui_at_rect(row_rect, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
+                        if show_target_col {
+                            let target_text = dialog
+                                .candidate_targets
+                                .get(&index)
+                                .copied()
+                                .map_or_else(|| "-".to_owned(), format_prefixed_memory_address);
+                            Self::memory_label_cell(
+                                ui,
+                                TARGET_WIDTH,
+                                24.0,
+                                egui::Label::new(target_text).truncate(),
+                            );
+                        }
                         Self::memory_label_cell(
                             ui,
                             ROOT_WIDTH,
@@ -10662,7 +10875,7 @@ impl CrosshairApp {
                     .collect();
 
                 let pointer_width = process_pointer_width(pid).unwrap_or(8);
-                let val_width = value_type.width();
+                let _val_width = value_type.width();
 
                 let mut verified = 0;
                 let mut changed = 0;
@@ -10758,6 +10971,8 @@ impl CrosshairApp {
                                 changed += 1;
                             }
                         } else {
+                            let val_type = candidate.expected_value.value_type();
+                            let val_width = val_type.width();
                             if process.read(curr_addr, &mut val_buf[..val_width]).is_err() {
                                 candidate.valid = Some(false);
                                 candidate.observed_value = None;
@@ -10766,7 +10981,7 @@ impl CrosshairApp {
                                 broken += 1;
                                 continue;
                             }
-                            let Some(observed) = value_type.decode(&val_buf[..val_width]) else {
+                            let Some(observed) = val_type.decode(&val_buf[..val_width]) else {
                                 candidate.valid = Some(false);
                                 candidate.observed_value = None;
                                 candidate.live_value = None;
@@ -10861,30 +11076,43 @@ impl CrosshairApp {
                 .resolved_address
                 .or_else(|| resolve_memory_address(pid, base, Some(&pointer)).ok())
                 .unwrap_or(candidate.source_address);
-            let current = if dialog.text_encoding.is_none() {
+            let orig_entry = self.memory_panel.saved.iter().find(|s| s.address == candidate.source_address);
+            let (val_type, text_enc, text_len, base_desc) = if let Some(orig) = orig_entry {
+                (orig.value_type, orig.text_encoding, orig.text_byte_len, orig.description.clone())
+            } else {
+                (candidate.expected_value.value_type(), dialog.text_encoding, dialog.text_byte_len, String::new())
+            };
+            let current = if text_enc.is_none() {
                 candidate
                     .live_value
-                    .or_else(|| read_scan_value(pid, address, dialog.value_type).ok())
+                    .or_else(|| read_scan_value(pid, address, val_type).ok())
             } else {
                 None
             };
-            let current_text = if let Some(enc) = dialog.text_encoding {
+            let current_text = if let Some(enc) = text_enc {
                 candidate.live_text.clone().or_else(|| {
-                    read_text_memory(pid, address, dialog.text_byte_len.max(1), enc).ok()
+                    read_text_memory(pid, address, text_len.max(1), enc).ok()
                 })
             } else {
                 None
             };
-            let desc = format!(
-                "{}+{:X}",
-                candidate.path.module, candidate.path.module_offset
-            );
+            let desc = if base_desc.is_empty() {
+                format!(
+                    "{}+{:X}",
+                    candidate.path.module, candidate.path.module_offset
+                )
+            } else {
+                format!(
+                    "{}+{:X} ({})",
+                    candidate.path.module, candidate.path.module_offset, base_desc
+                )
+            };
             self.memory_panel.saved.push(SavedMemoryAddress {
                 address,
-                value_type: dialog.value_type,
+                value_type: val_type,
                 current,
-                text_encoding: dialog.text_encoding,
-                text_byte_len: if dialog.text_encoding.is_some() { dialog.text_byte_len.max(1) } else { 0 },
+                text_encoding: text_enc,
+                text_byte_len: if text_enc.is_some() { text_len.max(1) } else { 0 },
                 current_text,
                 description: desc,
                 group: String::new(),
@@ -19694,5 +19922,48 @@ mod tests {
         // Click item 5 again unselects
         select_item(5, false, &mut selected, &mut anchor);
         assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn test_strict_multi_scan_deep_pointer_comparison() {
+        use crate::process_memory::PointerMap;
+        use crate::ui::memory_panel::run_deep_pointer_comparison;
+        use crate::ui::memory_panel::PointerScanLimits;
+
+        let modules = vec![("game.exe".to_owned(), 0x1000, 0x100)];
+        // Map A: location 0x1010 in module holds value 0x2000. Target A1 = 0x2000 + 0x10, Target A2 = 0x2000 + 0x20.
+        // Pointers are stored as (value, location):
+        let map_a = PointerMap::new_for_test(vec![(0x2000, 0x1010)], modules.clone());
+        // Map B: location 0x1010 in module holds value 0x3000. Target B1 = 0x3000 + 0x10, Target B2 = 0x3000 + 0x20.
+        let map_b = PointerMap::new_for_test(vec![(0x3000, 0x1010)], modules);
+
+        let targets_a = vec![0x2010, 0x2020];
+        let targets_b = vec![0x3010, 0x3020];
+
+        let limits = PointerScanLimits {
+            max_depth: 2,
+            max_offset: 0x100,
+            result_limit: 10,
+            max_bytes: 1024 * 1024,
+        };
+
+        let res = run_deep_pointer_comparison(
+            &map_a,
+            &map_b,
+            &targets_a,
+            &targets_b,
+            0,
+            0,
+            false,
+            limits,
+            &[],
+            true,
+        );
+
+        assert_eq!(res.comparison.exact.len(), 2);
+        assert_eq!(res.candidate_targets.get(&0), Some(&0x2010));
+        assert_eq!(res.comparison.exact[0].offsets, vec![0x10]);
+        assert_eq!(res.candidate_targets.get(&1), Some(&0x2020));
+        assert_eq!(res.comparison.exact[1].offsets, vec![0x20]);
     }
 }
