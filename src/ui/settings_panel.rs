@@ -688,10 +688,6 @@ impl CrosshairApp {
     pub(crate) fn render_downloaded_tools_settings(&mut self, ui: &mut egui::Ui, card_width: f32) {
         self.poll_mouse_tool_jobs();
         let language = self.state.ui_language;
-        let opencv_path = self.paths.opencv_dll.clone();
-        let ffmpeg_path = self.paths.ffmpeg_exe.clone();
-        let frida_path = self.paths.frida_helper_exe.clone();
-        let arduino_path = self.paths.avrdude_exe.clone();
         let opencv_progress = self
             .opencv_download_job
             .as_ref()
@@ -708,7 +704,6 @@ impl CrosshairApp {
             .game_capture_download_job
             .as_ref()
             .map(|_| self.game_capture_download_progress.load(Ordering::SeqCst) as f32 / 1000.0);
-        let game_capture_path = self.paths.graphics_hook64_dll.clone();
         let frida_progress = self
             .frida_download_job
             .as_ref()
@@ -732,6 +727,12 @@ impl CrosshairApp {
                 }
 
                 if self.downloaded_tools_open {
+                    let opencv_path = self.paths.opencv_dll.clone();
+                    let ffmpeg_path = self.paths.ffmpeg_exe.clone();
+                    let game_capture_path = self.paths.graphics_hook64_dll.clone();
+                    let frida_path = self.paths.frida_helper_exe.clone();
+                    let arduino_path = self.paths.avrdude_exe.clone();
+
                     ui.add_space(6.0);
                     self.render_downloaded_tool_entry(
                         ui,
@@ -830,7 +831,7 @@ impl CrosshairApp {
         let restart_required = self.interception_driver_needs_restart;
         let action_width = Self::settings_tool_action_width();
         let package_size_label =
-            Self::tool_size_label(language, &self.paths.interception_zip, 389_119);
+            Self::tool_size_label(ui.ctx(), language, &self.paths.interception_zip, 389_119);
 
         ui.vertical(|ui| {
             if downloading_progress.is_some() {
@@ -1013,9 +1014,26 @@ impl CrosshairApp {
             } else {
                 None
             };
-            let all_installed = crate::ocr::are_all_language_packs_installed();
-            let has_assets = crate::ocr::has_any_ocr_assets();
-            let current_size = crate::ocr::ocr_assets_disk_usage_bytes();
+            let ocr_cache_id = egui::Id::new("ocr-tool-status-cache");
+            let now = Instant::now();
+            let cached_ocr = if is_downloading {
+                None
+            } else {
+                ui.ctx().data(|d| {
+                    d.get_temp::<(Instant, bool, u64)>(ocr_cache_id)
+                        .filter(|(t, _, _)| now.duration_since(*t) < Duration::from_secs(4))
+                        .map(|(_, all_installed, size)| (all_installed, size))
+                })
+            };
+            let (all_installed, current_size) = cached_ocr.unwrap_or_else(|| {
+                let all_installed = crate::ocr::are_all_language_packs_installed();
+                let current_size = crate::ocr::ocr_assets_disk_usage_bytes();
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(ocr_cache_id, (now, all_installed, current_size));
+                });
+                (all_installed, current_size)
+            });
+            let has_assets = current_size > 0;
             let state_label = if all_installed {
                 Self::tr_lang(language, "Installed", "Đã cài đặt")
             } else {
@@ -1081,6 +1099,9 @@ impl CrosshairApp {
                         .clicked()
                         {
                             self.delete_all_ocr_assets();
+                            ui.ctx().data_mut(|d| {
+                                d.remove::<(Instant, bool, u64)>(ocr_cache_id);
+                            });
                             self.status = "OCR assets deleted.".to_owned();
                         }
                     } else if Self::settings_action_button_fixed(
@@ -1123,6 +1144,7 @@ impl CrosshairApp {
                             [details_width, 0.0],
                             egui::Label::new(
                                 RichText::new(Self::tool_size_label(
+                                    ui.ctx(),
                                     language,
                                     path,
                                     expected_size_bytes,
@@ -1144,6 +1166,9 @@ impl CrosshairApp {
                         .clicked()
                         {
                             delete_action(self);
+                            ui.ctx().data_mut(|d| {
+                                d.remove::<(Instant, String)>(egui::Id::new(("tool-size-cache", path)));
+                            });
                             self.status = delete_status_text.to_owned();
                         }
                     } else if let Some(progress) = downloading_progress {
@@ -2185,8 +2210,24 @@ impl CrosshairApp {
         self.status = "Launching Interception driver uninstaller...".to_owned();
     }
 
-    fn tool_size_label(language: UiLanguage, path: &Path, expected_size_bytes: u64) -> String {
-        match fs::metadata(path) {
+    fn tool_size_label(
+        ctx: &egui::Context,
+        language: UiLanguage,
+        path: &Path,
+        expected_size_bytes: u64,
+    ) -> String {
+        let cache_id = egui::Id::new(("tool-size-cache", path));
+        let now = Instant::now();
+        let cached = ctx.data(|d| {
+            d.get_temp::<(Instant, String)>(cache_id)
+                .filter(|(t, _)| now.duration_since(*t) < Duration::from_secs(4))
+                .map(|(_, s)| s)
+        });
+        if let Some(label) = cached {
+            return label;
+        }
+
+        let label = match fs::metadata(path) {
             Ok(metadata) => format!(
                 "{}: {}",
                 Self::tr_lang(language, "Size", "Dung lượng"),
@@ -2197,7 +2238,9 @@ impl CrosshairApp {
                 Self::tr_lang(language, "Expected size", "Dung lượng dự kiến"),
                 Self::format_file_size(expected_size_bytes)
             ),
-        }
+        };
+        ctx.data_mut(|d| d.insert_temp(cache_id, (now, label.clone())));
+        label
     }
 
     fn format_file_size(bytes: u64) -> String {
