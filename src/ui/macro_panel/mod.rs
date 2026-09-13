@@ -12904,93 +12904,131 @@ if supports_move_mouse || show_detection_tuning {
                             let mut compact_cursor = 0usize;
                             let mut hovered_region = None;
                             let mut sync_delay_to_selected: Option<(String, u64, String)> = None;
+
+                            // Precompute invariant properties once per frame across all steps in preset (O(N) instead of O(N^2))
+                            let has_stop_audio = preset.steps.iter().any(|s| {
+                                matches!(s.action, MacroAction::StopAudioSense) && s.enabled
+                            });
+                            let needs_explicit_vision_stop =
+                                Self::vision_search_needs_explicit_stop(preset);
+
+                            let mut is_inside_loop = vec![false; steps_len];
+                            let mut loop_depth = 0usize;
+                            for (idx, s) in preset.steps.iter().enumerate() {
+                                if loop_depth > 0 {
+                                    is_inside_loop[idx] = true;
+                                }
+                                if s.enabled {
+                                    if s.action == MacroAction::LoopStart {
+                                        loop_depth += 1;
+                                    } else if s.action == MacroAction::LoopEnd {
+                                        loop_depth = loop_depth.saturating_sub(1);
+                                    }
+                                }
+                            }
+
+                            let mut preset_selected_indices = selected_steps_snapshot
+                                .iter()
+                                .filter_map(|(selected_group, selected_preset, selected_index)| {
+                                    (*selected_group == group.id && *selected_preset == preset.id)
+                                        .then_some(*selected_index)
+                                })
+                                .collect::<Vec<_>>();
+                            preset_selected_indices.sort_unstable();
+
+                            let step_height_id = ui.make_persistent_id((group.id, preset.id, "macro-step-row-height"));
+                            let mut estimated_step_height = ui.memory(|mem| {
+                                mem.data.get_temp::<f32>(step_height_id).unwrap_or(25.0)
+                            });
+                            let cull_rect = ui.clip_rect().expand2(egui::vec2(0.0, 300.0));
+
                             for (display_index, step_index) in
                                 visual_step_order.iter().copied().enumerate()
                             {
                                 let step_is_being_dragged =
                                     active_dragged_indices.contains(&step_index);
+                                let cursor_pos = ui.cursor().min;
+                                let prospective_rect = Rect::from_min_size(
+                                    cursor_pos,
+                                    egui::vec2(ui.available_width(), estimated_step_height),
+                                );
+                                let is_visible = prospective_rect.intersects(cull_rect);
+
+                                // Viewport culling: offscreen rows bypass all widget/layout overhead
+                                if !is_visible && !step_is_being_dragged {
+                                    let (allocated_rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(ui.available_width(), estimated_step_height),
+                                        egui::Sense::hover(),
+                                    );
+                                    step_rects[step_index] = allocated_rect;
+                                    if drag_payload.is_some()
+                                        && next_compact_preview_index == steps_len
+                                        && pointer_y.is_some_and(|pointer_y| {
+                                            pointer_y < allocated_rect.bottom()
+                                        })
+                                    {
+                                        next_compact_preview_index = if step_is_being_dragged {
+                                            compact_cursor
+                                        } else {
+                                            let moving_up = active_current_compact_index
+                                                .is_some_and(|current| compact_cursor < current);
+                                            if moving_up {
+                                                compact_cursor
+                                            } else {
+                                                compact_cursor + 1
+                                            }
+                                        };
+                                    }
+                                    if !step_is_being_dragged {
+                                        compact_cursor += 1;
+                                    }
+                                    continue;
+                                }
+
                                 let has_step_break_loop_warning = {
                                     let current_step = &preset.steps[step_index];
                                     current_step.action == MacroAction::StopIfKeyPressed
                                         && current_step.enabled
-                                        && !{
-                                            let mut depth = 0;
-                                            let mut inside = false;
-                                            for (idx, s) in preset.steps.iter().enumerate() {
-                                                if idx == step_index {
-                                                    if depth > 0 {
-                                                        inside = true;
-                                                    }
-                                                    break;
-                                                }
-                                                if s.enabled {
-                                                    if s.action == MacroAction::LoopStart {
-                                                        depth += 1;
-                                                    } else if s.action == MacroAction::LoopEnd {
-                                                        if depth > 0 {
-                                                            depth -= 1;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            inside
-                                        }
+                                        && !is_inside_loop[step_index]
                                 };
-                                 let step_ref = &preset.steps[step_index];
-                                 let loop_start_needs_end = step_ref.action == MacroAction::LoopStart && {
-                                     let mut nested = 0usize;
-                                     !preset.steps[step_index + 1..].iter().any(|candidate| {
-                                         match candidate.action {
-                                             MacroAction::LoopStart => nested += 1,
-                                             MacroAction::LoopEnd if nested == 0 => return true,
-                                             MacroAction::LoopEnd => nested -= 1,
-                                             _ => {}
-                                         }
-                                         false
-                                     })
-                                 };
-                                 let if_start_needs_end = step_ref.action == MacroAction::IfStart && {
-                                     let mut nested = 0usize;
-                                     !preset.steps[step_index + 1..].iter().any(|candidate| {
-                                         match candidate.action {
-                                             MacroAction::IfStart => nested += 1,
-                                             MacroAction::IfEnd if nested == 0 => return true,
-                                             MacroAction::IfEnd => nested -= 1,
-                                             _ => {}
-                                         }
-                                         false
-                                     })
-                                 };
+                                let step_ref = &preset.steps[step_index];
+                                let loop_start_needs_end = step_ref.action == MacroAction::LoopStart && {
+                                    let mut nested = 0usize;
+                                    !preset.steps[step_index + 1..].iter().any(|candidate| {
+                                        match candidate.action {
+                                            MacroAction::LoopStart => nested += 1,
+                                            MacroAction::LoopEnd if nested == 0 => return true,
+                                            MacroAction::LoopEnd => nested -= 1,
+                                            _ => {}
+                                        }
+                                        false
+                                    })
+                                };
+                                let if_start_needs_end = step_ref.action == MacroAction::IfStart && {
+                                    let mut nested = 0usize;
+                                    !preset.steps[step_index + 1..].iter().any(|candidate| {
+                                        match candidate.action {
+                                            MacroAction::IfStart => nested += 1,
+                                            MacroAction::IfEnd if nested == 0 => return true,
+                                            MacroAction::IfEnd => nested -= 1,
+                                            _ => {}
+                                        }
+                                        false
+                                    })
+                                };
                                 let is_vision_active = step_ref.action == MacroAction::StartVisionSearch && {
                                     crate::overlay::is_vision_following_active_by_spec(&step_ref.key)
                                 };
                                 let is_timer_active = Self::step_has_running_timer(step_ref);
                                 let is_active = is_vision_active;
-                                let has_stop_audio = preset.steps.iter().any(|s| {
-                                    matches!(
-                                        s.action,
-                                        MacroAction::StopAudioSense
-                                    ) && s.enabled
-                                });
-                                let needs_explicit_vision_stop =
-                                    Self::vision_search_needs_explicit_stop(preset);
                                 let step = &mut preset.steps[step_index];
                                 let is_selected = selected_steps_snapshot
                                     .contains(&(group.id, preset.id, step_index));
                                 let drag_indices = if is_selected {
-                                    let mut indices = selected_steps_snapshot
-                                        .iter()
-                                        .filter_map(|(selected_group, selected_preset, selected_index)| {
-                                            (*selected_group == group.id
-                                                && *selected_preset == preset.id)
-                                                .then_some(*selected_index)
-                                        })
-                                        .collect::<Vec<_>>();
-                                    indices.sort_unstable();
-                                    if indices.is_empty() {
+                                    if preset_selected_indices.is_empty() {
                                         vec![step_index]
                                     } else {
-                                        indices
+                                        preset_selected_indices.clone()
                                     }
                                 } else {
                                     vec![step_index]
@@ -16768,6 +16806,13 @@ if supports_move_mouse || show_detection_tuning {
                                  }
                                 if row_response.secondary_clicked() {
                                     remove_step = Some((preset.id, step_index));
+                                }
+                                let actual_height = row_response.rect.height();
+                                if (actual_height - estimated_step_height).abs() > 0.5 && actual_height > 10.0 {
+                                    estimated_step_height = actual_height;
+                                    ui.memory_mut(|mem| {
+                                        mem.data.insert_temp(step_height_id, actual_height);
+                                    });
                                 }
                                 step_rects[step_index] = row_response.rect;
                                 if drag_payload.is_some()
@@ -22605,6 +22650,61 @@ mod tests {
 
         assert!(cleared, "Preview must be cleared immediately upon unhover");
         assert!(!hover_preview_active, "Hover preview state must deactivate");
+    }
+
+    #[test]
+    fn test_precomputed_loop_depth_matches_iterative_depth() {
+        use crate::model::{MacroAction, MacroStep};
+        let steps = vec![
+            MacroStep { action: MacroAction::KeyPress, enabled: true, ..Default::default() },
+            MacroStep { action: MacroAction::LoopStart, enabled: true, ..Default::default() },
+            MacroStep { action: MacroAction::StopIfKeyPressed, enabled: true, ..Default::default() },
+            MacroStep { action: MacroAction::LoopStart, enabled: false, ..Default::default() },
+            MacroStep { action: MacroAction::LoopStart, enabled: true, ..Default::default() },
+            MacroStep { action: MacroAction::KeyPress, enabled: true, ..Default::default() },
+            MacroStep { action: MacroAction::LoopEnd, enabled: true, ..Default::default() },
+            MacroStep { action: MacroAction::StopIfKeyPressed, enabled: true, ..Default::default() },
+            MacroStep { action: MacroAction::LoopEnd, enabled: true, ..Default::default() },
+            MacroStep { action: MacroAction::StopIfKeyPressed, enabled: true, ..Default::default() },
+        ];
+
+        let mut is_inside_loop = vec![false; steps.len()];
+        let mut loop_depth = 0usize;
+        for (idx, s) in steps.iter().enumerate() {
+            if loop_depth > 0 {
+                is_inside_loop[idx] = true;
+            }
+            if s.enabled {
+                if s.action == MacroAction::LoopStart {
+                    loop_depth += 1;
+                } else if s.action == MacroAction::LoopEnd {
+                    loop_depth = loop_depth.saturating_sub(1);
+                }
+            }
+        }
+
+        for step_index in 0..steps.len() {
+            let mut depth = 0;
+            let mut inside = false;
+            for (idx, s) in steps.iter().enumerate() {
+                if idx == step_index {
+                    if depth > 0 {
+                        inside = true;
+                    }
+                    break;
+                }
+                if s.enabled {
+                    if s.action == MacroAction::LoopStart {
+                        depth += 1;
+                    } else if s.action == MacroAction::LoopEnd {
+                        if depth > 0 {
+                            depth -= 1;
+                        }
+                    }
+                }
+            }
+            assert_eq!(is_inside_loop[step_index], inside, "Mismatch at step {}", step_index);
+        }
     }
 }
 
