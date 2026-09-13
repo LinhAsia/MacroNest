@@ -228,7 +228,7 @@ impl CrosshairApp {
         timer_names: &[String],
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
-        id_source: impl std::hash::Hash,
+        id_source: impl std::hash::Hash + Copy,
         group_id: u32,
         preset_id: u32,
         step_index: usize,
@@ -241,60 +241,19 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
 
-            let live_open_windows = crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
-            let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
-            let window_label = step
-                .background_target_window
-                .as_deref()
-                .map(|selector| Self::display_title_for_selector(selector, effective_open_windows))
-                .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Focused window", "Cửa sổ đang focus").to_owned()
-                });
-            let combo_resp = egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-click-window")))
-                .width(135.0)
-                .selected_text(Self::truncate_window_title(&window_label, 18))
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(
-                            step.background_target_window.is_none(),
-                            Self::tr_lang(language, "Focused window", "Cửa sổ đang focus"),
-                        )
-                        .clicked()
-                    {
-                        step.background_target_window = None;
-                        changed = true;
-                    }
-                    for window in effective_open_windows {
-                        let clean_title = crate::window_list::strip_rule_suffix(&window.title);
-                        let is_selected = step.background_target_window.as_deref().map_or(false, |s| {
-                            s == window.selector
-                                || s == window.title
-                                || crate::window_list::strip_rule_suffix(s) == clean_title
-                        });
-                        if ui
-                            .selectable_label(
-                                is_selected,
-                                Self::truncate_window_title(
-                                    &Self::simplify_window_title(&window.title),
-                                    35,
-                                ),
-                            )
-                            .on_hover_text(&window.selector)
-                            .clicked()
-                        {
-                            step.background_target_window = Some(window.selector.clone());
-                            changed = true;
-                        }
-                    }
-                });
-            if combo_resp.response.clicked() {
-                let ctx = ui.ctx().clone();
-                std::thread::spawn(move || {
-                    let windows = crate::window_list::list_open_windows();
-                    *crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
-                    ctx.request_repaint();
-                });
-            }
+            let mut duplicate_mode = false;
+            let none_label = Self::tr_lang(language, "Focused window", "Cửa sổ đang focus");
+            changed |= Self::render_window_target_combo_with_duplicate_mode(
+                ui,
+                language,
+                (id_source, "bg-click-window"),
+                &none_label,
+                &mut step.background_target_window,
+                &mut duplicate_mode,
+                open_windows,
+                135.0,
+                true,
+            );
 
             let button_label = match step.background_mouse_button.as_str() {
                 "Left" => Self::tr_lang(language, "Left Click", "Click Trái"),
@@ -556,7 +515,7 @@ impl CrosshairApp {
         timer_names: &[String],
         vietnamese_input_enabled: bool,
         vietnamese_input_mode: VietnameseInputMode,
-        id_source: impl std::hash::Hash,
+        id_source: impl std::hash::Hash + Copy,
         capture_target: CaptureRequest,
         capture_target_snapshot: Option<&CaptureRequest>,
         next_capture_target: &mut Option<CaptureRequest>,
@@ -566,60 +525,19 @@ impl CrosshairApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
 
-            let live_open_windows = crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
-            let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
-            let window_label = step
-                .background_target_window
-                .as_deref()
-                .map(|selector| Self::display_title_for_selector(selector, effective_open_windows))
-                .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Focused window", "Cửa sổ đang focus").to_owned()
-                });
-            let combo_resp = egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-key-window")))
-                .width(135.0)
-                .selected_text(Self::truncate_window_title(&window_label, 18))
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(
-                            step.background_target_window.is_none(),
-                            Self::tr_lang(language, "Focused window", "Cửa sổ đang focus"),
-                        )
-                        .clicked()
-                    {
-                        step.background_target_window = None;
-                        changed = true;
-                    }
-                    for window in effective_open_windows {
-                        let clean_title = crate::window_list::strip_rule_suffix(&window.title);
-                        let is_selected = step.background_target_window.as_deref().map_or(false, |s| {
-                            s == window.selector
-                                || s == window.title
-                                || crate::window_list::strip_rule_suffix(s) == clean_title
-                        });
-                        if ui
-                            .selectable_label(
-                                is_selected,
-                                Self::truncate_window_title(
-                                    &Self::simplify_window_title(&window.title),
-                                    35,
-                                ),
-                            )
-                            .on_hover_text(&window.selector)
-                            .clicked()
-                        {
-                            step.background_target_window = Some(window.selector.clone());
-                            changed = true;
-                        }
-                    }
-                });
-            if combo_resp.response.clicked() {
-                let ctx = ui.ctx().clone();
-                std::thread::spawn(move || {
-                    let windows = crate::window_list::list_open_windows();
-                    *crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
-                    ctx.request_repaint();
-                });
-            }
+            let mut duplicate_mode = false;
+            let none_label = Self::tr_lang(language, "Focused window", "Cửa sổ đang focus");
+            changed |= Self::render_window_target_combo_with_duplicate_mode(
+                ui,
+                language,
+                (id_source, "bg-key-window"),
+                &none_label,
+                &mut step.background_target_window,
+                &mut duplicate_mode,
+                open_windows,
+                135.0,
+                true,
+            );
 
             let current_mode = if step.background_key_mode.is_empty() {
                 "Press".to_string()

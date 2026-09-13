@@ -8795,15 +8795,6 @@ impl CrosshairApp {
         path
     }
 
-    fn selectable_process_row(
-        ui: &mut egui::Ui,
-        selected: bool,
-        label: impl Into<egui::WidgetText>,
-        pid: u32,
-        path: &str,
-    ) -> egui::Response {
-        Self::selectable_process_row_with_selector(ui, selected, label, pid, path, None)
-    }
 
     fn selectable_process_row_with_selector(
         ui: &mut egui::Ui,
@@ -8958,26 +8949,25 @@ impl CrosshairApp {
                 }
             })
             .unwrap_or(label_when_none.to_owned());
-        let truncated_selected_text = Self::truncate_window_title(&selected_text, 40);
+        let max_chars = if width <= 150.0 { 18 } else if width <= 200.0 { 26 } else { 40 };
+        let truncated_selected_text = Self::truncate_window_title(&selected_text, max_chars);
         let popup_state_id = ui.make_persistent_id((id_source, "duplicate-title-hover"));
         let mut expanded_title = ui
             .ctx()
             .data(|data| data.get_temp::<String>(popup_state_id));
 
         if let Some(window) = target.as_deref().and_then(|selector| {
+            let clean = crate::window_list::strip_rule_suffix(selector);
             effective_open_windows
                 .iter()
-                .find(|window| window.selector == selector)
+                .find(|window| {
+                    window.selector == selector
+                        || window.selector == clean
+                        || window.title == clean
+                        || crate::window_list::strip_rule_suffix(&window.title) == clean
+                })
         }) {
-            let path = if window.process_path.is_empty() {
-                PROCESS_PATHS
-                    .lock()
-                    .get(&window.process_id)
-                    .cloned()
-                    .unwrap_or_default()
-            } else {
-                window.process_path.clone()
-            };
+            let path = Self::lazy_process_path(window.process_id, &window.process_path);
             if let Some(texture) = Self::process_icon_texture(ui.ctx(), &path) {
                 ui.add(Image::new((texture.id(), vec2(16.0, 16.0))));
             }
@@ -9004,7 +8994,7 @@ impl CrosshairApp {
                     let first_selector = selectors.first().cloned().unwrap_or_default();
                     let main_selected = target.as_deref().is_some_and(|current| {
                         Self::display_title_for_selector(current, effective_open_windows) == title
-                    }) && *match_duplicate_window_titles;
+                    }) && (!has_duplicates || *match_duplicate_window_titles);
                     let row_label = if has_duplicates {
                         format!("{title}  >")
                     } else {
@@ -9116,16 +9106,16 @@ impl CrosshairApp {
                                         .find(|window| window.selector == *selector)
                                         .map(|window| window.process_id)
                                         .unwrap_or_default();
-                                    let child_response = Self::selectable_process_row(
+                                    let child_resp = Self::selectable_process_row_with_selector(
                                         ui,
                                         child_selected,
                                         truncated_selector,
                                         process_id,
                                         process_path,
-                                    )
-                                    .on_hover_text(selector);
-                                    child_hovered |= child_response.hovered();
-                                    if child_response.clicked() {
+                                        Some(selector),
+                                    );
+                                    child_hovered |= child_resp.hovered();
+                                    if child_resp.clicked() {
                                         *target = Some(selector.clone());
                                         *match_duplicate_window_titles = false;
                                         expanded_title = None;
@@ -9140,7 +9130,11 @@ impl CrosshairApp {
                     }
                 }
             });
-        if combo_response.response.clicked() {
+        let mut response = combo_response.response;
+        if !selected_text.is_empty() {
+            response = response.on_hover_text(&selected_text);
+        }
+        if response.clicked() {
             let ctx = ui.ctx().clone();
             std::thread::spawn(move || {
                 let windows = window_list::list_open_windows();

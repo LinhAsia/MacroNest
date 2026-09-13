@@ -1735,6 +1735,14 @@ mod tests {
     fn window_match_rules_and_browser_matching() {
         assert_eq!(strip_rule_suffix("Window [Lowest]"), "Window");
         assert_eq!(parse_window_match_rule("Window [Lowest]").1, Some(WindowMatchRule::Lowest));
+        assert_eq!(strip_rule_suffix("Window [Highest]"), "Window");
+        assert_eq!(parse_window_match_rule("Window [Highest]").1, Some(WindowMatchRule::Highest));
+        assert_eq!(strip_rule_suffix("Window [Leftmost]"), "Window");
+        assert_eq!(parse_window_match_rule("Window [Leftmost]").1, Some(WindowMatchRule::Leftmost));
+        assert_eq!(strip_rule_suffix("Window [Rightmost]"), "Window");
+        assert_eq!(parse_window_match_rule("Window [Rightmost]").1, Some(WindowMatchRule::Rightmost));
+        assert!(has_position_rule_suffix("Microsoft Edge [Leftmost]"));
+        assert!(!has_position_rule_suffix("Microsoft Edge"));
 
         assert!(window_matches_candidate_title(
             "Doc - Google Chrome",
