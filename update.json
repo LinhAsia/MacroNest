@@ -1,6 +1,5 @@
 {
   "version": "1.2.8",
-  "notes": "Added background key press (BackgroundKey) action with child window routing and thread input synchronization, dynamic window list refresh in macro dropdowns, duplicate keystroke prevention, and stability fixes.",
+  "notes": "Added Background Keyboard and Background Mouse actions without stealing window focus.",
   "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.8/MacroNest.exe"
 }
-
