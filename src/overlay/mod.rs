@@ -278,6 +278,14 @@ mod windows_overlay {
     static MEMORY_TRIGGER_EVENTS: Lazy<Mutex<Vec<HotkeyBinding>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
 
+    struct ActiveInstructionScanState {
+        stop_handle: Option<crate::memory_debugger::debugger::AccessWatch>,
+        stop_flag: Arc<AtomicBool>,
+    }
+
+    static ACTIVE_INSTRUCTION_SCAN: Lazy<Mutex<Option<ActiveInstructionScanState>>> =
+        Lazy::new(|| Mutex::new(None));
+
     pub(crate) fn set_memory_pointer_entries(entries: &[crate::model::MemoryPointerEntry]) {
         *MEMORY_POINTER_ENTRIES.lock() = entries.to_vec();
     }
@@ -28909,6 +28917,22 @@ mod windows_overlay {
                 let _ = set_macro_steps_enabled(&step.key, false);
             }
 
+            MacroAction::ReadMemory => {
+                execute_read_memory_action_step(step);
+            }
+
+            MacroAction::WriteMemory => {
+                execute_write_memory_action_step(step);
+            }
+
+            MacroAction::ScanInstruction => {
+                execute_scan_instruction_action_step(step, preset_id);
+            }
+
+            MacroAction::StopInstructionScan => {
+                execute_stop_instruction_scan_action_step();
+            }
+
             _ => {
                 let _ = send_key_event(step);
             }
@@ -29291,6 +29315,8 @@ mod windows_overlay {
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
                 MacroAction::WriteMemory => execute_write_memory_action_step(step),
+                MacroAction::ScanInstruction => execute_scan_instruction_action_step(step, preset_id),
+                MacroAction::StopInstructionScan => execute_stop_instruction_scan_action_step(),
 
                 MacroAction::JumpToStep => {
                     let interpolated = interpolate_variables(&step.key);
@@ -30136,6 +30162,8 @@ mod windows_overlay {
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
                 MacroAction::WriteMemory => execute_write_memory_action_step(step),
+                MacroAction::ScanInstruction => execute_scan_instruction_action_step(step, preset_id),
+                MacroAction::StopInstructionScan => execute_stop_instruction_scan_action_step(),
 
                 MacroAction::JumpToStep => {
                     let interpolated = interpolate_variables(&step.key);
@@ -31295,7 +31323,11 @@ mod windows_overlay {
 
     fn parse_memory_address(text: &str) -> Option<usize> {
         let address_text = interpolate_variables(text);
-        let address_text = address_text.trim().replace('_', "");
+        let address_text = address_text
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .replace('_', "");
         if let Some(hex) = address_text
             .strip_prefix("0x")
             .or_else(|| address_text.strip_prefix("0X"))
@@ -32019,10 +32051,11 @@ mod windows_overlay {
         if target_var.is_empty() {
             return;
         }
-        let is_tracked_alias = step.key.trim().starts_with('@');
+        let raw_key = interpolate_variables(&step.key);
+        let is_tracked_alias = raw_key.trim().starts_with('@');
         let target_pid = macro_memory_target_pid(step.memory_target_window.as_deref());
         let value =
-            resolve_memory_action_target(target_pid, &step.key, true).and_then(|(pid, address)| {
+            resolve_memory_action_target(target_pid, &raw_key, true).and_then(|(pid, address)| {
                 crate::process_memory::read_value(pid, address, step.memory_value_type).ok()
             });
         if let Some(value) = value {
@@ -32038,9 +32071,10 @@ mod windows_overlay {
     }
 
     fn execute_write_memory_action_step(step: &MacroStep) {
+        let raw_key = interpolate_variables(&step.key);
         let Some((pid, address)) = resolve_memory_action_target(
             macro_memory_target_pid(step.memory_target_window.as_deref()),
-            &step.key,
+            &raw_key,
             true,
         ) else {
             return;
@@ -32135,6 +32169,253 @@ mod windows_overlay {
             },
         };
         let _ = crate::process_memory::write_scan_value(pid, address, value);
+    }
+
+    fn store_scanned_instruction_addresses(var_name: &str, addresses: &[usize]) {
+        let name = var_name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let count = addresses.len();
+        set_variable_value(&format!("{name}_count"), count as f64);
+        TEXT_VARIABLES
+            .lock()
+            .insert(format!("{name}_count"), count.to_string());
+
+        if let Some(&first) = addresses.first() {
+            let hex_str = format!("0x{:X}", first);
+            set_variable_value(name, first as f64);
+            TEXT_VARIABLES.lock().insert(name.to_owned(), hex_str.clone());
+        } else {
+            set_variable_value(name, 0.0);
+            TEXT_VARIABLES.lock().remove(name);
+        }
+
+        if let Some(&last) = addresses.last() {
+            let hex_str = format!("0x{:X}", last);
+            set_variable_value(&format!("{name}_last"), last as f64);
+            TEXT_VARIABLES.lock().insert(format!("{name}_last"), hex_str);
+        }
+
+        let all_hex = addresses
+            .iter()
+            .map(|addr| format!("0x{:X}", addr))
+            .collect::<Vec<_>>()
+            .join(", ");
+        TEXT_VARIABLES.lock().insert(format!("{name}_all"), all_hex.clone());
+        TEXT_VARIABLES.lock().insert(format!("{name}_list"), all_hex);
+
+        for (i, &addr) in addresses.iter().enumerate() {
+            let hex_str = format!("0x{:X}", addr);
+            set_variable_value(&format!("{name}_{}", i + 1), addr as f64);
+            TEXT_VARIABLES
+                .lock()
+                .insert(format!("{name}_{}", i + 1), hex_str.clone());
+            set_variable_value(&format!("{name}_{i}"), addr as f64);
+            TEXT_VARIABLES.lock().insert(format!("{name}_{i}"), hex_str);
+        }
+    }
+
+    fn resolve_instruction_address(pid: u32, key: &str) -> Option<usize> {
+        let key = key.trim().trim_matches('"').trim_matches('\'');
+        if let Some(alias) = key.strip_prefix('@') {
+            let alias = alias.trim();
+            if let Some(code) = MEMORY_CODE_ENTRIES
+                .lock()
+                .iter()
+                .find(|c| c.name.eq_ignore_ascii_case(alias))
+            {
+                if let Ok(addr) =
+                    crate::memory_debugger::debugger::resolve_module_offset(pid, &code.module, code.offset)
+                {
+                    return Some(addr);
+                }
+            }
+            if let Some(entry) = MEMORY_POINTER_ENTRIES
+                .lock()
+                .iter()
+                .find(|p| p.name.eq_ignore_ascii_case(alias))
+            {
+                if !entry.code_module.is_empty() {
+                    if let Ok(addr) = crate::memory_debugger::debugger::resolve_module_offset(
+                        pid,
+                        &entry.code_module,
+                        entry.code_offset,
+                    ) {
+                        return Some(addr);
+                    }
+                }
+            }
+        }
+        if let Some((module, offset_str)) = key.rsplit_once('+') {
+            let module = module.trim();
+            let offset_str = offset_str.trim();
+            if !module.is_empty() {
+                let offset = usize::from_str_radix(
+                    offset_str
+                        .strip_prefix("0x")
+                        .or_else(|| offset_str.strip_prefix("0X"))
+                        .unwrap_or(offset_str),
+                    16,
+                )
+                .ok();
+                if let Some(offset) = offset {
+                    if let Ok(addr) =
+                        crate::memory_debugger::debugger::resolve_module_offset(pid, module, offset)
+                    {
+                        return Some(addr);
+                    }
+                }
+            }
+        }
+        parse_memory_address(key)
+    }
+
+    pub(crate) fn execute_stop_instruction_scan_action_step() {
+        let mut guard = ACTIVE_INSTRUCTION_SCAN.lock();
+        if let Some(mut state) = guard.take() {
+            state.stop_flag.store(true, Ordering::SeqCst);
+            if let Some(mut watch) = state.stop_handle.take() {
+                watch.stop();
+            }
+        }
+    }
+
+    fn execute_scan_instruction_action_step(step: &MacroStep, preset_id: u32) {
+        let target_pid = macro_memory_target_pid(step.memory_target_window.as_deref());
+        let Some(pid) = target_pid else {
+            return;
+        };
+        let raw_key = interpolate_variables(&step.key);
+        let Some(instruction_address) = resolve_instruction_address(pid, &raw_key) else {
+            return;
+        };
+
+        let target_count = step.scan_instruction_target_count.max(1);
+        let timeout_ms = step.scan_instruction_timeout_ms;
+        let var_name = step.if_variable_name.clone();
+
+        execute_stop_instruction_scan_action_step();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let watch = match crate::memory_debugger::debugger::AccessWatch::start_unique(
+            pid,
+            instruction_address,
+            crate::model::MemoryDebuggerArchitecture::Auto,
+            target_count,
+            move |event| {
+                let _ = tx.send(event);
+            },
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("Failed to start instruction scan: {e}");
+                return;
+            }
+        };
+
+        if step.wait_for_completion {
+            let start = Instant::now();
+            let mut collected = Vec::with_capacity(target_count.min(128));
+            let timeout = if timeout_ms > 0 {
+                Some(Duration::from_millis(timeout_ms))
+            } else {
+                None
+            };
+            let mut watch = watch;
+
+            while collected.len() < target_count {
+                if macro_stop_requested(preset_id, false) {
+                    break;
+                }
+                if let Some(t) = timeout {
+                    if start.elapsed() >= t {
+                        break;
+                    }
+                }
+                match rx.recv_timeout(Duration::from_millis(50)) {
+                    Ok(crate::memory_debugger::debugger::WatchEvent::AccessHit {
+                        data_address,
+                        ..
+                    }) => {
+                        if !collected.contains(&data_address) {
+                            collected.push(data_address);
+                            store_scanned_instruction_addresses(&var_name, &collected);
+                        }
+                    }
+                    Ok(crate::memory_debugger::debugger::WatchEvent::CaptureLimitReached(_))
+                    | Ok(crate::memory_debugger::debugger::WatchEvent::Stopped) => {
+                        break;
+                    }
+                    Ok(crate::memory_debugger::debugger::WatchEvent::Error(err)) => {
+                        eprintln!("Instruction scan error: {err}");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            watch.stop();
+        } else {
+            let stop_flag = Arc::new(AtomicBool::new(false));
+            let stop_flag_clone = stop_flag.clone();
+            let var_name_clone = var_name.clone();
+
+            {
+                let mut guard = ACTIVE_INSTRUCTION_SCAN.lock();
+                *guard = Some(ActiveInstructionScanState {
+                    stop_handle: Some(watch),
+                    stop_flag,
+                });
+            }
+
+            std::thread::spawn(move || {
+                let start = Instant::now();
+                let mut collected = Vec::with_capacity(target_count.min(128));
+                let timeout = if timeout_ms > 0 {
+                    Some(Duration::from_millis(timeout_ms))
+                } else {
+                    None
+                };
+
+                while !stop_flag_clone.load(Ordering::SeqCst) && collected.len() < target_count {
+                    if let Some(t) = timeout {
+                        if start.elapsed() >= t {
+                            break;
+                        }
+                    }
+                    match rx.recv_timeout(Duration::from_millis(100)) {
+                        Ok(crate::memory_debugger::debugger::WatchEvent::AccessHit {
+                            data_address,
+                            ..
+                        }) => {
+                            if !collected.contains(&data_address) {
+                                collected.push(data_address);
+                                store_scanned_instruction_addresses(&var_name_clone, &collected);
+                            }
+                        }
+                        Ok(crate::memory_debugger::debugger::WatchEvent::CaptureLimitReached(_))
+                        | Ok(crate::memory_debugger::debugger::WatchEvent::Stopped) => {
+                            break;
+                        }
+                        Ok(crate::memory_debugger::debugger::WatchEvent::Error(err)) => {
+                            eprintln!("Background instruction scan error: {err}");
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+
+                let mut guard = ACTIVE_INSTRUCTION_SCAN.lock();
+                if let Some(state) = guard.as_mut() {
+                    if Arc::ptr_eq(&state.stop_flag, &stop_flag_clone) {
+                        if let Some(mut w) = state.stop_handle.take() {
+                            w.stop();
+                        }
+                        *guard = None;
+                    }
+                }
+            });
+        }
     }
 
     fn execute_ocr_action_step(step: &crate::model::MacroStep) {
@@ -37577,6 +37858,7 @@ mod windows_overlay {
     }
 
     fn shutdown_application(hwnd: HWND, runtime: &mut Runtime) -> Result<()> {
+        execute_stop_instruction_scan_action_step();
         let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &notify_icon(hwnd)) };
         let _ = crate::platform::show_taskbar();
         let _ = restore_mouse_sensitivity_on_exit();

@@ -58,63 +58,180 @@ impl CrosshairApp {
         language: UiLanguage,
     ) -> bool {
         let mut changed = false;
+        if step.action == MacroAction::StopInstructionScan {
+            ui.label(
+                RichText::new(Self::tr_lang(
+                    language,
+                    "Stop active instruction scan",
+                    "Dừng scan instruction đang chạy",
+                ))
+                .weak()
+                .italics(),
+            );
+            return false;
+        }
+
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
-        let live_open_windows = crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
-        let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
-        let process_label = step
-            .memory_target_window
-            .as_deref()
-            .map(|selector| Self::display_title_for_selector(selector, effective_open_windows))
-            .unwrap_or_else(|| {
-                Self::tr_lang(language, "Focused process", "Process đang focus").to_owned()
-            });
-        let combo_resp = egui::ComboBox::from_id_salt(ui.id().with("memory-process"))
-            .width(145.0)
-            .selected_text(Self::truncate_window_title(&process_label, 22))
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(
-                        step.memory_target_window.is_none(),
-                        Self::tr_lang(language, "Focused process", "Process đang focus"),
-                    )
-                    .clicked()
-                {
-                    step.memory_target_window = None;
-                    changed = true;
-                }
-                for window in effective_open_windows {
-                    let clean_title = crate::window_list::strip_rule_suffix(&window.title);
-                    let is_selected = step.memory_target_window.as_deref().map_or(false, |s| {
-                        s == window.selector
-                            || s == window.title
-                            || crate::window_list::strip_rule_suffix(s) == clean_title
-                    });
+            let live_open_windows = crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
+            let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
+            let process_label = step
+                .memory_target_window
+                .as_deref()
+                .map(|selector| Self::display_title_for_selector(selector, effective_open_windows))
+                .unwrap_or_else(|| {
+                    Self::tr_lang(language, "Focused process", "Process đang focus").to_owned()
+                });
+            let combo_resp = egui::ComboBox::from_id_salt(ui.id().with("memory-process"))
+                .width(145.0)
+                .selected_text(Self::truncate_window_title(&process_label, 22))
+                .show_ui(ui, |ui| {
                     if ui
                         .selectable_label(
-                            is_selected,
-                            Self::truncate_window_title(
-                                &Self::simplify_window_title(&window.title),
-                                40,
-                            ),
+                            step.memory_target_window.is_none(),
+                            Self::tr_lang(language, "Focused process", "Process đang focus"),
                         )
-                        .on_hover_text(&window.selector)
                         .clicked()
                     {
-                        step.memory_target_window = Some(window.title.clone());
+                        step.memory_target_window = None;
                         changed = true;
                     }
-                }
-            });
-        if combo_resp.response.clicked() {
-            let ctx = ui.ctx().clone();
-            std::thread::spawn(move || {
-                let windows = crate::window_list::list_open_windows();
-                *crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
-                ctx.request_repaint();
-            });
-        }
-        egui::ComboBox::from_id_salt(ui.id().with("memory-type"))
+                    for window in effective_open_windows {
+                        let clean_title = crate::window_list::strip_rule_suffix(&window.title);
+                        let is_selected = step.memory_target_window.as_deref().map_or(false, |s| {
+                            s == window.selector
+                                || s == window.title
+                                || crate::window_list::strip_rule_suffix(s) == clean_title
+                        });
+                        if ui
+                            .selectable_label(
+                                is_selected,
+                                Self::truncate_window_title(
+                                    &Self::simplify_window_title(&window.title),
+                                    40,
+                                ),
+                            )
+                            .on_hover_text(&window.selector)
+                            .clicked()
+                        {
+                            step.memory_target_window = Some(window.title.clone());
+                            changed = true;
+                        }
+                    }
+                });
+            if combo_resp.response.clicked() {
+                let ctx = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let windows = crate::window_list::list_open_windows();
+                    *crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
+                    ctx.request_repaint();
+                });
+            }
+
+            if step.action == MacroAction::ScanInstruction {
+                let address_response = Self::render_expandable_text_edit(
+                    ui,
+                    &mut step.key,
+                    ui.make_persistent_id("instruction-address"),
+                    130.0,
+                    320.0,
+                    21.0,
+                    21.0,
+                    "instruction / @code / 0x...",
+                    false,
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Instruction address (module+offset, 0x..., or saved @CodeName)",
+                    "Địa chỉ instruction (module+offset, 0x..., hoặc tên code @CodeName)",
+                ));
+                changed |= address_response.changed();
+                let alias_suggestions = ui
+                    .memory(|mem| {
+                        mem.data.get_temp::<Vec<String>>(egui::Id::new(
+                            "macro_memory_alias_suggestion_names",
+                        ))
+                    })
+                    .unwrap_or_default();
+                ui.memory_mut(|mem| {
+                    mem.data.insert_temp(
+                        address_response.id.with("raw_suggestions"),
+                        alias_suggestions,
+                    );
+                });
+                Self::render_variable_suggestions_raw(
+                    ui,
+                    &address_response,
+                    &mut step.key,
+                    &[],
+                    language,
+                );
+
+                ui.label("→");
+                changed |= ui
+                    .add_sized(
+                        [85.0, 21.0],
+                        egui::TextEdit::singleline(&mut step.if_variable_name)
+                            .hint_text(
+                                egui::RichText::new(Self::tr_lang(language, "variable", "biến"))
+                                    .weak(),
+                            ),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Output variable name. Stored as 0x... and number. Also sets var_1, var_2, var_count, var_all.",
+                        "Tên biến. Lưu địa chỉ dạng hex 0x... và số. Đồng thời tạo var_1, var_2, var_count, var_all.",
+                    ))
+                    .changed();
+
+                ui.label(Self::tr_lang(language, "Count:", "SL:"));
+                changed |= ui
+                    .add(
+                        egui::DragValue::new(&mut step.scan_instruction_target_count)
+                            .range(1..=1000)
+                            .speed(1),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Target count of unique addresses to scan before stopping",
+                        "Số lượng địa chỉ unique cần scan để dừng",
+                    ))
+                    .changed();
+
+                ui.label(Self::tr_lang(language, "Timeout:", "Hạn:"));
+                changed |= ui
+                    .add(
+                        egui::DragValue::new(&mut step.scan_instruction_timeout_ms)
+                            .range(0..=600000)
+                            .speed(100)
+                            .custom_formatter(|n, _| {
+                                if n <= 0.0 {
+                                    "No timeout".to_string()
+                                } else {
+                                    format!("{:.0}ms", n)
+                                }
+                            }),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Max time to scan in milliseconds (0 = no timeout)",
+                        "Thời gian tối đa tính bằng mili-giây (0 = không giới hạn)",
+                    ))
+                    .changed();
+
+                changed |= ui
+                    .checkbox(&mut step.wait_for_completion, Self::tr_lang(language, "Wait", "Chờ"))
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Wait until target count is reached or timeout expires before running next steps",
+                        "Chờ cho tới khi scan đủ số lượng hoặc hết giờ rồi mới chạy bước tiếp",
+                    ))
+                    .changed();
+
+                return;
+            }
+
+            egui::ComboBox::from_id_salt(ui.id().with("memory-type"))
                 .width(105.0)
                 .selected_text(match step.memory_value_type {
                     MemoryValueType::I8 => "1 Byte (integer)",
@@ -3344,7 +3461,12 @@ impl CrosshairApp {
     }
 
     fn memory_macro_actions() -> &'static [MacroAction] {
-        &[MacroAction::ReadMemory, MacroAction::WriteMemory]
+        &[
+            MacroAction::ReadMemory,
+            MacroAction::WriteMemory,
+            MacroAction::ScanInstruction,
+            MacroAction::StopInstructionScan,
+        ]
     }
 
     fn macro_action_is_memory(action: MacroAction) -> bool {
@@ -5008,6 +5130,12 @@ impl CrosshairApp {
             .filter(|name| !name.is_empty())
             .map(|name| format!("@{name}"))
             .collect::<Vec<_>>();
+        for entry in &self.state.memory_code_list {
+            let name = entry.name.trim();
+            if !name.is_empty() {
+                memory_alias_suggestions.push(format!("@{name}"));
+            }
+        }
         memory_alias_suggestions.sort_by_key(|name| name.to_ascii_lowercase());
         memory_alias_suggestions.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         ui.memory_mut(|mem| {
@@ -9654,7 +9782,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   true,
                                                               );
                                                           });
-                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory) {
+                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
                                                           live_sync |= Self::render_memory_step_fields(
                                                               ui,
                                                               step,
@@ -12011,7 +12139,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                   true,
                                                               );
                                                           });
-                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory) {
+                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
                                                           live_sync |= Self::render_memory_step_fields(
                                                               ui,
                                                               step,
@@ -15568,7 +15696,15 @@ if supports_move_mouse || show_detection_tuning {
                                             {
                                                 step.vision_move_cursor_on_match = false;
                                             }
-                                                      });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory) {
+                                             if step.action != previous_action
+                                                 && matches!(step.action, MacroAction::ScanInstruction)
+                                             {
+                                                 if step.scan_instruction_target_count == 0 {
+                                                     step.scan_instruction_target_count = 1;
+                                                 }
+                                                 step.wait_for_completion = true;
+                                             }
+                                                       });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
                                                           live_sync |= Self::render_memory_step_fields(
                                                               ui,
                                                               step,
@@ -17614,6 +17750,18 @@ if supports_move_mouse || show_detection_tuning {
             let name = step.if_variable_name.trim();
             if !name.is_empty() {
                 vars.insert(name.to_owned());
+            }
+            Self::extract_braced_vars(&step.key, vars);
+        }
+        if step.action == MacroAction::ScanInstruction {
+            let name = step.if_variable_name.trim();
+            if !name.is_empty() {
+                vars.insert(name.to_owned());
+                vars.insert(format!("{name}_1"));
+                vars.insert(format!("{name}_2"));
+                vars.insert(format!("{name}_count"));
+                vars.insert(format!("{name}_all"));
+                vars.insert(format!("{name}_last"));
             }
             Self::extract_braced_vars(&step.key, vars);
         }

@@ -101,6 +101,10 @@ pub enum MacroAction {
     SetVariable,
     ReadMemory,
     WriteMemory,
+    #[serde(alias = "ScanMemoryInstruction", alias = "InstructionScan", alias = "ScanMemory")]
+    ScanInstruction,
+    #[serde(alias = "StopScanInstruction", alias = "StopInstructionScan", alias = "StopScan")]
+    StopInstructionScan,
     StartTimerPreset,
     PauseTimerPreset,
     StopTimerPreset,
@@ -453,6 +457,18 @@ pub struct MacroStep {
     pub background_key_mode: String,
     #[serde(default = "default_false")]
     pub background_send_wm_char: bool,
+    #[serde(default = "default_scan_instruction_target_count")]
+    pub scan_instruction_target_count: usize,
+    #[serde(default = "default_scan_instruction_timeout_ms")]
+    pub scan_instruction_timeout_ms: u64,
+}
+
+fn default_scan_instruction_target_count() -> usize {
+    1
+}
+
+fn default_scan_instruction_timeout_ms() -> u64 {
+    5000
 }
 
 fn default_background_key_mode() -> String {
@@ -590,6 +606,8 @@ impl Default for MacroStep {
             background_restore_minimized: false,
             background_key_mode: "Press".to_string(),
             background_send_wm_char: false,
+            scan_instruction_target_count: 1,
+            scan_instruction_timeout_ms: 5000,
         }
     }
 }
@@ -1157,6 +1175,35 @@ mod tests {
         let alias_json2 = r#"{"action":"BackgroundKeyboard"}"#;
         let parsed2: ActionOnly = serde_json::from_str(alias_json2).expect("parse alias 2");
         assert_eq!(parsed2.action, MacroAction::BackgroundKey);
+    }
+
+    #[test]
+    fn test_scan_instruction_serialization() {
+        let mut step = MacroStep::default();
+        step.action = MacroAction::ScanInstruction;
+        step.key = "Game.exe+0x1234".to_string();
+        step.if_variable_name = "player_pos".to_string();
+        step.scan_instruction_target_count = 3;
+        step.scan_instruction_timeout_ms = 10000;
+        step.wait_for_completion = true;
+
+        let json = serde_json::to_string(&step).expect("serialize scan instruction step");
+        let restored: MacroStep = serde_json::from_str(&json).expect("deserialize scan instruction step");
+
+        assert_eq!(restored.action, MacroAction::ScanInstruction);
+        assert_eq!(restored.key, "Game.exe+0x1234");
+        assert_eq!(restored.if_variable_name, "player_pos");
+        assert_eq!(restored.scan_instruction_target_count, 3);
+        assert_eq!(restored.scan_instruction_timeout_ms, 10000);
+        assert!(restored.wait_for_completion);
+
+        let stop_step = MacroStep {
+            action: MacroAction::StopInstructionScan,
+            ..MacroStep::default()
+        };
+        let stop_json = serde_json::to_string(&stop_step).expect("serialize stop scan step");
+        let restored_stop: MacroStep = serde_json::from_str(&stop_json).expect("deserialize stop scan step");
+        assert_eq!(restored_stop.action, MacroAction::StopInstructionScan);
     }
 
     #[test]

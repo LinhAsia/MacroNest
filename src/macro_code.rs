@@ -525,7 +525,7 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
     if field == "if_variable_name" {
         return matches!(
             action,
-            MacroAction::IfStart | MacroAction::SetVariable | MacroAction::ReadMemory
+            MacroAction::IfStart | MacroAction::SetVariable | MacroAction::ReadMemory | MacroAction::ScanInstruction
         );
     }
     if field == "trigger_macro_group_id" {
@@ -581,7 +581,10 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
         return action == MacroAction::OcrSearch;
     }
     if field.starts_with("memory_") {
-        return matches!(action, MacroAction::ReadMemory | MacroAction::WriteMemory);
+        return matches!(action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction);
+    }
+    if field.starts_with("scan_instruction_") {
+        return action == MacroAction::ScanInstruction;
     }
     if field.starts_with("timer_") {
         return matches!(

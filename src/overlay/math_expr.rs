@@ -82,6 +82,11 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
         return 0.0;
     }
     if !trimmed.contains('(') {
+        if let Some(hex) = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+            if let Ok(val) = u64::from_str_radix(hex, 16) {
+                return val as f64;
+            }
+        }
         if let Ok(val) = trimmed.parse::<f64>() {
             return val;
         }
@@ -337,6 +342,12 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
         return evaluate_comparison_expression(left, operator, right);
     }
 
+    if let Some(hex) = expr.strip_prefix("0x").or_else(|| expr.strip_prefix("0X")) {
+        if let Ok(val) = u64::from_str_radix(hex, 16) {
+            return val as f64;
+        }
+    }
+
     if let Ok(val) = expr.parse::<f64>() {
         return val;
     }
@@ -387,13 +398,26 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
             std::f64::consts::PI
         } else if normalized.eq_ignore_ascii_case("e") {
             std::f64::consts::E
+        } else if let Some(hex) = normalized.strip_prefix("0x").or_else(|| normalized.strip_prefix("0X")) {
+            u64::from_str_radix(hex, 16).map(|v| v as f64).unwrap_or(0.0)
         } else if let Ok(num) = normalized.parse::<f64>() {
             num
         } else if let Some(obj_val) = get_object_property_value(normalized) {
             obj_val as f64
         } else {
             let variable_name = resolve_variable_name(normalized);
-            *RUNTIME_VARIABLES.lock().get(&variable_name).unwrap_or(&0.0)
+            if let Some(&num) = RUNTIME_VARIABLES.lock().get(&variable_name) {
+                num
+            } else if let Some(text_val) = TEXT_VARIABLES.lock().get(&variable_name) {
+                let trimmed_text = text_val.trim();
+                if let Some(hex) = trimmed_text.strip_prefix("0x").or_else(|| trimmed_text.strip_prefix("0X")) {
+                    u64::from_str_radix(hex, 16).map(|v| v as f64).unwrap_or(0.0)
+                } else {
+                    trimmed_text.parse::<f64>().unwrap_or(0.0)
+                }
+            } else {
+                0.0
+            }
         }
     };
     let mut values = Vec::new();
@@ -1399,6 +1423,7 @@ mod tests {
         RUNTIME_VARIABLES, TEXT_VARIABLES, evaluate_math_expression, evaluate_math_expression_f64,
         resolve_text_variable_value, smart_set_variable_from_expression,
     };
+    use crate::overlay::interpolate_variables;
 
     #[test]
     fn substr_and_len_support_text_variables() {
@@ -1526,6 +1551,27 @@ mod tests {
             resolve_text_variable_value("lower(trim(player_name))").as_deref(),
             Some("dungeonboss")
         );
+
+        {
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.clear();
+        }
+    }
+
+    #[test]
+    fn hex_literals_and_hex_variables_in_math_work() {
+        let _guard = super::super::tests::TEST_MUTEX.lock().unwrap();
+        assert_eq!(evaluate_math_expression_f64("0x10"), 16.0);
+        assert_eq!(evaluate_math_expression_f64("0x10 + 4"), 20.0);
+        assert_eq!(evaluate_math_expression_f64("0x20 - 0x10"), 16.0);
+
+        {
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.insert("pos".to_string(), "0x1000".to_string());
+        }
+        assert_eq!(evaluate_math_expression_f64("pos + 4"), 4100.0);
+        assert_eq!(interpolate_variables("{pos}"), "0x1000");
+        assert_eq!(interpolate_variables("{pos + 4}"), "4100");
 
         {
             let mut text_vars = TEXT_VARIABLES.lock();
