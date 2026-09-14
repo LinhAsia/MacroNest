@@ -33758,6 +33758,9 @@ mod windows_overlay {
         extra_target_window_titles: &[String],
         match_duplicate_window_titles: bool,
     ) -> bool {
+        if target_window_title.is_none() && extra_target_window_titles.is_empty() {
+            return true;
+        }
         let hook_state = HOOK_STATE.lock();
         macro_runtime_target_matches_with_guard(
             target_window_title,
@@ -33773,6 +33776,9 @@ mod windows_overlay {
         match_duplicate_window_titles: bool,
         _hook_state: &HookState,
     ) -> bool {
+        if target_window_title.is_none() && extra_target_window_titles.is_empty() {
+            return true;
+        }
         window_focus_matches(
             target_window_title,
             extra_target_window_titles,
@@ -36606,6 +36612,7 @@ mod windows_overlay {
             unsafe {
                 let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
             }
+            update_foreground_window(hwnd);
             return;
         }
         if !update_foreground_window(hwnd) {
@@ -36758,6 +36765,13 @@ mod windows_overlay {
 
     pub fn update_foreground_window(hwnd: HWND) -> bool {
         if !tracks_macro_foreground_window(hwnd) {
+            let current_hwnd = FOREGROUND_WINDOW_HWND.swap(0, Ordering::Relaxed);
+            if current_hwnd != 0 {
+                invalidate_runtime_open_window_snapshot();
+                let mut guard = FOREGROUND_WINDOW_TITLE.lock();
+                *guard = None;
+                return true;
+            }
             return false;
         }
         let current_hwnd = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
@@ -37123,29 +37137,34 @@ mod windows_overlay {
         #[cfg(all(windows, not(test)))]
         unsafe {
             let live = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
-            if !live.0.is_null() {
-                let normalized = normalize_focus_window(live);
-                if window_belongs_to_current_process(normalized) || is_internal_app_window(normalized) {
-                    return None;
-                }
-                let current_cached = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
-                if normalized.0 as isize != current_cached {
-                    update_foreground_window(normalized);
-                }
-                let title = crate::window_list::window_title(normalized).or_else(|| {
-                    FOREGROUND_WINDOW_TITLE.lock().clone()
-                });
-                return title.map(|t| (normalized, t));
+            if live.0.is_null() {
+                return None;
             }
+            let normalized = normalize_focus_window(live);
+            if window_belongs_to_current_process(normalized) || is_internal_app_window(normalized) {
+                return None;
+            }
+            let current_cached = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
+            if normalized.0 as isize != current_cached {
+                update_foreground_window(normalized);
+            }
+            let mut title = crate::window_list::window_title(normalized);
+            if title.is_none() && normalized.0 as isize == current_cached {
+                title = FOREGROUND_WINDOW_TITLE.lock().clone();
+            }
+            return title.map(|t| (normalized, t));
         }
 
-        let foreground =
-            HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
-        if foreground.0.is_null() {
-            return None;
+        #[cfg(any(not(windows), test))]
+        {
+            let foreground =
+                HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
+            if foreground.0.is_null() {
+                return None;
+            }
+            let title_guard = FOREGROUND_WINDOW_TITLE.lock();
+            title_guard.as_ref().map(|title| (foreground, title.clone()))
         }
-        let title_guard = FOREGROUND_WINDOW_TITLE.lock();
-        title_guard.as_ref().map(|title| (foreground, title.clone()))
     }
 
     fn foreground_matches_any_window_target(

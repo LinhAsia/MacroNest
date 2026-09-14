@@ -576,27 +576,55 @@ mod windows_impl {
             return false;
         }
 
+        let is_specific_selector = looks_like_window_selector(clean_target);
         let base = selector_base_title(clean_target);
+
         let mut matches = if match_duplicate_window_titles {
-            title == base || selector == clean_target
+            title == base || (!selector.is_empty() && selector == clean_target)
+        } else if is_specific_selector {
+            !selector.is_empty() && selector == clean_target
         } else {
             title == clean_target
-                || selector == clean_target
-                || (base != clean_target && title == base)
+                || title.eq_ignore_ascii_case(clean_target)
+                || (!selector.is_empty() && selector == clean_target)
         };
-        if !matches {
+
+        if !matches && !is_specific_selector {
             matches = matches_browser_suffix(clean_target, title);
         }
-        if !matches {
+
+        if !matches && !is_specific_selector {
+            if let Some((prefix, rest)) = title.split_at_checked(clean_target.len()) {
+                if prefix.eq_ignore_ascii_case(clean_target)
+                    && (rest.starts_with(" - ")
+                        || rest.starts_with(" — ")
+                        || rest.starts_with(" (")
+                        || rest.starts_with(" : "))
+                {
+                    matches = true;
+                }
+            }
+        }
+
+        if !matches && !is_specific_selector {
             let simplified_cand = simplify_window_title(title);
             let simplified_target = simplify_window_title(clean_target);
-            if (!simplified_cand.is_empty() && simplified_cand.eq_ignore_ascii_case(&simplified_target))
-                || title.to_lowercase().contains(&clean_target.to_lowercase())
+            if !simplified_cand.is_empty()
+                && is_known_app_simplified_title(&simplified_cand)
+                && simplified_cand.eq_ignore_ascii_case(&simplified_target)
             {
                 matches = true;
             }
         }
+
         matches
+    }
+
+    fn is_known_app_simplified_title(simplified: &str) -> bool {
+        simplified.eq_ignore_ascii_case("Antigravity IDE")
+            || BROWSER_SUFFIXES.iter().any(|s| {
+                s.trim_start_matches(" - ").eq_ignore_ascii_case(simplified)
+            })
     }
 
     fn find_window_by_candidate(
@@ -1821,6 +1849,44 @@ mod tests {
             "IdentityV - Patch 1.0",
             "IdentityV - Patch 1.0 (0x400)",
             "IdentityV",
+            false
+        ));
+
+        // When match_duplicate_window_titles is false and target is a specific selector:
+        // ONLY the window with the exact selector must match.
+        assert!(!window_matches_candidate_title(
+            "Roblox",
+            "Roblox (0x200)",
+            "Roblox (0x100)",
+            false
+        ));
+        assert!(window_matches_candidate_title(
+            "Roblox",
+            "Roblox (0x100)",
+            "Roblox (0x100)",
+            false
+        ));
+
+        // When match_duplicate_window_titles is true:
+        // Any duplicate window sharing the base title matches.
+        assert!(window_matches_candidate_title(
+            "Roblox",
+            "Roblox (0x200)",
+            "Roblox (0x100)",
+            true
+        ));
+
+        // Substring and unrelated subtitle false positives must be rejected
+        assert!(!window_matches_candidate_title(
+            "Epic Games Launcher",
+            "Epic Games Launcher (0x500)",
+            "Game",
+            false
+        ));
+        assert!(!window_matches_candidate_title(
+            "Game - v1.0",
+            "Game - v1.0 (0x600)",
+            "Settings - v1.0",
             false
         ));
     }
