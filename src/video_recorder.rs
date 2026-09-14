@@ -2373,3 +2373,28 @@ fn run_video_copy_toast(rect: Option<RECT>, language: crate::model::UiLanguage) 
         let _ = DestroyWindow(hwnd);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::HotkeyBinding;
+
+    #[test]
+    fn test_video_recorder_hotkey_disabled_when_not_enabled() {
+        let binding = HotkeyBinding {
+            key: "F9".to_string(),
+            ctrl: false,
+            alt: false,
+            shift: false,
+            win: false,
+            combo_keys: Vec::new(),
+        };
+        set_config(VideoRecorderConfig {
+            enabled: false,
+            hotkey: Some(binding.clone()),
+            ..Default::default()
+        });
+        assert!(!process_hotkey(&binding, true, false));
+        assert!(!process_hotkey(&binding, false, false));
+    }
+}

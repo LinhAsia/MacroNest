@@ -119,7 +119,7 @@ mod windows_overlay {
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
                     GetWindowThreadProcessId, HC_ACTION, HCURSOR, HMENU, HTCLIENT,
                     HTTRANSPARENT, HWND_NOTOPMOST, HWND_TOPMOST, ICONINFO, IDC_ARROW, IDC_CROSS,
-                    IsChild, IsIconic, IsWindow, IsWindowVisible, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LWA_ALPHA, LoadCursorW,
+                    IsChild, IsIconic, IsWindow, IsZoomed, KBDLLHOOKSTRUCT, KillTimer, LWA_ALPHA, LoadCursorW,
                     MA_NOACTIVATE, MF_SEPARATOR, MF_STRING, MSG, MSLLHOOKSTRUCT,
                     PostMessageW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CXVIRTUALSCREEN,
                     SM_CYSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -4952,14 +4952,16 @@ mod windows_overlay {
                         update_modifier_state(info.vkCode, is_key_down);
                         return LRESULT(1);
                     }
-                    let (ocr_hotkey, ocr_lang) = {
+                    let (ocr_enabled, ocr_hotkey, ocr_lang) = {
                         let hook_state = HOOK_STATE.lock();
                         (
+                            hook_state.quick_ocr_enabled,
                             hook_state.quick_ocr_hotkey.clone(),
                             hook_state.quick_ocr_language.clone(),
                         )
                     };
-                    if quick_ocr_trigger_allowed
+                    if ocr_enabled
+                        && quick_ocr_trigger_allowed
                         && let Some(trigger) = ocr_hotkey
                         && hotkey::binding_matches(&trigger, &binding)
                     {
@@ -4979,11 +4981,12 @@ mod windows_overlay {
                             return LRESULT(1);
                         }
                     }
-                    let screen_draw_hotkey = {
+                    let (screen_draw_enabled, screen_draw_hotkey) = {
                         let state = SCREEN_DRAW_STATE.lock();
-                        state.trigger.clone()
+                        (state.enabled, state.trigger.clone())
                     };
-                    if screen_draw_trigger_allowed
+                    if screen_draw_enabled
+                        && screen_draw_trigger_allowed
                         && let Some(trigger) = screen_draw_hotkey
                         && hotkey::binding_matches(&trigger, &binding)
                     {
