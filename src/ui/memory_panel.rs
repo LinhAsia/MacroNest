@@ -2940,7 +2940,8 @@ impl CrosshairApp {
                         self.state.vietnamese_input_mode,
                         &mut self.memory_panel.manual_address,
                     );
-                    if ui.button(self.tr("Add address", "Add address")).clicked() {
+                    let enter_pressed = addr_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if ui.button(self.tr("Add address", "Add address")).clicked() || enter_pressed {
                         self.add_manual_memory_address();
                     }
                     if ui.button(self.tr("View class", "View class")).clicked() {
@@ -3408,9 +3409,11 @@ impl CrosshairApp {
                 ui.checkbox(&mut self.memory_panel.show_scan_previous, previous_label);
                 ui.checkbox(&mut self.memory_panel.highlight_changed_values, highlight_label);
             });
+            let has_kb_focus = ui.ctx().memory(|memory| memory.focused().is_some())
+                || ui.ctx().wants_keyboard_input();
             if !pinned
                 && !self.memory_panel.saved_list_active
-                && ui.ctx().memory(|memory| memory.focused().is_none())
+                && !has_kb_focus
                 && ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::A))
             {
                 self.memory_panel.selected_results = (0..visible_count).collect();
@@ -3718,14 +3721,16 @@ impl CrosshairApp {
                 ui.separator();
                 let editing = self.memory_panel.edit_value_index.is_some()
                     || self.memory_panel.edit_description_index.is_some();
+                let has_kb_focus = ui.ctx().memory(|memory| memory.focused().is_some())
+                    || ui.ctx().wants_keyboard_input();
                 if self.memory_panel.saved_list_active
                     && !editing
-                    && ui.ctx().memory(|memory| memory.focused().is_none())
+                    && !has_kb_focus
                     && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A))
                 {
                     self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
                 }
-                if self.memory_panel.saved_list_active && !editing {
+                if self.memory_panel.saved_list_active && !editing && !has_kb_focus {
                     let (shift_w, shift_s, delete, shift_delete, edit) = ui.input(|input| {
                         (
                             input.modifiers.shift && input.key_pressed(egui::Key::W),
@@ -17358,8 +17363,22 @@ impl CrosshairApp {
                     preset.target_y = format_prefixed_memory_address(y_addr);
                     preset.target_z = format_prefixed_memory_address(z_addr);
                 }
+                preset.debug_mode = dialog
+                    .original_preset
+                    .as_ref()
+                    .map(|p| p.debug_mode)
+                    .unwrap_or(false);
+                preset.probe_base_addresses.clear();
                 preset.enabled = true;
             } else {
+                preset.debug_mode = true;
+                preset.probe_base_addresses = dialog.base_addresses.clone();
+                if preset.marker_source != crate::model::EspMarkerSource::Geometry
+                    || preset.marker == crate::model::EspMarkerKind::None
+                {
+                    preset.marker_source = crate::model::EspMarkerSource::Geometry;
+                    preset.marker = crate::model::EspMarkerKind::Box;
+                }
                 if dialog.show_all_candidates {
                     let mut candidate_addrs = Vec::new();
                     let back = dialog.backward_count as i64;
@@ -17619,6 +17638,9 @@ impl CrosshairApp {
                             sign,
                             dialog.current_offset,
                         )).monospace().strong().color(Color32::from_rgb(100, 220, 140)));
+
+                        ui.separator();
+                        ui.label(RichText::new(format!("Base: 0x{:X}", active_base)).monospace().strong().color(Color32::from_rgb(180, 180, 230)));
 
                         ui.separator();
                         let fmt_f = |v: Option<f32>| v.map(|x| format!("{:.3}", x)).unwrap_or_else(|| "--".to_string());
@@ -20528,5 +20550,25 @@ mod tests {
             .collect();
         assert_eq!(candidates, vec![0x0FFC, 0x1000, 0x1004]);
         assert_eq!(candidates.len(), 3);
+
+        let probe_bases = vec![base];
+        let test_entity = 0x0FFCusize;
+        let closest = probe_bases
+            .iter()
+            .min_by_key(|&&b| (test_entity as isize).wrapping_sub(b as isize).abs())
+            .copied();
+        assert_eq!(closest, Some(0x1000));
+        let diff = (test_entity as isize).wrapping_sub(closest.unwrap() as isize);
+        assert_eq!(diff, -4);
+        let sign = if diff > 0 { "+" } else { "" };
+        let formatted = format!("0x{test_entity:X} ({sign}{diff})\nBase: 0x{:X}", closest.unwrap());
+        assert_eq!(formatted, "0xFFC (-4)\nBase: 0x1000");
+
+        let test_entity_fwd = 0x1004usize;
+        let diff_fwd = (test_entity_fwd as isize).wrapping_sub(closest.unwrap() as isize);
+        assert_eq!(diff_fwd, 4);
+        let sign_fwd = if diff_fwd > 0 { "+" } else { "" };
+        let formatted_fwd = format!("0x{test_entity_fwd:X} ({sign_fwd}{diff_fwd})\nBase: 0x{:X}", closest.unwrap());
+        assert_eq!(formatted_fwd, "0x1004 (+4)\nBase: 0x1000");
     }
 }

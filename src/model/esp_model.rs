@@ -180,6 +180,8 @@ pub struct EspPreset {
     pub show_distance: bool,
     pub debug_mode: bool,
     #[serde(default)]
+    pub probe_base_addresses: Vec<usize>,
+    #[serde(default)]
     pub permutation_debug_mode: bool,
     #[serde(default = "default_selected_permutation")]
     pub selected_permutation: usize,
@@ -295,6 +297,7 @@ impl EspPreset {
             clamp_offscreen_tracer: false,
             show_distance: false,
             debug_mode: false,
+            probe_base_addresses: Vec::new(),
             permutation_debug_mode: false,
             selected_permutation: 1,
             target_audio_enabled: false,

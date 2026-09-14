@@ -26636,6 +26636,52 @@ mod windows_overlay {
                             thickness,
                         },
                     });
+
+                    if preset.debug_mode {
+                        let closest_base = if !preset.probe_base_addresses.is_empty() {
+                            preset
+                                .probe_base_addresses
+                                .iter()
+                                .min_by_key(|&&base| (entity_address as isize).wrapping_sub(base as isize).abs())
+                                .copied()
+                        } else {
+                            None
+                        };
+
+                        let debug_text = if entity_address != 0 {
+                            if let Some(base_addr) = closest_base {
+                                let diff = (entity_address as isize).wrapping_sub(base_addr as isize);
+                                let sign = if diff > 0 { "+" } else { "" };
+                                format!(
+                                    "0x{entity_address:X} ({sign}{diff})\nBase: 0x{base_addr:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
+                                    target[0], target[1], target[2]
+                                )
+                            } else {
+                                format!(
+                                    "0x{entity_address:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
+                                    target[0], target[1], target[2]
+                                )
+                            }
+                        } else {
+                            format!("X:{:.1} Y:{:.1} Z:{:.1}", target[0], target[1], target[2])
+                        };
+                        let text_y = if closest_base.is_some() {
+                            y - radius - 42
+                        } else {
+                            y - radius - 28
+                        };
+                        shapes.push(GeometryRenderShape {
+                            bounds: geometry_label_bounds(x, text_y, 12, &debug_text, 0.0),
+                            draw: GeometryRenderDraw::Label(GeometryRenderText {
+                                x,
+                                y: text_y,
+                                font_size: 12,
+                                color: [255, 230, 0, 255],
+                                rotation_deg: 0.0,
+                                text: debug_text,
+                            }),
+                        });
+                    }
                 }
                 crate::model::EspMarkerKind::Box => {
                     let half_width =
@@ -26671,15 +26717,38 @@ mod windows_overlay {
                             address: entity_address,
                         });
 
+                        let closest_base = if !preset.probe_base_addresses.is_empty() {
+                            preset
+                                .probe_base_addresses
+                                .iter()
+                                .min_by_key(|&&base| (entity_address as isize).wrapping_sub(base as isize).abs())
+                                .copied()
+                        } else {
+                            None
+                        };
+
                         let debug_text = if entity_address != 0 {
-                            format!(
-                                "0x{entity_address:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
-                                target[0], target[1], target[2]
-                            )
+                            if let Some(base_addr) = closest_base {
+                                let diff = (entity_address as isize).wrapping_sub(base_addr as isize);
+                                let sign = if diff > 0 { "+" } else { "" };
+                                format!(
+                                    "0x{entity_address:X} ({sign}{diff})\nBase: 0x{base_addr:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
+                                    target[0], target[1], target[2]
+                                )
+                            } else {
+                                format!(
+                                    "0x{entity_address:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
+                                    target[0], target[1], target[2]
+                                )
+                            }
                         } else {
                             format!("X:{:.1} Y:{:.1} Z:{:.1}", target[0], target[1], target[2])
                         };
-                        let text_y = box_min_y - 28;
+                        let text_y = if closest_base.is_some() {
+                            box_min_y - 42
+                        } else {
+                            box_min_y - 28
+                        };
                         shapes.push(GeometryRenderShape {
                             bounds: geometry_label_bounds(x, text_y, 12, &debug_text, 0.0),
                             draw: GeometryRenderDraw::Label(GeometryRenderText {
