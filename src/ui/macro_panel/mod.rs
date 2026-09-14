@@ -56,6 +56,8 @@ impl CrosshairApp {
         step: &mut MacroStep,
         open_windows: &[crate::window_list::WindowInfo],
         language: UiLanguage,
+        memory_codes: &[crate::model::MemoryCodeEntry],
+        memory_pointers: &[crate::model::MemoryPointerEntry],
     ) -> bool {
         let mut changed = false;
         if step.action == MacroAction::StopInstructionScan {
@@ -73,99 +75,209 @@ impl CrosshairApp {
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 3.0;
-            let live_open_windows = crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock().clone();
-            let effective_open_windows = live_open_windows.as_deref().unwrap_or(open_windows);
-            let process_label = step
-                .memory_target_window
-                .as_deref()
-                .map(|selector| Self::display_title_for_selector(selector, effective_open_windows))
-                .unwrap_or_else(|| {
-                    Self::tr_lang(language, "Focused process", "Process đang focus").to_owned()
-                });
-            let combo_resp = egui::ComboBox::from_id_salt(ui.id().with("memory-process"))
-                .width(145.0)
-                .selected_text(Self::truncate_window_title(&process_label, 22))
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(
-                            step.memory_target_window.is_none(),
-                            Self::tr_lang(language, "Focused process", "Process đang focus"),
-                        )
-                        .clicked()
-                    {
-                        step.memory_target_window = None;
-                        changed = true;
-                    }
-                    for window in effective_open_windows {
-                        let clean_title = crate::window_list::strip_rule_suffix(&window.title);
-                        let is_selected = step.memory_target_window.as_deref().map_or(false, |s| {
-                            s == window.selector
-                                || s == window.title
-                                || crate::window_list::strip_rule_suffix(s) == clean_title
-                        });
-                        if ui
-                            .selectable_label(
-                                is_selected,
-                                Self::truncate_window_title(
-                                    &Self::simplify_window_title(&window.title),
-                                    40,
-                                ),
-                            )
-                            .on_hover_text(&window.selector)
-                            .clicked()
-                        {
-                            step.memory_target_window = Some(window.title.clone());
-                            changed = true;
-                        }
-                    }
-                });
-            if combo_resp.response.clicked() {
-                let ctx = ui.ctx().clone();
-                std::thread::spawn(move || {
-                    let windows = crate::window_list::list_open_windows();
-                    *crate::ui::LIVE_WINDOW_TARGET_COMBO_WINDOWS.lock() = Some(windows);
-                    ctx.request_repaint();
-                });
-            }
+            let mut duplicate_mode = false;
+            let none_label = Self::tr_lang(language, "Focused process", "Process đang focus");
+            changed |= Self::render_window_target_combo_with_duplicate_mode(
+                ui,
+                language,
+                ui.id().with("memory-target-window"),
+                &none_label,
+                &mut step.memory_target_window,
+                &mut duplicate_mode,
+                open_windows,
+                145.0,
+                true,
+            );
 
             if step.action == MacroAction::ScanInstruction {
-                let address_response = Self::render_expandable_text_edit(
-                    ui,
-                    &mut step.key,
-                    ui.make_persistent_id("instruction-address"),
-                    130.0,
-                    320.0,
-                    21.0,
-                    21.0,
-                    "instruction / @code / 0x...",
-                    false,
-                )
-                .on_hover_text(Self::tr_lang(
-                    language,
-                    "Instruction address (module+offset, 0x..., or saved @CodeName)",
-                    "Địa chỉ instruction (module+offset, 0x..., hoặc tên code @CodeName)",
-                ));
-                changed |= address_response.changed();
-                let alias_suggestions = ui
-                    .memory(|mem| {
-                        mem.data.get_temp::<Vec<String>>(egui::Id::new(
-                            "macro_memory_alias_suggestion_names",
-                        ))
-                    })
-                    .unwrap_or_default();
-                ui.memory_mut(|mem| {
-                    mem.data.insert_temp(
-                        address_response.id.with("raw_suggestions"),
-                        alias_suggestions,
-                    );
+                let key_trimmed = step.key.trim().to_owned();
+                let has_matching_code = memory_codes.iter().any(|c| {
+                    let name_tag = format!("@{}", c.name.trim());
+                    let mod_off = format!("{}+{:X}", c.module, c.offset);
+                    let mod_off_lower = format!("{}+0x{:x}", c.module, c.offset);
+                    key_trimmed == name_tag
+                        || key_trimmed == c.name.trim()
+                        || key_trimmed.eq_ignore_ascii_case(&mod_off)
+                        || key_trimmed.eq_ignore_ascii_case(&mod_off_lower)
+                }) || memory_pointers.iter().any(|p| {
+                    !p.code_module.is_empty() && (
+                        key_trimmed == format!("@{}", p.name.trim())
+                        || key_trimmed == p.name.trim()
+                    )
                 });
-                Self::render_variable_suggestions_raw(
-                    ui,
-                    &address_response,
-                    &mut step.key,
-                    &[],
-                    language,
-                );
+
+                let manual_id = ui.id().with("manual_instruction_input");
+                let is_manual = ui.data(|d| d.get_temp::<bool>(manual_id))
+                    .unwrap_or_else(|| !key_trimmed.is_empty() && !has_matching_code);
+
+                if !is_manual {
+                    let selected_label = if key_trimmed.is_empty() {
+                        Self::tr_lang(language, "Select instruction", "Chọn instruction").to_owned()
+                    } else if let Some(code) = memory_codes.iter().find(|c| {
+                        let name_tag = format!("@{}", c.name.trim());
+                        let mod_off = format!("{}+{:X}", c.module, c.offset);
+                        let mod_off_lower = format!("{}+0x{:x}", c.module, c.offset);
+                        key_trimmed == name_tag
+                            || key_trimmed == c.name.trim()
+                            || key_trimmed.eq_ignore_ascii_case(&mod_off)
+                            || key_trimmed.eq_ignore_ascii_case(&mod_off_lower)
+                    }) {
+                        if !code.name.trim().is_empty() {
+                            format!("@{} — {}", code.name.trim(), code.instruction)
+                        } else {
+                            format!("{}+{:X} — {}", code.module, code.offset, code.instruction)
+                        }
+                    } else if let Some(p) = memory_pointers.iter().find(|p| {
+                        !p.code_module.is_empty() && (
+                            key_trimmed == format!("@{}", p.name.trim())
+                            || key_trimmed == p.name.trim()
+                        )
+                    }) {
+                        format!("@{} — {}+{:X}", p.name.trim(), p.code_module, p.code_offset)
+                    } else {
+                        key_trimmed.to_owned()
+                    };
+
+                    egui::ComboBox::from_id_salt(ui.id().with("instruction-combo"))
+                        .width(160.0)
+                        .selected_text(Self::truncate_window_title(&selected_label, 26))
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(
+                                    false,
+                                    Self::tr_lang(
+                                        language,
+                                        "✏ Manual address / 0x...",
+                                        "✏ Nhập thủ công / 0x...",
+                                    ),
+                                )
+                                .clicked()
+                            {
+                                ui.data_mut(|d| d.insert_temp(manual_id, true));
+                                ui.close_menu();
+                            }
+                            ui.separator();
+
+                            let has_codes = !memory_codes.is_empty()
+                                || memory_pointers.iter().any(|p| !p.code_module.is_empty());
+                            if !has_codes {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "(No saved instructions in Memory Panel)",
+                                        "(Chưa có instruction nào trong Memory Panel)",
+                                    ))
+                                    .weak()
+                                    .italics(),
+                                );
+                            }
+
+                            for code in memory_codes {
+                                let item_key = if !code.name.trim().is_empty() {
+                                    format!("@{}", code.name.trim())
+                                } else {
+                                    format!("{}+{:X}", code.module, code.offset)
+                                };
+                                let is_sel = key_trimmed == item_key || key_trimmed == code.name.trim();
+                                let label = if !code.name.trim().is_empty() {
+                                    format!(
+                                        "{} ({}+{:X})  {}",
+                                        code.name.trim(),
+                                        code.module,
+                                        code.offset,
+                                        code.instruction
+                                    )
+                                } else {
+                                    format!("{}+{:X}  {}", code.module, code.offset, code.instruction)
+                                };
+                                if ui
+                                    .selectable_label(is_sel, label)
+                                    .on_hover_text(&code.instruction)
+                                    .clicked()
+                                {
+                                    step.key = item_key;
+                                    changed = true;
+                                }
+                            }
+
+                            for p in memory_pointers.iter().filter(|p| !p.code_module.is_empty()) {
+                                let item_key = format!("@{}", p.name.trim());
+                                let is_sel = key_trimmed == item_key || key_trimmed == p.name.trim();
+                                let label = format!(
+                                    "{} ({}+{:X}) [Ptr]",
+                                    p.name.trim(),
+                                    p.code_module,
+                                    p.code_offset
+                                );
+                                if ui.selectable_label(is_sel, label).clicked() {
+                                    step.key = item_key;
+                                    changed = true;
+                                }
+                            }
+                        });
+
+                    if ui
+                        .button("✏")
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Switch to manual text input",
+                            "Chuyển sang gõ địa chỉ thủ công",
+                        ))
+                        .clicked()
+                    {
+                        ui.data_mut(|d| d.insert_temp(manual_id, true));
+                    }
+                } else {
+                    let address_response = Self::render_expandable_text_edit(
+                        ui,
+                        &mut step.key,
+                        ui.make_persistent_id("instruction-address"),
+                        130.0,
+                        300.0,
+                        21.0,
+                        21.0,
+                        "instruction / @code / 0x...",
+                        false,
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "Instruction address (module+offset, 0x..., or saved @CodeName)",
+                        "Địa chỉ instruction (module+offset, 0x..., hoặc tên code @CodeName)",
+                    ));
+                    changed |= address_response.changed();
+                    let alias_suggestions = ui
+                        .memory(|mem| {
+                            mem.data.get_temp::<Vec<String>>(egui::Id::new(
+                                "macro_memory_alias_suggestion_names",
+                            ))
+                        })
+                        .unwrap_or_default();
+                    ui.memory_mut(|mem| {
+                        mem.data.insert_temp(
+                            address_response.id.with("raw_suggestions"),
+                            alias_suggestions,
+                        );
+                    });
+                    Self::render_variable_suggestions_raw(
+                        ui,
+                        &address_response,
+                        &mut step.key,
+                        &[],
+                        language,
+                    );
+
+                    if ui
+                        .button("📋")
+                        .on_hover_text(Self::tr_lang(
+                            language,
+                            "Switch to instruction dropdown list",
+                            "Chuyển sang chọn từ danh sách instruction",
+                        ))
+                        .clicked()
+                    {
+                        ui.data_mut(|d| d.insert_temp(manual_id, false));
+                    }
+                }
 
                 ui.label("→");
                 changed |= ui
@@ -179,22 +291,44 @@ impl CrosshairApp {
                     )
                     .on_hover_text(Self::tr_lang(
                         language,
-                        "Output variable name. Stored as 0x... and number. Also sets var_1, var_2, var_count, var_all.",
-                        "Tên biến. Lưu địa chỉ dạng hex 0x... và số. Đồng thời tạo var_1, var_2, var_count, var_all.",
+                        "When Count > 1:\n- {var}: 1st address\n- {var}_1 .. {var}_N: individual addresses\n- {var}_last: last address\n- {var}_count: count of addresses\n- {var}_all: comma-separated hex list",
+                        "Khi Count > 1:\n- {var}: địa chỉ đầu tiên\n- {var}_1 .. {var}_N: từng địa chỉ theo thứ tự\n- {var}_last: địa chỉ cuối cùng\n- {var}_count: tổng số lượng địa chỉ\n- {var}_all: danh sách tất cả địa chỉ hex",
                     ))
                     .changed();
+
+                if step.scan_instruction_target_count > 1 {
+                    let var_prefix = if step.if_variable_name.trim().is_empty() {
+                        "var"
+                    } else {
+                        step.if_variable_name.trim()
+                    };
+                    ui.label(
+                        RichText::new(format!(
+                            "({var_prefix}_1..{var_prefix}_{}, {var_prefix}_count)",
+                            step.scan_instruction_target_count
+                        ))
+                        .weak()
+                        .small(),
+                    )
+                    .on_hover_text(Self::tr_lang(
+                        language,
+                        "All found addresses are automatically indexed into individual variables (var_1, var_2...), with the total count in var_count.",
+                        "Tất cả địa chỉ tìm được tự động lưu vào từng biến riêng lẻ (var_1, var_2...), tổng số lượng lưu trong var_count.",
+                    ));
+                }
 
                 ui.label(Self::tr_lang(language, "Count:", "SL:"));
                 changed |= ui
                     .add(
                         egui::DragValue::new(&mut step.scan_instruction_target_count)
                             .range(1..=1000)
-                            .speed(1),
+                            .speed(0.05)
+                            .clamp_existing_to_range(true),
                     )
                     .on_hover_text(Self::tr_lang(
                         language,
-                        "Target count of unique addresses to scan before stopping",
-                        "Số lượng địa chỉ unique cần scan để dừng",
+                        "Target count of unique addresses to scan before stopping (drag smoothly 1-by-1, or click to type)",
+                        "Số lượng địa chỉ unique cần scan để dừng (kéo mượt từng đơn vị 1, hoặc click để nhập số)",
                     ))
                     .changed();
 
@@ -9788,6 +9922,8 @@ if supports_move_mouse || show_detection_tuning {
                                                               step,
                                                               &self.open_window_infos,
                                                               language,
+                                                              &self.state.memory_code_list,
+                                                              &self.state.memory_pointer_list,
                                                           );
                                                       } else if step.action == MacroAction::BackgroundClick {
                                                            live_sync |= Self::render_background_click_step_fields(
@@ -12145,6 +12281,8 @@ if supports_move_mouse || show_detection_tuning {
                                                               step,
                                                               &self.open_window_infos,
                                                               language,
+                                                              &self.state.memory_code_list,
+                                                              &self.state.memory_pointer_list,
                                                           );
                                                       } else if step.action == MacroAction::BackgroundClick {
                                                           live_sync |= Self::render_background_click_step_fields(
@@ -15705,12 +15843,14 @@ if supports_move_mouse || show_detection_tuning {
                                                  step.wait_for_completion = true;
                                              }
                                                        });} else if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction | MacroAction::StopInstructionScan) {
-                                                          live_sync |= Self::render_memory_step_fields(
-                                                              ui,
-                                                              step,
-                                                              &self.open_window_infos,
-                                                              language,
-                                                          );
+                                                           live_sync |= Self::render_memory_step_fields(
+                                                               ui,
+                                                               step,
+                                                               &self.open_window_infos,
+                                                               language,
+                                                               &self.state.memory_code_list,
+                                                               &self.state.memory_pointer_list,
+                                                           );
                                                       } else if step.action == MacroAction::BackgroundClick {
                                                           live_sync |= Self::render_background_click_step_fields(
                                                               ui,
