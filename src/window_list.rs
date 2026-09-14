@@ -92,6 +92,7 @@ mod windows_impl {
         Highest,
         Leftmost,
         Rightmost,
+        Unfocused,
     }
 
     pub fn list_open_windows() -> Vec<WindowInfo> {
@@ -485,6 +486,10 @@ mod windows_impl {
             (s, Some(WindowMatchRule::Leftmost))
         } else if let Some(s) = target.strip_suffix(" [Rightmost]") {
             (s, Some(WindowMatchRule::Rightmost))
+        } else if let Some(s) = target.strip_suffix(" [The Unfocused One]") {
+            (s, Some(WindowMatchRule::Unfocused))
+        } else if let Some(s) = target.strip_suffix(" [Unfocused]") {
+            (s, Some(WindowMatchRule::Unfocused))
         } else {
             (target, None)
         }
@@ -499,10 +504,33 @@ mod windows_impl {
     }
 
     pub fn select_window_by_match_rule(candidates: &[HWND], rule: WindowMatchRule) -> Option<HWND> {
+        if rule == WindowMatchRule::Unfocused {
+            let live = unsafe { GetForegroundWindow() };
+            let fg_root = if live.0.is_null() {
+                HWND(std::ptr::null_mut())
+            } else {
+                let root = unsafe { GetAncestor(live, GA_ROOT) };
+                if root.0.is_null() { live } else { root }
+            };
+            let root_of = |h: HWND| unsafe {
+                if h.0.is_null() {
+                    h
+                } else {
+                    let root = GetAncestor(h, GA_ROOT);
+                    if root.0.is_null() { h } else { root }
+                }
+            };
+            if let Some(unfocused) = candidates.iter().copied().find(|&hwnd| root_of(hwnd) != fg_root) {
+                return Some(unfocused);
+            }
+            return candidates.first().copied();
+        }
+
         let mut best_hwnd = None;
         let mut best_val = match rule {
             WindowMatchRule::Lowest | WindowMatchRule::Rightmost => i32::MIN,
             WindowMatchRule::Highest | WindowMatchRule::Leftmost => i32::MAX,
+            WindowMatchRule::Unfocused => unreachable!(),
         };
 
         for hwnd in candidates {
@@ -511,10 +539,12 @@ mod windows_impl {
                 let axis = match rule {
                     WindowMatchRule::Lowest | WindowMatchRule::Highest => rect.top,
                     WindowMatchRule::Leftmost | WindowMatchRule::Rightmost => rect.left,
+                    WindowMatchRule::Unfocused => unreachable!(),
                 };
                 let better = match rule {
                     WindowMatchRule::Lowest | WindowMatchRule::Rightmost => axis > best_val,
                     WindowMatchRule::Highest | WindowMatchRule::Leftmost => axis < best_val,
+                    WindowMatchRule::Unfocused => unreachable!(),
                 };
                 if better {
                     best_val = axis;
@@ -1746,7 +1776,13 @@ mod tests {
         assert_eq!(parse_window_match_rule("Window [Leftmost]").1, Some(WindowMatchRule::Leftmost));
         assert_eq!(strip_rule_suffix("Window [Rightmost]"), "Window");
         assert_eq!(parse_window_match_rule("Window [Rightmost]").1, Some(WindowMatchRule::Rightmost));
+        assert_eq!(strip_rule_suffix("Window [The Unfocused One]"), "Window");
+        assert_eq!(parse_window_match_rule("Window [The Unfocused One]").1, Some(WindowMatchRule::Unfocused));
+        assert_eq!(strip_rule_suffix("Window [Unfocused]"), "Window");
+        assert_eq!(parse_window_match_rule("Window [Unfocused]").1, Some(WindowMatchRule::Unfocused));
         assert!(has_position_rule_suffix("Microsoft Edge [Leftmost]"));
+        assert!(has_position_rule_suffix("Microsoft Edge [The Unfocused One]"));
+        assert!(has_position_rule_suffix("Microsoft Edge [Unfocused]"));
         assert!(!has_position_rule_suffix("Microsoft Edge"));
 
         assert!(window_matches_candidate_title(

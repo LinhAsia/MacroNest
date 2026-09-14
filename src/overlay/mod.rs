@@ -36806,7 +36806,8 @@ mod windows_overlay {
         target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
-        let selector = if target.ends_with(')') && target.contains(" (0x") {
+        let clean_target = crate::window_list::strip_rule_suffix(target);
+        let selector = if clean_target.ends_with(')') && clean_target.contains(" (0x") {
             crate::window_list::window_selector(hwnd, title)
         } else {
             String::new()
@@ -36814,7 +36815,7 @@ mod windows_overlay {
         crate::window_list::window_matches_candidate_title(
             title,
             &selector,
-            target,
+            clean_target,
             match_duplicate_window_titles,
         )
     }
@@ -37407,7 +37408,7 @@ mod windows_overlay {
                 base_title,
                 match_duplicate_window_titles,
                 exclude,
-                targeted,
+                None,
                 rule,
             );
         }
