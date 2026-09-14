@@ -6420,12 +6420,19 @@ impl CrosshairApp {
                                             matches!(target, CaptureRequest::QuickScreenDrawHotkey)
                                         });
                                     let hotkey_label = if capture_active {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Capturing...",
-                                            "Đang bắt phím...",
-                                        )
-                                        .to_owned()
+                                        if let Some(pending) = self.capture_hotkey_combo_keys.as_ref() {
+                                            Self::format_binding_ui(
+                                                self.state.ui_language,
+                                                Some(&Self::hotkey_binding_from_combo_keys(pending.clone())),
+                                            )
+                                        } else {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Capturing...",
+                                                "Đang bắt phím...",
+                                            )
+                                            .to_owned()
+                                        }
                                     } else {
                                         self.state
                                             .quick_screen_draw_hotkey
@@ -6642,12 +6649,19 @@ impl CrosshairApp {
                                             matches!(target, CaptureRequest::QuickOcrHotkey)
                                         });
                                     let hotkey_label = if capture_active {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Capturing...",
-                                            "Đang bắt phím...",
-                                        )
-                                        .to_owned()
+                                        if let Some(pending) = self.capture_hotkey_combo_keys.as_ref() {
+                                            Self::format_binding_ui(
+                                                self.state.ui_language,
+                                                Some(&Self::hotkey_binding_from_combo_keys(pending.clone())),
+                                            )
+                                        } else {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Capturing...",
+                                                "Đang bắt phím...",
+                                            )
+                                            .to_owned()
+                                        }
                                     } else {
                                         self.state
                                             .quick_ocr_hotkey
@@ -7070,12 +7084,19 @@ impl CrosshairApp {
                                             )
                                         });
                                     let label = if capture_active {
-                                        Self::tr_lang(
-                                            self.state.ui_language,
-                                            "Capturing...",
-                                            "Đang bắt phím...",
-                                        )
-                                        .to_owned()
+                                        if let Some(pending) = self.capture_hotkey_combo_keys.as_ref() {
+                                            Self::format_binding_ui(
+                                                self.state.ui_language,
+                                                Some(&Self::hotkey_binding_from_combo_keys(pending.clone())),
+                                            )
+                                        } else {
+                                            Self::tr_lang(
+                                                self.state.ui_language,
+                                                "Capturing...",
+                                                "Đang bắt phím...",
+                                            )
+                                            .to_owned()
+                                        }
                                     } else {
                                         self.state
                                             .quick_video_record_hotkey
@@ -13448,6 +13469,9 @@ impl CrosshairApp {
                 | CaptureRequest::PinPresetHotkey(_)
                 | CaptureRequest::MouseSensitivityPresetHotkey(_)
                 | CaptureRequest::VisionPresetHotkey(_)
+                | CaptureRequest::QuickScreenDrawHotkey
+                | CaptureRequest::QuickVideoRecordHotkey
+                | CaptureRequest::QuickOcrHotkey
         ) {
             false
         } else {
@@ -13588,6 +13612,9 @@ impl CrosshairApp {
                     | CaptureRequest::WindowLayoutHotkey(_)
                     | CaptureRequest::PinPresetHotkey(_)
                     | CaptureRequest::MouseSensitivityPresetHotkey(_)
+                    | CaptureRequest::QuickScreenDrawHotkey
+                    | CaptureRequest::QuickVideoRecordHotkey
+                    | CaptureRequest::QuickOcrHotkey
             )
             && let Some(pending) = self.capture_hotkey_combo_keys.as_ref()
         {
@@ -13595,7 +13622,12 @@ impl CrosshairApp {
             ctx.request_repaint();
         }
 
-        if self.capture_hotkey_combo_keys.is_some() && !captured_key_down {
+        let combo_released = !self.capture_hotkey_combo_vks.is_empty()
+            && self.capture_hotkey_combo_vks.iter().all(|&vk| {
+                unsafe { (GetAsyncKeyState(vk as i32) as u16 & 0x8000) == 0 }
+            });
+
+        if self.capture_hotkey_combo_keys.is_some() && (combo_released || !captured_key_down) {
             self.capture_hotkey_combo_vks.clear();
             return self
                 .capture_hotkey_combo_keys

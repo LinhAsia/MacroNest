@@ -540,6 +540,12 @@ mod windows_impl {
         clean_target: &str,
         match_duplicate_window_titles: bool,
     ) -> bool {
+        let trimmed_title = title.trim();
+        let trimmed_target = clean_target.trim();
+        if trimmed_title.is_empty() || trimmed_target.is_empty() {
+            return false;
+        }
+
         let base = selector_base_title(clean_target);
         let mut matches = if match_duplicate_window_titles {
             title == base || selector == clean_target
@@ -554,9 +560,8 @@ mod windows_impl {
         if !matches {
             let simplified_cand = simplify_window_title(title);
             let simplified_target = simplify_window_title(clean_target);
-            if simplified_cand.eq_ignore_ascii_case(&simplified_target)
+            if (!simplified_cand.is_empty() && simplified_cand.eq_ignore_ascii_case(&simplified_target))
                 || title.to_lowercase().contains(&clean_target.to_lowercase())
-                || clean_target.to_lowercase().contains(&title.to_lowercase())
             {
                 matches = true;
             }
@@ -1748,6 +1753,38 @@ mod tests {
             "Doc - Google Chrome",
             "Doc - Google Chrome (0x100)",
             "Other - Google Chrome",
+            false
+        ));
+
+        // Ensure IdentityV does not match Edge or empty titles
+        assert!(!window_matches_candidate_title(
+            "New Tab - Microsoft Edge",
+            "New Tab - Microsoft Edge (0x200)",
+            "IdentityV",
+            false
+        ));
+        assert!(!window_matches_candidate_title(
+            "",
+            "",
+            "IdentityV",
+            false
+        ));
+        assert!(!window_matches_candidate_title(
+            "v",
+            "v (0x300)",
+            "IdentityV",
+            false
+        ));
+        assert!(window_matches_candidate_title(
+            "IdentityV",
+            "IdentityV (0x400)",
+            "IdentityV",
+            false
+        ));
+        assert!(window_matches_candidate_title(
+            "IdentityV - Patch 1.0",
+            "IdentityV - Patch 1.0 (0x400)",
+            "IdentityV",
             false
         ));
     }

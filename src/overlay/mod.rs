@@ -36837,22 +36837,45 @@ mod windows_overlay {
         })
     }
 
+    fn live_or_cached_foreground() -> Option<(HWND, String)> {
+        #[cfg(all(windows, not(test)))]
+        unsafe {
+            let live = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            if !live.0.is_null() {
+                let normalized = normalize_focus_window(live);
+                if window_belongs_to_current_process(normalized) || is_internal_app_window(normalized) {
+                    return None;
+                }
+                let current_cached = FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed);
+                if normalized.0 as isize != current_cached {
+                    update_foreground_window(normalized);
+                }
+                let title = crate::window_list::window_title(normalized).or_else(|| {
+                    FOREGROUND_WINDOW_TITLE.lock().clone()
+                });
+                return title.map(|t| (normalized, t));
+            }
+        }
+
+        let foreground =
+            HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
+        if foreground.0.is_null() {
+            return None;
+        }
+        let title_guard = FOREGROUND_WINDOW_TITLE.lock();
+        title_guard.as_ref().map(|title| (foreground, title.clone()))
+    }
+
     fn foreground_matches_any_window_target(
         target_title: Option<&str>,
         extra_target_titles: &[String],
         match_duplicate_window_titles: bool,
     ) -> bool {
-        let foreground =
-            HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
-        if foreground.0.is_null() {
-            return false;
-        }
-        let title_guard = FOREGROUND_WINDOW_TITLE.lock();
-        let Some(ref title) = *title_guard else {
+        let Some((foreground, title)) = live_or_cached_foreground() else {
             return false;
         };
         title_matches_any_window_target(
-            title,
+            &title,
             foreground,
             target_title,
             extra_target_titles,
@@ -36865,18 +36888,11 @@ mod windows_overlay {
             return true;
         }
 
-        let foreground =
-            HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
-        if foreground.0.is_null() {
-            return false;
-        }
-
-        let title_guard = FOREGROUND_WINDOW_TITLE.lock();
-        let Some(ref title) = *title_guard else {
+        let Some((foreground, title)) = live_or_cached_foreground() else {
             return false;
         };
         title_matches_any_window_target(
-            title,
+            &title,
             foreground,
             group.target_window_title.as_deref(),
             &group.extra_target_window_titles,
@@ -37238,24 +37254,16 @@ mod windows_overlay {
         extra_target_titles: &[String],
         match_duplicate_window_titles: bool,
     ) -> bool {
+        let Some((foreground, title)) = live_or_cached_foreground() else {
+            return false;
+        };
+
         if target_title.is_none() && extra_target_titles.is_empty() {
-            let foreground =
-                HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
             return is_focus_trigger_candidate_window(foreground);
         }
 
-        let foreground =
-            HWND(FOREGROUND_WINDOW_HWND.load(Ordering::Relaxed) as *mut std::ffi::c_void);
-        if foreground.0.is_null() {
-            return false;
-        }
-
-        let title_guard = FOREGROUND_WINDOW_TITLE.lock();
-        let Some(ref title) = *title_guard else {
-            return false;
-        };
         title_matches_any_window_target(
-            title,
+            &title,
             foreground,
             target_title,
             extra_target_titles,
