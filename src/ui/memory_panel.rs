@@ -885,31 +885,16 @@ impl Default for ProximityFinderDialog {
 }
 
 #[derive(Clone)]
-struct LocationProbeCandidate {
-    offset: i64,
-    address_x: usize,
-    x: f32,
-    y: f32,
-    z: f32,
-    distance: Option<f32>,
-}
-
-#[derive(Clone)]
 pub(crate) struct LocationProbeDialog {
     pub(crate) preset_id: u32,
     pub(crate) anchor_addresses: Vec<usize>,
     pub(crate) selected_anchor_idx: usize,
-    pub(crate) backward_range: usize,
-    pub(crate) forward_range: usize,
-    pub(crate) step: usize,
+    pub(crate) backward_count: u32,
+    pub(crate) forward_count: u32,
     pub(crate) y_offset_from_x: i64,
     pub(crate) z_offset_from_x: i64,
     pub(crate) current_offset: i64,
-    pub(crate) live_preview: bool,
     pub(crate) original_preset: Option<EspPreset>,
-    pub(crate) filter_plausible: bool,
-    pub(crate) plausible_min: f32,
-    pub(crate) plausible_max: f32,
     pub(crate) status: String,
 }
 
@@ -919,17 +904,12 @@ impl Default for LocationProbeDialog {
             preset_id: 0,
             anchor_addresses: Vec::new(),
             selected_anchor_idx: 0,
-            backward_range: 0x200,
-            forward_range: 0x200,
-            step: 4,
+            backward_count: 50,
+            forward_count: 50,
             y_offset_from_x: 4,
             z_offset_from_x: 8,
             current_offset: 0,
-            live_preview: true,
             original_preset: None,
-            filter_plausible: true,
-            plausible_min: -50000.0,
-            plausible_max: 50000.0,
             status: String::new(),
         }
     }
@@ -17311,17 +17291,12 @@ impl CrosshairApp {
             preset_id,
             anchor_addresses: addrs,
             selected_anchor_idx: 0,
-            backward_range: 0x200,
-            forward_range: 0x200,
-            step: 4,
+            backward_count: 50,
+            forward_count: 50,
             y_offset_from_x: y_off,
             z_offset_from_x: z_off,
             current_offset: 0,
-            live_preview: true,
             original_preset: preset,
-            filter_plausible: true,
-            plausible_min: -50000.0,
-            plausible_max: 50000.0,
             status: String::new(),
         });
 
@@ -17385,29 +17360,6 @@ impl CrosshairApp {
         }
     }
 
-    fn save_probed_location_address(&mut self, address: usize, description: String, group: String) {
-        let current = self.memory_panel.process_pid.and_then(|pid| {
-            read_scan_value(pid, address, ScanValueType::F32).ok()
-        });
-        self.memory_panel.saved.push(SavedMemoryAddress {
-            address,
-            value_type: ScanValueType::F32,
-            current,
-            text_encoding: None,
-            text_byte_len: 0,
-            current_text: None,
-            description,
-            group,
-            hexadecimal: false,
-            pointer: None,
-            frozen: None,
-            saved_to_library: false,
-            aob_sample_1: None,
-            aob_pattern: None,
-        });
-        self.persist_memory_pointers();
-    }
-
     fn render_location_probe_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.memory_panel.location_probe_dialog.take() else {
             return;
@@ -17415,7 +17367,6 @@ impl CrosshairApp {
         let mut open = true;
         let mut request_close = false;
         let mut applied = false;
-        let mut action_add_to_list = false;
         let mut offset_changed = false;
         let mut switch_preset = None;
 
@@ -17426,16 +17377,12 @@ impl CrosshairApp {
             "Dò vị trí vật thể (ESP)",
         ))
         .open(&mut open)
-        .resizable(true)
+        .resizable(false)
         .pivot(egui::Align2::CENTER_CENTER)
         .default_pos(screen_rect.center())
         .constrain_to(inset_bounds)
-        .default_width(740.0)
-        .default_height(560.0)
-        .min_width(520.0)
-        .min_height(380.0);
+        .default_width(460.0);
 
-        let pid = self.memory_panel.process_pid;
         let active_anchor = match dialog.anchor_addresses.get(dialog.selected_anchor_idx).copied() {
             Some(a) => a,
             None => {
@@ -17444,119 +17391,12 @@ impl CrosshairApp {
             }
         };
 
-        let camera_pos = if let Some(p) = self.state.esp_presets.iter().find(|p| p.id == dialog.preset_id) {
-            let resolve_coord = |expr: &str| -> Option<f32> {
-                let trimmed = expr.trim();
-                if let Ok(val) = trimmed.parse::<f32>() {
-                    return Some(val);
-                }
-                if let Some(proc_pid) = pid {
-                    let hex_str = trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")).unwrap_or(trimmed);
-                    if let Ok(addr) = usize::from_str_radix(hex_str, 16) {
-                        if let Ok(bytes) = read_memory_bytes(proc_pid, addr, 4) {
-                            if bytes.len() == 4 {
-                                return Some(f32::from_le_bytes(bytes.try_into().unwrap()));
-                            }
-                        }
-                    }
-                }
-                None
-            };
-            match (resolve_coord(&p.camera_x), resolve_coord(&p.camera_y), resolve_coord(&p.camera_z)) {
-                (Some(cx), Some(cy), Some(cz)) => Some([cx, cy, cz]),
-                _ => None,
-            }
-        } else {
-            None
-        };
-
-        let step = dialog.step.max(1);
-        let backward = dialog.backward_range;
-        let forward = dialog.forward_range;
-        let start_addr = active_anchor.saturating_sub(backward);
-        let read_len = backward + forward + 64;
-
-        let mem_buffer = pid.and_then(|proc_pid| read_memory_bytes(proc_pid, start_addr, read_len).ok());
-
-        let min_offset = -(backward as i64);
-        let max_offset = forward as i64;
-        let mut candidates: Vec<LocationProbeCandidate> = Vec::new();
-
-        if let Some(buf) = &mem_buffer {
-            let mut off = min_offset;
-            while off <= max_offset {
-                let read_float_at_offset = |target_offset: i64| -> Option<f32> {
-                    let rel = target_offset - min_offset;
-                    if rel >= 0 && (rel as usize) + 4 <= buf.len() {
-                        let urel = rel as usize;
-                        Some(f32::from_le_bytes(buf[urel..urel + 4].try_into().unwrap()))
-                    } else if let Some(proc_pid) = pid {
-                        let addr = active_anchor.wrapping_add_signed(target_offset as isize);
-                        read_memory_bytes(proc_pid, addr, 4).ok().and_then(|b| {
-                            if b.len() == 4 {
-                                Some(f32::from_le_bytes(b.try_into().unwrap()))
-                            } else {
-                                None
-                            }
-                        })
-                    } else {
-                        None
-                    }
-                };
-
-                let x_opt = read_float_at_offset(off);
-                let y_opt = read_float_at_offset(off + dialog.y_offset_from_x);
-                let z_opt = read_float_at_offset(off + dialog.z_offset_from_x);
-
-                if let (Some(x), Some(y), Some(z)) = (x_opt, y_opt, z_opt) {
-                    let is_valid = !dialog.filter_plausible || {
-                        x.is_finite() && y.is_finite() && z.is_finite()
-                            && !(x == 0.0 && y == 0.0 && z == 0.0)
-                            && x >= dialog.plausible_min && x <= dialog.plausible_max
-                            && y >= dialog.plausible_min && y <= dialog.plausible_max
-                            && z >= dialog.plausible_min && z <= dialog.plausible_max
-                            && !(x != 0.0 && x.abs() < 0.001 && y.abs() < 0.001 && z.abs() < 0.001)
-                    };
-
-                    if is_valid {
-                        let distance = camera_pos.map(|[cx, cy, cz]| {
-                            ((x - cx).powi(2) + (y - cy).powi(2) + (z - cz).powi(2)).sqrt()
-                        });
-                        candidates.push(LocationProbeCandidate {
-                            offset: off,
-                            address_x: active_anchor.wrapping_add_signed(off as isize),
-                            x,
-                            y,
-                            z,
-                            distance,
-                        });
-                    }
-                }
-                off += step as i64;
-            }
-        }
-
-        let curr_x_addr = active_anchor.wrapping_add_signed(dialog.current_offset as isize);
-        let curr_y_addr = curr_x_addr.wrapping_add_signed(dialog.y_offset_from_x as isize);
-        let curr_z_addr = curr_x_addr.wrapping_add_signed(dialog.z_offset_from_x as isize);
-        let curr_val = |addr: usize| -> Option<f32> {
-            pid.and_then(|p| read_memory_bytes(p, addr, 4).ok()).and_then(|b| {
-                if b.len() == 4 { Some(f32::from_le_bytes(b.try_into().unwrap())) } else { None }
-            })
-        };
-        let curr_x = curr_val(curr_x_addr);
-        let curr_y = curr_val(curr_y_addr);
-        let curr_z = curr_val(curr_z_addr);
-        let curr_dist = match (camera_pos, curr_x, curr_y, curr_z) {
-            (Some([cx, cy, cz]), Some(x), Some(y), Some(z)) => {
-                Some(((x - cx).powi(2) + (y - cy).powi(2) + (z - cz).powi(2)).sqrt())
-            }
-            _ => None,
-        };
-
         window.show(ctx, |ui| {
+            ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
+
+            // Row 1: Target ESP and Anchor
             ui.horizontal(|ui| {
-                ui.label(RichText::new(self.tr("Target ESP Preset:", "Preset ESP mục tiêu:")).strong());
+                ui.label(RichText::new(self.tr("ESP Preset:", "Preset ESP:")).strong());
                 let cur_preset_name = self
                     .state
                     .esp_presets
@@ -17582,7 +17422,7 @@ impl CrosshairApp {
 
                 if dialog.anchor_addresses.len() > 1 {
                     ui.separator();
-                    ui.label(RichText::new(self.tr("Active Anchor:", "Địa chỉ neo chính:")).strong());
+                    ui.label(RichText::new(self.tr("Anchor:", "Địa chỉ neo:")).strong());
                     egui::ComboBox::from_id_salt("location_probe_anchor_select")
                         .selected_text(format!(
                             "#{}: 0x{:X}",
@@ -17602,195 +17442,106 @@ impl CrosshairApp {
                         });
                 } else {
                     ui.separator();
-                    ui.label(RichText::new(format!("Anchor: 0x{:X}", active_anchor)).weak());
+                    ui.label(RichText::new(format!("0x{:X}", active_anchor)).monospace().strong());
                 }
             });
 
+            ui.separator();
+
+            // Row 2: Check backward / forward address counts
             ui.horizontal(|ui| {
-                ui.label(self.tr("Coordinate Layout:", "Quy tắc tọa độ:"));
-                ui.label("X + 0,");
-                ui.label("Y +");
-                ui.add(egui::DragValue::new(&mut dialog.y_offset_from_x).range(-0x1000..=0x1000));
-                ui.label("Z +");
-                ui.add(egui::DragValue::new(&mut dialog.z_offset_from_x).range(-0x1000..=0x1000));
+                ui.label(self.tr("Check backward (addrs):", "Số địa chỉ lùi:"));
+                if ui.add(egui::DragValue::new(&mut dialog.backward_count).range(1..=1000).speed(1)).changed() {
+                    dialog.backward_count = dialog.backward_count.clamp(1, 1000);
+                }
 
                 ui.separator();
-                let prev_preview = dialog.live_preview;
-                ui.checkbox(&mut dialog.live_preview, self.tr("Live ESP Preview", "Xem trước trực tiếp trên ESP"));
-                if prev_preview != dialog.live_preview && dialog.live_preview {
-                    offset_changed = true;
+
+                ui.label(self.tr("Check forward (addrs):", "Số địa chỉ tiến:"));
+                if ui.add(egui::DragValue::new(&mut dialog.forward_count).range(1..=1000).speed(1)).changed() {
+                    dialog.forward_count = dialog.forward_count.clamp(1, 1000);
                 }
             });
 
-            ui.separator();
+            // Row 3: Probe Slider
+            let min_idx = -(dialog.backward_count as i64);
+            let max_idx = dialog.forward_count as i64;
+            let mut cur_idx = (dialog.current_offset / 4).clamp(min_idx, max_idx);
 
             ui.horizontal(|ui| {
-                ui.label(self.tr("Probe Range:", "Phạm vi quét:"));
-                ui.label(self.tr("Backward", "Lùi"));
-                ui.add(
-                    egui::DragValue::new(&mut dialog.backward_range)
-                        .range(0x10..=0x4000)
-                        .hexadecimal(1, false, false)
-                        .prefix("0x"),
-                );
-                ui.label(self.tr("Forward", "Tiến"));
-                ui.add(
-                    egui::DragValue::new(&mut dialog.forward_range)
-                        .range(0x10..=0x4000)
-                        .hexadecimal(1, false, false)
-                        .prefix("0x"),
-                );
-                ui.label("Step:");
-                egui::ComboBox::from_id_salt("location_probe_step")
-                    .selected_text(format!("{} bytes", dialog.step))
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_label(dialog.step == 4, "4 bytes (Float)").clicked() {
-                            dialog.step = 4;
-                        }
-                        if ui.selectable_label(dialog.step == 8, "8 bytes (Double/Ptr)").clicked() {
-                            dialog.step = 8;
-                        }
-                    });
-            });
-
-            ui.add_space(4.0);
-
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(self.tr("Offset Slider:", "Thanh trượt Offset:")).strong());
-                let mut slider_val = dialog.current_offset;
-                let slider_text = format!("{:+X} (dec: {:+})", slider_val, slider_val);
+                ui.label(RichText::new(self.tr("Probe:", "Dò:")).strong());
+                if ui.button("◀ -1").on_hover_text(self.tr("Previous address (-4 bytes)", "Địa chỉ trước (-4 bytes)")).clicked() {
+                    cur_idx = (cur_idx - 1).max(min_idx);
+                    dialog.current_offset = cur_idx * 4;
+                    offset_changed = true;
+                }
+                let slider_text = if cur_idx == 0 {
+                    "0 (Anchor)".to_string()
+                } else {
+                    format!("{:+}", cur_idx)
+                };
                 if ui.add(
-                    egui::Slider::new(&mut slider_val, min_offset..=max_offset)
-                        .step_by(step as f64)
+                    egui::Slider::new(&mut cur_idx, min_idx..=max_idx)
                         .text(slider_text)
                 ).changed() {
-                    dialog.current_offset = (slider_val / step as i64) * step as i64;
+                    dialog.current_offset = cur_idx * 4;
+                    offset_changed = true;
+                }
+                if ui.button("+1 ▶").on_hover_text(self.tr("Next address (+4 bytes)", "Địa chỉ tiếp theo (+4 bytes)")).clicked() {
+                    cur_idx = (cur_idx + 1).min(max_idx);
+                    dialog.current_offset = cur_idx * 4;
+                    offset_changed = true;
+                }
+                if cur_idx != 0 && ui.button("⟲ 0").on_hover_text(self.tr("Reset to anchor address", "Về lại địa chỉ gốc")).clicked() {
+                    cur_idx = 0;
+                    dialog.current_offset = 0;
                     offset_changed = true;
                 }
             });
 
-            ui.horizontal(|ui| {
-                if ui.button("[-] -4").clicked() {
-                    dialog.current_offset = (dialog.current_offset - 4).clamp(min_offset, max_offset);
-                    offset_changed = true;
-                }
-                if ui.button("[+] +4").clicked() {
-                    dialog.current_offset = (dialog.current_offset + 4).clamp(min_offset, max_offset);
-                    offset_changed = true;
-                }
-                if ui.button(self.tr("<< Prev Plausible", "<< Tọa độ hợp lý trước")).clicked() {
-                    if let Some(prev) = candidates.iter().filter(|c| c.offset < dialog.current_offset).next_back() {
-                        dialog.current_offset = prev.offset;
-                        offset_changed = true;
-                    }
-                }
-                if ui.button(self.tr("Next Plausible >>", "Tọa độ hợp lý sau >>")).clicked() {
-                    if let Some(next) = candidates.iter().filter(|c| c.offset > dialog.current_offset).next() {
-                        dialog.current_offset = next.offset;
-                        offset_changed = true;
-                    }
-                }
-            });
-
-            ui.add_space(4.0);
+            // Row 4: Values preview frame
+            let curr_x_addr = active_anchor.wrapping_add_signed(dialog.current_offset as isize);
+            let curr_y_addr = curr_x_addr.wrapping_add_signed(dialog.y_offset_from_x as isize);
+            let curr_z_addr = curr_x_addr.wrapping_add_signed(dialog.z_offset_from_x as isize);
+            let pid = self.memory_panel.process_pid;
+            let read_f32 = |addr: usize| -> Option<f32> {
+                pid.and_then(|p| read_memory_bytes(p, addr, 4).ok()).and_then(|b| {
+                    if b.len() == 4 { Some(f32::from_le_bytes(b.try_into().unwrap())) } else { None }
+                })
+            };
+            let val_x = read_f32(curr_x_addr);
+            let val_y = read_f32(curr_y_addr);
+            let val_z = read_f32(curr_z_addr);
 
             egui::Frame::group(ui.style())
-                .fill(Color32::from_rgba_unmultiplied(30, 34, 42, 220))
+                .fill(Color32::from_rgba_unmultiplied(24, 28, 36, 220))
                 .show(ui, |ui| {
-                    ui.horizontal_wrapped(|ui| {
+                    ui.horizontal(|ui| {
+                        let sign = if dialog.current_offset >= 0 { "+" } else { "" };
                         ui.label(RichText::new(format!(
-                            "Offset: {:+X} (0x{:X})",
+                            "0x{:X} ({}{:#X})",
+                            curr_x_addr,
+                            sign,
                             dialog.current_offset,
-                            curr_x_addr
-                        )).strong().color(Color32::from_rgb(90, 215, 120)));
+                        )).monospace().strong().color(Color32::from_rgb(100, 220, 140)));
+
                         ui.separator();
-                        let fmt_val = |v: Option<f32>| v.map_or_else(|| "-".to_owned(), |val| format!("{:.3}", val));
-                        ui.label(format!("X: {}", fmt_val(curr_x)));
-                        ui.label(format!("Y: {}", fmt_val(curr_y)));
-                        ui.label(format!("Z: {}", fmt_val(curr_z)));
-                        if let Some(dist) = curr_dist {
-                            ui.separator();
-                            ui.label(RichText::new(format!("Cam Dist: {:.1} m", dist)).strong().color(Color32::from_rgb(240, 200, 80)));
-                        }
+                        let fmt_f = |v: Option<f32>| v.map(|x| format!("{:.3}", x)).unwrap_or_else(|| "--".to_string());
+                        ui.label(RichText::new(format!("X: {}", fmt_f(val_x))).strong());
+                        ui.label(RichText::new(format!("Y: {}", fmt_f(val_y))).strong());
+                        ui.label(RichText::new(format!("Z: {}", fmt_f(val_z))).strong());
                     });
-                });
-
-            ui.add_space(4.0);
-
-            ui.horizontal(|ui| {
-                ui.strong(format!(
-                    "{} ({}):",
-                    self.tr("Plausible Candidates", "Các vị trí tiềm năng"),
-                    candidates.len()
-                ));
-                ui.checkbox(
-                    &mut dialog.filter_plausible,
-                    self.tr("Filter plausible only", "Chỉ hiện tọa độ hợp lý"),
-                );
-            });
-
-            let table_height = (ui.available_height() - 48.0).max(120.0);
-            egui::ScrollArea::vertical()
-                .max_height(table_height)
-                .show(ui, |ui| {
-                    egui::Grid::new("location_probe_candidate_grid")
-                        .striped(true)
-                        .min_col_width(65.0)
-                        .show(ui, |ui| {
-                            ui.label(RichText::new("Offset").strong());
-                            ui.label(RichText::new("Address (X)").strong());
-                            ui.label(RichText::new("X").strong());
-                            ui.label(RichText::new("Y").strong());
-                            ui.label(RichText::new("Z").strong());
-                            ui.label(RichText::new("Dist (m)").strong());
-                            ui.label(RichText::new("Action").strong());
-                            ui.end_row();
-
-                            for c in &candidates {
-                                let is_current = c.offset == dialog.current_offset;
-                                let text_color = if is_current {
-                                    Color32::from_rgb(90, 220, 130)
-                                } else {
-                                    Color32::WHITE
-                                };
-                                ui.label(
-                                    RichText::new(format!("{:+X}", c.offset))
-                                        .color(text_color)
-                                        .strong(),
-                                );
-                                ui.label(RichText::new(format!("0x{:X}", c.address_x)).color(text_color));
-                                ui.label(RichText::new(format!("{:.2}", c.x)).color(text_color));
-                                ui.label(RichText::new(format!("{:.2}", c.y)).color(text_color));
-                                ui.label(RichText::new(format!("{:.2}", c.z)).color(text_color));
-                                if let Some(dist) = c.distance {
-                                    ui.label(RichText::new(format!("{:.1}", dist)).color(text_color));
-                                } else {
-                                    ui.label(RichText::new("-").weak());
-                                }
-                                let btn_text = if is_current { "Active" } else { "Select" };
-                                if ui.button(btn_text).clicked() {
-                                    dialog.current_offset = c.offset;
-                                    offset_changed = true;
-                                }
-                                ui.end_row();
-                            }
-                        });
                 });
 
             ui.separator();
 
+            // Row 5: Actions
             ui.horizontal(|ui| {
                 if ui
-                    .button(RichText::new(self.tr("Apply to ESP Preset", "Áp dụng vào Preset ESP")).strong())
+                    .button(RichText::new(self.tr("Apply to ESP Preset", "Áp dụng vào ESP")).strong())
                     .clicked()
                 {
                     applied = true;
-                }
-                if ui
-                    .button(self.tr("Add to Address List", "Thêm vào danh sách địa chỉ"))
-                    .clicked()
-                {
-                    action_add_to_list = true;
                 }
                 if ui
                     .button(self.tr("Cancel & Revert", "Hủy & Hoàn nguyên"))
@@ -17800,7 +17551,7 @@ impl CrosshairApp {
                 }
                 if !dialog.status.is_empty() {
                     ui.separator();
-                    ui.label(RichText::new(&dialog.status).color(Color32::from_rgb(90, 215, 120)));
+                    ui.label(RichText::new(&dialog.status).color(Color32::from_rgb(100, 220, 140)));
                 }
             });
         });
@@ -17846,48 +17597,7 @@ impl CrosshairApp {
                 d.status = status_msg;
             }
         } else if offset_changed {
-            if self
-                .memory_panel
-                .location_probe_dialog
-                .as_ref()
-                .is_some_and(|d| d.live_preview)
-            {
-                self.apply_location_probe_preview(false);
-            }
-        }
-
-        if action_add_to_list {
-            let saved_status = self.tr(
-                "Saved X, Y, Z to Address List!",
-                "Đã lưu X, Y, Z vào danh sách địa chỉ!",
-            ).to_owned();
-            if let Some(d) = self.memory_panel.location_probe_dialog.as_mut() {
-                let curr_off = d.current_offset;
-                let y_off = d.y_offset_from_x;
-                let z_off = d.z_offset_from_x;
-                let x_addr = active_anchor.wrapping_add_signed(curr_off as isize);
-                let y_addr = x_addr.wrapping_add_signed(y_off as isize);
-                let z_addr = x_addr.wrapping_add_signed(z_off as isize);
-                let group_name = format!("Probe {:+X}", curr_off);
-                self.save_probed_location_address(
-                    x_addr,
-                    format!("Probe X (0x{:X}{:+X})", active_anchor, curr_off),
-                    group_name.clone(),
-                );
-                self.save_probed_location_address(
-                    y_addr,
-                    format!("Probe Y (0x{:X}{:+X})", active_anchor, curr_off + y_off),
-                    group_name.clone(),
-                );
-                self.save_probed_location_address(
-                    z_addr,
-                    format!("Probe Z (0x{:X}{:+X})", active_anchor, curr_off + z_off),
-                    group_name,
-                );
-                if let Some(d) = self.memory_panel.location_probe_dialog.as_mut() {
-                    d.status = saved_status;
-                }
-            }
+            self.apply_location_probe_preview(false);
         }
 
         if !open || request_close {
@@ -20693,10 +20403,10 @@ mod tests {
         use super::LocationProbeDialog;
 
         let dialog = LocationProbeDialog::default();
-        assert_eq!(dialog.step, 4);
+        assert_eq!(dialog.backward_count, 50);
+        assert_eq!(dialog.forward_count, 50);
         assert_eq!(dialog.y_offset_from_x, 4);
         assert_eq!(dialog.z_offset_from_x, 8);
-        assert!(dialog.live_preview);
 
         let anchor = 0x1000usize;
         let offset = 0x40i64;
