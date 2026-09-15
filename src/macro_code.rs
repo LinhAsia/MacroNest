@@ -606,6 +606,9 @@ fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> boo
                 | MacroAction::BackgroundKey
         );
     }
+    if field.starts_with("follow_3d_") {
+        return action == MacroAction::Follow3DTarget;
+    }
     true
 }
 

@@ -9405,6 +9405,7 @@ impl CrosshairApp {
             MacroAction::BackgroundClick => "BackgroundClick",
             MacroAction::BackgroundMouseMove => "BackgroundMouseMove",
             MacroAction::BackgroundKey => "BackgroundKey",
+            MacroAction::Follow3DTarget => "Follow3DTarget",
             _ => "Legacy (Deprecated)",
         }
     }
@@ -9789,6 +9790,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.background_key",
                 "Send key press or text directly to a background window without stealing focus or interrupting your work.",
             ),
+            MacroAction::Follow3DTarget => (
+                "macro_action_tooltip.follow_3d_target",
+                "Automatically follow a 3D target using background WASD keys based on memory coordinates.",
+            ),
             _ => ("macro_action_tooltip.legacy", "Legacy (Deprecated)"),
         };
         match language {
@@ -9898,6 +9903,7 @@ impl CrosshairApp {
             MacroAction::BackgroundClick => 0xe323,
             MacroAction::BackgroundMouseMove => 0xe89f,
             MacroAction::BackgroundKey => 0xe312,
+            MacroAction::Follow3DTarget => 0xe566,
             _ => 0xe8b5,
         };
         char::from_u32(codepoint).unwrap_or('?')
@@ -10087,6 +10093,9 @@ impl CrosshairApp {
             }
             MacroAction::BackgroundKey => {
                 ("macro_action_short_label.background_key", "BgKey")
+            }
+            MacroAction::Follow3DTarget => {
+                ("macro_action_short_label.follow_3d_target", "Follow3D")
             }
             _ => ("macro_action_short_label.legacy", "Legacy"),
         };
@@ -10325,6 +10334,7 @@ impl CrosshairApp {
                 | MacroAction::BackgroundClick
                 | MacroAction::BackgroundMouseMove
                 | MacroAction::BackgroundKey
+                | MacroAction::Follow3DTarget
                 | MacroAction::FunnyMemeReply
                 | MacroAction::AiResponse
                 | MacroAction::DisableCrosshair

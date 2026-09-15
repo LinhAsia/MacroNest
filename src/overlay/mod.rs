@@ -25073,6 +25073,7 @@ mod windows_overlay {
             active
         };
         cleanup_removed_hold_macro(preset_id, active);
+        stop_follow_3d_target();
     }
 
     fn cleanup_press_macro_locks(
@@ -25086,6 +25087,8 @@ mod windows_overlay {
         for &mask in press_locked_mouse_masks {
             apply_unlock_mouse(None, None, mask);
         }
+
+        stop_follow_3d_target();
     }
 
     fn current_hold_run_matches(preset_id: u32, run_token: u64) -> bool {
@@ -29709,6 +29712,10 @@ mod windows_overlay {
                     execute_esp_3d_aim_lock(step);
                 }
 
+                MacroAction::Follow3DTarget => {
+                    let _ = execute_follow_3d_target(step);
+                }
+
                 MacroAction::StopVisionWait => {
                     let _ = stop_vision_waiting(&step.key);
                 }
@@ -30518,6 +30525,10 @@ mod windows_overlay {
 
                 MacroAction::Esp3DAimLock => {
                     execute_esp_3d_aim_lock(step);
+                }
+
+                MacroAction::Follow3DTarget => {
+                    let _ = execute_follow_3d_target(step);
                 }
 
                 MacroAction::StopVisionWait => {
@@ -33224,6 +33235,29 @@ mod windows_overlay {
         }
 
         #[test]
+        fn test_compute_follow_3d_keys() {
+            // Target is straight ahead (along positive Z, camera looking along +Z: fa=0, fb=1)
+            let keys = compute_follow_3d_keys(0.0, 10.0, 0.0, 1.0, 1.0);
+            assert_eq!(keys, [true, false, false, false], "should press W when target is ahead");
+
+            // Target is behind (along negative Z)
+            let keys = compute_follow_3d_keys(0.0, -10.0, 0.0, 1.0, 1.0);
+            assert_eq!(keys, [false, false, true, false], "should press S when target is behind");
+
+            // Target is to the right (along positive X)
+            let keys = compute_follow_3d_keys(10.0, 0.0, 0.0, 1.0, 1.0);
+            assert_eq!(keys, [false, false, false, true], "should press D when target is right");
+
+            // Target is to the left (along negative X)
+            let keys = compute_follow_3d_keys(-10.0, 0.0, 0.0, 1.0, 1.0);
+            assert_eq!(keys, [false, true, false, false], "should press A when target is left");
+
+            // Target is within stop distance
+            let keys = compute_follow_3d_keys(0.5, 0.5, 0.0, 1.0, 2.0);
+            assert_eq!(keys, [false, false, false, false], "should not press any key when within stop distance");
+        }
+
+        #[test]
         fn test_set_variable_round_expression_without_braces() {
             let _guard = TEST_MUTEX.lock().unwrap();
             RUNTIME_VARIABLES.lock().clear();
@@ -34444,6 +34478,7 @@ mod windows_overlay {
             MacroAction::BackgroundClick => return send_background_click(step),
             MacroAction::BackgroundMouseMove => return send_background_mouse_move(step),
             MacroAction::BackgroundKey => return send_background_key(step),
+            MacroAction::Follow3DTarget => return execute_follow_3d_target(step),
             MacroAction::TypeText => {
                 let text = interpolate_variables(&step.key);
                 return if step.type_text_paste {
@@ -35443,6 +35478,203 @@ mod windows_overlay {
                 let _ = AttachThreadInput(current_thread, target_thread, false);
             }
         }
+        Ok(())
+    }
+
+    struct Follow3DActiveSession {
+        stop_flag: Arc<AtomicBool>,
+        input_hwnd: isize,
+        held_keys: Arc<Mutex<[bool; 4]>>, // [W, A, S, D]
+    }
+
+    static ACTIVE_FOLLOW_3D_SESSION: Lazy<Mutex<Option<Follow3DActiveSession>>> =
+        Lazy::new(|| Mutex::new(None));
+
+    fn post_bg_key_down(target: HWND, vk: u32) {
+        unsafe {
+            let scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+            let lparam = LPARAM((1u32 | ((scan & 0xFF) << 16)) as isize);
+            let _ = PostMessageW(Some(target), WM_KEYDOWN, WPARAM(vk as usize), lparam);
+        }
+    }
+
+    fn post_bg_key_up(target: HWND, vk: u32) {
+        unsafe {
+            let scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
+            let lparam = LPARAM((1u32 | ((scan & 0xFF) << 16) | (1 << 30) | (1 << 31)) as isize);
+            let _ = PostMessageW(Some(target), WM_KEYUP, WPARAM(vk as usize), lparam);
+        }
+    }
+
+    pub(crate) fn stop_follow_3d_target() {
+        let mut session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();
+        if let Some(session) = session_guard.take() {
+            session.stop_flag.store(true, Ordering::SeqCst);
+            let target_hwnd = HWND(session.input_hwnd as *mut _);
+            if !target_hwnd.0.is_null() {
+                let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
+                let mut held = session.held_keys.lock();
+                for (idx, &vk) in vk_keys.iter().enumerate() {
+                    if held[idx] {
+                        held[idx] = false;
+                        post_bg_key_up(target_hwnd, vk);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn compute_follow_3d_keys(
+        dx: f32,
+        dz: f32,
+        fa: f32,
+        fb: f32,
+        stop_dist: f32,
+    ) -> [bool; 4] {
+        let dist = dx.hypot(dz);
+        let mut want_keys = [false; 4]; // [W, A, S, D]
+        if dist > stop_dist {
+            let f_score = dx * fa + dz * fb;
+            let r_score = dx * fb - dz * fa;
+            let angle = r_score.atan2(f_score).to_degrees();
+
+            want_keys[0] = (-67.5..=67.5).contains(&angle);
+            want_keys[1] = angle < -22.5 && angle > -157.5;
+            want_keys[2] = angle > 112.5 || angle < -112.5;
+            want_keys[3] = angle > 22.5 && angle < 157.5;
+        }
+        want_keys
+    }
+
+    fn execute_follow_3d_target(step: &MacroStep) -> Result<()> {
+        if step.follow_3d_spec.mode == crate::model::Follow3DMode::Stop {
+            stop_follow_3d_target();
+            return Ok(());
+        }
+
+        stop_follow_3d_target();
+
+        let spec = step.follow_3d_spec.clone();
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let held_keys = Arc::new(Mutex::new([false; 4]));
+
+        let input_selector = spec
+            .input_window
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or(spec.follower_window.as_deref());
+        let input_hwnd = crate::window_list::find_window_handle(input_selector);
+        let Some(input_hwnd) = input_hwnd else {
+            bail!("Follow3DTarget: Input window could not be found");
+        };
+        if input_hwnd.0.is_null() {
+            bail!("Follow3DTarget: Input window handle is null");
+        }
+
+        let target_input = if step.background_find_child {
+            unsafe { find_background_input_child(input_hwnd) }
+        } else {
+            input_hwnd
+        };
+
+        let target_input_raw = target_input.0 as isize;
+
+        *ACTIVE_FOLLOW_3D_SESSION.lock() = Some(Follow3DActiveSession {
+            stop_flag: stop_flag.clone(),
+            input_hwnd: target_input_raw,
+            held_keys: held_keys.clone(),
+        });
+
+        let thread_stop = stop_flag.clone();
+        let thread_held = held_keys.clone();
+
+        thread::spawn(move || {
+            let target_input = HWND(target_input_raw as *mut _);
+            let mut frame = EspReadFrame::default();
+            let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
+            let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(10, 500));
+
+            while !thread_stop.load(Ordering::SeqCst) {
+                frame.begin_sample();
+
+                let pid_leader = spec.leader_window.as_deref().and_then(|w| frame.pid_for(w));
+                let pid_follower = spec.follower_window.as_deref().and_then(|w| frame.pid_for(w));
+
+                if let (Some(pid_l), Some(pid_f)) = (pid_leader, pid_follower) {
+                    let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
+                    let lz = if !spec.leader_z.trim().is_empty() {
+                        frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
+                    } else {
+                        frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
+                    };
+
+                    let fx = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
+                    let fz = if !spec.follower_z.trim().is_empty() {
+                        frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
+                    } else {
+                        frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
+                    };
+
+                    let mut forward_opt: Option<(f32, f32)> = None;
+                    match spec.orientation_mode {
+                        crate::model::Follow3DOrientationMode::ForwardPairPitch => {
+                            let fa = frame.read_value(pid_f, &spec.camera_forward_a, spec.value_type).ok();
+                            let fb = frame.read_value(pid_f, &spec.camera_forward_b, spec.value_type).ok();
+                            if let (Some(a), Some(b)) = (fa, fb) {
+                                forward_opt = Some((a, b));
+                            }
+                        }
+                        crate::model::Follow3DOrientationMode::Angles => {
+                            if let Ok(yaw) = frame.read_value(pid_f, &spec.camera_yaw, spec.value_type) {
+                                let rad = yaw.to_radians();
+                                forward_opt = Some((rad.cos(), rad.sin()));
+                            }
+                        }
+                    }
+
+                    if let (Some(lx), Some(lz), Some(fx), Some(fz), Some((mut fa, mut fb))) =
+                        (lx, lz, fx, fz, forward_opt)
+                    {
+                        if spec.invert_forward {
+                            fa = -fa;
+                        }
+                        if spec.invert_strafe {
+                            fb = -fb;
+                        }
+                        if spec.swap_forward_strafe {
+                            std::mem::swap(&mut fa, &mut fb);
+                        }
+
+                        let want_keys = compute_follow_3d_keys(lx - fx, lz - fz, fa, fb, spec.stop_distance);
+
+                        let mut held = thread_held.lock();
+                        for idx in 0..4 {
+                            let vk = vk_keys[idx];
+                            if want_keys[idx] && !held[idx] {
+                                held[idx] = true;
+                                post_bg_key_down(target_input, vk);
+                            } else if !want_keys[idx] && held[idx] {
+                                held[idx] = false;
+                                post_bg_key_up(target_input, vk);
+                            } else if want_keys[idx] && held[idx] {
+                                post_bg_key_down(target_input, vk);
+                            }
+                        }
+                    }
+                }
+
+                thread::sleep(interval);
+            }
+
+            let mut held = thread_held.lock();
+            for idx in 0..4 {
+                if held[idx] {
+                    held[idx] = false;
+                    post_bg_key_up(target_input, vk_keys[idx]);
+                }
+            }
+        });
+
         Ok(())
     }
 
