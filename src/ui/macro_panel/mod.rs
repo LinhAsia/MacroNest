@@ -916,11 +916,11 @@ impl CrosshairApp {
             ui,
             text,
             id,
-            80.0,
-            180.0,
-            21.0,
-            21.0,
-            "0x... / {var} / @name",
+            66.0,
+            130.0,
+            20.0,
+            20.0,
+            "0x.../{v}",
             false,
         )
         .on_hover_text(Self::tr_lang(
@@ -1053,462 +1053,506 @@ impl CrosshairApp {
 
                 // Collapsible body
                 if !step.follow_3d_collapsed {
-                    ui.indent((id_prefix, "f3d-indent"), |ui| {
-                        ui.add_space(3.0);
-                        egui::Frame::group(ui.style())
-                            .corner_radius(egui::CornerRadius::same(4))
-                            .inner_margin(egui::Margin::same(8))
-                            .show(ui, |ui| {
-                                ui.spacing_mut().item_spacing.y = 6.0;
+                    ui.add_space(2.0);
+                    egui::Frame::group(ui.style())
+                        .corner_radius(egui::CornerRadius::same(4))
+                        .inner_margin(egui::Margin::symmetric(8, 6))
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 4.0;
 
-                                // 1. Leader Target
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "1. Leader Window:",
-                                            "1. Cửa sổ Leader:",
-                                        ))
-                                        .strong(),
-                                    );
-                                    let mut dup_mode = false;
-                                    let none_label = Self::tr_lang(
+                            // 1. Leader Target
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
                                         language,
-                                        "Focused window",
-                                        "Cửa sổ đang focus",
-                                    );
-                                    changed |= Self::render_window_target_combo_with_duplicate_mode(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-leader-win"),
-                                        &none_label,
-                                        &mut step.follow_3d_spec.leader_window,
-                                        &mut dup_mode,
-                                        open_windows,
-                                        140.0,
-                                        true,
-                                    );
-                                    ui.add_space(8.0);
-                                    ui.label(RichText::new("X:").strong());
-                                    Self::render_f3d_coord_box(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-lx"),
-                                        &mut step.follow_3d_spec.leader_x,
-                                        timer_names,
-                                        vietnamese_input_enabled,
-                                        vietnamese_input_mode,
-                                        &mut changed,
-                                    );
-                                    ui.label(RichText::new("Y:").strong());
-                                    Self::render_f3d_coord_box(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-ly"),
-                                        &mut step.follow_3d_spec.leader_y,
-                                        timer_names,
-                                        vietnamese_input_enabled,
-                                        vietnamese_input_mode,
-                                        &mut changed,
-                                    );
-                                    ui.label(RichText::new("Z:").strong());
-                                    Self::render_f3d_coord_box(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-lz"),
-                                        &mut step.follow_3d_spec.leader_z,
-                                        timer_names,
-                                        vietnamese_input_enabled,
-                                        vietnamese_input_mode,
-                                        &mut changed,
-                                    );
-                                });
-
-                                // 2. Follower Target
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "2. Follower Window:",
-                                            "2. Cửa sổ Follower:",
-                                        ))
-                                        .strong(),
-                                    );
-                                    let mut dup_mode = false;
-                                    let none_label = Self::tr_lang(
-                                        language,
-                                        "Focused window",
-                                        "Cửa sổ đang focus",
-                                    );
-                                    changed |= Self::render_window_target_combo_with_duplicate_mode(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-follower-win"),
-                                        &none_label,
-                                        &mut step.follow_3d_spec.follower_window,
-                                        &mut dup_mode,
-                                        open_windows,
-                                        140.0,
-                                        true,
-                                    );
-                                    ui.add_space(8.0);
-                                    ui.label(RichText::new("X:").strong());
-                                    Self::render_f3d_coord_box(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-fx"),
-                                        &mut step.follow_3d_spec.follower_x,
-                                        timer_names,
-                                        vietnamese_input_enabled,
-                                        vietnamese_input_mode,
-                                        &mut changed,
-                                    );
-                                    ui.label(RichText::new("Y:").strong());
-                                    Self::render_f3d_coord_box(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-fy"),
-                                        &mut step.follow_3d_spec.follower_y,
-                                        timer_names,
-                                        vietnamese_input_enabled,
-                                        vietnamese_input_mode,
-                                        &mut changed,
-                                    );
-                                    ui.label(RichText::new("Z:").strong());
-                                    Self::render_f3d_coord_box(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-fz"),
-                                        &mut step.follow_3d_spec.follower_z,
-                                        timer_names,
-                                        vietnamese_input_enabled,
-                                        vietnamese_input_mode,
-                                        &mut changed,
-                                    );
-
-                                    ui.add_space(4.0);
-                                    let vt_label = match step.follow_3d_spec.value_type {
-                                        MemoryValueType::F32 => "F32",
-                                        MemoryValueType::F64 => "F64",
-                                        MemoryValueType::I32 => "I32",
-                                        _ => "F32",
-                                    };
-                                    egui::ComboBox::from_id_salt((id_prefix, "f3d-vtype"))
-                                        .width(65.0)
-                                        .selected_text(vt_label)
-                                        .show_ui(ui, |ui| {
-                                            if ui
-                                                .selectable_label(
-                                                    step.follow_3d_spec.value_type
-                                                        == MemoryValueType::F32,
-                                                    "Float (F32)",
-                                                )
-                                                .clicked()
-                                            {
-                                                step.follow_3d_spec.value_type =
-                                                    MemoryValueType::F32;
-                                                changed = true;
-                                            }
-                                            if ui
-                                                .selectable_label(
-                                                    step.follow_3d_spec.value_type
-                                                        == MemoryValueType::F64,
-                                                    "Double (F64)",
-                                                )
-                                                .clicked()
-                                            {
-                                                step.follow_3d_spec.value_type =
-                                                    MemoryValueType::F64;
-                                                changed = true;
-                                            }
-                                            if ui
-                                                .selectable_label(
-                                                    step.follow_3d_spec.value_type
-                                                        == MemoryValueType::I32,
-                                                    "Int32 (I32)",
-                                                )
-                                                .clicked()
-                                            {
-                                                step.follow_3d_spec.value_type =
-                                                    MemoryValueType::I32;
-                                                changed = true;
-                                            }
-                                        });
-                                });
-
-                                // Camera Orientation row
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "   Follower Camera:",
-                                            "   Camera Follower:",
-                                        ))
-                                        .strong(),
-                                    );
-                                    let ori_label = match step.follow_3d_spec.orientation_mode {
-                                        Follow3DOrientationMode::ForwardPairPitch => Self::tr_lang(
-                                            language,
-                                            "Forward (A, B) + Pitch",
-                                            "Vector tiến (A, B) + Pitch",
-                                        ),
-                                        Follow3DOrientationMode::Angles => Self::tr_lang(
-                                            language,
-                                            "Angles (Yaw + Pitch)",
-                                            "Góc xoay (Yaw + Pitch)",
-                                        ),
-                                    };
-                                    egui::ComboBox::from_id_salt((id_prefix, "f3d-ori-mode"))
-                                        .width(155.0)
-                                        .selected_text(ori_label)
-                                        .show_ui(ui, |ui| {
-                                            if ui
-                                                .selectable_label(
-                                                    step.follow_3d_spec.orientation_mode
-                                                        == Follow3DOrientationMode::ForwardPairPitch,
-                                                    Self::tr_lang(
-                                                        language,
-                                                        "Forward (A, B) + Pitch",
-                                                        "Vector tiến (A, B) + Pitch",
-                                                    ),
-                                                )
-                                                .clicked()
-                                            {
-                                                step.follow_3d_spec.orientation_mode =
-                                                    Follow3DOrientationMode::ForwardPairPitch;
-                                                changed = true;
-                                            }
-                                            if ui
-                                                .selectable_label(
-                                                    step.follow_3d_spec.orientation_mode
-                                                        == Follow3DOrientationMode::Angles,
-                                                    Self::tr_lang(
-                                                        language,
-                                                        "Angles (Yaw + Pitch)",
-                                                        "Góc xoay (Yaw + Pitch)",
-                                                    ),
-                                                )
-                                                .clicked()
-                                            {
-                                                step.follow_3d_spec.orientation_mode =
-                                                    Follow3DOrientationMode::Angles;
-                                                changed = true;
-                                            }
-                                        });
-
-                                    ui.add_space(8.0);
-                                    match step.follow_3d_spec.orientation_mode {
-                                        Follow3DOrientationMode::ForwardPairPitch => {
-                                            ui.label(RichText::new("Fwd A:").strong());
-                                            Self::render_f3d_coord_box(
-                                                ui,
-                                                language,
-                                                (id_prefix, "f3d-fwd-a"),
-                                                &mut step.follow_3d_spec.camera_forward_a,
-                                                timer_names,
-                                                vietnamese_input_enabled,
-                                                vietnamese_input_mode,
-                                                &mut changed,
-                                            );
-
-                                            ui.label(RichText::new("Fwd B:").strong());
-                                            Self::render_f3d_coord_box(
-                                                ui,
-                                                language,
-                                                (id_prefix, "f3d-fwd-b"),
-                                                &mut step.follow_3d_spec.camera_forward_b,
-                                                timer_names,
-                                                vietnamese_input_enabled,
-                                                vietnamese_input_mode,
-                                                &mut changed,
-                                            );
-
-                                            ui.label(RichText::new("Pitch (opt):").weak());
-                                            Self::render_f3d_coord_box(
-                                                ui,
-                                                language,
-                                                (id_prefix, "f3d-pitch"),
-                                                &mut step.follow_3d_spec.camera_pitch,
-                                                timer_names,
-                                                vietnamese_input_enabled,
-                                                vietnamese_input_mode,
-                                                &mut changed,
-                                            );
-                                        }
-                                        Follow3DOrientationMode::Angles => {
-                                            ui.label(RichText::new("Yaw:").strong());
-                                            Self::render_f3d_coord_box(
-                                                ui,
-                                                language,
-                                                (id_prefix, "f3d-yaw"),
-                                                &mut step.follow_3d_spec.camera_yaw,
-                                                timer_names,
-                                                vietnamese_input_enabled,
-                                                vietnamese_input_mode,
-                                                &mut changed,
-                                            );
-
-                                            ui.label(RichText::new("Pitch (opt):").weak());
-                                            Self::render_f3d_coord_box(
-                                                ui,
-                                                language,
-                                                (id_prefix, "f3d-pitch"),
-                                                &mut step.follow_3d_spec.camera_pitch,
-                                                timer_names,
-                                                vietnamese_input_enabled,
-                                                vietnamese_input_mode,
-                                                &mut changed,
-                                            );
-                                        }
-                                    }
-                                });
-
-                                // 3. Key Input Window & Tuning
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "3. Key Input Window:",
-                                            "3. Cửa sổ nhận phím:",
-                                        ))
-                                        .strong(),
-                                    );
-                                    let mut dup_mode = false;
-                                    let default_input_label = Self::tr_lang(
-                                        language,
-                                        "Follower Window (Default)",
-                                        "Theo cửa sổ Follower (Mặc định)",
-                                    );
-                                    changed |= Self::render_window_target_combo_with_duplicate_mode(
-                                        ui,
-                                        language,
-                                        (id_prefix, "f3d-input-win"),
-                                        &default_input_label,
-                                        &mut step.follow_3d_spec.input_window,
-                                        &mut dup_mode,
-                                        open_windows,
-                                        145.0,
-                                        true,
-                                    );
-
-                                    ui.add_space(8.0);
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "Stop Dist:",
-                                            "KC dừng:",
-                                        ))
-                                        .strong(),
-                                    );
-                                    let dist_drag = ui.add(
-                                        egui::DragValue::new(&mut step.follow_3d_spec.stop_distance)
-                                            .speed(0.1)
-                                            .range(0.1..=100.0)
-                                            .suffix("m"),
-                                    ).on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Distance threshold: sub character will release WASD when within this distance to leader.",
-                                        "Ngưỡng khoảng cách: nhân vật phụ sẽ dừng phím WASD khi cách nhân vật chính <= khoảng cách này.",
-                                    ));
-                                    if dist_drag.changed() {
-                                        changed = true;
-                                    }
-
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "Interval:",
-                                            "Tần số:",
-                                        ))
-                                        .strong(),
-                                    );
-                                    let rate_drag = ui.add(
-                                        egui::DragValue::new(&mut step.follow_3d_spec.update_interval_ms)
-                                            .speed(1.0)
-                                            .range(5..=1000)
-                                            .suffix("ms"),
-                                    ).on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Update interval in milliseconds (default 30ms = ~33 updates/sec).",
-                                        "Tần số lặp tính bằng ms (mặc định 30ms = ~33 lần/giây).",
-                                    ));
-                                    if rate_drag.changed() {
-                                        changed = true;
-                                    }
-                                });
-
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 10.0;
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(
-                                            language,
-                                            "   Tuning / Calibration:",
-                                            "   Cân chỉnh trục:",
-                                        ))
-                                        .weak(),
-                                    );
-
-                                    if ui
-                                        .checkbox(
-                                            &mut step.follow_3d_spec.invert_forward,
-                                            Self::tr_lang(
-                                                language,
-                                                "Invert Forward",
-                                                "Đảo tiến/lùi",
-                                            ),
-                                        )
-                                        .on_hover_text(Self::tr_lang(
-                                            language,
-                                            "Invert W/S directions",
-                                            "Đảo ngược chiều phím W và S",
-                                        ))
-                                        .changed()
-                                    {
-                                        changed = true;
-                                    }
-                                    if ui
-                                        .checkbox(
-                                            &mut step.follow_3d_spec.invert_strafe,
-                                            Self::tr_lang(
-                                                language,
-                                                "Invert Strafe",
-                                                "Đảo trái/phải",
-                                            ),
-                                        )
-                                        .on_hover_text(Self::tr_lang(
-                                            language,
-                                            "Invert A/D directions",
-                                            "Đảo ngược chiều phím A và D",
-                                        ))
-                                        .changed()
-                                    {
-                                        changed = true;
-                                    }
-                                    if ui
-                                        .checkbox(
-                                            &mut step.follow_3d_spec.swap_forward_strafe,
-                                            Self::tr_lang(
-                                                language,
-                                                "Swap Axes",
-                                                "Hoán đổi trục",
-                                            ),
-                                        )
-                                        .on_hover_text(Self::tr_lang(
-                                            language,
-                                            "Swap Forward/Backward with Left/Right",
-                                            "Đổi trục tiến/lùi sang trục trái/phải",
-                                        ))
-                                        .changed()
-                                    {
-                                        changed = true;
-                                    }
-                                });
+                                        "1. Leader Target:",
+                                        "1. Mục tiêu Leader:",
+                                    ))
+                                    .strong(),
+                                );
+                                let mut dup_mode = false;
+                                let none_label = Self::tr_lang(
+                                    language,
+                                    "Focused window",
+                                    "Cửa sổ đang focus",
+                                );
+                                changed |= Self::render_window_target_combo_with_duplicate_mode(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-leader-win"),
+                                    &none_label,
+                                    &mut step.follow_3d_spec.leader_window,
+                                    &mut dup_mode,
+                                    open_windows,
+                                    140.0,
+                                    true,
+                                );
                             });
-                    });
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "   Coords:",
+                                        "   Tọa độ:",
+                                    ))
+                                    .weak(),
+                                );
+                                ui.label(RichText::new("X:").strong());
+                                Self::render_f3d_coord_box(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-lx"),
+                                    &mut step.follow_3d_spec.leader_x,
+                                    timer_names,
+                                    vietnamese_input_enabled,
+                                    vietnamese_input_mode,
+                                    &mut changed,
+                                );
+                                ui.label(RichText::new("Y:").strong());
+                                Self::render_f3d_coord_box(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-ly"),
+                                    &mut step.follow_3d_spec.leader_y,
+                                    timer_names,
+                                    vietnamese_input_enabled,
+                                    vietnamese_input_mode,
+                                    &mut changed,
+                                );
+                                ui.label(RichText::new("Z:").strong());
+                                Self::render_f3d_coord_box(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-lz"),
+                                    &mut step.follow_3d_spec.leader_z,
+                                    timer_names,
+                                    vietnamese_input_enabled,
+                                    vietnamese_input_mode,
+                                    &mut changed,
+                                );
+                            });
+
+                            ui.add_space(2.0);
+
+                            // 2. Follower Target
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "2. Follower Target:",
+                                        "2. Nhân vật Follower:",
+                                    ))
+                                    .strong(),
+                                );
+                                let mut dup_mode = false;
+                                let none_label = Self::tr_lang(
+                                    language,
+                                    "Focused window",
+                                    "Cửa sổ đang focus",
+                                );
+                                changed |= Self::render_window_target_combo_with_duplicate_mode(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-follower-win"),
+                                    &none_label,
+                                    &mut step.follow_3d_spec.follower_window,
+                                    &mut dup_mode,
+                                    open_windows,
+                                    140.0,
+                                    true,
+                                );
+                                ui.add_space(4.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Type:",
+                                        "Kiểu:",
+                                    ))
+                                    .weak(),
+                                );
+                                let vt_label = match step.follow_3d_spec.value_type {
+                                    MemoryValueType::F32 => "F32",
+                                    MemoryValueType::F64 => "F64",
+                                    MemoryValueType::I32 => "I32",
+                                    _ => "F32",
+                                };
+                                egui::ComboBox::from_id_salt((id_prefix, "f3d-vtype"))
+                                    .width(55.0)
+                                    .selected_text(vt_label)
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.value_type
+                                                    == MemoryValueType::F32,
+                                                "Float (F32)",
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.value_type =
+                                                MemoryValueType::F32;
+                                            changed = true;
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.value_type
+                                                    == MemoryValueType::F64,
+                                                "Double (F64)",
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.value_type =
+                                                MemoryValueType::F64;
+                                            changed = true;
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.value_type
+                                                    == MemoryValueType::I32,
+                                                "Int32 (I32)",
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.value_type =
+                                                MemoryValueType::I32;
+                                            changed = true;
+                                        }
+                                    });
+                            });
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "   Coords:",
+                                        "   Tọa độ:",
+                                    ))
+                                    .weak(),
+                                );
+                                ui.label(RichText::new("X:").strong());
+                                Self::render_f3d_coord_box(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-fx"),
+                                    &mut step.follow_3d_spec.follower_x,
+                                    timer_names,
+                                    vietnamese_input_enabled,
+                                    vietnamese_input_mode,
+                                    &mut changed,
+                                );
+                                ui.label(RichText::new("Y:").strong());
+                                Self::render_f3d_coord_box(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-fy"),
+                                    &mut step.follow_3d_spec.follower_y,
+                                    timer_names,
+                                    vietnamese_input_enabled,
+                                    vietnamese_input_mode,
+                                    &mut changed,
+                                );
+                                ui.label(RichText::new("Z:").strong());
+                                Self::render_f3d_coord_box(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-fz"),
+                                    &mut step.follow_3d_spec.follower_z,
+                                    timer_names,
+                                    vietnamese_input_enabled,
+                                    vietnamese_input_mode,
+                                    &mut changed,
+                                );
+                            });
+
+                            // Follower Camera
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "   Camera:",
+                                        "   Camera:",
+                                    ))
+                                    .weak(),
+                                );
+                                let ori_label = match step.follow_3d_spec.orientation_mode {
+                                    Follow3DOrientationMode::ForwardPairPitch => Self::tr_lang(
+                                        language,
+                                        "Forward (A, B)",
+                                        "Vector tiến (A, B)",
+                                    ),
+                                    Follow3DOrientationMode::Angles => Self::tr_lang(
+                                        language,
+                                        "Angles (Yaw)",
+                                        "Góc xoay (Yaw)",
+                                    ),
+                                };
+                                egui::ComboBox::from_id_salt((id_prefix, "f3d-ori-mode"))
+                                    .width(135.0)
+                                    .selected_text(ori_label)
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.orientation_mode
+                                                    == Follow3DOrientationMode::ForwardPairPitch,
+                                                Self::tr_lang(
+                                                    language,
+                                                    "Forward (A, B) + Pitch",
+                                                    "Vector tiến (A, B) + Pitch",
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.orientation_mode =
+                                                Follow3DOrientationMode::ForwardPairPitch;
+                                            changed = true;
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.orientation_mode
+                                                    == Follow3DOrientationMode::Angles,
+                                                Self::tr_lang(
+                                                    language,
+                                                    "Angles (Yaw + Pitch)",
+                                                    "Góc xoay (Yaw + Pitch)",
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.orientation_mode =
+                                                Follow3DOrientationMode::Angles;
+                                            changed = true;
+                                        }
+                                    });
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                match step.follow_3d_spec.orientation_mode {
+                                    Follow3DOrientationMode::ForwardPairPitch => {
+                                        ui.label(
+                                            RichText::new(Self::tr_lang(
+                                                language,
+                                                "   Vector:",
+                                                "   Vector:",
+                                            ))
+                                            .weak(),
+                                        );
+                                        ui.label(RichText::new("A:").strong());
+                                        Self::render_f3d_coord_box(
+                                            ui,
+                                            language,
+                                            (id_prefix, "f3d-fwd-a"),
+                                            &mut step.follow_3d_spec.camera_forward_a,
+                                            timer_names,
+                                            vietnamese_input_enabled,
+                                            vietnamese_input_mode,
+                                            &mut changed,
+                                        );
+                                        ui.label(RichText::new("B:").strong());
+                                        Self::render_f3d_coord_box(
+                                            ui,
+                                            language,
+                                            (id_prefix, "f3d-fwd-b"),
+                                            &mut step.follow_3d_spec.camera_forward_b,
+                                            timer_names,
+                                            vietnamese_input_enabled,
+                                            vietnamese_input_mode,
+                                            &mut changed,
+                                        );
+                                        ui.label(RichText::new("Pitch:").weak());
+                                        Self::render_f3d_coord_box(
+                                            ui,
+                                            language,
+                                            (id_prefix, "f3d-pitch"),
+                                            &mut step.follow_3d_spec.camera_pitch,
+                                            timer_names,
+                                            vietnamese_input_enabled,
+                                            vietnamese_input_mode,
+                                            &mut changed,
+                                        );
+                                    }
+                                    Follow3DOrientationMode::Angles => {
+                                        ui.label(
+                                            RichText::new(Self::tr_lang(
+                                                language,
+                                                "   Angles:",
+                                                "   Góc xoay:",
+                                            ))
+                                            .weak(),
+                                        );
+                                        ui.label(RichText::new("Yaw:").strong());
+                                        Self::render_f3d_coord_box(
+                                            ui,
+                                            language,
+                                            (id_prefix, "f3d-yaw"),
+                                            &mut step.follow_3d_spec.camera_yaw,
+                                            timer_names,
+                                            vietnamese_input_enabled,
+                                            vietnamese_input_mode,
+                                            &mut changed,
+                                        );
+                                        ui.label(RichText::new("Pitch:").weak());
+                                        Self::render_f3d_coord_box(
+                                            ui,
+                                            language,
+                                            (id_prefix, "f3d-pitch"),
+                                            &mut step.follow_3d_spec.camera_pitch,
+                                            timer_names,
+                                            vietnamese_input_enabled,
+                                            vietnamese_input_mode,
+                                            &mut changed,
+                                        );
+                                    }
+                                }
+                            });
+
+                            ui.add_space(2.0);
+
+                            // 3. Key Input Window & Tuning
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 4.0;
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "3. Key Input:",
+                                        "3. Nhận phím:",
+                                    ))
+                                    .strong(),
+                                );
+                                let mut dup_mode = false;
+                                let default_input_label = Self::tr_lang(
+                                    language,
+                                    "Follower Window (Default)",
+                                    "Theo cửa sổ Follower (Mặc định)",
+                                );
+                                changed |= Self::render_window_target_combo_with_duplicate_mode(
+                                    ui,
+                                    language,
+                                    (id_prefix, "f3d-input-win"),
+                                    &default_input_label,
+                                    &mut step.follow_3d_spec.input_window,
+                                    &mut dup_mode,
+                                    open_windows,
+                                    140.0,
+                                    true,
+                                );
+
+                                ui.add_space(4.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Stop:",
+                                        "Dừng:",
+                                    ))
+                                    .strong(),
+                                );
+                                let dist_drag = ui.add(
+                                    egui::DragValue::new(&mut step.follow_3d_spec.stop_distance)
+                                        .speed(0.1)
+                                        .range(0.1..=100.0)
+                                        .suffix("m"),
+                                ).on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Distance threshold: sub character will release WASD when within this distance to leader.",
+                                    "Ngưỡng khoảng cách: nhân vật phụ sẽ dừng phím WASD khi cách nhân vật chính <= khoảng cách này.",
+                                ));
+                                if dist_drag.changed() {
+                                    changed = true;
+                                }
+
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Interval:",
+                                        "Lặp:",
+                                    ))
+                                    .strong(),
+                                );
+                                let rate_drag = ui.add(
+                                    egui::DragValue::new(&mut step.follow_3d_spec.update_interval_ms)
+                                        .speed(1.0)
+                                        .range(5..=1000)
+                                        .suffix("ms"),
+                                ).on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Update interval in milliseconds (default 30ms = ~33 updates/sec).",
+                                    "Tần số lặp tính bằng ms (mặc định 30ms = ~33 lần/giây).",
+                                ));
+                                if rate_drag.changed() {
+                                    changed = true;
+                                }
+                            });
+
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "   Calibrate:",
+                                        "   Cân chỉnh:",
+                                    ))
+                                    .weak(),
+                                );
+
+                                if ui
+                                    .checkbox(
+                                        &mut step.follow_3d_spec.invert_forward,
+                                        Self::tr_lang(
+                                            language,
+                                            "Invert W/S",
+                                            "Đảo W/S",
+                                        ),
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Invert W/S directions",
+                                        "Đảo ngược chiều phím W và S",
+                                    ))
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                                if ui
+                                    .checkbox(
+                                        &mut step.follow_3d_spec.invert_strafe,
+                                        Self::tr_lang(
+                                            language,
+                                            "Invert A/D",
+                                            "Đảo A/D",
+                                        ),
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Invert A/D directions",
+                                        "Đảo ngược chiều phím A và D",
+                                    ))
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                                if ui
+                                    .checkbox(
+                                        &mut step.follow_3d_spec.swap_forward_strafe,
+                                        Self::tr_lang(
+                                            language,
+                                            "Swap Axes",
+                                            "Đổi trục",
+                                        ),
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Swap Forward/Backward with Left/Right",
+                                        "Đổi trục tiến/lùi sang trục trái/phải",
+                                    ))
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                            });
+                        });
                 }
             });
         });
