@@ -248,6 +248,21 @@ pub enum Follow3DOrientationMode {
     Angles,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum Follow3DGroundPlane {
+    #[default]
+    XZ,
+    XY,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum Follow3DAngleUnit {
+    #[default]
+    Auto,
+    Degrees,
+    Radians,
+}
+
 fn default_follow_3d_stop_distance() -> f32 {
     2.0
 }
@@ -276,6 +291,11 @@ pub struct Follow3DTargetSpec {
     pub camera_yaw: String,
     pub camera_forward_a: String,
     pub camera_forward_b: String,
+
+    #[serde(default)]
+    pub ground_plane: Follow3DGroundPlane,
+    #[serde(default)]
+    pub angle_unit: Follow3DAngleUnit,
 
     pub input_window: Option<String>,
     #[serde(default = "default_follow_3d_stop_distance")]
@@ -306,6 +326,8 @@ impl Default for Follow3DTargetSpec {
             camera_yaw: String::new(),
             camera_forward_a: String::new(),
             camera_forward_b: String::new(),
+            ground_plane: Follow3DGroundPlane::XZ,
+            angle_unit: Follow3DAngleUnit::Auto,
             input_window: None,
             stop_distance: 2.0,
             update_interval_ms: 30,

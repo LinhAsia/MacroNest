@@ -525,8 +525,15 @@ mod windows_impl {
                     if root.0.is_null() { h } else { root }
                 }
             };
-            if let Some(unfocused) = candidates.iter().copied().find(|&hwnd| root_of(hwnd) != fg_root) {
-                return Some(unfocused);
+            let fg_is_candidate = candidates.iter().any(|&hwnd| root_of(hwnd) == fg_root);
+            if fg_is_candidate {
+                if let Some(unfocused) = candidates.iter().copied().find(|&hwnd| root_of(hwnd) != fg_root) {
+                    return Some(unfocused);
+                }
+            } else if candidates.len() > 1 {
+                // Foreground is outside candidates (e.g. MacroNest). Return candidate 1 so
+                // Focused (candidate 0) and Unfocused (candidate 1) never resolve to the same window.
+                return Some(candidates[1]);
             }
             return candidates.first().copied();
         }

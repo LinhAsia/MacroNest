@@ -33240,25 +33240,39 @@ mod windows_overlay {
 
         #[test]
         fn test_compute_follow_3d_keys() {
+            // XZ plane tests:
             // Target is straight ahead (along positive Z, camera looking along +Z: fa=0, fb=1)
-            let keys = compute_follow_3d_keys(0.0, 10.0, 0.0, 1.0, 1.0);
+            let keys = compute_follow_3d_keys(0.0, 10.0, 0.0, 1.0, 1.0, crate::model::Follow3DGroundPlane::XZ);
             assert_eq!(keys, [true, false, false, false], "should press W when target is ahead");
 
             // Target is behind (along negative Z)
-            let keys = compute_follow_3d_keys(0.0, -10.0, 0.0, 1.0, 1.0);
+            let keys = compute_follow_3d_keys(0.0, -10.0, 0.0, 1.0, 1.0, crate::model::Follow3DGroundPlane::XZ);
             assert_eq!(keys, [false, false, true, false], "should press S when target is behind");
 
             // Target is to the right (along positive X)
-            let keys = compute_follow_3d_keys(10.0, 0.0, 0.0, 1.0, 1.0);
+            let keys = compute_follow_3d_keys(10.0, 0.0, 0.0, 1.0, 1.0, crate::model::Follow3DGroundPlane::XZ);
             assert_eq!(keys, [false, false, false, true], "should press D when target is right");
 
             // Target is to the left (along negative X)
-            let keys = compute_follow_3d_keys(-10.0, 0.0, 0.0, 1.0, 1.0);
+            let keys = compute_follow_3d_keys(-10.0, 0.0, 0.0, 1.0, 1.0, crate::model::Follow3DGroundPlane::XZ);
             assert_eq!(keys, [false, true, false, false], "should press A when target is left");
 
             // Target is within stop distance
-            let keys = compute_follow_3d_keys(0.5, 0.5, 0.0, 1.0, 2.0);
+            let keys = compute_follow_3d_keys(0.5, 0.5, 0.0, 1.0, 2.0, crate::model::Follow3DGroundPlane::XZ);
             assert_eq!(keys, [false, false, false, false], "should not press any key when within stop distance");
+
+            // XY plane tests (Unreal style: X forward, Y right, camera facing +X: fa=1, fb=0):
+            let keys = compute_follow_3d_keys(10.0, 0.0, 1.0, 0.0, 1.0, crate::model::Follow3DGroundPlane::XY);
+            assert_eq!(keys, [true, false, false, false], "XY should press W when target is ahead along +X");
+
+            let keys = compute_follow_3d_keys(-10.0, 0.0, 1.0, 0.0, 1.0, crate::model::Follow3DGroundPlane::XY);
+            assert_eq!(keys, [false, false, true, false], "XY should press S when target is behind along -X");
+
+            let keys = compute_follow_3d_keys(0.0, 10.0, 1.0, 0.0, 1.0, crate::model::Follow3DGroundPlane::XY);
+            assert_eq!(keys, [false, false, false, true], "XY should press D when target is right along +Y");
+
+            let keys = compute_follow_3d_keys(0.0, -10.0, 1.0, 0.0, 1.0, crate::model::Follow3DGroundPlane::XY);
+            assert_eq!(keys, [false, true, false, false], "XY should press A when target is left along -Y");
         }
 
         #[test]
@@ -35538,12 +35552,23 @@ mod windows_overlay {
         fa: f32,
         fb: f32,
         stop_dist: f32,
+        ground_plane: crate::model::Follow3DGroundPlane,
     ) -> [bool; 4] {
         let dist = dx.hypot(dz);
         let mut want_keys = [false; 4]; // [W, A, S, D]
         if dist > stop_dist {
-            let f_score = dx * fa + dz * fb;
-            let r_score = dx * fb - dz * fa;
+            let (f_score, r_score) = match ground_plane {
+                crate::model::Follow3DGroundPlane::XZ => {
+                    let f = dx * fa + dz * fb;
+                    let r = dx * fb - dz * fa;
+                    (f, r)
+                }
+                crate::model::Follow3DGroundPlane::XY => {
+                    let f = dx * fa + dz * fb;
+                    let r = dz * fa - dx * fb;
+                    (f, r)
+                }
+            };
             let angle = r_score.atan2(f_score).to_degrees();
 
             want_keys[0] = (-67.5..=67.5).contains(&angle);
@@ -35552,6 +35577,51 @@ mod windows_overlay {
             want_keys[3] = angle > 22.5 && angle < 157.5;
         }
         want_keys
+    }
+
+    fn resolve_unfocused_follower_window(spec: &crate::model::Follow3DTargetSpec) -> Option<HWND> {
+        let input_selector = spec
+            .input_window
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or(spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()));
+
+        if let Some(selector) = input_selector {
+            if let Some(hwnd) = crate::window_list::find_window_handle(Some(selector)) {
+                return Some(hwnd);
+            }
+        }
+
+        // Neither input_window nor follower_window explicitly specified.
+        // Find counterpart unfocused window of leader:
+        let leader_hwnd = crate::window_list::find_window_handle(spec.leader_window.as_deref());
+        if let Some(l_hwnd) = leader_hwnd
+            && let Some(title) = crate::window_list::window_title(l_hwnd)
+        {
+            let unfocused_selector = format!("{title} [The Unfocused One]");
+            if let Some(unfocused) = crate::window_list::find_window_handle(Some(&unfocused_selector)) {
+                return Some(unfocused);
+            }
+        }
+
+        crate::window_list::find_window_handle(Some("[The Unfocused One]"))
+            .or_else(|| crate::window_list::find_window_handle(None))
+    }
+
+    fn resolve_follower_pid(frame: &mut EspReadFrame, spec: &crate::model::Follow3DTargetSpec) -> Option<u32> {
+        if let Some(fw) = spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()) {
+            frame.pid_for(fw)
+        } else if let Some(input_win) = spec.input_window.as_deref().filter(|s| !s.trim().is_empty()) {
+            frame.pid_for(input_win)
+        } else if let Some(hwnd) = resolve_unfocused_follower_window(spec) {
+            let mut process_id = 0;
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+            }
+            (process_id != 0).then_some(process_id)
+        } else {
+            frame.pid_for_opt(None)
+        }
     }
 
     fn execute_follow_3d_target(step: &MacroStep) -> Result<()> {
@@ -35565,13 +35635,9 @@ mod windows_overlay {
         let spec = step.follow_3d_spec.clone();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let held_keys = Arc::new(Mutex::new([false; 4]));
+        let background_find_child = step.background_find_child;
 
-        let input_selector = spec
-            .input_window
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
-            .or(spec.follower_window.as_deref());
-        let input_hwnd = crate::window_list::find_window_handle(input_selector);
+        let input_hwnd = resolve_unfocused_follower_window(&spec);
         let Some(input_hwnd) = input_hwnd else {
             bail!("Follow3DTarget: Input window could not be found");
         };
@@ -35579,7 +35645,7 @@ mod windows_overlay {
             bail!("Follow3DTarget: Input window handle is null");
         }
 
-        let target_input = if step.background_find_child {
+        let target_input = if background_find_child {
             unsafe { find_background_input_child(input_hwnd) }
         } else {
             input_hwnd
@@ -35597,30 +35663,73 @@ mod windows_overlay {
         let thread_held = held_keys.clone();
 
         thread::spawn(move || {
-            let target_input = HWND(target_input_raw as *mut _);
+            let mut current_input_hwnd = HWND(target_input_raw as *mut _);
             let mut frame = EspReadFrame::default();
             let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
             let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(10, 500));
+            let mut last_window_check = Instant::now();
 
             while !thread_stop.load(Ordering::SeqCst) {
                 frame.begin_sample();
 
+                // Periodically verify input_hwnd hasn't drifted or role-reversed
+                if last_window_check.elapsed() >= Duration::from_millis(250) {
+                    last_window_check = Instant::now();
+                    if let Some(new_input) = resolve_unfocused_follower_window(&spec) {
+                        let new_target = if background_find_child {
+                            unsafe { find_background_input_child(new_input) }
+                        } else {
+                            new_input
+                        };
+                        if new_target != current_input_hwnd {
+                            let mut held = thread_held.lock();
+                            for idx in 0..4 {
+                                if held[idx] {
+                                    held[idx] = false;
+                                    post_bg_key_up(current_input_hwnd, vk_keys[idx]);
+                                }
+                            }
+                            current_input_hwnd = new_target;
+                        }
+                    }
+                }
+
                 let pid_leader = frame.pid_for_opt(spec.leader_window.as_deref());
-                let pid_follower = frame.pid_for_opt(spec.follower_window.as_deref());
+                let pid_follower = resolve_follower_pid(&mut frame, &spec);
 
                 if let (Some(pid_l), Some(pid_f)) = (pid_leader, pid_follower) {
-                    let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
-                    let lz = if !spec.leader_z.trim().is_empty() {
-                        frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
-                    } else {
-                        frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
+                    let (lx, l_second) = match spec.ground_plane {
+                        crate::model::Follow3DGroundPlane::XZ => {
+                            let x = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
+                            let z = if !spec.leader_z.trim().is_empty() {
+                                frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
+                            } else {
+                                frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
+                            };
+                            (x, z)
+                        }
+                        crate::model::Follow3DGroundPlane::XY => {
+                            let x = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
+                            let y = frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok();
+                            (x, y)
+                        }
                     };
 
-                    let fx = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
-                    let fz = if !spec.follower_z.trim().is_empty() {
-                        frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
-                    } else {
-                        frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
+                    let (fx, f_second) = match spec.ground_plane {
+                        crate::model::Follow3DGroundPlane::XZ => {
+                            let x = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
+                            let z = if !spec.follower_z.trim().is_empty() {
+                                frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
+                            } else {
+                                frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
+                            };
+                            (x, z)
+                        }
+                        crate::model::Follow3DGroundPlane::XY => {
+                            let x = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
+                            let y = frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok();
+                            (x, y)
+                        }
                     };
 
                     let mut forward_opt: Option<(f32, f32)> = None;
@@ -35634,14 +35743,35 @@ mod windows_overlay {
                         }
                         crate::model::Follow3DOrientationMode::Angles => {
                             if let Ok(yaw) = frame.read_value(pid_f, &spec.camera_yaw, spec.value_type) {
-                                let rad = yaw.to_radians();
-                                forward_opt = Some((rad.cos(), rad.sin()));
+                                let is_radians = match spec.angle_unit {
+                                    crate::model::Follow3DAngleUnit::Radians => true,
+                                    crate::model::Follow3DAngleUnit::Degrees => false,
+                                    crate::model::Follow3DAngleUnit::Auto => {
+                                        yaw.abs() <= std::f32::consts::PI * 2.05 && yaw != 0.0
+                                    }
+                                };
+                                let rad = if is_radians {
+                                    yaw
+                                } else {
+                                    yaw.to_radians()
+                                };
+
+                                match spec.ground_plane {
+                                    crate::model::Follow3DGroundPlane::XZ => {
+                                        // Unity/Godot standard: 0 yaw faces North (+Z), turning right (+yaw) faces East (+X)
+                                        forward_opt = Some((rad.sin(), rad.cos()));
+                                    }
+                                    crate::model::Follow3DGroundPlane::XY => {
+                                        // Unreal standard: 0 yaw faces Forward (+X), turning right (+yaw) faces Right (+Y)
+                                        forward_opt = Some((rad.cos(), rad.sin()));
+                                    }
+                                }
                             }
                         }
                     }
 
                     if let (Some(lx), Some(lz), Some(fx), Some(fz), Some((mut fa, mut fb))) =
-                        (lx, lz, fx, fz, forward_opt)
+                        (lx, l_second, fx, f_second, forward_opt)
                     {
                         if spec.invert_forward {
                             fa = -fa;
@@ -35653,19 +35783,26 @@ mod windows_overlay {
                             std::mem::swap(&mut fa, &mut fb);
                         }
 
-                        let want_keys = compute_follow_3d_keys(lx - fx, lz - fz, fa, fb, spec.stop_distance);
+                        let want_keys = compute_follow_3d_keys(
+                            lx - fx,
+                            lz - fz,
+                            fa,
+                            fb,
+                            spec.stop_distance,
+                            spec.ground_plane,
+                        );
 
                         let mut held = thread_held.lock();
                         for idx in 0..4 {
                             let vk = vk_keys[idx];
                             if want_keys[idx] && !held[idx] {
                                 held[idx] = true;
-                                post_bg_key_down(target_input, vk);
+                                post_bg_key_down(current_input_hwnd, vk);
                             } else if !want_keys[idx] && held[idx] {
                                 held[idx] = false;
-                                post_bg_key_up(target_input, vk);
+                                post_bg_key_up(current_input_hwnd, vk);
                             } else if want_keys[idx] && held[idx] {
-                                post_bg_key_down(target_input, vk);
+                                post_bg_key_down(current_input_hwnd, vk);
                             }
                         }
                     }
@@ -35678,7 +35815,7 @@ mod windows_overlay {
             for idx in 0..4 {
                 if held[idx] {
                     held[idx] = false;
-                    post_bg_key_up(target_input, vk_keys[idx]);
+                    post_bg_key_up(current_input_hwnd, vk_keys[idx]);
                 }
             }
             let mut session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();

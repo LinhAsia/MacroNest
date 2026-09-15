@@ -1190,8 +1190,8 @@ impl CrosshairApp {
                                 let mut dup_mode = false;
                                 let none_label = Self::tr_lang(
                                     language,
-                                    "Focused window",
-                                    "Cửa sổ đang focus",
+                                    "Unfocused window (Default)",
+                                    "Cửa sổ không focus (Mặc định)",
                                 );
                                 changed |= Self::render_window_target_combo_with_duplicate_mode(
                                     ui,
@@ -1309,7 +1309,7 @@ impl CrosshairApp {
                                 );
                             });
 
-                            // Follower Camera
+                            // Follower Camera & Coordinate Plane
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
                                 ui.add_sized(
@@ -1336,7 +1336,7 @@ impl CrosshairApp {
                                     ),
                                 };
                                 egui::ComboBox::from_id_salt((id_prefix, "f3d-ori-mode"))
-                                    .width(WIN_COMBO_WIDTH)
+                                    .width(115.0)
                                     .selected_text(ori_label)
                                     .show_ui(ui, |ui| {
                                         if ui
@@ -1372,6 +1372,135 @@ impl CrosshairApp {
                                             changed = true;
                                         }
                                     });
+
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Plane:",
+                                        "Mặt phẳng:",
+                                    ))
+                                    .weak(),
+                                );
+                                let plane_label = match step.follow_3d_spec.ground_plane {
+                                    Follow3DGroundPlane::XZ => Self::tr_lang(
+                                        language,
+                                        "X-Z (Unity / Godot)",
+                                        "X-Z (Unity / Godot)",
+                                    ),
+                                    Follow3DGroundPlane::XY => Self::tr_lang(
+                                        language,
+                                        "X-Y (Unreal / Source)",
+                                        "X-Y (Unreal / Source)",
+                                    ),
+                                };
+                                egui::ComboBox::from_id_salt((id_prefix, "f3d-ground-plane"))
+                                    .width(120.0)
+                                    .selected_text(plane_label)
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.ground_plane
+                                                    == Follow3DGroundPlane::XZ,
+                                                Self::tr_lang(
+                                                    language,
+                                                    "X-Z (Y is height - Unity/Godot)",
+                                                    "X-Z (Y là chiều cao - Unity/Godot)",
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.ground_plane =
+                                                Follow3DGroundPlane::XZ;
+                                            changed = true;
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.ground_plane
+                                                    == Follow3DGroundPlane::XY,
+                                                Self::tr_lang(
+                                                    language,
+                                                    "X-Y (Z is height - Unreal/Source)",
+                                                    "X-Y (Z là chiều cao - Unreal/Source)",
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.ground_plane =
+                                                Follow3DGroundPlane::XY;
+                                            changed = true;
+                                        }
+                                    });
+
+                                if step.follow_3d_spec.orientation_mode == Follow3DOrientationMode::Angles {
+                                    ui.add_space(2.0);
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "Unit:",
+                                            "Đơn vị:",
+                                        ))
+                                        .weak(),
+                                    );
+                                    let unit_label = match step.follow_3d_spec.angle_unit {
+                                        Follow3DAngleUnit::Auto => "Auto",
+                                        Follow3DAngleUnit::Degrees => "Deg (°)",
+                                        Follow3DAngleUnit::Radians => "Rad",
+                                    };
+                                    egui::ComboBox::from_id_salt((id_prefix, "f3d-angle-unit"))
+                                        .width(70.0)
+                                        .selected_text(unit_label)
+                                        .show_ui(ui, |ui| {
+                                            if ui
+                                                .selectable_label(
+                                                    step.follow_3d_spec.angle_unit
+                                                        == Follow3DAngleUnit::Auto,
+                                                    Self::tr_lang(
+                                                        language,
+                                                        "Auto (detect rad/deg)",
+                                                        "Auto (tự nhận rad/độ)",
+                                                    ),
+                                                )
+                                                .clicked()
+                                            {
+                                                step.follow_3d_spec.angle_unit =
+                                                    Follow3DAngleUnit::Auto;
+                                                changed = true;
+                                            }
+                                            if ui
+                                                .selectable_label(
+                                                    step.follow_3d_spec.angle_unit
+                                                        == Follow3DAngleUnit::Degrees,
+                                                    Self::tr_lang(
+                                                        language,
+                                                        "Degrees (°)",
+                                                        "Độ (°)",
+                                                    ),
+                                                )
+                                                .clicked()
+                                            {
+                                                step.follow_3d_spec.angle_unit =
+                                                    Follow3DAngleUnit::Degrees;
+                                                changed = true;
+                                            }
+                                            if ui
+                                                .selectable_label(
+                                                    step.follow_3d_spec.angle_unit
+                                                        == Follow3DAngleUnit::Radians,
+                                                    Self::tr_lang(
+                                                        language,
+                                                        "Radians (rad)",
+                                                        "Radian (rad)",
+                                                    ),
+                                                )
+                                                .clicked()
+                                            {
+                                                step.follow_3d_spec.angle_unit =
+                                                    Follow3DAngleUnit::Radians;
+                                                changed = true;
+                                            }
+                                        });
+                                }
                             });
 
                             ui.horizontal(|ui| {
