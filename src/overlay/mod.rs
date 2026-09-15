@@ -35554,10 +35554,10 @@ mod windows_overlay {
             let r_score = dx * fb - dy * fa;
             let angle = r_score.atan2(f_score).to_degrees();
 
-            want_keys[0] = (-67.5..=67.5).contains(&angle);
-            want_keys[1] = angle < -22.5 && angle > -157.5;
-            want_keys[2] = angle > 112.5 || angle < -112.5;
-            want_keys[3] = angle > 22.5 && angle < 157.5;
+            want_keys[0] = (-80.0..=80.0).contains(&angle);
+            want_keys[1] = angle < -18.0 && angle > -162.0;
+            want_keys[2] = angle > 100.0 || angle < -100.0;
+            want_keys[3] = angle > 18.0 && angle < 162.0;
         }
         want_keys
     }
@@ -35775,8 +35775,6 @@ mod windows_overlay {
                             } else if !want_keys[idx] && held[idx] {
                                 held[idx] = false;
                                 post_bg_key_up(current_input_hwnd, vk);
-                            } else if want_keys[idx] && held[idx] {
-                                post_bg_key_down(current_input_hwnd, vk);
                             }
                         }
                     }
@@ -39429,7 +39427,9 @@ mod fallback {
 
 #[cfg(all(test, windows))]
 mod tests {
-    use super::windows_overlay::{macro_enabled_map, macro_presets_outside_scope};
+    use super::windows_overlay::{
+        compute_follow_3d_keys, macro_enabled_map, macro_presets_outside_scope,
+    };
     use crate::model::{MacroGroup, MacroPreset};
 
     #[test]
@@ -39469,6 +39469,35 @@ mod tests {
             crate::overlay::MacroFolderScope::Folder(7),
         );
         assert_eq!(outside, vec![20]);
+    }
+
+    #[test]
+    fn test_compute_follow_3d_keys() {
+        // [W, A, S, D]
+        // Facing (0, 1) - along +Y
+        // Target straight ahead (0, 5) -> W only
+        let keys = compute_follow_3d_keys(0.0, 5.0, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [true, false, false, false]);
+
+        // Target straight behind (0, -5) -> S only
+        let keys = compute_follow_3d_keys(0.0, -5.0, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [false, false, true, false]);
+
+        // Target to the right (5, 0) -> D only (angle = 90 deg, W inactive as |90| > 80)
+        let keys = compute_follow_3d_keys(5.0, 0.0, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [false, false, false, true]);
+
+        // Target diagonally forward-right (3, 3) -> angle = 45 deg -> both W and D active
+        let keys = compute_follow_3d_keys(3.0, 3.0, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [true, false, false, true]);
+
+        // Target to the left (-5, 0) -> A only
+        let keys = compute_follow_3d_keys(-5.0, 0.0, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [false, true, false, false]);
+
+        // Within stop distance (0.5 <= 1.0) -> all keys released
+        let keys = compute_follow_3d_keys(0.3, 0.4, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [false; 4]);
     }
 }
 

@@ -1578,13 +1578,13 @@ impl CrosshairApp {
                                 );
                                 let dist_drag = ui.add(
                                     egui::DragValue::new(&mut step.follow_3d_spec.stop_distance)
-                                        .speed(0.1)
-                                        .range(0.1..=100.0)
+                                        .speed(0.05)
+                                        .range(0.0..=100.0)
                                         .suffix("m"),
                                 ).on_hover_text(Self::tr_lang(
                                     language,
-                                    "Distance threshold: sub character will release WASD when within this distance to leader.",
-                                    "Ngưỡng khoảng cách: nhân vật phụ sẽ dừng phím WASD khi cách nhân vật chính <= khoảng cách này.",
+                                    "Distance threshold: sub character stops WASD when within this distance. Lower values (e.g. 0.3m - 0.8m) make the character stick closer.",
+                                    "Ngưỡng khoảng cách: nhân vật phụ dừng WASD khi cách leader <= khoảng này. Chỉnh nhỏ (vd 0.3m - 0.8m) để bám sát sườn.",
                                 ));
                                 if dist_drag.changed() {
                                     changed = true;

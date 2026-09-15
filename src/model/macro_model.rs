@@ -257,7 +257,7 @@ pub enum Follow3DAngleUnit {
 }
 
 fn default_follow_3d_stop_distance() -> f32 {
-    2.0
+    1.0
 }
 
 fn default_follow_3d_update_interval_ms() -> u32 {
@@ -319,7 +319,7 @@ impl Default for Follow3DTargetSpec {
             camera_forward_b: String::new(),
             angle_unit: Follow3DAngleUnit::Auto,
             input_window: None,
-            stop_distance: 2.0,
+            stop_distance: 1.0,
             update_interval_ms: 30,
             value_type: MemoryValueType::F32,
             invert_forward: false,
