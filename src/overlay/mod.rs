@@ -25073,7 +25073,6 @@ mod windows_overlay {
             active
         };
         cleanup_removed_hold_macro(preset_id, active);
-        stop_follow_3d_target();
     }
 
     fn cleanup_press_macro_locks(
@@ -25087,8 +25086,6 @@ mod windows_overlay {
         for &mask in press_locked_mouse_masks {
             apply_unlock_mouse(None, None, mask);
         }
-
-        stop_follow_3d_target();
     }
 
     fn current_hold_run_matches(preset_id: u32, run_token: u64) -> bool {
@@ -25652,6 +25649,13 @@ mod windows_overlay {
             let pid = macro_memory_target_pid(Some(key));
             self.pids.insert(key.to_owned(), (Instant::now(), pid));
             pid
+        }
+
+        fn pid_for_opt(&mut self, target_window: Option<&str>) -> Option<u32> {
+            match target_window {
+                Some(w) if !w.trim().is_empty() => self.pid_for(w),
+                _ => macro_memory_target_pid(None),
+            }
         }
 
         fn resolve_address(
@@ -35524,6 +35528,10 @@ mod windows_overlay {
         }
     }
 
+    pub(crate) fn is_follow_3d_active() -> bool {
+        ACTIVE_FOLLOW_3D_SESSION.lock().is_some()
+    }
+
     pub(crate) fn compute_follow_3d_keys(
         dx: f32,
         dz: f32,
@@ -35597,8 +35605,8 @@ mod windows_overlay {
             while !thread_stop.load(Ordering::SeqCst) {
                 frame.begin_sample();
 
-                let pid_leader = spec.leader_window.as_deref().and_then(|w| frame.pid_for(w));
-                let pid_follower = spec.follower_window.as_deref().and_then(|w| frame.pid_for(w));
+                let pid_leader = frame.pid_for_opt(spec.leader_window.as_deref());
+                let pid_follower = frame.pid_for_opt(spec.follower_window.as_deref());
 
                 if let (Some(pid_l), Some(pid_f)) = (pid_leader, pid_follower) {
                     let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
@@ -35671,6 +35679,12 @@ mod windows_overlay {
                 if held[idx] {
                     held[idx] = false;
                     post_bg_key_up(target_input, vk_keys[idx]);
+                }
+            }
+            let mut session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();
+            if let Some(session) = session_guard.as_ref() {
+                if Arc::ptr_eq(&session.stop_flag, &thread_stop) {
+                    *session_guard = None;
                 }
             }
         });
@@ -39273,6 +39287,9 @@ mod fallback {
     pub(crate) fn hide_hud_now() {}
 
     pub fn screen_draw_active() -> bool {
+        false
+    }
+    pub(crate) fn is_follow_3d_active() -> bool {
         false
     }
     pub fn screen_draw_undo() {}

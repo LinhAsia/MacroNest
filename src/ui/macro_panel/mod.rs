@@ -916,7 +916,7 @@ impl CrosshairApp {
             ui,
             text,
             id,
-            66.0,
+            70.0,
             130.0,
             20.0,
             20.0,
@@ -956,7 +956,7 @@ impl CrosshairApp {
                 // Top row (compact step line)
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.spacing_mut().interact_size.y = 18.0;
+                    ui.spacing_mut().interact_size.y = 21.0;
 
                     let mode_label = match step.follow_3d_spec.mode {
                         Follow3DMode::Start => {
@@ -967,7 +967,7 @@ impl CrosshairApp {
                         }
                     };
                     egui::ComboBox::from_id_salt((id_prefix, "f3d-mode"))
-                        .width(125.0)
+                        .width(135.0)
                         .selected_text(mode_label)
                         .show_ui(ui, |ui| {
                             if ui
@@ -1007,7 +1007,7 @@ impl CrosshairApp {
                     };
                     let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
                     if ui
-                        .add_sized([18.0, 18.0], collapse_btn)
+                        .add_sized([20.0, 21.0], collapse_btn)
                         .on_hover_text(if step.follow_3d_collapsed {
                             "Expand Settings"
                         } else {
@@ -1017,6 +1017,30 @@ impl CrosshairApp {
                     {
                         step.follow_3d_collapsed = !step.follow_3d_collapsed;
                         changed = true;
+                    }
+
+                    if crate::overlay::is_follow_3d_active() {
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(350));
+                        let time = ui.ctx().input(|i| i.time);
+                        let alpha = (0.5 + 0.5 * (time * 5.0).sin().abs()).clamp(0.4, 1.0);
+                        let dot_color = Color32::from_rgba_unmultiplied(0, 255, 170, (alpha * 255.0) as u8);
+
+                        egui::Frame::none()
+                            .fill(Color32::from_rgba_unmultiplied(0, 255, 170, 28))
+                            .corner_radius(egui::CornerRadius::same(3))
+                            .inner_margin(egui::Margin::symmetric(6, 2))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    ui.label(RichText::new("●").color(dot_color).size(11.0));
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(language, "RUNNING", "ĐANG CHẠY"))
+                                            .color(Color32::from_rgb(0, 255, 170))
+                                            .strong()
+                                            .size(11.0),
+                                    );
+                                });
+                            });
                     }
 
                     if step.follow_3d_spec.mode == Follow3DMode::Stop {
@@ -1060,16 +1084,26 @@ impl CrosshairApp {
                         .show(ui, |ui| {
                             ui.spacing_mut().item_spacing.y = 4.0;
 
+                            const SECTION_LABEL_WIDTH: f32 = 132.0;
+                            const WIN_COMBO_WIDTH: f32 = 145.0;
+                            const COORD_PREFIX_WIDTH: f32 = 54.0;
+                            const COL1_LABEL_WIDTH: f32 = 26.0;
+                            const COL2_LABEL_WIDTH: f32 = 22.0;
+                            const COL3_LABEL_WIDTH: f32 = 36.0;
+
                             // 1. Leader Target
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "1. Leader Target:",
-                                        "1. Mục tiêu Leader:",
-                                    ))
-                                    .strong(),
+                                ui.add_sized(
+                                    [SECTION_LABEL_WIDTH, 20.0],
+                                    egui::Label::new(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "1. Leader Target:",
+                                            "1. Mục tiêu Leader:",
+                                        ))
+                                        .strong(),
+                                    ),
                                 );
                                 let mut dup_mode = false;
                                 let none_label = Self::tr_lang(
@@ -1085,21 +1119,24 @@ impl CrosshairApp {
                                     &mut step.follow_3d_spec.leader_window,
                                     &mut dup_mode,
                                     open_windows,
-                                    140.0,
+                                    WIN_COMBO_WIDTH,
                                     true,
                                 );
                             });
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "   Coords:",
-                                        "   Tọa độ:",
-                                    ))
-                                    .weak(),
+                                ui.add_sized(
+                                    [COORD_PREFIX_WIDTH, 20.0],
+                                    egui::Label::new(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "Coords:",
+                                            "Tọa độ:",
+                                        ))
+                                        .weak(),
+                                    ),
                                 );
-                                ui.label(RichText::new("X:").strong());
+                                ui.add_sized([COL1_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("X:").strong()));
                                 Self::render_f3d_coord_box(
                                     ui,
                                     language,
@@ -1110,7 +1147,7 @@ impl CrosshairApp {
                                     vietnamese_input_mode,
                                     &mut changed,
                                 );
-                                ui.label(RichText::new("Y:").strong());
+                                ui.add_sized([COL2_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("Y:").strong()));
                                 Self::render_f3d_coord_box(
                                     ui,
                                     language,
@@ -1121,7 +1158,7 @@ impl CrosshairApp {
                                     vietnamese_input_mode,
                                     &mut changed,
                                 );
-                                ui.label(RichText::new("Z:").strong());
+                                ui.add_sized([COL3_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("Z:").strong()));
                                 Self::render_f3d_coord_box(
                                     ui,
                                     language,
@@ -1139,13 +1176,16 @@ impl CrosshairApp {
                             // 2. Follower Target
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "2. Follower Target:",
-                                        "2. Nhân vật Follower:",
-                                    ))
-                                    .strong(),
+                                ui.add_sized(
+                                    [SECTION_LABEL_WIDTH, 20.0],
+                                    egui::Label::new(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "2. Follower Target:",
+                                            "2. Nhân vật Follower:",
+                                        ))
+                                        .strong(),
+                                    ),
                                 );
                                 let mut dup_mode = false;
                                 let none_label = Self::tr_lang(
@@ -1161,7 +1201,7 @@ impl CrosshairApp {
                                     &mut step.follow_3d_spec.follower_window,
                                     &mut dup_mode,
                                     open_windows,
-                                    140.0,
+                                    WIN_COMBO_WIDTH,
                                     true,
                                 );
                                 ui.add_space(4.0);
@@ -1223,15 +1263,18 @@ impl CrosshairApp {
                             });
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "   Coords:",
-                                        "   Tọa độ:",
-                                    ))
-                                    .weak(),
+                                ui.add_sized(
+                                    [COORD_PREFIX_WIDTH, 20.0],
+                                    egui::Label::new(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "Coords:",
+                                            "Tọa độ:",
+                                        ))
+                                        .weak(),
+                                    ),
                                 );
-                                ui.label(RichText::new("X:").strong());
+                                ui.add_sized([COL1_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("X:").strong()));
                                 Self::render_f3d_coord_box(
                                     ui,
                                     language,
@@ -1242,7 +1285,7 @@ impl CrosshairApp {
                                     vietnamese_input_mode,
                                     &mut changed,
                                 );
-                                ui.label(RichText::new("Y:").strong());
+                                ui.add_sized([COL2_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("Y:").strong()));
                                 Self::render_f3d_coord_box(
                                     ui,
                                     language,
@@ -1253,7 +1296,7 @@ impl CrosshairApp {
                                     vietnamese_input_mode,
                                     &mut changed,
                                 );
-                                ui.label(RichText::new("Z:").strong());
+                                ui.add_sized([COL3_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("Z:").strong()));
                                 Self::render_f3d_coord_box(
                                     ui,
                                     language,
@@ -1269,13 +1312,16 @@ impl CrosshairApp {
                             // Follower Camera
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "   Camera:",
-                                        "   Camera:",
-                                    ))
-                                    .weak(),
+                                ui.add_sized(
+                                    [COORD_PREFIX_WIDTH, 20.0],
+                                    egui::Label::new(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "Camera:",
+                                            "Camera:",
+                                        ))
+                                        .weak(),
+                                    ),
                                 );
                                 let ori_label = match step.follow_3d_spec.orientation_mode {
                                     Follow3DOrientationMode::ForwardPairPitch => Self::tr_lang(
@@ -1290,7 +1336,7 @@ impl CrosshairApp {
                                     ),
                                 };
                                 egui::ComboBox::from_id_salt((id_prefix, "f3d-ori-mode"))
-                                    .width(135.0)
+                                    .width(WIN_COMBO_WIDTH)
                                     .selected_text(ori_label)
                                     .show_ui(ui, |ui| {
                                         if ui
@@ -1332,15 +1378,18 @@ impl CrosshairApp {
                                 ui.spacing_mut().item_spacing.x = 4.0;
                                 match step.follow_3d_spec.orientation_mode {
                                     Follow3DOrientationMode::ForwardPairPitch => {
-                                        ui.label(
-                                            RichText::new(Self::tr_lang(
-                                                language,
-                                                "   Vector:",
-                                                "   Vector:",
-                                            ))
-                                            .weak(),
+                                        ui.add_sized(
+                                            [COORD_PREFIX_WIDTH, 20.0],
+                                            egui::Label::new(
+                                                RichText::new(Self::tr_lang(
+                                                    language,
+                                                    "Vector:",
+                                                    "Vector:",
+                                                ))
+                                                .weak(),
+                                            ),
                                         );
-                                        ui.label(RichText::new("A:").strong());
+                                        ui.add_sized([COL1_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("A:").strong()));
                                         Self::render_f3d_coord_box(
                                             ui,
                                             language,
@@ -1351,7 +1400,7 @@ impl CrosshairApp {
                                             vietnamese_input_mode,
                                             &mut changed,
                                         );
-                                        ui.label(RichText::new("B:").strong());
+                                        ui.add_sized([COL2_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("B:").strong()));
                                         Self::render_f3d_coord_box(
                                             ui,
                                             language,
@@ -1362,7 +1411,7 @@ impl CrosshairApp {
                                             vietnamese_input_mode,
                                             &mut changed,
                                         );
-                                        ui.label(RichText::new("Pitch:").weak());
+                                        ui.add_sized([COL3_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("Pitch:").weak()));
                                         Self::render_f3d_coord_box(
                                             ui,
                                             language,
@@ -1375,15 +1424,18 @@ impl CrosshairApp {
                                         );
                                     }
                                     Follow3DOrientationMode::Angles => {
-                                        ui.label(
-                                            RichText::new(Self::tr_lang(
-                                                language,
-                                                "   Angles:",
-                                                "   Góc xoay:",
-                                            ))
-                                            .weak(),
+                                        ui.add_sized(
+                                            [COORD_PREFIX_WIDTH, 20.0],
+                                            egui::Label::new(
+                                                RichText::new(Self::tr_lang(
+                                                    language,
+                                                    "Angles:",
+                                                    "Góc:",
+                                                ))
+                                                .weak(),
+                                            ),
                                         );
-                                        ui.label(RichText::new("Yaw:").strong());
+                                        ui.add_sized([COL1_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("Yaw:").strong()));
                                         Self::render_f3d_coord_box(
                                             ui,
                                             language,
@@ -1394,7 +1446,9 @@ impl CrosshairApp {
                                             vietnamese_input_mode,
                                             &mut changed,
                                         );
-                                        ui.label(RichText::new("Pitch:").weak());
+                                        ui.add_sized([COL2_LABEL_WIDTH, 20.0], egui::Label::new(""));
+                                        ui.add_sized([70.0, 20.0], egui::Label::new(""));
+                                        ui.add_sized([COL3_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("Pitch:").weak()));
                                         Self::render_f3d_coord_box(
                                             ui,
                                             language,
@@ -1414,13 +1468,16 @@ impl CrosshairApp {
                             // 3. Key Input Window & Tuning
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 4.0;
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "3. Key Input:",
-                                        "3. Nhận phím:",
-                                    ))
-                                    .strong(),
+                                ui.add_sized(
+                                    [SECTION_LABEL_WIDTH, 20.0],
+                                    egui::Label::new(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "3. Key Input:",
+                                            "3. Nhận phím:",
+                                        ))
+                                        .strong(),
+                                    ),
                                 );
                                 let mut dup_mode = false;
                                 let default_input_label = Self::tr_lang(
@@ -1436,7 +1493,7 @@ impl CrosshairApp {
                                     &mut step.follow_3d_spec.input_window,
                                     &mut dup_mode,
                                     open_windows,
-                                    140.0,
+                                    WIN_COMBO_WIDTH,
                                     true,
                                 );
 
@@ -1488,13 +1545,16 @@ impl CrosshairApp {
 
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 8.0;
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "   Calibrate:",
-                                        "   Cân chỉnh:",
-                                    ))
-                                    .weak(),
+                                ui.add_sized(
+                                    [COORD_PREFIX_WIDTH, 20.0],
+                                    egui::Label::new(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "Calibrate:",
+                                            "Cân chỉnh:",
+                                        ))
+                                        .weak(),
+                                    ),
                                 );
 
                                 if ui
@@ -4208,6 +4268,7 @@ impl CrosshairApp {
             MacroAction::WriteMemory,
             MacroAction::ScanInstruction,
             MacroAction::StopInstructionScan,
+            MacroAction::Follow3DTarget,
         ]
     }
 
@@ -8736,7 +8797,6 @@ impl CrosshairApp {
                                                              MacroAction::SetVariable,
                                                              MacroAction::OcrSearch,
                                                              MacroAction::JumpToStep,
-                                                             MacroAction::Follow3DTarget,
                                                         ]
                                                         {
                                                             Self::render_macro_action_option(
@@ -11111,7 +11171,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                              MacroAction::SetVariable,
                                                              MacroAction::OcrSearch,
                                                              MacroAction::JumpToStep,
-                                                             MacroAction::Follow3DTarget,
                                                         ]
                                                         {
                                                             Self::render_macro_action_option(
@@ -14423,7 +14482,6 @@ if supports_move_mouse || show_detection_tuning {
                                                                 MacroAction::SetVariable,
                                                                 MacroAction::OcrSearch,
                                                                 MacroAction::JumpToStep,
-                                                                MacroAction::Follow3DTarget,
                                                             ] {
                                                                 Self::render_macro_action_option(
                                                                     ui,

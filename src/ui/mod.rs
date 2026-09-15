@@ -8952,6 +8952,16 @@ impl CrosshairApp {
                         "[The Unfocused One]",
                         "[The Unfocused One]",
                     ),
+                    (
+                        " [The Focused One]",
+                        "[The Focused One]",
+                        "[The Focused One]",
+                    ),
+                    (
+                        " [Focused]",
+                        "[The Focused One]",
+                        "[The Focused One]",
+                    ),
                 ];
                 let mut matched_rule = false;
                 for (suffix, en_label, vi_label) in rules {
@@ -9107,6 +9117,14 @@ impl CrosshairApp {
                                             language,
                                             "[The Unfocused One]",
                                             "[The Unfocused One]",
+                                        ),
+                                    ),
+                                    (
+                                        " [Focused]",
+                                        Self::tr_lang(
+                                            language,
+                                            "[The Focused One]",
+                                            "[The Focused One]",
                                         ),
                                     ),
                                 ];

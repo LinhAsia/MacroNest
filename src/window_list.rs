@@ -93,6 +93,7 @@ mod windows_impl {
         Leftmost,
         Rightmost,
         Unfocused,
+        Focused,
     }
 
     pub fn list_open_windows() -> Vec<WindowInfo> {
@@ -490,6 +491,10 @@ mod windows_impl {
             (s, Some(WindowMatchRule::Unfocused))
         } else if let Some(s) = target.strip_suffix(" [Unfocused]") {
             (s, Some(WindowMatchRule::Unfocused))
+        } else if let Some(s) = target.strip_suffix(" [The Focused One]") {
+            (s, Some(WindowMatchRule::Focused))
+        } else if let Some(s) = target.strip_suffix(" [Focused]") {
+            (s, Some(WindowMatchRule::Focused))
         } else {
             (target, None)
         }
@@ -526,11 +531,33 @@ mod windows_impl {
             return candidates.first().copied();
         }
 
+        if rule == WindowMatchRule::Focused {
+            let live = unsafe { GetForegroundWindow() };
+            let fg_root = if live.0.is_null() {
+                HWND(std::ptr::null_mut())
+            } else {
+                let root = unsafe { GetAncestor(live, GA_ROOT) };
+                if root.0.is_null() { live } else { root }
+            };
+            let root_of = |h: HWND| unsafe {
+                if h.0.is_null() {
+                    h
+                } else {
+                    let root = GetAncestor(h, GA_ROOT);
+                    if root.0.is_null() { h } else { root }
+                }
+            };
+            if let Some(focused) = candidates.iter().copied().find(|&hwnd| root_of(hwnd) == fg_root) {
+                return Some(focused);
+            }
+            return candidates.first().copied();
+        }
+
         let mut best_hwnd = None;
         let mut best_val = match rule {
             WindowMatchRule::Lowest | WindowMatchRule::Rightmost => i32::MIN,
             WindowMatchRule::Highest | WindowMatchRule::Leftmost => i32::MAX,
-            WindowMatchRule::Unfocused => unreachable!(),
+            WindowMatchRule::Unfocused | WindowMatchRule::Focused => unreachable!(),
         };
 
         for hwnd in candidates {
@@ -539,12 +566,12 @@ mod windows_impl {
                 let axis = match rule {
                     WindowMatchRule::Lowest | WindowMatchRule::Highest => rect.top,
                     WindowMatchRule::Leftmost | WindowMatchRule::Rightmost => rect.left,
-                    WindowMatchRule::Unfocused => unreachable!(),
+                    WindowMatchRule::Unfocused | WindowMatchRule::Focused => unreachable!(),
                 };
                 let better = match rule {
                     WindowMatchRule::Lowest | WindowMatchRule::Rightmost => axis > best_val,
                     WindowMatchRule::Highest | WindowMatchRule::Leftmost => axis < best_val,
-                    WindowMatchRule::Unfocused => unreachable!(),
+                    WindowMatchRule::Unfocused | WindowMatchRule::Focused => unreachable!(),
                 };
                 if better {
                     best_val = axis;
@@ -1808,9 +1835,15 @@ mod tests {
         assert_eq!(parse_window_match_rule("Window [The Unfocused One]").1, Some(WindowMatchRule::Unfocused));
         assert_eq!(strip_rule_suffix("Window [Unfocused]"), "Window");
         assert_eq!(parse_window_match_rule("Window [Unfocused]").1, Some(WindowMatchRule::Unfocused));
+        assert_eq!(strip_rule_suffix("Window [The Focused One]"), "Window");
+        assert_eq!(parse_window_match_rule("Window [The Focused One]").1, Some(WindowMatchRule::Focused));
+        assert_eq!(strip_rule_suffix("Window [Focused]"), "Window");
+        assert_eq!(parse_window_match_rule("Window [Focused]").1, Some(WindowMatchRule::Focused));
         assert!(has_position_rule_suffix("Microsoft Edge [Leftmost]"));
         assert!(has_position_rule_suffix("Microsoft Edge [The Unfocused One]"));
         assert!(has_position_rule_suffix("Microsoft Edge [Unfocused]"));
+        assert!(has_position_rule_suffix("Microsoft Edge [The Focused One]"));
+        assert!(has_position_rule_suffix("Microsoft Edge [Focused]"));
         assert!(!has_position_rule_suffix("Microsoft Edge"));
 
         assert!(window_matches_candidate_title(
