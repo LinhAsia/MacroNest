@@ -12233,7 +12233,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               &self.state.memory_code_list,
                                                               &self.state.memory_pointer_list,
                                                           );
-                                                      } else if step.action == MacroAction::BackgroundClick {
+                                                      } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundMouseMove {
                                                           live_sync |= Self::render_background_click_step_fields(
                                                               ui,
                                                               step,
@@ -15800,7 +15800,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                &self.state.memory_code_list,
                                                                &self.state.memory_pointer_list,
                                                            );
-                                                      } else if step.action == MacroAction::BackgroundClick {
+                                                      } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundMouseMove {
                                                           live_sync |= Self::render_background_click_step_fields(
                                                               ui,
                                                               step,
