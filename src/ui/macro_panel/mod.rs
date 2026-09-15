@@ -119,8 +119,8 @@ impl CrosshairApp {
                 };
 
                 egui::ComboBox::from_id_salt(ui.id().with("instruction-combo"))
-                    .width(170.0)
-                    .selected_text(Self::truncate_window_title(&selected_label, 28))
+                    .width(105.0)
+                    .selected_text(Self::truncate_window_title(&selected_label, 16))
                     .show_ui(ui, |ui| {
                         let has_codes = !memory_codes.is_empty()
                             || memory_pointers.iter().any(|p| !p.code_module.is_empty());
@@ -181,21 +181,29 @@ impl CrosshairApp {
                     });
 
                 ui.label("→");
-                changed |= ui
-                    .add_sized(
-                        [85.0, 21.0],
-                        egui::TextEdit::singleline(&mut step.if_variable_name)
-                            .hint_text(
-                                egui::RichText::new(Self::tr_lang(language, "variable", "biến"))
-                                    .weak(),
-                            ),
-                    )
-                    .on_hover_text(Self::tr_lang(
-                        language,
-                        "When Count > 1:\n- {var}: 1st address\n- {var}_1 .. {var}_N: individual addresses\n- {var}_last: last address\n- {var}_count: count of addresses\n- {var}_all: comma-separated hex list",
-                        "Khi Count > 1:\n- {var}: địa chỉ đầu tiên\n- {var}_1 .. {var}_N: từng địa chỉ theo thứ tự\n- {var}_last: địa chỉ cuối cùng\n- {var}_count: tổng số lượng địa chỉ\n- {var}_all: danh sách tất cả địa chỉ hex",
-                    ))
-                    .changed();
+                let var_len = step.if_variable_name.chars().count();
+                let normal_w = if var_len == 0 {
+                    24.0
+                } else {
+                    (var_len as f32 * 7.5 + 14.0).clamp(24.0, 85.0)
+                };
+                let var_resp = Self::render_variable_text_edit(
+                    ui,
+                    &mut step.if_variable_name,
+                    ui.id().with("scan-var-name"),
+                    normal_w,
+                    110.0,
+                    21.0,
+                    21.0,
+                    Self::tr_lang(language, "var", "biến"),
+                    false,
+                );
+                changed |= var_resp.changed();
+                var_resp.on_hover_text(Self::tr_lang(
+                    language,
+                    "Output variable name.\nWhen Count > 1:\n- {var}: 1st address\n- {var}_1 .. {var}_N: individual addresses\n- {var}_last: last address\n- {var}_count: count of addresses\n- {var}_all: comma-separated hex list",
+                    "Tên biến nhận kết quả.\nKhi Count > 1:\n- {var}: địa chỉ đầu tiên\n- {var}_1 .. {var}_N: từng địa chỉ theo thứ tự\n- {var}_last: địa chỉ cuối cùng\n- {var}_count: tổng số lượng địa chỉ\n- {var}_all: danh sách tất cả địa chỉ hex",
+                ));
 
                 ui.label(Self::tr_lang(language, "Count:", "SL:"));
                 changed |= ui
@@ -310,17 +318,28 @@ impl CrosshairApp {
             );
             if step.action == MacroAction::WriteMemory {
                 ui.label("=");
-                let response = ui
-                    .add_sized(
-                        [120.0, 21.0],
-                        egui::TextEdit::singleline(&mut step.memory_write_value)
-                            .hint_text(egui::RichText::new("value/expr").weak()),
-                    )
-                    .on_hover_text(Self::tr_lang(
-                        language,
-                        "Value or expression to write",
-                        "Giá trị hoặc biểu thức cần ghi",
-                    ));
+                let val_len = step.memory_write_value.chars().count();
+                let normal_w = if val_len == 0 {
+                    24.0
+                } else {
+                    (val_len as f32 * 7.5 + 14.0).clamp(24.0, 95.0)
+                };
+                let response = Self::render_variable_text_edit(
+                    ui,
+                    &mut step.memory_write_value,
+                    ui.id().with("writemem-val"),
+                    normal_w,
+                    130.0,
+                    21.0,
+                    21.0,
+                    "val",
+                    false,
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Value or expression to write",
+                    "Giá trị hoặc biểu thức cần ghi",
+                ));
                 changed |= response.changed();
                 Self::render_variable_suggestions_braced(
                     ui,
@@ -331,21 +350,29 @@ impl CrosshairApp {
                 );
             } else {
                 ui.label("→");
-                changed |= ui
-                    .add_sized(
-                        [100.0, 21.0],
-                        egui::TextEdit::singleline(&mut step.if_variable_name)
-                            .hint_text(
-                                egui::RichText::new(Self::tr_lang(language, "variable", "biến"))
-                                    .weak(),
-                            ),
-                    )
-                    .on_hover_text(Self::tr_lang(
-                        language,
-                        "Output variable",
-                        "Biến nhận kết quả",
-                    ))
-                    .changed();
+                let var_len = step.if_variable_name.chars().count();
+                let normal_w = if var_len == 0 {
+                    24.0
+                } else {
+                    (var_len as f32 * 7.5 + 14.0).clamp(24.0, 85.0)
+                };
+                let var_resp = Self::render_variable_text_edit(
+                    ui,
+                    &mut step.if_variable_name,
+                    ui.id().with("readmem-var-name"),
+                    normal_w,
+                    110.0,
+                    21.0,
+                    21.0,
+                    Self::tr_lang(language, "var", "biến"),
+                    false,
+                );
+                changed |= var_resp.changed();
+                var_resp.on_hover_text(Self::tr_lang(
+                    language,
+                    "Output variable",
+                    "Biến nhận kết quả",
+                ));
             }
         });
         changed
