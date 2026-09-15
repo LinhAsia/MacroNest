@@ -25016,6 +25016,7 @@ mod windows_overlay {
         }
 
         stop_vision_following_ids(&image_search_preset_ids);
+        stop_follow_3d_target();
         hide_toolbox_for_owner(preset_id);
         HOOK_STATE.lock().stop_ignore_keys.remove(&preset_id);
         FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
@@ -28551,6 +28552,7 @@ mod windows_overlay {
         } else {
             STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
         }
+        stop_follow_3d_target();
     }
 
     fn execute_stop_macro_step(step: &MacroStep) {
@@ -28938,6 +28940,10 @@ mod windows_overlay {
 
             MacroAction::StopInstructionScan => {
                 execute_stop_instruction_scan_action_step();
+            }
+
+            MacroAction::Follow3DTarget => {
+                let _ = execute_follow_3d_target(step, Some(preset_id), false);
             }
 
             _ => {
@@ -29717,7 +29723,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::Follow3DTarget => {
-                    let _ = execute_follow_3d_target(step);
+                    let _ = execute_follow_3d_target(step, Some(preset_id), false);
                 }
 
                 MacroAction::StopVisionWait => {
@@ -30532,7 +30538,7 @@ mod windows_overlay {
                 }
 
                 MacroAction::Follow3DTarget => {
-                    let _ = execute_follow_3d_target(step);
+                    let _ = execute_follow_3d_target(step, Some(preset_id), true);
                 }
 
                 MacroAction::StopVisionWait => {
@@ -33240,39 +33246,25 @@ mod windows_overlay {
 
         #[test]
         fn test_compute_follow_3d_keys() {
-            // XZ plane tests:
-            // Target is straight ahead (along positive Z, camera looking along +Z: fa=0, fb=1)
-            let keys = compute_follow_3d_keys(0.0, 10.0, 0.0, 1.0, 1.0, crate::model::Follow3DGroundPlane::XZ);
+            // Target is straight ahead (along positive Y, camera looking along +Y: fa=0, fb=1)
+            let keys = compute_follow_3d_keys(0.0, 10.0, 0.0, 1.0, 1.0);
             assert_eq!(keys, [true, false, false, false], "should press W when target is ahead");
 
-            // Target is behind (along negative Z)
-            let keys = compute_follow_3d_keys(0.0, -10.0, 0.0, 1.0, 1.0, crate::model::Follow3DGroundPlane::XZ);
+            // Target is behind (along negative Y)
+            let keys = compute_follow_3d_keys(0.0, -10.0, 0.0, 1.0, 1.0);
             assert_eq!(keys, [false, false, true, false], "should press S when target is behind");
 
             // Target is to the right (along positive X)
-            let keys = compute_follow_3d_keys(10.0, 0.0, 0.0, 1.0, 1.0, crate::model::Follow3DGroundPlane::XZ);
+            let keys = compute_follow_3d_keys(10.0, 0.0, 0.0, 1.0, 1.0);
             assert_eq!(keys, [false, false, false, true], "should press D when target is right");
 
             // Target is to the left (along negative X)
-            let keys = compute_follow_3d_keys(-10.0, 0.0, 0.0, 1.0, 1.0, crate::model::Follow3DGroundPlane::XZ);
+            let keys = compute_follow_3d_keys(-10.0, 0.0, 0.0, 1.0, 1.0);
             assert_eq!(keys, [false, true, false, false], "should press A when target is left");
 
             // Target is within stop distance
-            let keys = compute_follow_3d_keys(0.5, 0.5, 0.0, 1.0, 2.0, crate::model::Follow3DGroundPlane::XZ);
+            let keys = compute_follow_3d_keys(0.5, 0.5, 0.0, 1.0, 2.0);
             assert_eq!(keys, [false, false, false, false], "should not press any key when within stop distance");
-
-            // XY plane tests (Unreal style: X forward, Y right, camera facing +X: fa=1, fb=0):
-            let keys = compute_follow_3d_keys(10.0, 0.0, 1.0, 0.0, 1.0, crate::model::Follow3DGroundPlane::XY);
-            assert_eq!(keys, [true, false, false, false], "XY should press W when target is ahead along +X");
-
-            let keys = compute_follow_3d_keys(-10.0, 0.0, 1.0, 0.0, 1.0, crate::model::Follow3DGroundPlane::XY);
-            assert_eq!(keys, [false, false, true, false], "XY should press S when target is behind along -X");
-
-            let keys = compute_follow_3d_keys(0.0, 10.0, 1.0, 0.0, 1.0, crate::model::Follow3DGroundPlane::XY);
-            assert_eq!(keys, [false, false, false, true], "XY should press D when target is right along +Y");
-
-            let keys = compute_follow_3d_keys(0.0, -10.0, 1.0, 0.0, 1.0, crate::model::Follow3DGroundPlane::XY);
-            assert_eq!(keys, [false, true, false, false], "XY should press A when target is left along -Y");
         }
 
         #[test]
@@ -34496,7 +34488,7 @@ mod windows_overlay {
             MacroAction::BackgroundClick => return send_background_click(step),
             MacroAction::BackgroundMouseMove => return send_background_mouse_move(step),
             MacroAction::BackgroundKey => return send_background_key(step),
-            MacroAction::Follow3DTarget => return execute_follow_3d_target(step),
+            MacroAction::Follow3DTarget => return execute_follow_3d_target(step, None, false),
             MacroAction::TypeText => {
                 let text = interpolate_variables(&step.key);
                 return if step.type_text_paste {
@@ -35501,6 +35493,8 @@ mod windows_overlay {
 
     struct Follow3DActiveSession {
         stop_flag: Arc<AtomicBool>,
+        _owner_preset_id: Option<u32>,
+        _is_hold: bool,
         input_hwnd: isize,
         held_keys: Arc<Mutex<[bool; 4]>>, // [W, A, S, D]
     }
@@ -35532,10 +35526,10 @@ mod windows_overlay {
             if !target_hwnd.0.is_null() {
                 let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
                 let mut held = session.held_keys.lock();
-                for (idx, &vk) in vk_keys.iter().enumerate() {
+                for idx in 0..4 {
                     if held[idx] {
                         held[idx] = false;
-                        post_bg_key_up(target_hwnd, vk);
+                        post_bg_key_up(target_hwnd, vk_keys[idx]);
                     }
                 }
             }
@@ -35548,27 +35542,16 @@ mod windows_overlay {
 
     pub(crate) fn compute_follow_3d_keys(
         dx: f32,
-        dz: f32,
+        dy: f32,
         fa: f32,
         fb: f32,
         stop_dist: f32,
-        ground_plane: crate::model::Follow3DGroundPlane,
     ) -> [bool; 4] {
-        let dist = dx.hypot(dz);
+        let dist = dx.hypot(dy);
         let mut want_keys = [false; 4]; // [W, A, S, D]
         if dist > stop_dist {
-            let (f_score, r_score) = match ground_plane {
-                crate::model::Follow3DGroundPlane::XZ => {
-                    let f = dx * fa + dz * fb;
-                    let r = dx * fb - dz * fa;
-                    (f, r)
-                }
-                crate::model::Follow3DGroundPlane::XY => {
-                    let f = dx * fa + dz * fb;
-                    let r = dz * fa - dx * fb;
-                    (f, r)
-                }
-            };
+            let f_score = dx * fa + dy * fb;
+            let r_score = dx * fb - dy * fa;
             let angle = r_score.atan2(f_score).to_degrees();
 
             want_keys[0] = (-67.5..=67.5).contains(&angle);
@@ -35624,7 +35607,11 @@ mod windows_overlay {
         }
     }
 
-    fn execute_follow_3d_target(step: &MacroStep) -> Result<()> {
+    fn execute_follow_3d_target(
+        step: &MacroStep,
+        owner_preset_id: Option<u32>,
+        is_hold: bool,
+    ) -> Result<()> {
         if step.follow_3d_spec.mode == crate::model::Follow3DMode::Stop {
             stop_follow_3d_target();
             return Ok(());
@@ -35655,6 +35642,8 @@ mod windows_overlay {
 
         *ACTIVE_FOLLOW_3D_SESSION.lock() = Some(Follow3DActiveSession {
             stop_flag: stop_flag.clone(),
+            _owner_preset_id: owner_preset_id,
+            _is_hold: is_hold,
             input_hwnd: target_input_raw,
             held_keys: held_keys.clone(),
         });
@@ -35670,6 +35659,21 @@ mod windows_overlay {
             let mut last_window_check = Instant::now();
 
             while !thread_stop.load(Ordering::SeqCst) {
+                // If this session is owned by a Hold macro, stop immediately if the hold key was released
+                if let Some(pid) = owner_preset_id {
+                    if is_hold {
+                        let is_still_held = HOOK_STATE.lock().active_hold_macros.contains_key(&pid);
+                        if !is_still_held {
+                            break;
+                        }
+                    }
+                    if STOP_REQUESTED_MACRO_PRESETS.lock().contains(&pid)
+                        || FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().contains(&pid)
+                    {
+                        break;
+                    }
+                }
+
                 frame.begin_sample();
 
                 // Periodically verify input_hwnd hasn't drifted or role-reversed
@@ -35698,38 +35702,18 @@ mod windows_overlay {
                 let pid_follower = resolve_follower_pid(&mut frame, &spec);
 
                 if let (Some(pid_l), Some(pid_f)) = (pid_leader, pid_follower) {
-                    let (lx, l_second) = match spec.ground_plane {
-                        crate::model::Follow3DGroundPlane::XZ => {
-                            let x = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
-                            let z = if !spec.leader_z.trim().is_empty() {
-                                frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
-                            } else {
-                                frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
-                            };
-                            (x, z)
-                        }
-                        crate::model::Follow3DGroundPlane::XY => {
-                            let x = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
-                            let y = frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok();
-                            (x, y)
-                        }
+                    let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
+                    let ly = if !spec.leader_y.trim().is_empty() {
+                        frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
+                    } else {
+                        frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
                     };
 
-                    let (fx, f_second) = match spec.ground_plane {
-                        crate::model::Follow3DGroundPlane::XZ => {
-                            let x = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
-                            let z = if !spec.follower_z.trim().is_empty() {
-                                frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
-                            } else {
-                                frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
-                            };
-                            (x, z)
-                        }
-                        crate::model::Follow3DGroundPlane::XY => {
-                            let x = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
-                            let y = frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok();
-                            (x, y)
-                        }
+                    let fx = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
+                    let fy = if !spec.follower_y.trim().is_empty() {
+                        frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
+                    } else {
+                        frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
                     };
 
                     let mut forward_opt: Option<(f32, f32)> = None;
@@ -35756,22 +35740,13 @@ mod windows_overlay {
                                     yaw.to_radians()
                                 };
 
-                                match spec.ground_plane {
-                                    crate::model::Follow3DGroundPlane::XZ => {
-                                        // Unity/Godot standard: 0 yaw faces North (+Z), turning right (+yaw) faces East (+X)
-                                        forward_opt = Some((rad.sin(), rad.cos()));
-                                    }
-                                    crate::model::Follow3DGroundPlane::XY => {
-                                        // Unreal standard: 0 yaw faces Forward (+X), turning right (+yaw) faces Right (+Y)
-                                        forward_opt = Some((rad.cos(), rad.sin()));
-                                    }
-                                }
+                                forward_opt = Some((rad.sin(), rad.cos()));
                             }
                         }
                     }
 
-                    if let (Some(lx), Some(lz), Some(fx), Some(fz), Some((mut fa, mut fb))) =
-                        (lx, l_second, fx, f_second, forward_opt)
+                    if let (Some(lx), Some(ly), Some(fx), Some(fy), Some((mut fa, mut fb))) =
+                        (lx, ly, fx, fy, forward_opt)
                     {
                         if spec.invert_forward {
                             fa = -fa;
@@ -35785,11 +35760,10 @@ mod windows_overlay {
 
                         let want_keys = compute_follow_3d_keys(
                             lx - fx,
-                            lz - fz,
+                            ly - fy,
                             fa,
                             fb,
                             spec.stop_distance,
-                            spec.ground_plane,
                         );
 
                         let mut held = thread_held.lock();

@@ -916,8 +916,8 @@ impl CrosshairApp {
             ui,
             text,
             id,
-            70.0,
-            130.0,
+            96.0,
+            260.0,
             20.0,
             20.0,
             "0x.../{v}",
@@ -1369,65 +1369,6 @@ impl CrosshairApp {
                                         {
                                             step.follow_3d_spec.orientation_mode =
                                                 Follow3DOrientationMode::Angles;
-                                            changed = true;
-                                        }
-                                    });
-
-                                ui.add_space(2.0);
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "Plane:",
-                                        "Mặt phẳng:",
-                                    ))
-                                    .weak(),
-                                );
-                                let plane_label = match step.follow_3d_spec.ground_plane {
-                                    Follow3DGroundPlane::XZ => Self::tr_lang(
-                                        language,
-                                        "X-Z (Unity / Godot)",
-                                        "X-Z (Unity / Godot)",
-                                    ),
-                                    Follow3DGroundPlane::XY => Self::tr_lang(
-                                        language,
-                                        "X-Y (Unreal / Source)",
-                                        "X-Y (Unreal / Source)",
-                                    ),
-                                };
-                                egui::ComboBox::from_id_salt((id_prefix, "f3d-ground-plane"))
-                                    .width(120.0)
-                                    .selected_text(plane_label)
-                                    .show_ui(ui, |ui| {
-                                        if ui
-                                            .selectable_label(
-                                                step.follow_3d_spec.ground_plane
-                                                    == Follow3DGroundPlane::XZ,
-                                                Self::tr_lang(
-                                                    language,
-                                                    "X-Z (Y is height - Unity/Godot)",
-                                                    "X-Z (Y là chiều cao - Unity/Godot)",
-                                                ),
-                                            )
-                                            .clicked()
-                                        {
-                                            step.follow_3d_spec.ground_plane =
-                                                Follow3DGroundPlane::XZ;
-                                            changed = true;
-                                        }
-                                        if ui
-                                            .selectable_label(
-                                                step.follow_3d_spec.ground_plane
-                                                    == Follow3DGroundPlane::XY,
-                                                Self::tr_lang(
-                                                    language,
-                                                    "X-Y (Z is height - Unreal/Source)",
-                                                    "X-Y (Z là chiều cao - Unreal/Source)",
-                                                ),
-                                            )
-                                            .clicked()
-                                        {
-                                            step.follow_3d_spec.ground_plane =
-                                                Follow3DGroundPlane::XY;
                                             changed = true;
                                         }
                                     });
