@@ -784,7 +784,7 @@ impl CrosshairApp {
                     self.render_downloaded_tool_entry(
                         ui,
                         language,
-                        "Network Injection (Frida)",
+                        "Frida Script Injector",
                         &frida_path,
                         self.frida_installed,
                         frida_progress,
@@ -2098,7 +2098,7 @@ impl CrosshairApp {
     }
 
     fn delete_frida_tool(&mut self) {
-        self.network_panel.detach_frida();
+        self.memory_panel.frida_session.take();
         let _ = fs::remove_file(&self.paths.frida_helper_exe);
         let _ = fs::remove_file(&self.paths.frida_helper_zip);
         self.frida_installed = false;
@@ -2291,19 +2291,13 @@ impl CrosshairApp {
         let ui_tx = self.ui_tx.clone();
         let ctx = ctx.clone();
         let current_version = self.app_version_label().to_owned();
-        let network_proxy = self.network_panel.active_proxy_url();
         std::thread::spawn(move || {
             let client = reqwest::blocking::Client::builder()
                 .user_agent("MacroNest")
                 .connect_timeout(Duration::from_secs(10))
-                .timeout(Duration::from_secs(20));
-            let client = match network_proxy {
-                Some(proxy) => reqwest::Proxy::all(proxy)
-                    .map(|proxy| client.proxy(proxy))
-                    .map_err(|error| error.to_string()),
-                None => Ok(client),
-            }
-            .and_then(|client| client.build().map_err(|error| error.to_string()));
+                .timeout(Duration::from_secs(20))
+                .build()
+                .map_err(|error| error.to_string());
             let result = client.and_then(|c| {
                 let cache_buster = SystemTime::now()
                     .duration_since(UNIX_EPOCH)

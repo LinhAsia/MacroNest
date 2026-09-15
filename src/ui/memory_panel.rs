@@ -1163,6 +1163,7 @@ pub(crate) struct MemoryPanelState {
     pub(crate) show_dll_studio: bool,
     pub(crate) dll_status_msg: String,
     pub(crate) inject_dll_file_path: String,
+    pub(crate) frida_session: Option<crate::frida_injector::Session>,
     global_aob_sample_1: Option<(Vec<u8>, usize)>,
 }
 
@@ -1291,6 +1292,7 @@ impl Default for MemoryPanelState {
             show_dll_studio: false,
             dll_status_msg: String::new(),
             inject_dll_file_path: String::new(),
+            frida_session: None,
             global_aob_sample_1: None,
         }
     }
@@ -5366,6 +5368,14 @@ impl CrosshairApp {
                             egui::RichText::new(self.tr("3. Export & Inject", "3. Xuất & Tiêm (Export & Inject)"))
                                 .strong(),
                         );
+                        if let Some(session) = &self.memory_panel.frida_session {
+                            while let Ok(event) = session.events.try_recv() {
+                                match event {
+                                    crate::frida_injector::Event::Status(s) => self.memory_panel.dll_status_msg = s,
+                                    crate::frida_injector::Event::Log(l) => self.memory_panel.dll_status_msg = l,
+                                }
+                            }
+                        }
                         if !self.memory_panel.dll_status_msg.is_empty() {
                             ui.label(
                                 egui::RichText::new(&self.memory_panel.dll_status_msg)
@@ -5409,8 +5419,7 @@ impl CrosshairApp {
                                     let script =
                                         crate::dll_generator::generate_frida_js_script(&self.memory_panel.dll_config);
                                     let frida_helper = self.paths.frida_helper_exe.clone();
-                                    self.network_panel.frida_log.clear();
-                                    self.network_panel.frida_session = Some(crate::frida_injector::Session::attach(
+                                    self.memory_panel.frida_session = Some(crate::frida_injector::Session::attach(
                                         frida_helper,
                                         pid,
                                         script,

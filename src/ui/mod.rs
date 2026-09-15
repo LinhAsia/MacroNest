@@ -51,7 +51,6 @@ mod macro_panel_ocr;
 mod memory_panel;
 mod mouse_panel;
 mod navigation;
-mod network_panel;
 mod ocr_panel;
 mod settings_panel;
 mod sound_panel;
@@ -932,7 +931,6 @@ pub struct CrosshairApp {
     draw_geometry_step_preview_sent: Option<crate::model::GeometrySpec>,
     macro_step_inline_feedback: HashMap<(u32, usize), MacroStepInlineFeedback>,
     memory_panel: memory_panel::MemoryPanelState,
-    network_panel: network_panel::NetworkPanelState,
 
     macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
@@ -990,10 +988,6 @@ impl CrosshairApp {
         let memory_panel = memory_panel::MemoryPanelState::with_hotkeys(
             &state.memory_scan_hotkeys,
             &state.memory_pointer_list,
-        );
-        let network_panel = network_panel::NetworkPanelState::new(
-            paths.root.join("network-proxy-recovery.json"),
-            state.network_decrypt_https,
         );
         let persist_tx = spawn_persist_worker(paths.clone(), ui_tx.clone());
         let (video_library_thumbnail_tx, video_library_thumbnail_rx) =
@@ -1295,7 +1289,6 @@ impl CrosshairApp {
             draw_geometry_step_preview_sent: None,
             macro_step_inline_feedback: HashMap::new(),
             memory_panel,
-            network_panel,
             macro_referenced_variables_cache: None,
 
             variable_inspector_open: false,
@@ -16258,7 +16251,6 @@ impl eframe::App for CrosshairApp {
                             self.tr("Exit", "Exit"),
                         );
                         if exit_response.clicked() {
-                            self.network_panel.shutdown();
                             self.quit_requested = true;
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
@@ -16700,18 +16692,6 @@ impl eframe::App for CrosshairApp {
                             "Chức năng này do tác giả làm để phục vụ nhu cầu cá nhân, có thể khó sử dụng và không được hướng dẫn chi tiết.",
                         );
 
-                        let selected = self.state.active_panel == AppPanel::Network;
-                        let text = RichText::new(self.panel_label(AppPanel::Network)).strong();
-                        let response = Self::add_with_show_hover_radius(
-                            ui,
-                            10,
-                            self.top_tab_button_danger(text, selected),
-                        )
-                        .on_hover_text(personal_warning);
-                        if response.clicked() {
-                            self.state.active_panel = AppPanel::Network;
-                        }
-
                         let selected = self.state.active_panel == AppPanel::Memory;
                         let text = RichText::new(self.panel_label(AppPanel::Memory)).strong();
                         let response = Self::add_with_show_hover_radius(
@@ -16808,14 +16788,11 @@ impl eframe::App for CrosshairApp {
                     || active_panel == AppPanel::Modes
                     || active_panel == AppPanel::Mouse
                     || active_panel == AppPanel::Memory
-                    || active_panel == AppPanel::Network
                 {
                     if active_panel == AppPanel::Mouse {
                         self.render_mouse_panel(ui);
                     } else if active_panel == AppPanel::Memory {
                         self.render_memory_panel(ui);
-                    } else if active_panel == AppPanel::Network {
-                        self.render_network_panel(ui);
                     } else {
                         self.render_macro_panel(ui);
                     }
@@ -16847,7 +16824,6 @@ impl eframe::App for CrosshairApp {
                                 AppPanel::Timer => self.render_timer_panel(ui),
                                 AppPanel::Media => self.render_media_panel(ui),
                                 AppPanel::Memory => unreachable!(),
-                                AppPanel::Network => unreachable!(),
                             };
                             if self.capture_target.is_some()
                                 || self.memory_panel.capturing_hotkey.is_some()
@@ -16863,7 +16839,6 @@ impl eframe::App for CrosshairApp {
             });
 
         self.render_memory_pinned_viewport(ctx);
-        self.render_network_pinned_viewport(ctx);
 
         if self.settings_popup_open {
             if self.capture_target.is_none()
@@ -17095,7 +17070,6 @@ impl eframe::App for CrosshairApp {
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.network_panel.shutdown();
         crate::video_recorder::stop_blocking();
         let _ = crate::platform::show_taskbar();
         crate::overlay::unpin_all_interactive_windows();

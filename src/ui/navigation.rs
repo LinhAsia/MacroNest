@@ -52,7 +52,6 @@ impl CrosshairApp {
             AppPanel::Esp => "ESP",
             AppPanel::Timer => "Timer",
             AppPanel::Memory => "Memory",
-            AppPanel::Network => "Network",
         }
     }
 

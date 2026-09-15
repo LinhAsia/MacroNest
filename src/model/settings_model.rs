@@ -138,8 +138,8 @@ pub enum AppPanel {
     Geometry,
     Esp,
     Timer,
+    #[serde(alias = "Network")]
     Memory,
-    Network,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -542,8 +542,6 @@ pub struct AppState {
     pub memory_camera_viewport_height: String,
     pub memory_code_list: Vec<MemoryCodeEntry>,
     pub memory_pointer_list: Vec<MemoryPointerEntry>,
-    #[serde(default)]
-    pub network_decrypt_https: bool,
     pub ui_language: UiLanguage,
     pub vietnamese_input_enabled: bool,
     pub vietnamese_input_mode: VietnameseInputMode,
@@ -994,7 +992,6 @@ impl Default for AppState {
             memory_camera_viewport_height: "1080".to_owned(),
             memory_code_list: Vec::new(),
             memory_pointer_list: Vec::new(),
-            network_decrypt_https: false,
             ui_language: UiLanguage::English,
             vietnamese_input_enabled: false,
             vietnamese_input_mode: VietnameseInputMode::Telex,
