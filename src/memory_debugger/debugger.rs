@@ -769,8 +769,18 @@ fn watch_loop<F>(
             return;
         }
     };
-    if unsafe { DebugActiveProcess(pid) } == 0 {
-        notify(WatchEvent::Error(io::Error::last_os_error().to_string()));
+    let mut attached = false;
+    let mut last_error = io::Error::last_os_error();
+    for _ in 0..25 {
+        if unsafe { DebugActiveProcess(pid) } != 0 {
+            attached = true;
+            break;
+        }
+        last_error = io::Error::last_os_error();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    if !attached {
+        notify(WatchEvent::Error(last_error.to_string()));
         return;
     }
     if unsafe { DebugSetProcessKillOnExit(0) } == 0 {
@@ -1019,11 +1029,29 @@ fn watch_loop<F>(
         }
         unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
     }
-    unsafe { disarm_paused_threads(&threads, architecture) };
+    // 1. Suspend all threads so none can hit a hardware breakpoint during cleanup
+    for &thread in threads.values() {
+        unsafe {
+            let _ = SuspendThread(thread);
+        }
+    }
+    // 2. Disarm debug registers on all suspended threads
+    for &thread in threads.values() {
+        unsafe {
+            disarm_thread(thread, architecture);
+        }
+    }
+    // 3. Resume all threads
+    for &thread in threads.values() {
+        unsafe {
+            let _ = ResumeThread(thread);
+        }
+    }
+    // 4. Drain any pending debug events
     let flush_start = std::time::Instant::now();
-    while flush_start.elapsed() < std::time::Duration::from_millis(150) {
+    while flush_start.elapsed() < std::time::Duration::from_millis(50) {
         let mut event = DEBUG_EVENT::default();
-        if unsafe { WaitForDebugEvent(&mut event, 10) } != 0 {
+        if unsafe { WaitForDebugEvent(&mut event, 5) } != 0 {
             let mut status = DBG_CONTINUE;
             if event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT {
                 let exception = unsafe { event.u.Exception.ExceptionRecord.ExceptionCode };
@@ -1044,16 +1072,17 @@ fn watch_loop<F>(
             break;
         }
     }
-    for (_, thread) in threads {
-        unsafe {
-            if SuspendThread(thread) != u32::MAX {
-                disarm_thread(thread, architecture);
-                ResumeThread(thread);
-            }
-            close_if_valid(thread);
+    // 5. Detach debugger with retries
+    for _ in 0..5 {
+        if unsafe { DebugActiveProcessStop(pid) } != 0 {
+            break;
         }
+        std::thread::sleep(Duration::from_millis(10));
     }
-    unsafe { DebugActiveProcessStop(pid) };
+    // 6. Close remaining thread handles
+    for (_, thread) in threads {
+        unsafe { close_if_valid(thread) };
+    }
     notify(WatchEvent::Stopped);
 }
 

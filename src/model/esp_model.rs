@@ -92,6 +92,8 @@ pub struct EspPreset {
     pub entity_auto_hit_order: bool,
     #[serde(default)]
     pub entity_auto_scan_mode: EspAutoScanMode,
+    #[serde(default)]
+    pub entity_auto_continuous: bool,
     #[serde(default = "default_entity_auto_scan_duration_secs")]
     pub entity_auto_scan_duration_secs: f32,
     #[serde(default)]
@@ -220,6 +222,7 @@ impl EspPreset {
             entity_auto_capture_count: 5,
             entity_auto_hit_order: false,
             entity_auto_scan_mode: EspAutoScanMode::Stride,
+            entity_auto_continuous: false,
             entity_auto_scan_duration_secs: 1.0,
             entity_multi_strides: String::new(),
             entity_auto_hit_step: 1,
@@ -1513,6 +1516,12 @@ mod tests {
         let loaded: EspPreset = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.entity_auto_scan_mode, EspAutoScanMode::AllHits);
         assert_eq!(loaded.entity_auto_scan_duration_secs, 1.0);
+        assert!(!loaded.entity_auto_continuous);
+
+        preset.entity_auto_continuous = true;
+        let json2 = serde_json::to_string(&preset).unwrap();
+        let loaded2: EspPreset = serde_json::from_str(&json2).unwrap();
+        assert!(loaded2.entity_auto_continuous);
     }
 
     #[test]
