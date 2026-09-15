@@ -34442,6 +34442,7 @@ mod windows_overlay {
             | MacroAction::MouseMoveAbsolute
             | MacroAction::MouseMoveRelative => return send_mouse_event(step),
             MacroAction::BackgroundClick => return send_background_click(step),
+            MacroAction::BackgroundMouseMove => return send_background_mouse_move(step),
             MacroAction::BackgroundKey => return send_background_key(step),
             MacroAction::TypeText => {
                 let text = interpolate_variables(&step.key);
@@ -35055,6 +35056,9 @@ mod windows_overlay {
         Ok(())
     }
 
+    static LAST_BG_MOUSE_POS: Lazy<Mutex<HashMap<isize, (i32, i32)>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
+
     fn send_background_click(step: &MacroStep) -> Result<()> {
         let hwnd = crate::window_list::find_window_handle(step.background_target_window.as_deref());
         let Some(hwnd) = hwnd else {
@@ -35103,6 +35107,7 @@ mod windows_overlay {
             let delay_ms = step.mouse_click_delay_ms as u64;
 
             match step.background_mouse_button.as_str() {
+                "Move" => {}
                 "Right" => {
                     let _ = PostMessageW(Some(target), WM_RBUTTONDOWN, WPARAM(0x0002), lparam);
                     if delay_ms > 0 {
@@ -35151,6 +35156,82 @@ mod windows_overlay {
                     let _ = PostMessageW(Some(target), WM_LBUTTONUP, WPARAM(0), lparam);
                 }
             }
+
+            LAST_BG_MOUSE_POS.lock().insert(target.0 as isize, (target_pt.x, target_pt.y));
+        }
+        Ok(())
+    }
+
+    fn send_background_mouse_move(step: &MacroStep) -> Result<()> {
+        let hwnd = crate::window_list::find_window_handle(step.background_target_window.as_deref());
+        let Some(hwnd) = hwnd else {
+            return Ok(());
+        };
+        if hwnd.0.is_null() {
+            return Ok(());
+        }
+
+        unsafe {
+            if step.background_restore_minimized && IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOWNA);
+                thread::sleep(Duration::from_millis(50));
+            }
+
+            let x = step.get_x();
+            let y = step.get_y();
+
+            let mut screen_pt = POINT { x, y };
+            if step.background_client_coords {
+                let _ = ClientToScreen(hwnd, &mut screen_pt);
+            }
+
+            let mut target = hwnd;
+            if step.background_find_child {
+                let mut child_pt = screen_pt;
+                let _ = ScreenToClient(hwnd, &mut child_pt);
+                let child = ChildWindowFromPointEx(
+                    hwnd,
+                    child_pt,
+                    CWP_SKIPINVISIBLE | CWP_SKIPDISABLED,
+                );
+                if !child.0.is_null() && child != hwnd {
+                    target = child;
+                }
+            }
+
+            let mut target_pt = screen_pt;
+            let _ = ScreenToClient(target, &mut target_pt);
+
+            let wparam = match step.background_mouse_button.as_str() {
+                "LeftDown" | "Drag" => WPARAM(0x0001),
+                "RightDown" => WPARAM(0x0002),
+                "MiddleDown" => WPARAM(0x0010),
+                _ => WPARAM(0),
+            };
+
+            let target_key = target.0 as isize;
+            let start_pos = LAST_BG_MOUSE_POS.lock().get(&target_key).copied();
+            let duration_ms = step.mouse_click_delay_ms;
+
+            if duration_ms > 0 && start_pos.is_some() {
+                let (x0, y0) = start_pos.unwrap();
+                let steps = (duration_ms / 10).clamp(2, 60) as usize;
+                let step_delay = Duration::from_millis((duration_ms as u64) / steps as u64);
+                for i in 1..=steps {
+                    let cx = x0 + ((target_pt.x - x0) * i as i32) / steps as i32;
+                    let cy = y0 + ((target_pt.y - y0) * i as i32) / steps as i32;
+                    let lparam = LPARAM(((cy as u32 & 0xFFFF) << 16 | (cx as u32 & 0xFFFF)) as isize);
+                    let _ = PostMessageW(Some(target), WM_MOUSEMOVE, wparam, lparam);
+                    if step_delay.as_millis() > 0 {
+                        thread::sleep(step_delay);
+                    }
+                }
+            } else {
+                let lparam = LPARAM(((target_pt.y as u32 & 0xFFFF) << 16 | (target_pt.x as u32 & 0xFFFF)) as isize);
+                let _ = PostMessageW(Some(target), WM_MOUSEMOVE, wparam, lparam);
+            }
+
+            LAST_BG_MOUSE_POS.lock().insert(target_key, (target_pt.x, target_pt.y));
         }
         Ok(())
     }

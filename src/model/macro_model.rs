@@ -126,6 +126,8 @@ pub enum MacroAction {
     JumpToStep,
     #[serde(alias = "BackgroundMouseClick", alias = "BackgroundMouse")]
     BackgroundClick,
+    #[serde(alias = "BackgroundMove", alias = "BackgroundCursorMove")]
+    BackgroundMouseMove,
     #[serde(alias = "BackgroundKeyPress", alias = "BackgroundKeyboard")]
     BackgroundKey,
     #[serde(other)]
@@ -1141,6 +1143,31 @@ mod tests {
         }
         let parsed: ActionOnly = serde_json::from_str(alias_json).expect("parse alias");
         assert_eq!(parsed.action, MacroAction::BackgroundClick);
+
+        let move_alias_json = r#"{"action":"BackgroundMove"}"#;
+        let parsed_move: ActionOnly = serde_json::from_str(move_alias_json).expect("parse move alias");
+        assert_eq!(parsed_move.action, MacroAction::BackgroundMouseMove);
+    }
+
+    #[test]
+    fn test_background_mouse_move_serialization() {
+        let mut step = MacroStep::default();
+        step.action = MacroAction::BackgroundMouseMove;
+        step.background_target_window = Some("GameWindow".to_string());
+        step.background_mouse_button = "Drag (Left)".to_string();
+        step.x_expr = "400".to_string();
+        step.y_expr = "600".to_string();
+        step.mouse_click_delay_ms = 250;
+
+        let json = serde_json::to_string(&step).expect("serialize step");
+        let restored: MacroStep = serde_json::from_str(&json).expect("deserialize step");
+
+        assert_eq!(restored.action, MacroAction::BackgroundMouseMove);
+        assert_eq!(restored.background_target_window.as_deref(), Some("GameWindow"));
+        assert_eq!(restored.background_mouse_button, "Drag (Left)");
+        assert_eq!(restored.x_expr, "400");
+        assert_eq!(restored.y_expr, "600");
+        assert_eq!(restored.mouse_click_delay_ms, 250);
     }
 
     #[test]

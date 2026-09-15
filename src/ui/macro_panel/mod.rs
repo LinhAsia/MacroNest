@@ -413,31 +413,53 @@ impl CrosshairApp {
                 true,
             );
 
-            let button_label = match step.background_mouse_button.as_str() {
-                "Left" => Self::tr_lang(language, "Left Click", "Click Trái"),
-                "Right" => Self::tr_lang(language, "Right Click", "Click Phải"),
-                "Middle" => Self::tr_lang(language, "Middle Click", "Click Giữa"),
-                "DoubleLeft" => Self::tr_lang(language, "Double Click", "Double Click"),
-                "LeftDown" => Self::tr_lang(language, "Left Down", "Nhấn Trái"),
-                "LeftUp" => Self::tr_lang(language, "Left Up", "Nhả Trái"),
-                "RightDown" => Self::tr_lang(language, "Right Down", "Nhấn Phải"),
-                "RightUp" => Self::tr_lang(language, "Right Up", "Nhả Phải"),
-                _ => "Left Click",
+            let is_move = step.action == MacroAction::BackgroundMouseMove;
+
+            let button_label = if is_move {
+                match step.background_mouse_button.as_str() {
+                    "LeftDown" | "Drag" => Self::tr_lang(language, "Drag (Left)", "Kéo (Trái)"),
+                    "RightDown" => Self::tr_lang(language, "Drag (Right)", "Kéo (Phải)"),
+                    "MiddleDown" => Self::tr_lang(language, "Drag (Mid)", "Kéo (Giữa)"),
+                    _ => Self::tr_lang(language, "Hover", "Hover"),
+                }
+            } else {
+                match step.background_mouse_button.as_str() {
+                    "Move" => Self::tr_lang(language, "Move Only", "Chỉ di chuột"),
+                    "Left" => Self::tr_lang(language, "Left Click", "Click Trái"),
+                    "Right" => Self::tr_lang(language, "Right Click", "Click Phải"),
+                    "Middle" => Self::tr_lang(language, "Middle Click", "Click Giữa"),
+                    "DoubleLeft" => Self::tr_lang(language, "Double Click", "Double Click"),
+                    "LeftDown" => Self::tr_lang(language, "Left Down", "Nhấn Trái"),
+                    "LeftUp" => Self::tr_lang(language, "Left Up", "Nhả Trái"),
+                    "RightDown" => Self::tr_lang(language, "Right Down", "Nhấn Phải"),
+                    "RightUp" => Self::tr_lang(language, "Right Up", "Nhả Phải"),
+                    _ => "Left Click",
+                }
             };
             egui::ComboBox::from_id_salt(ui.id().with((&id_source, "bg-click-btn")))
-                .width(90.0)
+                .width(if is_move { 92.0 } else { 90.0 })
                 .selected_text(button_label)
                 .show_ui(ui, |ui| {
-                    let btn_options = [
-                        ("Left", Self::tr_lang(language, "Left Click", "Click Trái")),
-                        ("Right", Self::tr_lang(language, "Right Click", "Click Phải")),
-                        ("Middle", Self::tr_lang(language, "Middle Click", "Click Giữa")),
-                        ("DoubleLeft", Self::tr_lang(language, "Double Click", "Double Click")),
-                        ("LeftDown", Self::tr_lang(language, "Left Down", "Nhấn Trái")),
-                        ("LeftUp", Self::tr_lang(language, "Left Up", "Nhả Trái")),
-                        ("RightDown", Self::tr_lang(language, "Right Down", "Nhấn Phải")),
-                        ("RightUp", Self::tr_lang(language, "Right Up", "Nhả Phải")),
-                    ];
+                    let btn_options = if is_move {
+                        vec![
+                            ("Move", Self::tr_lang(language, "Hover (No click)", "Hover (Không click)")),
+                            ("LeftDown", Self::tr_lang(language, "Drag (Left Down)", "Kéo (Nhấn Trái)")),
+                            ("RightDown", Self::tr_lang(language, "Drag (Right Down)", "Kéo (Nhấn Phải)")),
+                            ("MiddleDown", Self::tr_lang(language, "Drag (Middle Down)", "Kéo (Nhấn Giữa)")),
+                        ]
+                    } else {
+                        vec![
+                            ("Left", Self::tr_lang(language, "Left Click", "Click Trái")),
+                            ("Right", Self::tr_lang(language, "Right Click", "Click Phải")),
+                            ("Middle", Self::tr_lang(language, "Middle Click", "Click Giữa")),
+                            ("DoubleLeft", Self::tr_lang(language, "Double Click", "Double Click")),
+                            ("LeftDown", Self::tr_lang(language, "Left Down", "Nhấn Trái")),
+                            ("LeftUp", Self::tr_lang(language, "Left Up", "Nhả Trái")),
+                            ("RightDown", Self::tr_lang(language, "Right Down", "Nhấn Phải")),
+                            ("RightUp", Self::tr_lang(language, "Right Up", "Nhả Phải")),
+                            ("Move", Self::tr_lang(language, "Move Only", "Chỉ di chuột")),
+                        ]
+                    };
                     for (val, label) in btn_options {
                         if ui.selectable_label(step.background_mouse_button == val, label).clicked() {
                             step.background_mouse_button = val.to_string();
@@ -514,13 +536,31 @@ impl CrosshairApp {
                 }
             }
 
-            ui.label(RichText::new(Self::tr_lang(language, "Hold:", "Giữ:")).size(MACRO_STEP_TEXT_SIZE));
+            let delay_label = if is_move {
+                Self::tr_lang(language, "Duration:", "Thời gian:")
+            } else {
+                Self::tr_lang(language, "Hold:", "Giữ:")
+            };
+            ui.label(RichText::new(delay_label).size(MACRO_STEP_TEXT_SIZE));
             changed |= ui
                 .add(
                     egui::DragValue::new(&mut step.mouse_click_delay_ms)
                         .range(0..=10_000)
                         .suffix(" ms"),
                 )
+                .on_hover_text(if is_move {
+                    Self::tr_lang(
+                        language,
+                        "Duration for smooth background move in ms (0 = instant jump)",
+                        "Thời gian di chuyển mượt ngầm bằng ms (0 = nhảy tức thì)",
+                    )
+                } else {
+                    Self::tr_lang(
+                        language,
+                        "Delay before releasing the mouse button in ms",
+                        "Thời gian giữ nút chuột trước khi nhả (ms)",
+                    )
+                })
                 .changed();
 
             let popup_id = ui.id().with((&id_source, "bg-click-options-popup"));
@@ -2887,6 +2927,7 @@ impl CrosshairApp {
             MacroAction::UnlockMouse,
             MacroAction::PlayMousePathPreset,
             MacroAction::BackgroundClick,
+            MacroAction::BackgroundMouseMove,
         ]
     }
 
@@ -2986,6 +3027,7 @@ impl CrosshairApp {
             MacroAction::UnlockMouse,
             MacroAction::PlayMousePathPreset,
             MacroAction::BackgroundClick,
+            MacroAction::BackgroundMouseMove,
         ]
     }
 
@@ -9832,7 +9874,7 @@ if supports_move_mouse || show_detection_tuning {
                                                               &self.state.memory_code_list,
                                                               &self.state.memory_pointer_list,
                                                           );
-                                                      } else if step.action == MacroAction::BackgroundClick {
+                                                       } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundMouseMove {
                                                            live_sync |= Self::render_background_click_step_fields(
                                                                ui,
                                                                step,
@@ -10010,7 +10052,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 }
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundMouseMove || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([70.0, 20.0], egui::Label::new(""));
@@ -12369,7 +12411,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 }
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundMouseMove || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([70.0, 20.0], egui::Label::new(""));
@@ -16069,7 +16111,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 ui.add_space(2.0);
                                             } else if Self::is_mouse_click_action(step.action) {
                                                 Self::render_mouse_click_delay(ui, language, step, &mut live_sync);
-                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
+                                            } else if step.action == MacroAction::BackgroundClick || step.action == MacroAction::BackgroundMouseMove || step.action == MacroAction::BackgroundKey || Self::macro_action_uses_position(step.action) {
                                                 ui.add_space(2.0);
                                             } else {
                                                 ui.add_sized([146.0, 21.0], egui::Label::new("-"));
