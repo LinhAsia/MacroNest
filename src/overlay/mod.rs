@@ -25016,7 +25016,7 @@ mod windows_overlay {
         }
 
         stop_vision_following_ids(&image_search_preset_ids);
-        stop_follow_3d_target();
+        stop_follow_3d_target_for_preset(Some(preset_id));
         hide_toolbox_for_owner(preset_id);
         HOOK_STATE.lock().stop_ignore_keys.remove(&preset_id);
         FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().remove(&preset_id);
@@ -28552,7 +28552,7 @@ mod windows_overlay {
         } else {
             STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
         }
-        stop_follow_3d_target();
+        stop_follow_3d_target_for_preset(Some(preset_id));
     }
 
     fn execute_stop_macro_step(step: &MacroStep) {
@@ -33268,6 +33268,40 @@ mod windows_overlay {
         }
 
         #[test]
+        fn test_follow_3d_key_repeat_cycle() {
+            let mut held = [false; 4];
+            let mut events = Vec::new();
+
+            let tick = |want_keys: [bool; 4], held: &mut [bool; 4], events: &mut Vec<(&'static str, usize, bool)>| {
+                for idx in 0..4 {
+                    if want_keys[idx] {
+                        let is_repeat = held[idx];
+                        held[idx] = true;
+                        events.push(("down", idx, is_repeat));
+                    } else if held[idx] {
+                        held[idx] = false;
+                        events.push(("up", idx, false));
+                    }
+                }
+            };
+
+            // Tick 1: Moving forward
+            tick([true, false, false, false], &mut held, &mut events);
+            assert_eq!(events.pop(), Some(("down", 0, false)), "first tick should be non-repeat key down");
+            assert!(held[0]);
+
+            // Tick 2: Still moving forward (main character pressed/released W)
+            tick([true, false, false, false], &mut held, &mut events);
+            assert_eq!(events.pop(), Some(("down", 0, true)), "subsequent tick should maintain repeat key down");
+            assert!(held[0]);
+
+            // Tick 3: Reached stop distance
+            tick([false, false, false, false], &mut held, &mut events);
+            assert_eq!(events.pop(), Some(("up", 0, false)), "stopping should release key");
+            assert!(!held[0]);
+        }
+
+        #[test]
         fn test_set_variable_round_expression_without_braces() {
             let _guard = TEST_MUTEX.lock().unwrap();
             RUNTIME_VARIABLES.lock().clear();
@@ -35502,10 +35536,11 @@ mod windows_overlay {
     static ACTIVE_FOLLOW_3D_SESSION: Lazy<Mutex<Option<Follow3DActiveSession>>> =
         Lazy::new(|| Mutex::new(None));
 
-    fn post_bg_key_down(target: HWND, vk: u32) {
+    fn post_bg_key_down(target: HWND, vk: u32, is_repeat: bool) {
         unsafe {
             let scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
-            let lparam = LPARAM((1u32 | ((scan & 0xFF) << 16)) as isize);
+            let prev_state = if is_repeat { 1u32 << 30 } else { 0u32 };
+            let lparam = LPARAM((1u32 | ((scan & 0xFF) << 16) | prev_state) as isize);
             let _ = PostMessageW(Some(target), WM_KEYDOWN, WPARAM(vk as usize), lparam);
         }
     }
@@ -35518,8 +35553,15 @@ mod windows_overlay {
         }
     }
 
-    pub(crate) fn stop_follow_3d_target() {
+    pub(crate) fn stop_follow_3d_target_for_preset(preset_id: Option<u32>) {
         let mut session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();
+        if let Some(session) = session_guard.as_ref() {
+            if let Some(pid) = preset_id {
+                if session._owner_preset_id.is_some() && session._owner_preset_id != Some(pid) {
+                    return;
+                }
+            }
+        }
         if let Some(session) = session_guard.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
             let target_hwnd = HWND(session.input_hwnd as *mut _);
@@ -35534,6 +35576,10 @@ mod windows_overlay {
                 }
             }
         }
+    }
+
+    pub(crate) fn stop_follow_3d_target() {
+        stop_follow_3d_target_for_preset(None);
     }
 
     pub(crate) fn is_follow_3d_active() -> bool {
@@ -35638,6 +35684,7 @@ mod windows_overlay {
             input_hwnd
         };
 
+        let input_hwnd_raw = input_hwnd.0 as isize;
         let target_input_raw = target_input.0 as isize;
 
         *ACTIVE_FOLLOW_3D_SESSION.lock() = Some(Follow3DActiveSession {
@@ -35652,6 +35699,7 @@ mod windows_overlay {
         let thread_held = held_keys.clone();
 
         thread::spawn(move || {
+            let mut current_top_hwnd = HWND(input_hwnd_raw as *mut _);
             let mut current_input_hwnd = HWND(target_input_raw as *mut _);
             let mut frame = EspReadFrame::default();
             let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
@@ -35680,20 +35728,23 @@ mod windows_overlay {
                 if last_window_check.elapsed() >= Duration::from_millis(250) {
                     last_window_check = Instant::now();
                     if let Some(new_input) = resolve_unfocused_follower_window(&spec) {
-                        let new_target = if background_find_child {
-                            unsafe { find_background_input_child(new_input) }
-                        } else {
-                            new_input
-                        };
-                        if new_target != current_input_hwnd {
-                            let mut held = thread_held.lock();
-                            for idx in 0..4 {
-                                if held[idx] {
-                                    held[idx] = false;
-                                    post_bg_key_up(current_input_hwnd, vk_keys[idx]);
+                        if new_input != current_top_hwnd {
+                            current_top_hwnd = new_input;
+                            let new_target = if background_find_child {
+                                unsafe { find_background_input_child(new_input) }
+                            } else {
+                                new_input
+                            };
+                            if new_target != current_input_hwnd {
+                                let mut held = thread_held.lock();
+                                for idx in 0..4 {
+                                    if held[idx] {
+                                        held[idx] = false;
+                                        post_bg_key_up(current_input_hwnd, vk_keys[idx]);
+                                    }
                                 }
+                                current_input_hwnd = new_target;
                             }
-                            current_input_hwnd = new_target;
                         }
                     }
                 }
@@ -35769,10 +35820,11 @@ mod windows_overlay {
                         let mut held = thread_held.lock();
                         for idx in 0..4 {
                             let vk = vk_keys[idx];
-                            if want_keys[idx] && !held[idx] {
+                            if want_keys[idx] {
+                                let is_repeat = held[idx];
                                 held[idx] = true;
-                                post_bg_key_down(current_input_hwnd, vk);
-                            } else if !want_keys[idx] && held[idx] {
+                                post_bg_key_down(current_input_hwnd, vk, is_repeat);
+                            } else if held[idx] {
                                 held[idx] = false;
                                 post_bg_key_up(current_input_hwnd, vk);
                             }
