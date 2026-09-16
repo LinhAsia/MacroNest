@@ -35741,16 +35741,51 @@ mod windows_overlay {
         owner_preset_id: Option<u32>,
         is_hold: bool,
     ) -> Result<()> {
+        let mut spec = step.follow_3d_spec.clone();
         if step.follow_3d_spec.mode == crate::model::Follow3DMode::Stop {
-            stop_follow_3d_target();
-            return Ok(());
+            let should_switch = {
+                let session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();
+                if let Some(session) = session_guard.as_ref() {
+                    let cur_inp = session.input_hwnd.load(Ordering::SeqCst);
+                    let live_fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                    if cur_inp != 0 && !live_fg.0.is_null() {
+                        let fg_raw = live_fg.0 as isize;
+                        let fg_root = unsafe {
+                            let r = windows::Win32::UI::WindowsAndMessaging::GetAncestor(live_fg, windows::Win32::UI::WindowsAndMessaging::GA_ROOT);
+                            if r.0.is_null() { live_fg.0 as isize } else { r.0 as isize }
+                        };
+                        fg_raw == cur_inp || fg_root == cur_inp
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            };
+
+            if should_switch {
+                eprintln!("[Follow3D] Hotkey triggered in Follower window while running: switching Leader to foreground window!");
+                if let Some(pid) = owner_preset_id {
+                    let hook_state = HOOK_STATE.lock();
+                    for group in &hook_state.macro_groups {
+                        if let Some(preset) = group.presets.iter().find(|p| p.id == pid) {
+                            if let Some(start_step) = preset.steps.iter().find(|s| s.action == MacroAction::Follow3DTarget && s.follow_3d_spec.mode == crate::model::Follow3DMode::Start) {
+                                spec = start_step.follow_3d_spec.clone();
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                stop_follow_3d_target();
+                return Ok(());
+            }
         }
 
         stop_follow_3d_target();
 
         invalidate_macro_memory_target_pid();
 
-        let spec = step.follow_3d_spec.clone();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let held_keys = Arc::new(Mutex::new([false; 4]));
         let background_find_child = step.background_find_child;
@@ -35832,6 +35867,11 @@ mod windows_overlay {
             );
         }
 
+        eprintln!(
+            "[Follow3D] === START SESSION: Leader HWND=0x{:X} (PID={}), Follower HWND=0x{:X} (PID={}), Input HWND=0x{:X}, SwapAB={} ===",
+            leader_hwnd.0 as usize, pid_leader, follower_hwnd.0 as usize, pid_follower, target_input.0 as usize, spec.swap_direction_pair
+        );
+
         *ACTIVE_FOLLOW_3D_SESSION.lock() = Some(Follow3DActiveSession {
             stop_flag: stop_flag.clone(),
             _owner_preset_id: owner_preset_id,
@@ -35848,6 +35888,7 @@ mod windows_overlay {
             let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
             let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(5, 500));
             let target_input = HWND(target_input_raw as *mut _);
+            let mut logged_first = false;
 
             while !thread_stop.load(Ordering::SeqCst) {
                 // If this session is owned by a Hold macro, stop immediately if the hold key was released
@@ -35868,17 +35909,17 @@ mod windows_overlay {
                 frame.begin_sample();
 
                 let lx = frame.read_value(pid_leader, &spec.leader_x, spec.value_type).ok();
-                let ly = if !spec.leader_y.trim().is_empty() {
-                    frame.read_value(pid_leader, &spec.leader_y, spec.value_type).ok()
-                } else {
+                let ly = if !spec.leader_z.trim().is_empty() {
                     frame.read_value(pid_leader, &spec.leader_z, spec.value_type).ok()
+                } else {
+                    frame.read_value(pid_leader, &spec.leader_y, spec.value_type).ok()
                 };
 
                 let fx = frame.read_value(pid_follower, &spec.follower_x, spec.value_type).ok();
-                let fy = if !spec.follower_y.trim().is_empty() {
-                    frame.read_value(pid_follower, &spec.follower_y, spec.value_type).ok()
-                } else {
+                let fy = if !spec.follower_z.trim().is_empty() {
                     frame.read_value(pid_follower, &spec.follower_z, spec.value_type).ok()
+                } else {
+                    frame.read_value(pid_follower, &spec.follower_y, spec.value_type).ok()
                 };
 
                 let mut forward_opt: Option<(f32, f32)> = None;
@@ -35946,6 +35987,14 @@ mod windows_overlay {
                     if spec.swap_forward_strafe {
                         want_keys.swap(0, 3); // W <-> D
                         want_keys.swap(1, 2); // A <-> S
+                    }
+
+                    if !logged_first {
+                        logged_first = true;
+                        eprintln!(
+                            "[Follow3D] First sample: Leader=({:.2}, {:.2}), Follower=({:.2}, {:.2}), delta=({:.2}, {:.2}), forward=({:.2}, {:.2}) -> keys={:?}",
+                            lx, ly, fx, fy, dx, dy, fa, fb, want_keys
+                        );
                     }
 
                     let mut held = thread_held.lock();
