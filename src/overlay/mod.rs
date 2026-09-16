@@ -35604,10 +35604,14 @@ mod windows_overlay {
             let r_score = dx * fb - dy * fa;
             let angle = r_score.atan2(f_score).to_degrees();
 
-            want_keys[0] = (-80.0..=80.0).contains(&angle);
-            want_keys[1] = angle < -18.0 && angle > -162.0;
-            want_keys[2] = angle > 100.0 || angle < -100.0;
-            want_keys[3] = angle > 18.0 && angle < 162.0;
+            // When approaching close to target (within 1.5x stop distance),
+            // disable strafe and drive straight forward/backward to prevent orbital overshoot/circling!
+            let allow_strafe = dist > (stop_dist * 1.5).max(0.5);
+
+            want_keys[0] = (-85.0..=85.0).contains(&angle);
+            want_keys[1] = allow_strafe && angle < -25.0 && angle > -155.0;
+            want_keys[2] = angle > 95.0 || angle < -95.0;
+            want_keys[3] = allow_strafe && angle > 25.0 && angle < 155.0;
         }
         want_keys
     }
@@ -35688,8 +35692,12 @@ mod windows_overlay {
             input_hwnd
         };
 
-        let input_hwnd_raw = input_hwnd.0 as isize;
+        let _input_hwnd_raw = input_hwnd.0 as isize;
         let target_input_raw = target_input.0 as isize;
+
+        let mut init_frame = EspReadFrame::default();
+        let initial_pid_leader = init_frame.pid_for_opt(spec.leader_window.as_deref());
+        let initial_pid_follower = resolve_follower_pid(&mut init_frame, &spec);
 
         *ACTIVE_FOLLOW_3D_SESSION.lock() = Some(Follow3DActiveSession {
             stop_flag: stop_flag.clone(),
@@ -35703,12 +35711,14 @@ mod windows_overlay {
         let thread_held = held_keys.clone();
 
         thread::spawn(move || {
-            let mut current_top_hwnd = HWND(input_hwnd_raw as *mut _);
-            let mut current_input_hwnd = HWND(target_input_raw as *mut _);
+            let current_input_hwnd = HWND(target_input_raw as *mut _);
             let mut frame = EspReadFrame::default();
             let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
             let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(10, 500));
-            let mut last_window_check = Instant::now();
+
+            // Lock leader and follower PIDs at start so Alt-Tabbing does not swap roles or drift to other apps
+            let mut locked_pid_leader = initial_pid_leader;
+            let mut locked_pid_follower = initial_pid_follower;
 
             while !thread_stop.load(Ordering::SeqCst) {
                 // If this session is owned by a Hold macro, stop immediately if the hold key was released
@@ -35728,35 +35738,14 @@ mod windows_overlay {
 
                 frame.begin_sample();
 
-                // Periodically verify input_hwnd hasn't drifted or role-reversed
-                if last_window_check.elapsed() >= Duration::from_millis(250) {
-                    last_window_check = Instant::now();
-                    if let Some(new_input) = resolve_unfocused_follower_window(&spec) {
-                        if new_input != current_top_hwnd {
-                            current_top_hwnd = new_input;
-                            let new_target = if background_find_child {
-                                unsafe { find_background_input_child(new_input) }
-                            } else {
-                                new_input
-                            };
-                            if new_target != current_input_hwnd {
-                                let mut held = thread_held.lock();
-                                for idx in 0..4 {
-                                    if held[idx] {
-                                        held[idx] = false;
-                                        post_bg_key_up(current_input_hwnd, vk_keys[idx]);
-                                    }
-                                }
-                                current_input_hwnd = new_target;
-                            }
-                        }
-                    }
+                if locked_pid_leader.is_none() {
+                    locked_pid_leader = frame.pid_for_opt(spec.leader_window.as_deref());
+                }
+                if locked_pid_follower.is_none() {
+                    locked_pid_follower = resolve_follower_pid(&mut frame, &spec);
                 }
 
-                let pid_leader = frame.pid_for_opt(spec.leader_window.as_deref());
-                let pid_follower = resolve_follower_pid(&mut frame, &spec);
-
-                if let (Some(pid_l), Some(pid_f)) = (pid_leader, pid_follower) {
+                if let (Some(pid_l), Some(pid_f)) = (locked_pid_leader, locked_pid_follower) {
                     let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
                     let ly = if !spec.leader_y.trim().is_empty() {
                         frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
@@ -35847,6 +35836,23 @@ mod windows_overlay {
                                 held[idx] = false;
                                 post_bg_key_up(current_input_hwnd, vk);
                             }
+                        }
+                    } else {
+                        // If coordinates cannot be read (e.g. game minimised/loading), release all keys to avoid stuck walking
+                        let mut held = thread_held.lock();
+                        for idx in 0..4 {
+                            if held[idx] {
+                                held[idx] = false;
+                                post_bg_key_up(current_input_hwnd, vk_keys[idx]);
+                            }
+                        }
+                    }
+                } else {
+                    let mut held = thread_held.lock();
+                    for idx in 0..4 {
+                        if held[idx] {
+                            held[idx] = false;
+                            post_bg_key_up(current_input_hwnd, vk_keys[idx]);
                         }
                     }
                 }
@@ -39577,6 +39583,10 @@ mod tests {
         // Invert X: if dx is negated (-5.0 instead of 5.0), presses A instead of D
         let keys = compute_follow_3d_keys(-5.0, 0.0, 0.0, 1.0, 1.0);
         assert_eq!(keys, [false, true, false, false]);
+
+        // Anti-circling: when close to target (dist = 1.3, stop_dist = 1.0), strafe is suppressed
+        let keys = compute_follow_3d_keys(0.92, 0.92, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [true, false, false, false], "close range should drive straight in without circling");
     }
 }
 
