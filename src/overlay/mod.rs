@@ -33343,6 +33343,8 @@ mod windows_overlay {
             RUNTIME_VARIABLES.lock().clear();
         }
 
+
+
         #[test]
         fn test_evaluate_interpolated_math_expression() {
             let _guard = TEST_MUTEX.lock().unwrap();
@@ -36023,11 +36025,7 @@ mod windows_overlay {
                         spec.stop_distance,
                     );
 
-                    // When swap_direction_pair reflects the (fa, fb) axes across the diagonal, 2D chirality (handedness)
-                    // is inverted. Swap strafe (A <-> D) to maintain correct steering towards the target and prevent spiraling.
-                    if spec.swap_direction_pair {
-                        want_keys.swap(1, 3); // A <-> D
-                    }
+
 
                     if spec.invert_forward {
                         want_keys.swap(0, 2); // W <-> S
@@ -36044,8 +36042,8 @@ mod windows_overlay {
                         last_sample_log = Instant::now();
                         let dist = dx.hypot(dy);
                         let sample_msg = format!(
-                            "SAMPLE: Leader=({:.2}, {:.2}), Follower=({:.2}, {:.2}), delta=({:.2}, {:.2}, dist={:.2}), forward=({:.2}, {:.2}) -> keys={:?}",
-                            lx, ly, fx, fy, dx, dy, dist, fa, fb, want_keys
+                            "SAMPLE [Preset {:?}, SwapAB={}, InvFwd={}]: Leader=({:.2}, {:.2}), Follower=({:.2}, {:.2}), delta=({:.2}, {:.2}, dist={:.2}), forward=({:.2}, {:.2}) -> keys={:?}",
+                            owner_preset_id, spec.swap_direction_pair, spec.invert_forward, lx, ly, fx, fy, dx, dy, dist, fa, fb, want_keys
                         );
                         eprintln!("[Follow3D] {}", sample_msg);
                         log_follow_3d_debug(&sample_msg);
