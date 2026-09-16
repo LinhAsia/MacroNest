@@ -35874,17 +35874,17 @@ mod windows_overlay {
                 frame.begin_sample();
 
                 let lx = frame.read_value(pid_leader, &spec.leader_x, spec.value_type).ok();
-                let ly = if !spec.leader_z.trim().is_empty() {
-                    frame.read_value(pid_leader, &spec.leader_z, spec.value_type).ok()
-                } else {
+                let ly = if !spec.leader_y.trim().is_empty() {
                     frame.read_value(pid_leader, &spec.leader_y, spec.value_type).ok()
+                } else {
+                    frame.read_value(pid_leader, &spec.leader_z, spec.value_type).ok()
                 };
 
                 let fx = frame.read_value(pid_follower, &spec.follower_x, spec.value_type).ok();
-                let fy = if !spec.follower_z.trim().is_empty() {
-                    frame.read_value(pid_follower, &spec.follower_z, spec.value_type).ok()
-                } else {
+                let fy = if !spec.follower_y.trim().is_empty() {
                     frame.read_value(pid_follower, &spec.follower_y, spec.value_type).ok()
+                } else {
+                    frame.read_value(pid_follower, &spec.follower_z, spec.value_type).ok()
                 };
 
                 let mut forward_opt: Option<(f32, f32)> = None;
