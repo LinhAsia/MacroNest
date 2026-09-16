@@ -1000,47 +1000,49 @@ impl CrosshairApp {
                             }
                         });
 
-                    let collapse_icon = if step.follow_3d_collapsed {
-                        0xe5cc
-                    } else {
-                        0xe5cf
-                    };
-                    let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
-                    if ui
-                        .add_sized([20.0, 21.0], collapse_btn)
-                        .on_hover_text(if step.follow_3d_collapsed {
-                            "Expand Settings"
+                    if step.follow_3d_spec.mode == Follow3DMode::Start {
+                        let collapse_icon = if step.follow_3d_collapsed {
+                            0xe5cc
                         } else {
-                            "Collapse Settings"
-                        })
-                        .clicked()
-                    {
-                        step.follow_3d_collapsed = !step.follow_3d_collapsed;
-                        changed = true;
-                    }
+                            0xe5cf
+                        };
+                        let collapse_btn = Button::new(Self::material_icon_text(collapse_icon, 12.0));
+                        if ui
+                            .add_sized([20.0, 21.0], collapse_btn)
+                            .on_hover_text(if step.follow_3d_collapsed {
+                                "Expand Settings"
+                            } else {
+                                "Collapse Settings"
+                            })
+                            .clicked()
+                        {
+                            step.follow_3d_collapsed = !step.follow_3d_collapsed;
+                            changed = true;
+                        }
 
-                    if crate::overlay::is_follow_3d_active() {
-                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(350));
-                        let time = ui.ctx().input(|i| i.time);
-                        let alpha = (0.5 + 0.5 * (time * 5.0).sin().abs()).clamp(0.4, 1.0);
-                        let dot_color = Color32::from_rgba_unmultiplied(0, 255, 170, (alpha * 255.0) as u8);
+                        if crate::overlay::is_follow_3d_active() {
+                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(350));
+                            let time = ui.ctx().input(|i| i.time);
+                            let alpha = (0.5 + 0.5 * (time * 5.0).sin().abs()).clamp(0.4, 1.0);
+                            let dot_color = Color32::from_rgba_unmultiplied(0, 255, 170, (alpha * 255.0) as u8);
 
-                        egui::Frame::none()
-                            .fill(Color32::from_rgba_unmultiplied(0, 255, 170, 28))
-                            .corner_radius(egui::CornerRadius::same(3))
-                            .inner_margin(egui::Margin::symmetric(6, 2))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.label(RichText::new("●").color(dot_color).size(11.0));
-                                    ui.label(
-                                        RichText::new(Self::tr_lang(language, "RUNNING", "ĐANG CHẠY"))
-                                            .color(Color32::from_rgb(0, 255, 170))
-                                            .strong()
-                                            .size(11.0),
-                                    );
+                            egui::Frame::none()
+                                .fill(Color32::from_rgba_unmultiplied(0, 255, 170, 28))
+                                .corner_radius(egui::CornerRadius::same(3))
+                                .inner_margin(egui::Margin::symmetric(6, 2))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        ui.label(RichText::new("●").color(dot_color).size(11.0));
+                                        ui.label(
+                                            RichText::new(Self::tr_lang(language, "RUNNING", "ĐANG CHẠY"))
+                                                .color(Color32::from_rgb(0, 255, 170))
+                                                .strong()
+                                                .size(11.0),
+                                        );
+                                    });
                                 });
-                            });
+                        }
                     }
 
                     if step.follow_3d_spec.mode == Follow3DMode::Stop {
@@ -1076,7 +1078,7 @@ impl CrosshairApp {
                 });
 
                 // Collapsible body
-                if !step.follow_3d_collapsed {
+                if !step.follow_3d_collapsed && step.follow_3d_spec.mode == Follow3DMode::Start {
                     ui.add_space(2.0);
                     egui::Frame::group(ui.style())
                         .corner_radius(egui::CornerRadius::same(4))

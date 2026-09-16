@@ -35741,51 +35741,16 @@ mod windows_overlay {
         owner_preset_id: Option<u32>,
         is_hold: bool,
     ) -> Result<()> {
-        let mut spec = step.follow_3d_spec.clone();
         if step.follow_3d_spec.mode == crate::model::Follow3DMode::Stop {
-            let should_switch = {
-                let session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();
-                if let Some(session) = session_guard.as_ref() {
-                    let cur_inp = session.input_hwnd.load(Ordering::SeqCst);
-                    let live_fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-                    if cur_inp != 0 && !live_fg.0.is_null() {
-                        let fg_raw = live_fg.0 as isize;
-                        let fg_root = unsafe {
-                            let r = windows::Win32::UI::WindowsAndMessaging::GetAncestor(live_fg, windows::Win32::UI::WindowsAndMessaging::GA_ROOT);
-                            if r.0.is_null() { live_fg.0 as isize } else { r.0 as isize }
-                        };
-                        fg_raw == cur_inp || fg_root == cur_inp
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            };
-
-            if should_switch {
-                eprintln!("[Follow3D] Hotkey triggered in Follower window while running: switching Leader to foreground window!");
-                if let Some(pid) = owner_preset_id {
-                    let hook_state = HOOK_STATE.lock();
-                    for group in &hook_state.macro_groups {
-                        if let Some(preset) = group.presets.iter().find(|p| p.id == pid) {
-                            if let Some(start_step) = preset.steps.iter().find(|s| s.action == MacroAction::Follow3DTarget && s.follow_3d_spec.mode == crate::model::Follow3DMode::Start) {
-                                spec = start_step.follow_3d_spec.clone();
-                                break;
-                            }
-                        }
-                    }
-                }
-            } else {
-                stop_follow_3d_target();
-                return Ok(());
-            }
+            stop_follow_3d_target();
+            return Ok(());
         }
 
         stop_follow_3d_target();
 
         invalidate_macro_memory_target_pid();
 
+        let spec = step.follow_3d_spec.clone();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let held_keys = Arc::new(Mutex::new([false; 4]));
         let background_find_child = step.background_find_child;
