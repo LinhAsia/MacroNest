@@ -1373,6 +1373,65 @@ impl CrosshairApp {
                                         }
                                     });
 
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Plane:",
+                                        "Mặt phẳng:",
+                                    ))
+                                    .weak(),
+                                );
+                                let plane_label = match step.follow_3d_spec.ground_plane {
+                                    Follow3DGroundPlane::XZ => Self::tr_lang(
+                                        language,
+                                        "X-Z (Y là cao - Unity)",
+                                        "X-Z (Y là cao - Unity)",
+                                    ),
+                                    Follow3DGroundPlane::XY => Self::tr_lang(
+                                        language,
+                                        "X-Y (Z là cao - Unreal)",
+                                        "X-Y (Z là cao - Unreal)",
+                                    ),
+                                };
+                                egui::ComboBox::from_id_salt((id_prefix, "f3d-ground-plane"))
+                                    .width(135.0)
+                                    .selected_text(plane_label)
+                                    .show_ui(ui, |ui| {
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.ground_plane
+                                                    == Follow3DGroundPlane::XZ,
+                                                Self::tr_lang(
+                                                    language,
+                                                    "X-Z (Y là chiều cao - Unity / Game 3D)",
+                                                    "X-Z (Y là chiều cao - Unity / Game 3D)",
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.ground_plane =
+                                                Follow3DGroundPlane::XZ;
+                                            changed = true;
+                                        }
+                                        if ui
+                                            .selectable_label(
+                                                step.follow_3d_spec.ground_plane
+                                                    == Follow3DGroundPlane::XY,
+                                                Self::tr_lang(
+                                                    language,
+                                                    "X-Y (Z là chiều cao - Unreal / 2D)",
+                                                    "X-Y (Z là chiều cao - Unreal / 2D)",
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            step.follow_3d_spec.ground_plane =
+                                                Follow3DGroundPlane::XY;
+                                            changed = true;
+                                        }
+                                    });
+
                                 if step.follow_3d_spec.orientation_mode == Follow3DOrientationMode::Angles {
                                     ui.add_space(2.0);
                                     ui.label(

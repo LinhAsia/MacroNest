@@ -33246,24 +33246,29 @@ mod windows_overlay {
 
         #[test]
         fn test_compute_follow_3d_keys() {
-            // Target is straight ahead (along positive Y, camera looking along +Y: fa=0, fb=1)
-            let keys = compute_follow_3d_keys(0.0, 10.0, 0.0, 1.0, 1.0);
+            use crate::model::Follow3DGroundPlane;
+            // Target is straight ahead (along positive Z, camera looking along +Z: fa=0, fb=1)
+            let keys = compute_follow_3d_keys(0.0, 10.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
             assert_eq!(keys, [true, false, false, false], "should press W when target is ahead");
 
-            // Target is behind (along negative Y)
-            let keys = compute_follow_3d_keys(0.0, -10.0, 0.0, 1.0, 1.0);
+            // Target is far away ahead (100.0 units) -> should still press W!
+            let keys = compute_follow_3d_keys(0.0, 100.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
+            assert_eq!(keys, [true, false, false, false], "should press W when target is far ahead");
+
+            // Target is behind (along negative Z)
+            let keys = compute_follow_3d_keys(0.0, -10.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
             assert_eq!(keys, [false, false, true, false], "should press S when target is behind");
 
             // Target is to the right (along positive X)
-            let keys = compute_follow_3d_keys(10.0, 0.0, 0.0, 1.0, 1.0);
+            let keys = compute_follow_3d_keys(10.0, 0.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
             assert_eq!(keys, [false, false, false, true], "should press D when target is right");
 
             // Target is to the left (along negative X)
-            let keys = compute_follow_3d_keys(-10.0, 0.0, 0.0, 1.0, 1.0);
+            let keys = compute_follow_3d_keys(-10.0, 0.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
             assert_eq!(keys, [false, true, false, false], "should press A when target is left");
 
             // Target is within stop distance
-            let keys = compute_follow_3d_keys(0.5, 0.5, 0.0, 1.0, 2.0);
+            let keys = compute_follow_3d_keys(0.5, 0.5, 0.0, 1.0, 2.0, Follow3DGroundPlane::XZ);
             assert_eq!(keys, [false, false, false, false], "should not press any key when within stop distance");
         }
 
@@ -35588,16 +35593,27 @@ mod windows_overlay {
 
     pub(crate) fn compute_follow_3d_keys(
         dx: f32,
-        dy: f32,
+        d_second: f32,
         fa: f32,
         fb: f32,
         stop_dist: f32,
+        ground_plane: crate::model::Follow3DGroundPlane,
     ) -> [bool; 4] {
-        let dist = dx.hypot(dy);
+        let dist = dx.hypot(d_second);
         let mut want_keys = [false; 4]; // [W, A, S, D]
         if dist > stop_dist {
-            let f_score = dx * fa + dy * fb;
-            let r_score = dx * fb - dy * fa;
+            let (f_score, r_score) = match ground_plane {
+                crate::model::Follow3DGroundPlane::XZ => {
+                    let f = dx * fa + d_second * fb;
+                    let r = dx * fb - d_second * fa;
+                    (f, r)
+                }
+                crate::model::Follow3DGroundPlane::XY => {
+                    let f = dx * fa + d_second * fb;
+                    let r = d_second * fa - dx * fb;
+                    (f, r)
+                }
+            };
             let angle = r_score.atan2(f_score).to_degrees();
 
             want_keys[0] = (-80.0..=80.0).contains(&angle);
@@ -35753,18 +35769,46 @@ mod windows_overlay {
                 let pid_follower = resolve_follower_pid(&mut frame, &spec);
 
                 if let (Some(pid_l), Some(pid_f)) = (pid_leader, pid_follower) {
-                    let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
-                    let ly = if !spec.leader_y.trim().is_empty() {
-                        frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
-                    } else {
-                        frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
+                    let (lx, l_second) = match spec.ground_plane {
+                        crate::model::Follow3DGroundPlane::XZ => {
+                            let x = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
+                            let z = if !spec.leader_z.trim().is_empty() {
+                                frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
+                            } else {
+                                frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
+                            };
+                            (x, z)
+                        }
+                        crate::model::Follow3DGroundPlane::XY => {
+                            let x = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
+                            let y = if !spec.leader_y.trim().is_empty() {
+                                frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
+                            } else {
+                                frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
+                            };
+                            (x, y)
+                        }
                     };
 
-                    let fx = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
-                    let fy = if !spec.follower_y.trim().is_empty() {
-                        frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
-                    } else {
-                        frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
+                    let (fx, f_second) = match spec.ground_plane {
+                        crate::model::Follow3DGroundPlane::XZ => {
+                            let x = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
+                            let z = if !spec.follower_z.trim().is_empty() {
+                                frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
+                            } else {
+                                frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
+                            };
+                            (x, z)
+                        }
+                        crate::model::Follow3DGroundPlane::XY => {
+                            let x = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
+                            let y = if !spec.follower_y.trim().is_empty() {
+                                frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
+                            } else {
+                                frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
+                            };
+                            (x, y)
+                        }
                     };
 
                     let mut forward_opt: Option<(f32, f32)> = None;
@@ -35791,31 +35835,42 @@ mod windows_overlay {
                                     yaw.to_radians()
                                 };
 
-                                forward_opt = Some((rad.sin(), rad.cos()));
+                                match spec.ground_plane {
+                                    crate::model::Follow3DGroundPlane::XZ => {
+                                        // Unity/Godot standard: 0 yaw faces North (+Z), turning right (+yaw) faces East (+X)
+                                        forward_opt = Some((rad.sin(), rad.cos()));
+                                    }
+                                    crate::model::Follow3DGroundPlane::XY => {
+                                        // Unreal standard: 0 yaw faces Forward (+X), turning right (+yaw) faces Right (+Y)
+                                        forward_opt = Some((rad.cos(), rad.sin()));
+                                    }
+                                }
                             }
                         }
                     }
 
-                    if let (Some(lx), Some(ly), Some(fx), Some(fy), Some((mut fa, mut fb))) =
-                        (lx, ly, fx, fy, forward_opt)
+                    if let (Some(lx), Some(lz), Some(fx), Some(fz), Some((fa, fb))) =
+                        (lx, l_second, fx, f_second, forward_opt)
                     {
-                        if spec.invert_forward {
-                            fa = -fa;
-                        }
-                        if spec.invert_strafe {
-                            fb = -fb;
-                        }
-                        if spec.swap_forward_strafe {
-                            std::mem::swap(&mut fa, &mut fb);
-                        }
-
-                        let want_keys = compute_follow_3d_keys(
+                        let mut want_keys = compute_follow_3d_keys(
                             lx - fx,
-                            ly - fy,
+                            lz - fz,
                             fa,
                             fb,
                             spec.stop_distance,
+                            spec.ground_plane,
                         );
+
+                        if spec.invert_forward {
+                            want_keys.swap(0, 2); // W <-> S
+                        }
+                        if spec.invert_strafe {
+                            want_keys.swap(1, 3); // A <-> D
+                        }
+                        if spec.swap_forward_strafe {
+                            want_keys.swap(0, 3); // W <-> D
+                            want_keys.swap(1, 2); // A <-> S
+                        }
 
                         let mut held = thread_held.lock();
                         for idx in 0..4 {
@@ -39525,31 +39580,36 @@ mod tests {
 
     #[test]
     fn test_compute_follow_3d_keys() {
+        use crate::model::Follow3DGroundPlane;
         // [W, A, S, D]
-        // Facing (0, 1) - along +Y
+        // Facing (0, 1) - along +Z
         // Target straight ahead (0, 5) -> W only
-        let keys = compute_follow_3d_keys(0.0, 5.0, 0.0, 1.0, 1.0);
+        let keys = compute_follow_3d_keys(0.0, 5.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
         assert_eq!(keys, [true, false, false, false]);
 
         // Target straight behind (0, -5) -> S only
-        let keys = compute_follow_3d_keys(0.0, -5.0, 0.0, 1.0, 1.0);
+        let keys = compute_follow_3d_keys(0.0, -5.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
         assert_eq!(keys, [false, false, true, false]);
 
         // Target to the right (5, 0) -> D only (angle = 90 deg, W inactive as |90| > 80)
-        let keys = compute_follow_3d_keys(5.0, 0.0, 0.0, 1.0, 1.0);
+        let keys = compute_follow_3d_keys(5.0, 0.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
         assert_eq!(keys, [false, false, false, true]);
 
         // Target diagonally forward-right (3, 3) -> angle = 45 deg -> both W and D active
-        let keys = compute_follow_3d_keys(3.0, 3.0, 0.0, 1.0, 1.0);
+        let keys = compute_follow_3d_keys(3.0, 3.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
         assert_eq!(keys, [true, false, false, true]);
 
         // Target to the left (-5, 0) -> A only
-        let keys = compute_follow_3d_keys(-5.0, 0.0, 0.0, 1.0, 1.0);
+        let keys = compute_follow_3d_keys(-5.0, 0.0, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
         assert_eq!(keys, [false, true, false, false]);
 
         // Within stop distance (0.5 <= 1.0) -> all keys released
-        let keys = compute_follow_3d_keys(0.3, 0.4, 0.0, 1.0, 1.0);
+        let keys = compute_follow_3d_keys(0.3, 0.4, 0.0, 1.0, 1.0, Follow3DGroundPlane::XZ);
         assert_eq!(keys, [false; 4]);
+
+        // XY plane (Unreal): Facing +X (1, 0), Target ahead (5, 0) -> W only
+        let keys_xy = compute_follow_3d_keys(5.0, 0.0, 1.0, 0.0, 1.0, Follow3DGroundPlane::XY);
+        assert_eq!(keys_xy, [true, false, false, false]);
     }
 }
 
