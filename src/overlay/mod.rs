@@ -35933,6 +35933,7 @@ mod windows_overlay {
             let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(5, 500));
             let target_input = HWND(target_input_raw as *mut _);
             let mut last_sample_log = Instant::now() - Duration::from_secs(1);
+            let mut last_key_repeat = Instant::now();
 
             while !thread_stop.load(Ordering::SeqCst) {
                 // If this session is owned by a Hold macro, stop immediately if the hold key was released
@@ -36022,6 +36023,12 @@ mod windows_overlay {
                         spec.stop_distance,
                     );
 
+                    // When swap_direction_pair reflects the (fa, fb) axes across the diagonal, 2D chirality (handedness)
+                    // is inverted. Swap strafe (A <-> D) to maintain correct steering towards the target and prevent spiraling.
+                    if spec.swap_direction_pair {
+                        want_keys.swap(1, 3); // A <-> D
+                    }
+
                     if spec.invert_forward {
                         want_keys.swap(0, 2); // W <-> S
                     }
@@ -36045,12 +36052,18 @@ mod windows_overlay {
                     }
 
                     let mut held = thread_held.lock();
+                    let should_repeat = last_key_repeat.elapsed() >= Duration::from_millis(50);
+                    if should_repeat {
+                        last_key_repeat = Instant::now();
+                    }
                     for idx in 0..4 {
                         let vk = vk_keys[idx];
                         if want_keys[idx] {
                             if !held[idx] {
                                 held[idx] = true;
                                 post_bg_key_down(target_input, vk, false);
+                            } else if should_repeat {
+                                post_bg_key_down(target_input, vk, true);
                             }
                         } else if held[idx] {
                             held[idx] = false;
