@@ -2029,4 +2029,19 @@ mod tests {
         // Clean up
         crate::overlay::FOREGROUND_WINDOW_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
     }
+
+    #[test]
+    fn test_resolve_follow_3d_follower_avoids_leader() {
+        let fake_leader = HWND(0x1000 as *mut _);
+        let fake_peer = HWND(0x2000 as *mut _);
+        let candidates = vec![fake_leader, fake_peer];
+
+        crate::overlay::FOREGROUND_WINDOW_HWND.store(0x1000, std::sync::atomic::Ordering::Relaxed);
+        let unfocused = select_window_by_match_rule(&candidates, WindowMatchRule::Unfocused);
+        assert_eq!(unfocused, Some(fake_peer));
+        assert_ne!(unfocused, Some(fake_leader));
+
+        crate::overlay::FOREGROUND_WINDOW_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
 }
+
