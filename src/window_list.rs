@@ -18,7 +18,7 @@ mod windows_impl {
             UI::Shell::{ExtractIconExW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGetFileInfoW},
             UI::WindowsAndMessaging::{
                 BringWindowToTop, DI_NORMAL, DestroyIcon, DrawIconEx, EnumWindows,
-                GA_ROOT, GetAncestor, GetClassLongPtrW, GET_CLASS_LONG_INDEX, GetClientRect, GetForegroundWindow,
+                GA_ROOT, GA_ROOTOWNER, GetAncestor, GetClassLongPtrW, GET_CLASS_LONG_INDEX, GetClientRect, GetForegroundWindow,
                 GetSystemMetrics, GetWindowRect, GetWindowTextLengthW,
                 GetWindowTextW, GetWindowThreadProcessId, HICON,
                 IsIconic, IsWindow, IsWindowVisible, PW_RENDERFULLCONTENT, SM_CXVIRTUALSCREEN,
@@ -508,29 +508,96 @@ mod windows_impl {
         parse_window_match_rule(target).1.is_some()
     }
 
+    pub fn find_focused_candidate(candidates: &[HWND]) -> Option<HWND> {
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let pid_of = |h: HWND| -> u32 {
+            if h.0.is_null() {
+                0
+            } else {
+                let mut pid = 0;
+                unsafe {
+                    let _ = GetWindowThreadProcessId(h, Some(&mut pid));
+                }
+                pid
+            }
+        };
+
+        let root_of = |h: HWND| -> (HWND, HWND) {
+            if h.0.is_null() {
+                (h, h)
+            } else {
+                unsafe {
+                    let root = GetAncestor(h, GA_ROOT);
+                    let root_owner = GetAncestor(h, GA_ROOTOWNER);
+                    (
+                        if root.0.is_null() { h } else { root },
+                        if root_owner.0.is_null() { h } else { root_owner },
+                    )
+                }
+            }
+        };
+
+        let cand_info: Vec<(HWND, u32, (HWND, HWND))> = candidates
+            .iter()
+            .copied()
+            .map(|h| (h, pid_of(h), root_of(h)))
+            .collect();
+
+        let live = unsafe { GetForegroundWindow() };
+        let cached = HWND(crate::overlay::FOREGROUND_WINDOW_HWND.load(std::sync::atomic::Ordering::Relaxed) as *mut _);
+        let current_pid = std::process::id();
+
+        for candidate_fg in [live, cached] {
+            if candidate_fg.0.is_null() {
+                continue;
+            }
+            let fg_pid = pid_of(candidate_fg);
+            if fg_pid == current_pid {
+                continue;
+            }
+
+            let (fg_root, fg_root_owner) = root_of(candidate_fg);
+
+            // 1. Exact HWND match
+            if let Some(&(h, _, _)) = cand_info.iter().find(|(h, _, _)| *h == candidate_fg) {
+                return Some(h);
+            }
+
+            // 2. Root or RootOwner match (covers child controls and owned popup windows)
+            if let Some(&(h, _, _)) = cand_info.iter().find(|(h, _, (c_root, c_root_owner))| {
+                *h == fg_root
+                    || *h == fg_root_owner
+                    || *c_root == fg_root
+                    || *c_root_owner == fg_root_owner
+                    || *c_root == fg_root_owner
+                    || *c_root_owner == fg_root
+            }) {
+                return Some(h);
+            }
+
+            // 3. Process ID match (vital for multiple game instances running side by side)
+            if fg_pid != 0 {
+                if let Some(&(h, _, _)) = cand_info.iter().find(|(_, p, _)| *p == fg_pid) {
+                    return Some(h);
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn select_window_by_match_rule(candidates: &[HWND], rule: WindowMatchRule) -> Option<HWND> {
         if rule == WindowMatchRule::Unfocused {
-            let live = unsafe { GetForegroundWindow() };
-            let fg_root = if live.0.is_null() {
-                HWND(std::ptr::null_mut())
-            } else {
-                let root = unsafe { GetAncestor(live, GA_ROOT) };
-                if root.0.is_null() { live } else { root }
-            };
-            let root_of = |h: HWND| unsafe {
-                if h.0.is_null() {
-                    h
-                } else {
-                    let root = GetAncestor(h, GA_ROOT);
-                    if root.0.is_null() { h } else { root }
-                }
-            };
-            let fg_is_candidate = candidates.iter().any(|&hwnd| root_of(hwnd) == fg_root);
-            if fg_is_candidate {
-                if let Some(unfocused) = candidates.iter().copied().find(|&hwnd| root_of(hwnd) != fg_root) {
+            if let Some(focused) = find_focused_candidate(candidates) {
+                if let Some(unfocused) = candidates.iter().copied().find(|&hwnd| hwnd != focused) {
                     return Some(unfocused);
                 }
-            } else if candidates.len() > 1 {
+                return Some(focused);
+            }
+            if candidates.len() > 1 {
                 // Foreground is outside candidates (e.g. MacroNest). Return candidate 1 so
                 // Focused (candidate 0) and Unfocused (candidate 1) never resolve to the same window.
                 return Some(candidates[1]);
@@ -539,22 +606,7 @@ mod windows_impl {
         }
 
         if rule == WindowMatchRule::Focused {
-            let live = unsafe { GetForegroundWindow() };
-            let fg_root = if live.0.is_null() {
-                HWND(std::ptr::null_mut())
-            } else {
-                let root = unsafe { GetAncestor(live, GA_ROOT) };
-                if root.0.is_null() { live } else { root }
-            };
-            let root_of = |h: HWND| unsafe {
-                if h.0.is_null() {
-                    h
-                } else {
-                    let root = GetAncestor(h, GA_ROOT);
-                    if root.0.is_null() { h } else { root }
-                }
-            };
-            if let Some(focused) = candidates.iter().copied().find(|&hwnd| root_of(hwnd) == fg_root) {
+            if let Some(focused) = find_focused_candidate(candidates) {
                 return Some(focused);
             }
             return candidates.first().copied();
@@ -1947,6 +1999,9 @@ mod tests {
         let fake_hwnd_2 = HWND(0x2000 as *mut _);
         let candidates = vec![fake_hwnd_1, fake_hwnd_2];
 
+        // Ensure clear cache initially
+        crate::overlay::FOREGROUND_WINDOW_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
+
         // When foreground is outside candidates
         let focused = select_window_by_match_rule(&candidates, WindowMatchRule::Focused);
         let unfocused = select_window_by_match_rule(&candidates, WindowMatchRule::Unfocused);
@@ -1954,5 +2009,24 @@ mod tests {
         assert_eq!(focused, Some(fake_hwnd_1));
         assert_eq!(unfocused, Some(fake_hwnd_2));
         assert_ne!(focused, unfocused);
+
+        // When fake_hwnd_2 becomes foreground (e.g. user Alt-Tabs to window 2)
+        crate::overlay::FOREGROUND_WINDOW_HWND.store(0x2000, std::sync::atomic::Ordering::Relaxed);
+        let focused_2 = select_window_by_match_rule(&candidates, WindowMatchRule::Focused);
+        let unfocused_2 = select_window_by_match_rule(&candidates, WindowMatchRule::Unfocused);
+        assert_eq!(focused_2, Some(fake_hwnd_2));
+        assert_eq!(unfocused_2, Some(fake_hwnd_1));
+        assert_ne!(focused_2, unfocused_2);
+
+        // When user Alt-Tabs back to window 1
+        crate::overlay::FOREGROUND_WINDOW_HWND.store(0x1000, std::sync::atomic::Ordering::Relaxed);
+        let focused_1 = select_window_by_match_rule(&candidates, WindowMatchRule::Focused);
+        let unfocused_1 = select_window_by_match_rule(&candidates, WindowMatchRule::Unfocused);
+        assert_eq!(focused_1, Some(fake_hwnd_1));
+        assert_eq!(unfocused_1, Some(fake_hwnd_2));
+        assert_ne!(focused_1, unfocused_1);
+
+        // Clean up
+        crate::overlay::FOREGROUND_WINDOW_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
