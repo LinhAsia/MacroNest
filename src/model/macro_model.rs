@@ -295,6 +295,12 @@ pub struct Follow3DTargetSpec {
     pub update_interval_ms: u32,
     pub value_type: MemoryValueType,
 
+    #[serde(default)]
+    pub invert_x: bool,
+    #[serde(default)]
+    pub invert_y: bool,
+    #[serde(default)]
+    pub swap_direction_pair: bool,
     pub invert_forward: bool,
     pub invert_strafe: bool,
     pub swap_forward_strafe: bool,
@@ -322,6 +328,9 @@ impl Default for Follow3DTargetSpec {
             stop_distance: 1.0,
             update_interval_ms: 30,
             value_type: MemoryValueType::F32,
+            invert_x: false,
+            invert_y: false,
+            swap_direction_pair: false,
             invert_forward: false,
             invert_strafe: false,
             swap_forward_strafe: false,

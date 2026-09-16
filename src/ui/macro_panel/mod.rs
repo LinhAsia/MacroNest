@@ -1629,6 +1629,60 @@ impl CrosshairApp {
 
                                 if ui
                                     .checkbox(
+                                        &mut step.follow_3d_spec.invert_y,
+                                        Self::tr_lang(
+                                            language,
+                                            "Invert Y Axis",
+                                            "Đảo trục Y",
+                                        ),
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Invert Y direction when computing ground angle",
+                                        "Đảo ngược chiều trục Y khi tính góc di chuyển",
+                                    ))
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                                if ui
+                                    .checkbox(
+                                        &mut step.follow_3d_spec.invert_x,
+                                        Self::tr_lang(
+                                            language,
+                                            "Invert X Axis",
+                                            "Đảo trục X",
+                                        ),
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Invert X direction when computing ground angle",
+                                        "Đảo ngược chiều trục X khi tính góc di chuyển",
+                                    ))
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                                if ui
+                                    .checkbox(
+                                        &mut step.follow_3d_spec.swap_direction_pair,
+                                        Self::tr_lang(
+                                            language,
+                                            "Swap A/B",
+                                            "Đổi A/B",
+                                        ),
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Swap Vector A and B",
+                                        "Đổi chỗ Vector A và B",
+                                    ))
+                                    .changed()
+                                {
+                                    changed = true;
+                                }
+                                if ui
+                                    .checkbox(
                                         &mut step.follow_3d_spec.invert_forward,
                                         Self::tr_lang(
                                             language,

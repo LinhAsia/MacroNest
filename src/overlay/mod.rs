@@ -35592,16 +35592,16 @@ mod windows_overlay {
 
     pub(crate) fn compute_follow_3d_keys(
         dx: f32,
-        dz: f32,
+        dy: f32,
         fa: f32,
         fb: f32,
         stop_dist: f32,
     ) -> [bool; 4] {
-        let dist = dx.hypot(dz);
+        let dist = dx.hypot(dy);
         let mut want_keys = [false; 4]; // [W, A, S, D]
         if dist > stop_dist {
-            let f_score = dx * fa + dz * fb;
-            let r_score = dx * fb - dz * fa;
+            let f_score = dx * fa + dy * fb;
+            let r_score = dx * fb - dy * fa;
             let angle = r_score.atan2(f_score).to_degrees();
 
             want_keys[0] = (-80.0..=80.0).contains(&angle);
@@ -35758,17 +35758,17 @@ mod windows_overlay {
 
                 if let (Some(pid_l), Some(pid_f)) = (pid_leader, pid_follower) {
                     let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
-                    let lz = if !spec.leader_z.trim().is_empty() {
-                        frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
-                    } else {
+                    let ly = if !spec.leader_y.trim().is_empty() {
                         frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
+                    } else {
+                        frame.read_value(pid_l, &spec.leader_z, spec.value_type).ok()
                     };
 
                     let fx = frame.read_value(pid_f, &spec.follower_x, spec.value_type).ok();
-                    let fz = if !spec.follower_z.trim().is_empty() {
-                        frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
-                    } else {
+                    let fy = if !spec.follower_y.trim().is_empty() {
                         frame.read_value(pid_f, &spec.follower_y, spec.value_type).ok()
+                    } else {
+                        frame.read_value(pid_f, &spec.follower_z, spec.value_type).ok()
                     };
 
                     let mut forward_opt: Option<(f32, f32)> = None;
@@ -35800,12 +35800,26 @@ mod windows_overlay {
                         }
                     }
 
-                    if let (Some(lx), Some(lz), Some(fx), Some(fz), Some((fa, fb))) =
-                        (lx, lz, fx, fz, forward_opt)
+                    if let (Some(lx), Some(ly), Some(fx), Some(fy), Some((mut fa, mut fb))) =
+                        (lx, ly, fx, fy, forward_opt)
                     {
+                        if spec.swap_direction_pair {
+                            std::mem::swap(&mut fa, &mut fb);
+                        }
+
+                        let mut dx = lx - fx;
+                        let mut dy = ly - fy;
+
+                        if spec.invert_x {
+                            dx = -dx;
+                        }
+                        if spec.invert_y {
+                            dy = -dy;
+                        }
+
                         let mut want_keys = compute_follow_3d_keys(
-                            lx - fx,
-                            lz - fz,
+                            dx,
+                            dy,
                             fa,
                             fb,
                             spec.stop_distance,
@@ -39555,6 +39569,14 @@ mod tests {
         // Within stop distance (0.5 <= 1.0) -> all keys released
         let keys = compute_follow_3d_keys(0.3, 0.4, 0.0, 1.0, 1.0);
         assert_eq!(keys, [false; 4]);
+
+        // Invert Y: if dy is negated (-5.0 instead of 5.0), presses S instead of W
+        let keys = compute_follow_3d_keys(0.0, -5.0, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [false, false, true, false]);
+
+        // Invert X: if dx is negated (-5.0 instead of 5.0), presses A instead of D
+        let keys = compute_follow_3d_keys(-5.0, 0.0, 0.0, 1.0, 1.0);
+        assert_eq!(keys, [false, true, false, false]);
     }
 }
 
