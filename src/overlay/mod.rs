@@ -114,7 +114,7 @@ mod windows_overlay {
                     CreateIconIndirect, CreatePopupMenu, CreateWindowExW,
                     CWP_SKIPDISABLED, CWP_SKIPINVISIBLE, DefWindowProcW, DestroyCursor,
                     DestroyMenu, DispatchMessageW, EVENT_SYSTEM_FOREGROUND, EnumChildWindows, GA_ROOT,
-                    GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GUITHREADINFO, GetAncestor, GetClassNameW,
+                    GW_CHILD, GW_OWNER, GWL_EXSTYLE, GWLP_USERDATA, GUITHREADINFO, GetAncestor, GetClassNameW,
                     GetClientRect, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetMessageW,
                     GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowLongW, GetWindowRect,
                     GetWindowThreadProcessId, HC_ACTION, HCURSOR, HMENU, HTCLIENT,
@@ -29727,6 +29727,9 @@ mod windows_overlay {
                 MacroAction::Follow3DTarget => {
                     if let Err(e) = execute_follow_3d_target(step, Some(preset_id), false) {
                         eprintln!("Follow3DTarget execution error: {e}");
+                        if step.toggle_enabled_on_run {
+                            let _ = toggle_macro_step_enabled(preset_id, absolute_index);
+                        }
                     }
                 }
 
@@ -35336,6 +35339,16 @@ mod windows_overlay {
     }
 
     unsafe fn find_background_input_child(hwnd: HWND) -> HWND {
+        if hwnd.0.is_null() {
+            return hwnd;
+        }
+        // Fast-path: if the window has no children (e.g. DirectX game clients), return hwnd directly
+        if let Ok(child) = GetWindow(hwnd, GW_CHILD) {
+            if child.0.is_null() {
+                return hwnd;
+            }
+        }
+
         // 1. Try finding active / focused control via GetGUIThreadInfo first:
         let target_thread = GetWindowThreadProcessId(hwnd, None);
         if target_thread != 0 {
@@ -35659,17 +35672,21 @@ mod windows_overlay {
         if let Some(selector) = spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()) {
             let res = crate::window_list::find_window_handle(Some(selector));
             if let Some(l_hwnd) = leader_hwnd {
-                if res == Some(l_hwnd) {
+                if res == Some(l_hwnd) || res.is_none() {
                     let (base, rule) = crate::window_list::parse_window_match_rule(selector);
                     if matches!(rule, Some(crate::window_list::WindowMatchRule::Unfocused) | None) {
                         let candidates = crate::window_list::find_all_windows_by_candidate(base, false);
                         if let Some(other) = candidates.into_iter().find(|&h| h != l_hwnd) {
                             return Some(other);
                         }
+                        let candidates_dup = crate::window_list::find_all_windows_by_candidate(base, true);
+                        if let Some(other) = candidates_dup.into_iter().find(|&h| h != l_hwnd) {
+                            return Some(other);
+                        }
                     }
                 }
             }
-            if res.is_some() {
+            if res.is_some() && res != leader_hwnd {
                 return res;
             }
         }
@@ -35689,10 +35706,15 @@ mod windows_overlay {
             if let Some(other) = candidates.into_iter().find(|&h| h != l_hwnd) {
                 return Some(other);
             }
+            let candidates_dup = crate::window_list::find_all_windows_by_candidate(clean_title, true);
+            if let Some(other) = candidates_dup.into_iter().find(|&h| h != l_hwnd) {
+                return Some(other);
+            }
         }
 
         crate::window_list::find_window_handle(Some("[The Unfocused One]"))
             .or_else(|| crate::window_list::find_window_handle(None))
+            .filter(|&h| Some(h) != leader_hwnd)
     }
 
     pub(crate) fn resolve_follow_3d_input_window(
@@ -35751,8 +35773,21 @@ mod windows_overlay {
         let held_keys = Arc::new(Mutex::new([false; 4]));
         let background_find_child = step.background_find_child;
 
-        let leader_hwnd = resolve_follow_3d_leader_window(&spec);
-        let follower_hwnd = resolve_follow_3d_follower_window(&spec, leader_hwnd);
+        let mut leader_hwnd = resolve_follow_3d_leader_window(&spec);
+        let mut follower_hwnd = resolve_follow_3d_follower_window(&spec, leader_hwnd);
+
+        // Debounce / retry up to 250ms (5 attempts * 50ms) during Alt-Tab transitions
+        for _ in 0..5 {
+            if leader_hwnd.is_some()
+                && follower_hwnd.is_some()
+                && leader_hwnd != follower_hwnd
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+            leader_hwnd = resolve_follow_3d_leader_window(&spec);
+            follower_hwnd = resolve_follow_3d_follower_window(&spec, leader_hwnd);
+        }
 
         let Some(leader_hwnd) = leader_hwnd else {
             bail!("Follow3DTarget: Leader window could not be found");
@@ -35789,7 +35824,7 @@ mod windows_overlay {
         let target_input_raw = target_input.0 as isize;
         let shared_input_hwnd = Arc::new(AtomicIsize::new(target_input_raw));
 
-        let initial_pid_leader = {
+        let mut initial_pid_leader = {
             let mut pid = 0;
             unsafe {
                 windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(leader_hwnd, Some(&mut pid));
@@ -35801,7 +35836,7 @@ mod windows_overlay {
             init_frame.pid_for_opt(spec.leader_window.as_deref())
         });
 
-        let initial_pid_follower = {
+        let mut initial_pid_follower = {
             let mut pid = 0;
             unsafe {
                 windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(follower_hwnd, Some(&mut pid));
@@ -35812,6 +35847,27 @@ mod windows_overlay {
             let mut init_frame = EspReadFrame::default();
             resolve_follower_pid(&mut init_frame, &spec)
         });
+
+        for _ in 0..5 {
+            if let (Some(pid_l), Some(pid_f)) = (initial_pid_leader, initial_pid_follower) {
+                if pid_l != pid_f {
+                    break;
+                }
+            } else if initial_pid_leader.is_some() && initial_pid_follower.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+            initial_pid_leader = {
+                let mut pid = 0;
+                unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(leader_hwnd, Some(&mut pid)); }
+                (pid != 0).then_some(pid)
+            };
+            initial_pid_follower = {
+                let mut pid = 0;
+                unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(follower_hwnd, Some(&mut pid)); }
+                (pid != 0).then_some(pid)
+            };
+        }
 
         if let (Some(pid_l), Some(pid_f)) = (initial_pid_leader, initial_pid_follower) {
             if pid_l == pid_f {
@@ -35902,14 +35958,18 @@ mod windows_overlay {
                             } else {
                                 HWND(cur_follower_raw as *mut _)
                             };
-                            cur_input_raw = new_input.0 as isize;
+                            cur_input_raw = if new_input.0.is_null() {
+                                cur_follower_raw
+                            } else {
+                                new_input.0 as isize
+                            };
                             thread_shared_input.store(cur_input_raw, Ordering::SeqCst);
                         } else {
                             let is_fg_leader = (cur_leader_raw != 0 && fg_root_raw == cur_leader_raw)
                                 || (cur_leader_pid.is_some() && fg_pid != 0 && cur_leader_pid == Some(fg_pid));
 
-                            if !is_fg_leader && fg_pid != 0 {
-                                // Focused window is outside both game clients (e.g. desktop/browser).
+                            if !is_fg_leader {
+                                // Focused window is outside both game clients (e.g. desktop/browser/Alt-Tab).
                                 // Pause movement and release keys so follower doesn't walk into walls.
                                 let mut held = thread_held.lock();
                                 for idx in 0..4 {
@@ -35923,6 +35983,18 @@ mod windows_overlay {
                                 continue;
                             }
                         }
+                    } else {
+                        // Foreground window is null during Alt-Tab: pause movement
+                        let mut held = thread_held.lock();
+                        for idx in 0..4 {
+                            if held[idx] {
+                                held[idx] = false;
+                                post_bg_key_up(HWND(cur_input_raw as *mut _), vk_keys[idx]);
+                            }
+                        }
+                        drop(held);
+                        thread::sleep(interval);
+                        continue;
                     }
                 }
 
@@ -35945,7 +36017,16 @@ mod windows_overlay {
 
                 if let (Some(pid_l), Some(pid_f)) = (cur_leader_pid, cur_follower_pid) {
                     if pid_l == pid_f {
-                        break;
+                        let mut held = thread_held.lock();
+                        for idx in 0..4 {
+                            if held[idx] {
+                                held[idx] = false;
+                                post_bg_key_up(HWND(cur_input_raw as *mut _), vk_keys[idx]);
+                            }
+                        }
+                        drop(held);
+                        thread::sleep(interval);
+                        continue;
                     }
                     let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
                     let ly = if !spec.leader_y.trim().is_empty() {

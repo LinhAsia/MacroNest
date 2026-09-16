@@ -595,14 +595,14 @@ mod windows_impl {
                 if let Some(unfocused) = candidates.iter().copied().find(|&hwnd| hwnd != focused) {
                     return Some(unfocused);
                 }
-                return Some(focused);
+                return None;
             }
             if candidates.len() > 1 {
                 // Foreground is outside candidates (e.g. MacroNest). Return candidate 1 so
                 // Focused (candidate 0) and Unfocused (candidate 1) never resolve to the same window.
                 return Some(candidates[1]);
             }
-            return candidates.first().copied();
+            return None;
         }
 
         if rule == WindowMatchRule::Focused {
@@ -2026,21 +2026,15 @@ mod tests {
         assert_eq!(unfocused_1, Some(fake_hwnd_2));
         assert_ne!(focused_1, unfocused_1);
 
+        // Follower resolution strictly avoids leader
+        assert_eq!(unfocused_1, Some(fake_hwnd_2));
+        assert_ne!(unfocused_1, Some(fake_hwnd_1));
+
+        // When only 1 candidate exists (and it is focused), Unfocused returns None (never matches leader)
+        let single_candidate = vec![fake_hwnd_1];
+        assert_eq!(select_window_by_match_rule(&single_candidate, WindowMatchRule::Unfocused), None);
+
         // Clean up
-        crate::overlay::FOREGROUND_WINDOW_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    #[test]
-    fn test_resolve_follow_3d_follower_avoids_leader() {
-        let fake_leader = HWND(0x1000 as *mut _);
-        let fake_peer = HWND(0x2000 as *mut _);
-        let candidates = vec![fake_leader, fake_peer];
-
-        crate::overlay::FOREGROUND_WINDOW_HWND.store(0x1000, std::sync::atomic::Ordering::Relaxed);
-        let unfocused = select_window_by_match_rule(&candidates, WindowMatchRule::Unfocused);
-        assert_eq!(unfocused, Some(fake_peer));
-        assert_ne!(unfocused, Some(fake_leader));
-
         crate::overlay::FOREGROUND_WINDOW_HWND.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 }
