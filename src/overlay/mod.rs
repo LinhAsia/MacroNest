@@ -35624,26 +35624,42 @@ mod windows_overlay {
         want_keys
     }
 
-    fn resolve_unfocused_follower_window(spec: &crate::model::Follow3DTargetSpec) -> Option<HWND> {
-        let input_selector = spec
-            .input_window
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
-            .or(spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()));
-
-        if let Some(selector) = input_selector {
-            if let Some(hwnd) = crate::window_list::find_window_handle(Some(selector)) {
-                return Some(hwnd);
+    fn resolve_follow_3d_leader_window(spec: &crate::model::Follow3DTargetSpec) -> Option<HWND> {
+        if let Some(selector) = spec.leader_window.as_deref().filter(|s| !s.trim().is_empty()) {
+            crate::window_list::find_window_handle(Some(selector))
+        } else {
+            let fg = crate::window_list::find_window_handle(None);
+            if let Some(hwnd) = fg {
+                let mut pid = 0;
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                }
+                if pid == std::process::id() {
+                    let cached = HWND(crate::overlay::FOREGROUND_WINDOW_HWND.load(std::sync::atomic::Ordering::Relaxed) as *mut _);
+                    if !cached.0.is_null() && unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(cached)).as_bool() } {
+                        return Some(cached);
+                    }
+                }
             }
+            fg
+        }
+    }
+
+    fn resolve_follow_3d_follower_window(
+        spec: &crate::model::Follow3DTargetSpec,
+        leader_hwnd: Option<HWND>,
+    ) -> Option<HWND> {
+        if let Some(selector) = spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()) {
+            return crate::window_list::find_window_handle(Some(selector));
         }
 
-        // Neither input_window nor follower_window explicitly specified.
-        // Find counterpart unfocused window of leader:
-        let leader_hwnd = crate::window_list::find_window_handle(spec.leader_window.as_deref());
+        // Default when follower_window is not specified: unfocused counterpart of leader
+        let leader_hwnd = leader_hwnd.or_else(|| resolve_follow_3d_leader_window(spec));
         if let Some(l_hwnd) = leader_hwnd
             && let Some(title) = crate::window_list::window_title(l_hwnd)
         {
-            let unfocused_selector = format!("{title} [The Unfocused One]");
+            let clean_title = crate::window_list::strip_rule_suffix(&title);
+            let unfocused_selector = format!("{clean_title} [The Unfocused One]");
             if let Some(unfocused) = crate::window_list::find_window_handle(Some(&unfocused_selector)) {
                 return Some(unfocused);
             }
@@ -35653,12 +35669,21 @@ mod windows_overlay {
             .or_else(|| crate::window_list::find_window_handle(None))
     }
 
+    pub(crate) fn resolve_follow_3d_input_window(
+        spec: &crate::model::Follow3DTargetSpec,
+        follower_hwnd: HWND,
+    ) -> HWND {
+        if let Some(selector) = spec.input_window.as_deref().filter(|s| !s.trim().is_empty()) {
+            crate::window_list::find_window_handle(Some(selector)).unwrap_or(follower_hwnd)
+        } else {
+            follower_hwnd
+        }
+    }
+
     fn resolve_follower_pid(frame: &mut EspReadFrame, spec: &crate::model::Follow3DTargetSpec) -> Option<u32> {
         if let Some(fw) = spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()) {
             frame.pid_for(fw)
-        } else if let Some(input_win) = spec.input_window.as_deref().filter(|s| !s.trim().is_empty()) {
-            frame.pid_for(input_win)
-        } else if let Some(hwnd) = resolve_unfocused_follower_window(spec) {
+        } else if let Some(hwnd) = resolve_follow_3d_follower_window(spec, None) {
             let mut process_id = 0;
             unsafe {
                 let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, Some(&mut process_id));
@@ -35688,55 +35713,14 @@ mod windows_overlay {
         let held_keys = Arc::new(Mutex::new([false; 4]));
         let background_find_child = step.background_find_child;
 
-        let mut follower_hwnd = resolve_unfocused_follower_window(&spec);
-        let mut leader_hwnd = crate::window_list::find_window_handle(spec.leader_window.as_deref());
+        let leader_hwnd = resolve_follow_3d_leader_window(&spec);
+        let follower_hwnd = resolve_follow_3d_follower_window(&spec, leader_hwnd);
 
-        // Ensure leader and follower are distinct when matching windows of the same application/title:
-        let base_title = spec
-            .leader_window
-            .as_deref()
-            .or(spec.follower_window.as_deref())
-            .or(spec.input_window.as_deref())
-            .map(crate::window_list::strip_rule_suffix);
-
-        if let Some(base) = base_title {
-            let candidates = crate::window_list::find_all_windows_by_candidate(base, true);
-            if candidates.len() >= 2 {
-                let focused_cand = crate::window_list::find_focused_candidate(&candidates);
-                let want_leader_focused = spec
-                    .leader_window
-                    .as_deref()
-                    .is_some_and(|w| w.contains("[Focused]") || w.contains("[The Focused One]"));
-                let want_follower_unfocused = spec
-                    .follower_window
-                    .as_deref()
-                    .is_some_and(|w| w.contains("[Unfocused]") || w.contains("[The Unfocused One]"))
-                    || spec
-                        .input_window
-                        .as_deref()
-                        .is_some_and(|w| w.contains("[Unfocused]") || w.contains("[The Unfocused One]"));
-
-                if want_leader_focused
-                    || want_follower_unfocused
-                    || follower_hwnd == leader_hwnd
-                    || follower_hwnd.is_none()
-                    || leader_hwnd.is_none()
-                {
-                    let focused = focused_cand.unwrap_or(candidates[0]);
-                    let unfocused = candidates
-                        .iter()
-                        .copied()
-                        .find(|&h| h != focused)
-                        .unwrap_or(candidates[1]);
-
-                    if want_leader_focused || leader_hwnd.is_none() || follower_hwnd == leader_hwnd {
-                        leader_hwnd = Some(focused);
-                    }
-                    if want_follower_unfocused || follower_hwnd.is_none() || follower_hwnd == leader_hwnd {
-                        follower_hwnd = Some(unfocused);
-                    }
-                }
-            }
+        let Some(leader_hwnd) = leader_hwnd else {
+            bail!("Follow3DTarget: Leader window could not be found");
+        };
+        if leader_hwnd.0.is_null() {
+            bail!("Follow3DTarget: Leader window handle is null");
         }
 
         let Some(follower_hwnd) = follower_hwnd else {
@@ -35746,29 +35730,40 @@ mod windows_overlay {
             bail!("Follow3DTarget: Follower window handle is null");
         }
 
+        if leader_hwnd == follower_hwnd {
+            let leader_name = spec.leader_window.as_deref().unwrap_or("Focused window");
+            let follower_name = spec.follower_window.as_deref().unwrap_or("Unfocused window (Default)");
+            bail!(
+                "Follow3DTarget: Cả Leader Target ('{}') và Follower Target ('{}') đều trỏ về cùng một cửa sổ (0x{:X})! Vui lòng chọn 1 mục tiêu là [The Focused One] và 1 mục tiêu là [The Unfocused One] (hoặc chọn 2 cửa sổ khác nhau).",
+                leader_name,
+                follower_name,
+                leader_hwnd.0 as usize
+            );
+        }
+
+        let input_hwnd = resolve_follow_3d_input_window(&spec, follower_hwnd);
         let target_input = if background_find_child {
-            unsafe { find_background_input_child(follower_hwnd) }
+            unsafe { find_background_input_child(input_hwnd) }
         } else {
-            follower_hwnd
+            input_hwnd
         };
 
         let target_input_raw = target_input.0 as isize;
         let shared_input_hwnd = Arc::new(AtomicIsize::new(target_input_raw));
 
-        let initial_pid_leader = leader_hwnd
-            .and_then(|h| {
-                let mut pid = 0;
-                unsafe {
-                    windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(h, Some(&mut pid));
-                }
-                (pid != 0).then_some(pid)
-            })
-            .or_else(|| {
-                let mut init_frame = EspReadFrame::default();
-                init_frame.pid_for_opt(spec.leader_window.as_deref())
-            });
+        let initial_pid_leader = {
+            let mut pid = 0;
+            unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(leader_hwnd, Some(&mut pid));
+            }
+            (pid != 0).then_some(pid)
+        }
+        .or_else(|| {
+            let mut init_frame = EspReadFrame::default();
+            init_frame.pid_for_opt(spec.leader_window.as_deref())
+        });
 
-        let mut initial_pid_follower = {
+        let initial_pid_follower = {
             let mut pid = 0;
             unsafe {
                 windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(follower_hwnd, Some(&mut pid));
@@ -35780,22 +35775,12 @@ mod windows_overlay {
             resolve_follower_pid(&mut init_frame, &spec)
         });
 
-        // Ensure leader PID and follower PID are distinct if multiple windows exist:
-        if initial_pid_leader.is_some() && initial_pid_leader == initial_pid_follower {
-            if let Some(l_h) = leader_hwnd {
-                if let Some(title) = crate::window_list::window_title(l_h) {
-                    let candidates = crate::window_list::find_all_windows_by_candidate(&title, true);
-                    for cand in candidates {
-                        let mut p = 0;
-                        unsafe {
-                            let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(cand, Some(&mut p));
-                        }
-                        if p != 0 && Some(p) != initial_pid_leader {
-                            initial_pid_follower = Some(p);
-                            break;
-                        }
-                    }
-                }
+        if let (Some(pid_l), Some(pid_f)) = (initial_pid_leader, initial_pid_follower) {
+            if pid_l == pid_f {
+                bail!(
+                    "Follow3DTarget: Leader và Follower cùng thuộc một Process ID ({})! Vui lòng chọn 2 cửa sổ thuộc 2 client game khác nhau.",
+                    pid_l
+                );
             }
         }
 
@@ -35845,6 +35830,9 @@ mod windows_overlay {
                 }
 
                 if let (Some(pid_l), Some(pid_f)) = (locked_pid_leader, locked_pid_follower) {
+                    if pid_l == pid_f {
+                        break;
+                    }
                     let lx = frame.read_value(pid_l, &spec.leader_x, spec.value_type).ok();
                     let ly = if !spec.leader_y.trim().is_empty() {
                         frame.read_value(pid_l, &spec.leader_y, spec.value_type).ok()
@@ -39608,6 +39596,7 @@ mod fallback {
 mod tests {
     use super::windows_overlay::{
         compute_follow_3d_keys, macro_enabled_map, macro_presets_outside_scope,
+        resolve_follow_3d_input_window,
     };
     use crate::model::{MacroGroup, MacroPreset};
 
@@ -39689,6 +39678,23 @@ mod tests {
         // Direct diagonal pursuit: at 45 deg, drives diagonally in (W + D) directly toward target
         let keys = compute_follow_3d_keys(0.92, 0.92, 0.0, 1.0, 0.5);
         assert_eq!(keys, [true, false, false, true], "diagonal pursuit should drive directly toward target with W+D");
+    }
+
+    #[test]
+    fn test_resolve_follow_3d_input_window_default_and_custom() {
+        use crate::model::Follow3DTargetSpec;
+        use windows::Win32::Foundation::HWND;
+
+        let mut spec = Follow3DTargetSpec::default();
+        let fake_hwnd = HWND(0x2000 as *mut _);
+
+        // When input_window is None, resolves to follower_hwnd:
+        spec.input_window = None;
+        assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
+
+        // When input_window is empty, resolves to follower_hwnd:
+        spec.input_window = Some("   ".to_string());
+        assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
     }
 }
 
