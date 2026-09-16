@@ -35586,6 +35586,17 @@ mod windows_overlay {
         }
     }
 
+    fn log_follow_3d_debug(msg: &str) {
+        if let Ok(root) = crate::storage::AppPaths::default_root() {
+            let path = root.join("follow_3d_debug.log");
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                use std::io::Write;
+                let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(file, "[{now}] {msg}");
+            }
+        }
+    }
+
     pub(crate) fn stop_follow_3d_target_for_preset(preset_id: Option<u32>) {
         let mut session_guard = ACTIVE_FOLLOW_3D_SESSION.lock();
         if let Some(session) = session_guard.as_ref() {
@@ -35596,6 +35607,7 @@ mod windows_overlay {
             }
         }
         if let Some(session) = session_guard.take() {
+            log_follow_3d_debug("STOP: session ended and keys released");
             session.stop_flag.store(true, Ordering::SeqCst);
             let target_hwnd = HWND(session.input_hwnd.load(Ordering::SeqCst) as *mut _);
             if !target_hwnd.0.is_null() {
@@ -35644,23 +35656,59 @@ mod windows_overlay {
     }
 
     pub(crate) fn resolve_follow_3d_leader_window(spec: &crate::model::Follow3DTargetSpec) -> Option<HWND> {
-        if let Some(selector) = spec.leader_window.as_deref().filter(|s| !s.trim().is_empty()) {
-            crate::window_list::find_window_handle(Some(selector))
-        } else {
-            let fg = crate::window_list::find_window_handle(None);
-            if let Some(hwnd) = fg {
+        let (target_base, is_focused_rule) = spec.leader_window.as_deref()
+            .map(|s| {
+                let (base, rule) = crate::window_list::parse_window_match_rule(s);
+                (base, matches!(rule, Some(crate::window_list::WindowMatchRule::Focused)))
+            })
+            .unwrap_or(("", true));
+
+        // If the selector requests [Focused] or has no window specified, prioritize the LIVE foreground window
+        if is_focused_rule || spec.leader_window.as_deref().unwrap_or("").trim().is_empty() {
+            let live = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+            if !live.0.is_null() {
+                let root = unsafe { windows::Win32::UI::WindowsAndMessaging::GetAncestor(live, windows::Win32::UI::WindowsAndMessaging::GA_ROOT) };
+                let candidate = if root.0.is_null() { live } else { root };
                 let mut pid = 0;
                 unsafe {
-                    let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                    let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(candidate, Some(&mut pid));
                 }
-                if pid == std::process::id() {
-                    let cached = HWND(crate::overlay::FOREGROUND_WINDOW_HWND.load(std::sync::atomic::Ordering::Relaxed) as *mut _);
-                    if !cached.0.is_null() && unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(cached)).as_bool() } {
-                        return Some(cached);
+                if pid != std::process::id() && pid != 0 {
+                    if target_base.is_empty() {
+                        return Some(candidate);
+                    }
+                    if let Some(title) = crate::window_list::window_title(candidate) {
+                        if crate::window_list::window_matches_candidate_title(&title, "", target_base, false) {
+                            return Some(candidate);
+                        }
                     }
                 }
             }
-            fg
+
+            // Fallback to cached foreground window if live was MacroNest itself or temporary popup
+            let cached = HWND(crate::overlay::FOREGROUND_WINDOW_HWND.load(std::sync::atomic::Ordering::Relaxed) as *mut _);
+            if !cached.0.is_null() && unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(cached)).as_bool() } {
+                let mut pid = 0;
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(cached, Some(&mut pid));
+                }
+                if pid != std::process::id() && pid != 0 {
+                    if target_base.is_empty() {
+                        return Some(cached);
+                    }
+                    if let Some(title) = crate::window_list::window_title(cached) {
+                        if crate::window_list::window_matches_candidate_title(&title, "", target_base, false) {
+                            return Some(cached);
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(selector) = spec.leader_window.as_deref().filter(|s| !s.trim().is_empty()) {
+            crate::window_list::find_window_handle(Some(selector))
+        } else {
+            crate::window_list::find_window_handle(None)
         }
     }
 
@@ -35669,6 +35717,35 @@ mod windows_overlay {
         leader_hwnd: Option<HWND>,
     ) -> Option<HWND> {
         let leader_hwnd = leader_hwnd.or_else(|| resolve_follow_3d_leader_window(spec));
+        let (follower_base, is_unfocused_rule) = spec.follower_window.as_deref()
+            .map(|s| {
+                let (base, rule) = crate::window_list::parse_window_match_rule(s);
+                (base, matches!(rule, Some(crate::window_list::WindowMatchRule::Unfocused)) || rule.is_none())
+            })
+            .unwrap_or(("", true));
+
+        // When follower is [Unfocused] (or default) and we know the leader window, pick the other game window
+        if is_unfocused_rule && let Some(l_hwnd) = leader_hwnd {
+            let leader_title_owned = crate::window_list::window_title(l_hwnd);
+            let base = if !follower_base.is_empty() {
+                follower_base
+            } else if let Some(ref title) = leader_title_owned {
+                crate::window_list::strip_rule_suffix(title)
+            } else {
+                ""
+            };
+            if !base.is_empty() {
+                let candidates = crate::window_list::find_all_windows_by_candidate(base, false);
+                if let Some(other) = candidates.into_iter().find(|&h| h != l_hwnd) {
+                    return Some(other);
+                }
+                let candidates_dup = crate::window_list::find_all_windows_by_candidate(base, true);
+                if let Some(other) = candidates_dup.into_iter().find(|&h| h != l_hwnd) {
+                    return Some(other);
+                }
+            }
+        }
+
         if let Some(selector) = spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()) {
             let res = crate::window_list::find_window_handle(Some(selector));
             if let Some(l_hwnd) = leader_hwnd {
@@ -35832,10 +35909,12 @@ mod windows_overlay {
             );
         }
 
-        eprintln!(
-            "[Follow3D] === START SESSION: Leader HWND=0x{:X} (PID={}), Follower HWND=0x{:X} (PID={}), Input HWND=0x{:X}, SwapAB={} ===",
+        let start_msg = format!(
+            "START SESSION: Leader HWND=0x{:X} (PID={}), Follower HWND=0x{:X} (PID={}), Input HWND=0x{:X}, SwapAB={}",
             leader_hwnd.0 as usize, pid_leader, follower_hwnd.0 as usize, pid_follower, target_input.0 as usize, spec.swap_direction_pair
         );
+        eprintln!("[Follow3D] === {} ===", start_msg);
+        log_follow_3d_debug(&start_msg);
 
         *ACTIVE_FOLLOW_3D_SESSION.lock() = Some(Follow3DActiveSession {
             stop_flag: stop_flag.clone(),
@@ -35853,7 +35932,7 @@ mod windows_overlay {
             let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
             let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(5, 500));
             let target_input = HWND(target_input_raw as *mut _);
-            let mut logged_first = false;
+            let mut last_sample_log = Instant::now() - Duration::from_secs(1);
 
             while !thread_stop.load(Ordering::SeqCst) {
                 // If this session is owned by a Hold macro, stop immediately if the hold key was released
@@ -35954,12 +36033,15 @@ mod windows_overlay {
                         want_keys.swap(1, 2); // A <-> S
                     }
 
-                    if !logged_first {
-                        logged_first = true;
-                        eprintln!(
-                            "[Follow3D] First sample: Leader=({:.2}, {:.2}), Follower=({:.2}, {:.2}), delta=({:.2}, {:.2}), forward=({:.2}, {:.2}) -> keys={:?}",
-                            lx, ly, fx, fy, dx, dy, fa, fb, want_keys
+                    if last_sample_log.elapsed() >= Duration::from_millis(1000) {
+                        last_sample_log = Instant::now();
+                        let dist = dx.hypot(dy);
+                        let sample_msg = format!(
+                            "SAMPLE: Leader=({:.2}, {:.2}), Follower=({:.2}, {:.2}), delta=({:.2}, {:.2}, dist={:.2}), forward=({:.2}, {:.2}) -> keys={:?}",
+                            lx, ly, fx, fy, dx, dy, dist, fa, fb, want_keys
                         );
+                        eprintln!("[Follow3D] {}", sample_msg);
+                        log_follow_3d_debug(&sample_msg);
                     }
 
                     let mut held = thread_held.lock();
