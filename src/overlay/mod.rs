@@ -31379,38 +31379,48 @@ mod windows_overlay {
     }
 
     struct MacroMemoryProcessInfo {
-        pid: u32,
         modules: HashMap<String, (usize, usize)>,
         pointer_width: usize,
     }
 
     thread_local! {
-        static MACRO_MEMORY_PROCESS_INFO: std::cell::RefCell<Option<MacroMemoryProcessInfo>> = const { std::cell::RefCell::new(None) };
+        static MACRO_MEMORY_PROCESS_INFO: std::cell::RefCell<HashMap<u32, MacroMemoryProcessInfo>> =
+            std::cell::RefCell::new(HashMap::new());
         static MACRO_MEMORY_TARGET_PID: std::cell::RefCell<Option<(String, Instant, Option<u32>)>> = const { std::cell::RefCell::new(None) };
         static ESP_TARGET_BOUNDS: std::cell::RefCell<Option<(String, Instant, Option<(i32, i32, i32, i32)>)>> = const { std::cell::RefCell::new(None) };
     }
 
+    pub(crate) fn invalidate_macro_memory_target_pid() {
+        MACRO_MEMORY_TARGET_PID.with(|cached| {
+            *cached.borrow_mut() = None;
+        });
+    }
+
     fn macro_memory_process_info(pid: u32, module: &str) -> Option<(usize, usize, usize)> {
         MACRO_MEMORY_PROCESS_INFO.with(|cached| {
-            let mut cached = cached.borrow_mut();
+            let mut map = cached.borrow_mut();
             let module = module.to_ascii_lowercase();
-            let should_refresh = cached
-                .as_ref()
-                .is_none_or(|entry| entry.pid != pid || !entry.modules.contains_key(&module));
+            let should_refresh = match map.get(&pid) {
+                Some(entry) => !entry.modules.contains_key(&module),
+                None => true,
+            };
             if should_refresh {
                 let modules = crate::memory_debugger::debugger::process_modules(pid)
                     .ok()?
                     .into_iter()
                     .map(|(name, base, size)| (name.to_ascii_lowercase(), (base, size)))
                     .collect();
-                *cached = Some(MacroMemoryProcessInfo {
-                    pid,
+                let pointer_width = crate::memory_debugger::debugger::process_pointer_width(pid)
+                    .ok()?;
+                if map.len() > 16 {
+                    map.clear();
+                }
+                map.insert(pid, MacroMemoryProcessInfo {
                     modules,
-                    pointer_width: crate::memory_debugger::debugger::process_pointer_width(pid)
-                        .ok()?,
+                    pointer_width,
                 });
             }
-            let entry = cached.as_ref()?;
+            let entry = map.get(&pid)?;
             let (base, size) = entry.modules.get(&module)?;
             Some((*base, *size, entry.pointer_width))
         })
@@ -35533,7 +35543,7 @@ mod windows_overlay {
         stop_flag: Arc<AtomicBool>,
         _owner_preset_id: Option<u32>,
         _is_hold: bool,
-        input_hwnd: isize,
+        input_hwnd: Arc<AtomicIsize>,
         held_keys: Arc<Mutex<[bool; 4]>>, // [W, A, S, D]
     }
 
@@ -35568,7 +35578,7 @@ mod windows_overlay {
         }
         if let Some(session) = session_guard.take() {
             session.stop_flag.store(true, Ordering::SeqCst);
-            let target_hwnd = HWND(session.input_hwnd as *mut _);
+            let target_hwnd = HWND(session.input_hwnd.load(Ordering::SeqCst) as *mut _);
             if !target_hwnd.0.is_null() {
                 let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
                 let mut held = session.held_keys.lock();
@@ -35692,8 +35702,8 @@ mod windows_overlay {
             input_hwnd
         };
 
-        let _input_hwnd_raw = input_hwnd.0 as isize;
         let target_input_raw = target_input.0 as isize;
+        let shared_input_hwnd = Arc::new(AtomicIsize::new(target_input_raw));
 
         let mut init_frame = EspReadFrame::default();
         let initial_pid_leader = init_frame.pid_for_opt(spec.leader_window.as_deref());
@@ -35703,22 +35713,47 @@ mod windows_overlay {
             stop_flag: stop_flag.clone(),
             _owner_preset_id: owner_preset_id,
             _is_hold: is_hold,
-            input_hwnd: target_input_raw,
+            input_hwnd: shared_input_hwnd.clone(),
             held_keys: held_keys.clone(),
         });
 
         let thread_stop = stop_flag.clone();
         let thread_held = held_keys.clone();
 
+        let (is_dynamic_leader, is_dynamic_follower) = {
+            let l = spec
+                .leader_window
+                .as_deref()
+                .and_then(|w| crate::window_list::parse_window_match_rule(w).1);
+            let f = spec
+                .follower_window
+                .as_deref()
+                .and_then(|w| crate::window_list::parse_window_match_rule(w).1);
+            (
+                matches!(
+                    l,
+                    Some(crate::window_list::WindowMatchRule::Focused)
+                        | Some(crate::window_list::WindowMatchRule::Unfocused)
+                ),
+                matches!(
+                    f,
+                    Some(crate::window_list::WindowMatchRule::Focused)
+                        | Some(crate::window_list::WindowMatchRule::Unfocused)
+                ),
+            )
+        };
+        let is_dynamic_roles = is_dynamic_leader || is_dynamic_follower;
+
         thread::spawn(move || {
-            let current_input_hwnd = HWND(target_input_raw as *mut _);
+            let mut current_input_hwnd = HWND(target_input_raw as *mut _);
             let mut frame = EspReadFrame::default();
             let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
-            let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(10, 500));
+            let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(5, 500));
 
-            // Lock leader and follower PIDs at start so Alt-Tabbing does not swap roles or drift to other apps
             let mut locked_pid_leader = initial_pid_leader;
             let mut locked_pid_follower = initial_pid_follower;
+            let mut last_fg = HWND(std::ptr::null_mut());
+            let mut is_current_fg_game = true;
 
             while !thread_stop.load(Ordering::SeqCst) {
                 // If this session is owned by a Hold macro, stop immediately if the hold key was released
@@ -35733,6 +35768,78 @@ mod windows_overlay {
                         || FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().contains(&pid)
                     {
                         break;
+                    }
+                }
+
+                if is_dynamic_roles {
+                    let live_fg = unsafe { GetForegroundWindow() };
+                    if live_fg != last_fg {
+                        last_fg = live_fg;
+                        let (base_title, _) = crate::window_list::parse_window_match_rule(
+                            spec.leader_window
+                                .as_deref()
+                                .or(spec.follower_window.as_deref())
+                                .unwrap_or(""),
+                        );
+                        let candidates =
+                            crate::window_list::find_all_windows_by_candidate(base_title, true);
+                        let root_of = |h: HWND| unsafe {
+                            if h.0.is_null() {
+                                h
+                            } else {
+                                let root = GetAncestor(h, GA_ROOT);
+                                if root.0.is_null() {
+                                    h
+                                } else {
+                                    root
+                                }
+                            }
+                        };
+                        let fg_root = root_of(live_fg);
+                        is_current_fg_game = candidates.iter().any(|&c| root_of(c) == fg_root);
+
+                        if is_current_fg_game {
+                            invalidate_macro_memory_target_pid();
+                            frame.pids.clear();
+                            frame.resolved_addresses.clear();
+
+                            if let Some(new_unfocused) = resolve_unfocused_follower_window(&spec) {
+                                let new_input = if background_find_child {
+                                    unsafe { find_background_input_child(new_unfocused) }
+                                } else {
+                                    new_unfocused
+                                };
+
+                                if new_input != current_input_hwnd {
+                                    let mut held = thread_held.lock();
+                                    for idx in 0..4 {
+                                        if held[idx] {
+                                            held[idx] = false;
+                                            post_bg_key_up(current_input_hwnd, vk_keys[idx]);
+                                        }
+                                    }
+                                    drop(held);
+
+                                    current_input_hwnd = new_input;
+                                    shared_input_hwnd.store(new_input.0 as isize, Ordering::SeqCst);
+                                    locked_pid_leader = frame.pid_for_opt(spec.leader_window.as_deref());
+                                    locked_pid_follower = resolve_follower_pid(&mut frame, &spec);
+                                }
+                            }
+                        }
+                    }
+
+                    if !is_current_fg_game {
+                        let mut held = thread_held.lock();
+                        for idx in 0..4 {
+                            if held[idx] {
+                                held[idx] = false;
+                                post_bg_key_up(current_input_hwnd, vk_keys[idx]);
+                            }
+                        }
+                        drop(held);
+                        thread::sleep(interval);
+                        continue;
                     }
                 }
 

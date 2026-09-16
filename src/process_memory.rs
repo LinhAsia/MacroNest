@@ -1207,14 +1207,11 @@ impl ScanProcess {
     }
 }
 
-struct CachedReadProcess {
-    pid: u32,
-    opened_at: Instant,
-    process: ScanProcess,
-}
-
 thread_local! {
-    static CACHED_READ_PROCESS: RefCell<Option<CachedReadProcess>> = const { RefCell::new(None) };
+    static CACHED_READ_PROCESS: RefCell<std::collections::HashMap<u32, (Instant, ScanProcess)>> =
+        RefCell::new(std::collections::HashMap::new());
+    static CACHED_WRITE_PROCESS: RefCell<std::collections::HashMap<u32, (Instant, ScanProcess)>> =
+        RefCell::new(std::collections::HashMap::new());
 }
 
 pub(crate) fn with_cached_read_process<T>(
@@ -1222,34 +1219,20 @@ pub(crate) fn with_cached_read_process<T>(
     read: impl FnOnce(&ScanProcess) -> io::Result<T>,
 ) -> io::Result<T> {
     CACHED_READ_PROCESS.with(|cached| {
-        let mut cached = cached.borrow_mut();
-        let should_reopen = cached.as_ref().is_none_or(|entry| {
-            entry.pid != pid || entry.opened_at.elapsed() >= Duration::from_secs(2)
-        });
-        if should_reopen {
-            *cached = Some(CachedReadProcess {
-                pid,
-                opened_at: Instant::now(),
-                process: ScanProcess::open(pid, false)?,
-            });
+        let mut map = cached.borrow_mut();
+        if map.len() > 8 {
+            map.retain(|_, (opened_at, _)| opened_at.elapsed() < Duration::from_secs(5));
         }
-        read(
-            &cached
-                .as_ref()
-                .expect("cached process was just opened")
-                .process,
-        )
+        let should_open = map
+            .get(&pid)
+            .map_or(true, |(opened_at, _)| opened_at.elapsed() >= Duration::from_secs(5));
+        if should_open {
+            let proc = ScanProcess::open(pid, false)?;
+            map.insert(pid, (Instant::now(), proc));
+        }
+        let (_, proc) = map.get(&pid).expect("cached process was just inserted");
+        read(proc)
     })
-}
-
-struct CachedWriteProcess {
-    pid: u32,
-    opened_at: Instant,
-    process: ScanProcess,
-}
-
-thread_local! {
-    static CACHED_WRITE_PROCESS: RefCell<Option<CachedWriteProcess>> = const { RefCell::new(None) };
 }
 
 fn with_cached_write_process<T>(
@@ -1257,23 +1240,19 @@ fn with_cached_write_process<T>(
     write: impl FnOnce(&ScanProcess) -> io::Result<T>,
 ) -> io::Result<T> {
     CACHED_WRITE_PROCESS.with(|cached| {
-        let mut cached = cached.borrow_mut();
-        let should_reopen = cached.as_ref().is_none_or(|entry| {
-            entry.pid != pid || entry.opened_at.elapsed() >= Duration::from_secs(2)
-        });
-        if should_reopen {
-            *cached = Some(CachedWriteProcess {
-                pid,
-                opened_at: Instant::now(),
-                process: ScanProcess::open(pid, true)?,
-            });
+        let mut map = cached.borrow_mut();
+        if map.len() > 8 {
+            map.retain(|_, (opened_at, _)| opened_at.elapsed() < Duration::from_secs(5));
         }
-        write(
-            &cached
-                .as_ref()
-                .expect("cached process was just opened")
-                .process,
-        )
+        let should_open = map
+            .get(&pid)
+            .map_or(true, |(opened_at, _)| opened_at.elapsed() >= Duration::from_secs(5));
+        if should_open {
+            let proc = ScanProcess::open(pid, true)?;
+            map.insert(pid, (Instant::now(), proc));
+        }
+        let (_, proc) = map.get(&pid).expect("cached process was just inserted");
+        write(proc)
     })
 }
 

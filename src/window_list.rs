@@ -680,7 +680,7 @@ mod windows_impl {
         find_first_window_by_candidate(title_or_selector, match_duplicate_window_titles)
     }
 
-    fn find_all_windows_by_candidate(
+    pub(crate) fn find_all_windows_by_candidate(
         title_or_selector: &str,
         match_duplicate_window_titles: bool,
     ) -> Vec<HWND> {
@@ -766,7 +766,9 @@ mod windows_impl {
     ) -> BOOL {
         let (target_title, match_duplicate_window_titles, candidates) =
             &mut *(lparam.0 as *mut (&str, bool, &mut Vec<HWND>));
-        if candidate_window_matches(hwnd, target_title, *match_duplicate_window_titles) {
+        if candidate_window_matches(hwnd, target_title, *match_duplicate_window_titles)
+            && !candidates.contains(&hwnd)
+        {
             candidates.push(hwnd);
         }
         true.into()
@@ -795,6 +797,13 @@ mod windows_impl {
         let clean_title = strip_rule_suffix(target_title);
         let base_title = selector_base_title(clean_title);
         if !unsafe { IsWindow(Some(hwnd)).as_bool() } {
+            return false;
+        }
+        if !unsafe { IsWindowVisible(hwnd).as_bool() } {
+            return false;
+        }
+        let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+        if !root.0.is_null() && root != hwnd {
             return false;
         }
         let Some(title) = window_title(hwnd) else {
@@ -1793,6 +1802,7 @@ pub use fallback::*;
 mod tests {
     use super::*;
     use std::borrow::Cow;
+    use windows::Win32::Foundation::HWND;
 
     #[test]
     fn clean_invisible_chars_borrows_clean_string() {
@@ -1929,5 +1939,20 @@ mod tests {
             "Settings - v1.0",
             false
         ));
+    }
+
+    #[test]
+    fn select_window_by_match_rule_focused_unfocused() {
+        let fake_hwnd_1 = HWND(0x1000 as *mut _);
+        let fake_hwnd_2 = HWND(0x2000 as *mut _);
+        let candidates = vec![fake_hwnd_1, fake_hwnd_2];
+
+        // When foreground is outside candidates
+        let focused = select_window_by_match_rule(&candidates, WindowMatchRule::Focused);
+        let unfocused = select_window_by_match_rule(&candidates, WindowMatchRule::Unfocused);
+
+        assert_eq!(focused, Some(fake_hwnd_1));
+        assert_eq!(unfocused, Some(fake_hwnd_2));
+        assert_ne!(focused, unfocused);
     }
 }

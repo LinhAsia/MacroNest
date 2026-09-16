@@ -195,21 +195,23 @@ pub fn is_instruction_compatible(expected: &str, found: &str) -> bool {
     found.contains('[') && found.contains(']')
 }
 
-static MODULE_CACHE: Mutex<Option<(u32, Instant, Vec<(String, usize, usize)>)>> = Mutex::new(None);
+static MODULE_CACHE: once_cell::sync::Lazy<
+    Mutex<std::collections::HashMap<u32, (Instant, Vec<(String, usize, usize)>)>>,
+> = once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 pub fn invalidate_process_modules_cache() {
     if let Ok(mut guard) = MODULE_CACHE.lock() {
-        *guard = None;
+        guard.clear();
     }
     if let Ok(mut guard) = POINTER_WIDTH_CACHE.lock() {
-        *guard = None;
+        guard.clear();
     }
 }
 
 pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
     if let Ok(guard) = MODULE_CACHE.lock() {
-        if let Some((cached_pid, timestamp, ref modules)) = *guard {
-            if cached_pid == pid && timestamp.elapsed() < Duration::from_millis(1500) {
+        if let Some((timestamp, modules)) = guard.get(&pid) {
+            if timestamp.elapsed() < Duration::from_secs(5) {
                 return Ok(modules.clone());
             }
         }
@@ -254,7 +256,10 @@ pub fn process_modules(pid: u32) -> io::Result<Vec<(String, usize, usize)>> {
     }
     unsafe { CloseHandle(snapshot) };
     if let Ok(mut guard) = MODULE_CACHE.lock() {
-        *guard = Some((pid, Instant::now(), modules.clone()));
+        if guard.len() > 16 {
+            guard.retain(|_, (t, _)| t.elapsed() < Duration::from_secs(10));
+        }
+        guard.insert(pid, (Instant::now(), modules.clone()));
     }
     Ok(modules)
 }
@@ -733,14 +738,13 @@ fn target_architecture(
     }
 }
 
-static POINTER_WIDTH_CACHE: Mutex<Option<(u32, usize)>> = Mutex::new(None);
+static POINTER_WIDTH_CACHE: once_cell::sync::Lazy<Mutex<std::collections::HashMap<u32, usize>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 pub fn process_pointer_width(pid: u32) -> io::Result<usize> {
     if let Ok(guard) = POINTER_WIDTH_CACHE.lock() {
-        if let Some((cached_pid, width)) = *guard {
-            if cached_pid == pid {
-                return Ok(width);
-            }
+        if let Some(&width) = guard.get(&pid) {
+            return Ok(width);
         }
     }
     let width = match target_architecture(pid, MemoryDebuggerArchitecture::Auto)? {
@@ -748,7 +752,10 @@ pub fn process_pointer_width(pid: u32) -> io::Result<usize> {
         TargetArchitecture::X64 => 8,
     };
     if let Ok(mut guard) = POINTER_WIDTH_CACHE.lock() {
-        *guard = Some((pid, width));
+        if guard.len() > 32 {
+            guard.clear();
+        }
+        guard.insert(pid, width);
     }
     Ok(width)
 }
