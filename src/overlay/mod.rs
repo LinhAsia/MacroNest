@@ -33291,6 +33291,25 @@ mod windows_overlay {
         }
 
         #[test]
+        fn test_follow_3d_swap_direction_pair_alignment() {
+            let mut fa = 0.68f32;
+            let mut fb = 0.73f32;
+            let swap_direction_pair = true;
+            let swap_forward_strafe = false;
+
+            if swap_direction_pair {
+                std::mem::swap(&mut fa, &mut fb);
+            }
+            let mut keys = compute_follow_3d_keys(19.23, 18.14, fa, fb, 1.0);
+            if swap_direction_pair ^ swap_forward_strafe {
+                keys.swap(0, 3);
+                keys.swap(1, 2);
+            }
+            assert!(keys[3], "should press D towards 43 deg target with swapped axes");
+            assert!(!keys[0], "should not press W towards 43 deg target with swapped axes");
+        }
+
+        #[test]
         fn test_follow_3d_key_repeat_cycle() {
             let mut held = [false; 4];
             let mut events = Vec::new();
@@ -36033,7 +36052,10 @@ mod windows_overlay {
                     if spec.invert_strafe {
                         want_keys.swap(1, 3); // A <-> D
                     }
-                    if spec.swap_forward_strafe {
+                    // When swap_direction_pair swaps the (fa, fb) vector axes, the movement keys must also
+                    // swap axes (W <-> D, A <-> S) to align key impulses with the transformed coordinate system,
+                    // preserving 2D chirality and preventing 90-degree orbital spiraling around the leader.
+                    if spec.swap_direction_pair ^ spec.swap_forward_strafe {
                         want_keys.swap(0, 3); // W <-> D
                         want_keys.swap(1, 2); // A <-> S
                     }
