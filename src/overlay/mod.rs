@@ -35609,19 +35609,17 @@ mod windows_overlay {
     ) -> [bool; 4] {
         let dist = dx.hypot(dy);
         let mut want_keys = [false; 4]; // [W, A, S, D]
-        if dist > stop_dist {
+        let effective_stop = stop_dist.max(0.15);
+        if dist > effective_stop {
             let f_score = dx * fa + dy * fb;
             let r_score = dx * fb - dy * fa;
             let angle = r_score.atan2(f_score).to_degrees();
 
-            // When approaching close to target (within 1.5x stop distance),
-            // disable strafe and drive straight forward/backward to prevent orbital overshoot/circling!
-            let allow_strafe = dist > (stop_dist * 1.5).max(0.5);
-
-            want_keys[0] = (-85.0..=85.0).contains(&angle);
-            want_keys[1] = allow_strafe && angle < -25.0 && angle > -155.0;
-            want_keys[2] = angle > 95.0 || angle < -95.0;
-            want_keys[3] = allow_strafe && angle > 25.0 && angle < 155.0;
+            // Symmetrical 8-way sector partitioning (each direction has an exact 45 deg cone)
+            want_keys[0] = (-67.5..=67.5).contains(&angle);
+            want_keys[1] = (-157.5..=-22.5).contains(&angle);
+            want_keys[2] = angle > 112.5 || angle < -112.5;
+            want_keys[3] = (22.5..=157.5).contains(&angle);
         }
         want_keys
     }
@@ -35800,7 +35798,9 @@ mod windows_overlay {
                             let fa = frame.read_value(pid_f, &spec.camera_forward_a, spec.value_type).ok();
                             let fb = frame.read_value(pid_f, &spec.camera_forward_b, spec.value_type).ok();
                             if let (Some(a), Some(b)) = (fa, fb) {
-                                forward_opt = Some((a, b));
+                                if a.hypot(b) > 0.01 {
+                                    forward_opt = Some((a, b));
+                                }
                             }
                         }
                         crate::model::Follow3DOrientationMode::Angles => {
@@ -35863,9 +35863,10 @@ mod windows_overlay {
                         for idx in 0..4 {
                             let vk = vk_keys[idx];
                             if want_keys[idx] {
-                                let is_repeat = held[idx];
-                                held[idx] = true;
-                                post_bg_key_down(current_input_hwnd, vk, is_repeat);
+                                if !held[idx] {
+                                    held[idx] = true;
+                                    post_bg_key_down(current_input_hwnd, vk, false);
+                                }
                             } else if held[idx] {
                                 held[idx] = false;
                                 post_bg_key_up(current_input_hwnd, vk);
@@ -39618,9 +39619,9 @@ mod tests {
         let keys = compute_follow_3d_keys(-5.0, 0.0, 0.0, 1.0, 1.0);
         assert_eq!(keys, [false, true, false, false]);
 
-        // Anti-circling: when close to target (dist = 1.3, stop_dist = 1.0), strafe is suppressed
-        let keys = compute_follow_3d_keys(0.92, 0.92, 0.0, 1.0, 1.0);
-        assert_eq!(keys, [true, false, false, false], "close range should drive straight in without circling");
+        // Direct diagonal pursuit: at 45 deg, drives diagonally in (W + D) directly toward target
+        let keys = compute_follow_3d_keys(0.92, 0.92, 0.0, 1.0, 0.5);
+        assert_eq!(keys, [true, false, false, true], "diagonal pursuit should drive directly toward target with W+D");
     }
 }
 
