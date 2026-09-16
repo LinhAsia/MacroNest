@@ -35624,7 +35624,7 @@ mod windows_overlay {
         want_keys
     }
 
-    fn resolve_follow_3d_leader_window(spec: &crate::model::Follow3DTargetSpec) -> Option<HWND> {
+    pub(crate) fn resolve_follow_3d_leader_window(spec: &crate::model::Follow3DTargetSpec) -> Option<HWND> {
         if let Some(selector) = spec.leader_window.as_deref().filter(|s| !s.trim().is_empty()) {
             crate::window_list::find_window_handle(Some(selector))
         } else {
@@ -35645,7 +35645,7 @@ mod windows_overlay {
         }
     }
 
-    fn resolve_follow_3d_follower_window(
+    pub(crate) fn resolve_follow_3d_follower_window(
         spec: &crate::model::Follow3DTargetSpec,
         leader_hwnd: Option<HWND>,
     ) -> Option<HWND> {
@@ -35680,7 +35680,7 @@ mod windows_overlay {
         }
     }
 
-    fn resolve_follower_pid(frame: &mut EspReadFrame, spec: &crate::model::Follow3DTargetSpec) -> Option<u32> {
+    pub(crate) fn resolve_follower_pid(frame: &mut EspReadFrame, spec: &crate::model::Follow3DTargetSpec) -> Option<u32> {
         if let Some(fw) = spec.follower_window.as_deref().filter(|s| !s.trim().is_empty()) {
             frame.pid_for(fw)
         } else if let Some(hwnd) = resolve_follow_3d_follower_window(spec, None) {
@@ -39696,6 +39696,7 @@ mod tests {
         spec.input_window = Some("   ".to_string());
         assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
     }
+
 }
 
 #[cfg(not(windows))]

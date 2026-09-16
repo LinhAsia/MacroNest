@@ -1459,7 +1459,12 @@ impl CrosshairApp {
                                                 .weak(),
                                             ),
                                         );
-                                        ui.add_sized([COL1_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("A:").strong()));
+                                        ui.add_sized([COL1_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("A:").strong()))
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                "Vector A (X-axis): Camera forward component along horizontal X. Must align with Coords X axis (e.g. smaller offset like F4).",
+                                                "Vector A (trục X): Thành phần vector tiến theo trục ngang X. Phải cùng trục với Tọa độ X (offset F4).",
+                                            ));
                                         Self::render_f3d_coord_box(
                                             ui,
                                             language,
@@ -1470,7 +1475,12 @@ impl CrosshairApp {
                                             vietnamese_input_mode,
                                             &mut changed,
                                         );
-                                        ui.add_sized([COL2_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("B:").strong()));
+                                        ui.add_sized([COL2_LABEL_WIDTH, 20.0], egui::Label::new(RichText::new("B:").strong()))
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                "Vector B (Z/Y-axis): Camera forward component along ground depth. Must align with Coords Y/Z axis (e.g. larger offset like 114).",
+                                                "Vector B (trục Z/Y): Thành phần vector tiến theo trục sâu mặt đất. Phải cùng trục với Tọa độ Y/Z (offset 114).",
+                                            ));
                                         Self::render_f3d_coord_box(
                                             ui,
                                             language,
@@ -1674,8 +1684,8 @@ impl CrosshairApp {
                                     )
                                     .on_hover_text(Self::tr_lang(
                                         language,
-                                        "Swap Vector A and B",
-                                        "Đổi chỗ Vector A và B",
+                                        "Swap Vector A and B. Tick this if follower moves sideways (90 deg), in spirals, or directly away from leader.",
+                                        "Đổi chỗ Vector A và B. Bật nếu nhân vật chạy lệch hướng 90 độ, đi xoắn ốc hoặc chạy ngược ra xa leader.",
                                     ))
                                     .changed()
                                 {
