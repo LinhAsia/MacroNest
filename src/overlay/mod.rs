@@ -35683,31 +35683,56 @@ mod windows_overlay {
 
         stop_follow_3d_target();
 
+        invalidate_macro_memory_target_pid();
+
         let spec = step.follow_3d_spec.clone();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let held_keys = Arc::new(Mutex::new([false; 4]));
         let background_find_child = step.background_find_child;
 
-        let input_hwnd = resolve_unfocused_follower_window(&spec);
-        let Some(input_hwnd) = input_hwnd else {
-            bail!("Follow3DTarget: Input window could not be found");
+        let follower_hwnd = resolve_unfocused_follower_window(&spec);
+        let Some(follower_hwnd) = follower_hwnd else {
+            bail!("Follow3DTarget: Follower window could not be found");
         };
-        if input_hwnd.0.is_null() {
-            bail!("Follow3DTarget: Input window handle is null");
+        if follower_hwnd.0.is_null() {
+            bail!("Follow3DTarget: Follower window handle is null");
         }
 
         let target_input = if background_find_child {
-            unsafe { find_background_input_child(input_hwnd) }
+            unsafe { find_background_input_child(follower_hwnd) }
         } else {
-            input_hwnd
+            follower_hwnd
         };
 
         let target_input_raw = target_input.0 as isize;
         let shared_input_hwnd = Arc::new(AtomicIsize::new(target_input_raw));
 
-        let mut init_frame = EspReadFrame::default();
-        let initial_pid_leader = init_frame.pid_for_opt(spec.leader_window.as_deref());
-        let initial_pid_follower = resolve_follower_pid(&mut init_frame, &spec);
+        let leader_hwnd = crate::window_list::find_window_handle(spec.leader_window.as_deref());
+
+        let initial_pid_leader = leader_hwnd
+            .and_then(|h| {
+                let mut pid = 0;
+                unsafe {
+                    windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(h, Some(&mut pid));
+                }
+                (pid != 0).then_some(pid)
+            })
+            .or_else(|| {
+                let mut init_frame = EspReadFrame::default();
+                init_frame.pid_for_opt(spec.leader_window.as_deref())
+            });
+
+        let initial_pid_follower = {
+            let mut pid = 0;
+            unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(follower_hwnd, Some(&mut pid));
+            }
+            (pid != 0).then_some(pid)
+        }
+        .or_else(|| {
+            let mut init_frame = EspReadFrame::default();
+            resolve_follower_pid(&mut init_frame, &spec)
+        });
 
         *ACTIVE_FOLLOW_3D_SESSION.lock() = Some(Follow3DActiveSession {
             stop_flag: stop_flag.clone(),
@@ -35720,40 +35745,14 @@ mod windows_overlay {
         let thread_stop = stop_flag.clone();
         let thread_held = held_keys.clone();
 
-        let (is_dynamic_leader, is_dynamic_follower) = {
-            let l = spec
-                .leader_window
-                .as_deref()
-                .and_then(|w| crate::window_list::parse_window_match_rule(w).1);
-            let f = spec
-                .follower_window
-                .as_deref()
-                .and_then(|w| crate::window_list::parse_window_match_rule(w).1);
-            (
-                matches!(
-                    l,
-                    Some(crate::window_list::WindowMatchRule::Focused)
-                        | Some(crate::window_list::WindowMatchRule::Unfocused)
-                ),
-                matches!(
-                    f,
-                    Some(crate::window_list::WindowMatchRule::Focused)
-                        | Some(crate::window_list::WindowMatchRule::Unfocused)
-                ),
-            )
-        };
-        let is_dynamic_roles = is_dynamic_leader || is_dynamic_follower;
-
         thread::spawn(move || {
-            let mut current_input_hwnd = HWND(target_input_raw as *mut _);
+            let current_input_hwnd = HWND(target_input_raw as *mut _);
             let mut frame = EspReadFrame::default();
             let vk_keys = [0x57u32, 0x41, 0x53, 0x44]; // W, A, S, D
             let interval = Duration::from_millis((spec.update_interval_ms as u64).clamp(5, 500));
 
             let mut locked_pid_leader = initial_pid_leader;
             let mut locked_pid_follower = initial_pid_follower;
-            let mut last_fg = HWND(std::ptr::null_mut());
-            let mut is_current_fg_game = true;
 
             while !thread_stop.load(Ordering::SeqCst) {
                 // If this session is owned by a Hold macro, stop immediately if the hold key was released
@@ -35768,78 +35767,6 @@ mod windows_overlay {
                         || FORCE_STOP_REQUESTED_MACRO_PRESETS.lock().contains(&pid)
                     {
                         break;
-                    }
-                }
-
-                if is_dynamic_roles {
-                    let live_fg = unsafe { GetForegroundWindow() };
-                    if live_fg != last_fg {
-                        last_fg = live_fg;
-                        let (base_title, _) = crate::window_list::parse_window_match_rule(
-                            spec.leader_window
-                                .as_deref()
-                                .or(spec.follower_window.as_deref())
-                                .unwrap_or(""),
-                        );
-                        let candidates =
-                            crate::window_list::find_all_windows_by_candidate(base_title, true);
-                        let root_of = |h: HWND| unsafe {
-                            if h.0.is_null() {
-                                h
-                            } else {
-                                let root = GetAncestor(h, GA_ROOT);
-                                if root.0.is_null() {
-                                    h
-                                } else {
-                                    root
-                                }
-                            }
-                        };
-                        let fg_root = root_of(live_fg);
-                        is_current_fg_game = candidates.iter().any(|&c| root_of(c) == fg_root);
-
-                        if is_current_fg_game {
-                            invalidate_macro_memory_target_pid();
-                            frame.pids.clear();
-                            frame.resolved_addresses.clear();
-
-                            if let Some(new_unfocused) = resolve_unfocused_follower_window(&spec) {
-                                let new_input = if background_find_child {
-                                    unsafe { find_background_input_child(new_unfocused) }
-                                } else {
-                                    new_unfocused
-                                };
-
-                                if new_input != current_input_hwnd {
-                                    let mut held = thread_held.lock();
-                                    for idx in 0..4 {
-                                        if held[idx] {
-                                            held[idx] = false;
-                                            post_bg_key_up(current_input_hwnd, vk_keys[idx]);
-                                        }
-                                    }
-                                    drop(held);
-
-                                    current_input_hwnd = new_input;
-                                    shared_input_hwnd.store(new_input.0 as isize, Ordering::SeqCst);
-                                    locked_pid_leader = frame.pid_for_opt(spec.leader_window.as_deref());
-                                    locked_pid_follower = resolve_follower_pid(&mut frame, &spec);
-                                }
-                            }
-                        }
-                    }
-
-                    if !is_current_fg_game {
-                        let mut held = thread_held.lock();
-                        for idx in 0..4 {
-                            if held[idx] {
-                                held[idx] = false;
-                                post_bg_key_up(current_input_hwnd, vk_keys[idx]);
-                            }
-                        }
-                        drop(held);
-                        thread::sleep(interval);
-                        continue;
                     }
                 }
 
