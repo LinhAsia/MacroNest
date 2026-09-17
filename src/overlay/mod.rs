@@ -33292,21 +33292,25 @@ mod windows_overlay {
 
         #[test]
         fn test_follow_3d_swap_direction_pair_alignment() {
+            // Test Case 1: Session 2 from live log (fa=0.68, fb=0.73, Target at dx=19.23, dy=18.14)
             let mut fa = 0.68f32;
             let mut fb = 0.73f32;
-            let swap_direction_pair = true;
-            let swap_forward_strafe = false;
+            let (rot_fa, rot_fb) = (-fb, fa);
+            fa = rot_fa;
+            fb = rot_fb;
+            let keys = compute_follow_3d_keys(19.23, 18.14, fa, fb, 1.0);
+            assert!(keys[3], "should press D towards 43 deg target with rotated vector");
+            assert!(!keys[0], "should not press W towards 43 deg target with rotated vector");
 
-            if swap_direction_pair {
-                std::mem::swap(&mut fa, &mut fb);
-            }
-            let mut keys = compute_follow_3d_keys(19.23, 18.14, fa, fb, 1.0);
-            if swap_direction_pair ^ swap_forward_strafe {
-                keys.swap(0, 3);
-                keys.swap(1, 2);
-            }
-            assert!(keys[3], "should press D towards 43 deg target with swapped axes");
-            assert!(!keys[0], "should not press W towards 43 deg target with swapped axes");
+            // Test Case 2: Session at 11:35 from live log (fa=0.04, fb=-1.00, Target at dx=31.06, dy=12.10)
+            let (rot_fa2, rot_fb2) = (-(-1.00f32), 0.04f32);
+            let keys2 = compute_follow_3d_keys(31.06, 12.10, rot_fa2, rot_fb2, 1.0);
+            assert!(keys2[0], "should press W towards East target with rotated vector");
+            assert!(!keys2[1], "should not press A towards East target with rotated vector");
+
+            // Test Case 3: Stop distance safeguard when configured as 0.0
+            let keys_close = compute_follow_3d_keys(0.8, 0.6, rot_fa2, rot_fb2, 0.0);
+            assert_eq!(keys_close, [false; 4], "should stop cleanly within 1.5m when stop_dist is 0.0");
         }
 
         #[test]
@@ -35661,7 +35665,11 @@ mod windows_overlay {
     ) -> [bool; 4] {
         let dist = dx.hypot(dy);
         let mut want_keys = [false; 4]; // [W, A, S, D]
-        let effective_stop = stop_dist.max(0.15);
+        let effective_stop = if stop_dist <= 0.05 {
+            1.5
+        } else {
+            stop_dist.max(0.2)
+        };
         if dist > effective_stop {
             let f_score = dx * fa + dy * fb;
             let r_score = dx * fb - dy * fa;
@@ -36023,7 +36031,9 @@ mod windows_overlay {
                     (lx, ly, fx, fy, forward_opt)
                 {
                     if spec.swap_direction_pair {
-                        std::mem::swap(&mut fa, &mut fb);
+                        let (rot_fa, rot_fb) = (-fb, fa);
+                        fa = rot_fa;
+                        fb = rot_fb;
                     }
 
                     let mut dx = lx - fx;
@@ -36044,18 +36054,13 @@ mod windows_overlay {
                         spec.stop_distance,
                     );
 
-
-
                     if spec.invert_forward {
                         want_keys.swap(0, 2); // W <-> S
                     }
                     if spec.invert_strafe {
                         want_keys.swap(1, 3); // A <-> D
                     }
-                    // When swap_direction_pair swaps the (fa, fb) vector axes, the movement keys must also
-                    // swap axes (W <-> D, A <-> S) to align key impulses with the transformed coordinate system,
-                    // preserving 2D chirality and preventing 90-degree orbital spiraling around the leader.
-                    if spec.swap_direction_pair ^ spec.swap_forward_strafe {
+                    if spec.swap_forward_strafe {
                         want_keys.swap(0, 3); // W <-> D
                         want_keys.swap(1, 2); // A <-> S
                     }
