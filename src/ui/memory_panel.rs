@@ -14,8 +14,9 @@ use eframe::egui::{self, Button, Color32, Frame, RichText, Sense, vec2};
 use crate::{
     hotkey,
     model::{
-        AppPanel, EspPreset, HotkeyBinding, MemoryCodeEntry, MemoryDebuggerArchitecture,
-        MemoryDebuggerMethod, MemoryPointerEntry, UiLanguage,
+        AppPanel, EspPreset, HotkeyBinding, MacroAction, MacroStep,
+        MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod, MemoryPointerEntry,
+        UiLanguage,
     },
     process_memory::{
         EntityListCandidate, EntityListScanResult, EntityListValidation, MemoryRegionInfo,
@@ -1165,6 +1166,11 @@ pub(crate) struct MemoryPanelState {
     pub(crate) inject_dll_file_path: String,
     pub(crate) frida_session: Option<crate::frida_injector::Session>,
     global_aob_sample_1: Option<(Vec<u8>, usize)>,
+    pub(crate) batch_replace_open: bool,
+    pub(crate) batch_old_base: String,
+    pub(crate) batch_new_base: String,
+    pub(crate) batch_replace_status: String,
+    pub(crate) batch_replace_filter: String,
 }
 
 impl Default for MemoryPanelState {
@@ -1294,6 +1300,11 @@ impl Default for MemoryPanelState {
             inject_dll_file_path: String::new(),
             frida_session: None,
             global_aob_sample_1: None,
+            batch_replace_open: false,
+            batch_old_base: String::new(),
+            batch_new_base: String::new(),
+            batch_replace_status: String::new(),
+            batch_replace_filter: String::new(),
         }
     }
 }
@@ -1617,6 +1628,12 @@ impl CrosshairApp {
                 {
                     self.memory_panel.show_dll_studio = true;
                 }
+                if ui
+                    .button(self.tr("Batch update bases", "Đổi base hàng loạt"))
+                    .clicked()
+                {
+                    self.memory_panel.batch_replace_open = true;
+                }
 
                 // Status text in remaining middle space with truncate
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -1740,6 +1757,15 @@ impl CrosshairApp {
             Self::render_saved_address_library,
         ) {
             self.memory_panel.saved_library_open = false;
+        }
+        if !self.render_detached_memory_popup(
+            ui.ctx(),
+            "memory-batch-replace-host",
+            "Batch update pointer bases",
+            self.memory_panel.batch_replace_open,
+            Self::render_batch_replace_dialog,
+        ) {
+            self.memory_panel.batch_replace_open = false;
         }
         let stable_active = self.memory_panel.stable_pointer_dialog.is_some();
         if !self.render_detached_memory_popup(
@@ -1929,6 +1955,15 @@ impl CrosshairApp {
             Self::render_saved_address_library,
         ) {
             self.memory_panel.saved_library_open = false;
+        }
+        if !self.render_detached_memory_popup(
+            ctx,
+            "memory-batch-replace-host",
+            "Batch update pointer bases",
+            self.memory_panel.batch_replace_open,
+            Self::render_batch_replace_dialog,
+        ) {
+            self.memory_panel.batch_replace_open = false;
         }
         let stable_active = self.memory_panel.stable_pointer_dialog.is_some();
         if !self.render_detached_memory_popup(
@@ -5633,6 +5668,739 @@ impl CrosshairApp {
             crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
             self.persist();
         }
+    }
+
+    fn render_batch_replace_dialog(&mut self, ui: &mut egui::Ui) {
+        if !self.memory_panel.batch_replace_open {
+            return;
+        }
+
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(self.tr(
+                "Quickly update base addresses across all Macros, Follow3D, ESP, and Memory lists after game updates.",
+                "Thay thế hàng loạt địa chỉ base cho toàn bộ Macro, Follow3D, ESP và Memory list sau khi game update.",
+            ))
+            .weak(),
+        );
+        ui.separator();
+
+        let old_input = self.memory_panel.batch_old_base.trim().to_string();
+        let new_input = self.memory_panel.batch_new_base.trim().to_string();
+
+        let effective_new_base = if let Some((old_mod, _)) = old_input.split_once('+') {
+            if !new_input.contains('+') && !new_input.is_empty() {
+                let off_str = new_input
+                    .strip_prefix("0x")
+                    .or_else(|| new_input.strip_prefix("0X"))
+                    .unwrap_or(&new_input);
+                format!("{}+{}", old_mod.trim(), off_str.trim())
+            } else {
+                new_input.clone()
+            }
+        } else {
+            new_input.clone()
+        };
+
+        let match_count = if !old_input.is_empty() {
+            self.count_pointer_base_matches(&old_input)
+        } else {
+            0
+        };
+
+        egui::Grid::new("batch_replace_grid")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new(self.tr("Old Base:", "Base cũ:")).strong());
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.memory_panel.batch_old_base)
+                        .hint_text("e.g. neox_engine.dll+8B68EC8 or 8B68EC8")
+                        .desired_width(280.0),
+                );
+                ui.end_row();
+
+                ui.label(RichText::new(self.tr("New Base:", "Base mới:")).strong());
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.memory_panel.batch_new_base)
+                        .hint_text("e.g. neox_engine.dll+9067700 or 9067700")
+                        .desired_width(280.0),
+                );
+                ui.end_row();
+            });
+
+        ui.add_space(4.0);
+
+        ui.horizontal(|ui| {
+            if !old_input.is_empty() {
+                let match_text = format!(
+                    "{} {} {}",
+                    self.tr("Found", "Tìm thấy"),
+                    match_count,
+                    self.tr("matching field(s) in project", "trường khớp trong project")
+                );
+                let color = if match_count > 0 {
+                    Color32::from_rgb(80, 200, 120)
+                } else {
+                    Color32::from_rgb(220, 120, 80)
+                };
+                ui.label(RichText::new(match_text).color(color).strong());
+            }
+
+            if !new_input.is_empty() && effective_new_base != new_input {
+                ui.label(
+                    RichText::new(format!(
+                        "({}: {})",
+                        self.tr("Target", "Đích"),
+                        effective_new_base
+                    ))
+                    .weak(),
+                );
+            }
+        });
+
+        ui.add_space(6.0);
+
+        ui.horizontal(|ui| {
+            let can_replace = match_count > 0 && !new_input.is_empty();
+            let btn = ui.add_enabled(
+                can_replace,
+                egui::Button::new(
+                    RichText::new(self.tr("🚀 Replace All Occurrences", "🚀 Thay thế tất cả"))
+                        .color(if can_replace { Color32::WHITE } else { Color32::GRAY })
+                        .strong(),
+                ),
+            );
+
+            if btn.clicked() {
+                let replaced = self.batch_replace_pointer_bases(&old_input, &effective_new_base);
+                if replaced > 0 {
+                    self.memory_panel.batch_replace_status = format!(
+                        "{} {} {} '{}' → '{}'. {}",
+                        self.tr("Successfully replaced", "Đã thay thế thành công"),
+                        replaced,
+                        self.tr("pointer field(s):", "trường pointer:"),
+                        old_input,
+                        effective_new_base,
+                        self.tr("Project saved!", "Đã lưu vào file!")
+                    );
+                    self.memory_panel.batch_old_base = effective_new_base;
+                } else {
+                    self.memory_panel.batch_replace_status = self.tr(
+                        "No matching fields were changed.",
+                        "Không có trường nào khớp được thay đổi.",
+                    ).to_string();
+                }
+            }
+
+            if ui.button(self.tr("Clear", "Xóa trắng")).clicked() {
+                self.memory_panel.batch_old_base.clear();
+                self.memory_panel.batch_new_base.clear();
+                self.memory_panel.batch_replace_status.clear();
+            }
+        });
+
+        if !self.memory_panel.batch_replace_status.is_empty() {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(&self.memory_panel.batch_replace_status)
+                    .color(Color32::from_rgb(100, 210, 255)),
+            );
+        }
+
+        ui.add_space(8.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        // Detected bases section
+        let detected = self.collect_detected_pointer_bases();
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} ({}):",
+                    self.tr("Detected Pointer Bases in Project", "Các Base Pointer phát hiện trong project"),
+                    detected.len()
+                ))
+                .strong(),
+            );
+
+            ui.add_space(8.0);
+            ui.label(self.tr("Filter:", "Lọc:"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.memory_panel.batch_replace_filter)
+                    .desired_width(120.0),
+            );
+        });
+
+        ui.add_space(4.0);
+
+        let filter = self.memory_panel.batch_replace_filter.trim().to_ascii_lowercase();
+
+        egui::ScrollArea::vertical()
+            .max_height(240.0)
+            .show(ui, |ui| {
+                if detected.is_empty() {
+                    ui.label(
+                        RichText::new(self.tr(
+                            "(No pointer bases detected in macros or memory tables)",
+                            "(Chưa tìm thấy base pointer nào trong macro hoặc memory)",
+                        ))
+                        .weak()
+                        .italics(),
+                    );
+                } else {
+                    for (base_name, count) in detected {
+                        if !filter.is_empty() && !base_name.to_ascii_lowercase().contains(&filter) {
+                            continue;
+                        }
+
+                        ui.horizontal(|ui| {
+                            let is_current = old_input.eq_ignore_ascii_case(&base_name);
+                            let text_color = if is_current {
+                                Color32::from_rgb(100, 220, 255)
+                            } else {
+                                Color32::LIGHT_GRAY
+                            };
+
+                            let btn_label = if is_current {
+                                self.tr("✓ Selected", "✓ Đã chọn")
+                            } else {
+                                self.tr("Select as Old", "Chọn làm Cũ")
+                            };
+
+                            if ui.small_button(btn_label).clicked() {
+                                self.memory_panel.batch_old_base = base_name.clone();
+                                if let Some((mod_name, _)) = base_name.split_once('+') {
+                                    if self.memory_panel.batch_new_base.is_empty() {
+                                        self.memory_panel.batch_new_base = format!("{}+", mod_name.trim());
+                                    }
+                                }
+                            }
+
+                            ui.label(RichText::new(&base_name).color(text_color).monospace().strong());
+                            ui.label(
+                                RichText::new(format!(
+                                    "({} {})",
+                                    count,
+                                    self.tr("occurrences", "vị trí")
+                                ))
+                                .weak(),
+                            );
+                        });
+                    }
+                }
+            });
+    }
+
+    pub fn collect_detected_pointer_bases(&self) -> Vec<(String, usize)> {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        let mut record = |val: &str| {
+            if let Some(base) = extract_base_part(val) {
+                *counts.entry(base).or_insert(0) += 1;
+            }
+        };
+
+        // 1. Macro groups
+        for group in &self.state.macro_groups {
+            for preset in &group.presets {
+                for step in &preset.steps {
+                    Self::collect_step_bases(step, &mut record);
+                }
+                if !preset.hold_stop_step.is_empty() {
+                    Self::collect_step_bases(&preset.hold_stop_step, &mut record);
+                }
+                if !preset.press_stop_step.is_empty() {
+                    Self::collect_step_bases(&preset.press_stop_step, &mut record);
+                }
+            }
+        }
+
+        // 2. Standalone macro presets
+        for preset in &self.state.macro_presets {
+            for step in &preset.steps {
+                Self::collect_step_bases(step, &mut record);
+            }
+            if !preset.hold_stop_step.is_empty() {
+                Self::collect_step_bases(&preset.hold_stop_step, &mut record);
+            }
+            if !preset.press_stop_step.is_empty() {
+                Self::collect_step_bases(&preset.press_stop_step, &mut record);
+            }
+        }
+
+        // 3. ESP presets
+        for esp in &self.state.esp_presets {
+            record(&esp.target_x);
+            record(&esp.target_y);
+            record(&esp.target_z);
+            record(&esp.entity_root);
+            record(&esp.camera_x);
+            record(&esp.camera_y);
+            record(&esp.camera_z);
+            record(&esp.camera_yaw);
+            record(&esp.camera_pitch);
+            record(&esp.camera_direction_a);
+            record(&esp.camera_direction_b);
+            if !esp.entity_auto_code_module.is_empty() {
+                record(&format!("{}+{:X}", esp.entity_auto_code_module, esp.entity_auto_code_offset));
+            }
+        }
+
+        // 4. Memory camera
+        record(&self.state.memory_camera_x);
+        record(&self.state.memory_camera_y);
+        record(&self.state.memory_camera_z);
+
+        // 5. Memory pointer list
+        for entry in &self.state.memory_pointer_list {
+            if !entry.module.is_empty() {
+                record(&format!("{}+{:X}", entry.module, entry.module_offset));
+            } else if let Some(addr) = entry.absolute_address {
+                record(&format!("0x{:X}", addr));
+            }
+            if !entry.code_module.is_empty() {
+                record(&format!("{}+{:X}", entry.code_module, entry.code_offset));
+            }
+        }
+
+        // 6. Memory code list
+        for entry in &self.state.memory_code_list {
+            if !entry.module.is_empty() {
+                record(&format!("{}+{:X}", entry.module, entry.offset));
+            }
+        }
+
+        // 7. Memory panel saved & manual address
+        for saved in &self.memory_panel.saved {
+            if let Some(ptr) = &saved.pointer {
+                if let Some((mod_name, mod_off)) = &ptr.module {
+                    record(&format!("{mod_name}+{:X}", mod_off));
+                } else {
+                    record(&format!("0x{:X}", ptr.base));
+                }
+            }
+        }
+        record(&self.memory_panel.manual_address);
+
+        let mut list: Vec<(String, usize)> = counts.into_iter().collect();
+        list.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        list
+    }
+
+    fn collect_step_bases(step: &MacroStep, record: &mut impl FnMut(&str)) {
+        if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction) {
+            record(&step.key);
+        }
+        record(&step.follow_3d_spec.leader_x);
+        record(&step.follow_3d_spec.leader_y);
+        record(&step.follow_3d_spec.leader_z);
+        record(&step.follow_3d_spec.follower_x);
+        record(&step.follow_3d_spec.follower_y);
+        record(&step.follow_3d_spec.follower_z);
+        record(&step.follow_3d_spec.camera_pitch);
+        record(&step.follow_3d_spec.camera_yaw);
+        record(&step.follow_3d_spec.camera_forward_a);
+        record(&step.follow_3d_spec.camera_forward_b);
+    }
+
+    pub fn count_pointer_base_matches(&self, old_base: &str) -> usize {
+        let old_base = old_base.trim();
+        if old_base.is_empty() {
+            return 0;
+        }
+        let old_hex = parse_hex_offset(old_base.split_once('+').map(|(_, off)| off).unwrap_or(old_base));
+        let mut count = 0;
+
+        // 1. Macro groups
+        for group in &self.state.macro_groups {
+            for preset in &group.presets {
+                for step in &preset.steps {
+                    count += Self::count_step_pointer_matches(step, old_base, old_hex);
+                }
+                if !preset.hold_stop_step.is_empty() {
+                    count += Self::count_step_pointer_matches(&preset.hold_stop_step, old_base, old_hex);
+                }
+                if !preset.press_stop_step.is_empty() {
+                    count += Self::count_step_pointer_matches(&preset.press_stop_step, old_base, old_hex);
+                }
+            }
+        }
+
+        // 2. Standalone macro presets
+        for preset in &self.state.macro_presets {
+            for step in &preset.steps {
+                count += Self::count_step_pointer_matches(step, old_base, old_hex);
+            }
+            if !preset.hold_stop_step.is_empty() {
+                count += Self::count_step_pointer_matches(&preset.hold_stop_step, old_base, old_hex);
+            }
+            if !preset.press_stop_step.is_empty() {
+                count += Self::count_step_pointer_matches(&preset.press_stop_step, old_base, old_hex);
+            }
+        }
+
+        // 3. ESP presets
+        for esp in &self.state.esp_presets {
+            if matches_pointer_base(&esp.target_x, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.target_y, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.target_z, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.entity_root, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.camera_x, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.camera_y, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.camera_z, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.camera_yaw, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.camera_pitch, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.camera_direction_a, old_base, old_hex) { count += 1; }
+            if matches_pointer_base(&esp.camera_direction_b, old_base, old_hex) { count += 1; }
+            if let Some((old_mod, _)) = old_base.split_once('+') {
+                if let Some(o_hex) = old_hex {
+                    if esp.entity_auto_code_module.eq_ignore_ascii_case(old_mod.trim()) && esp.entity_auto_code_offset == o_hex {
+                        count += 1;
+                    }
+                }
+            } else if let Some(o_hex) = old_hex {
+                if esp.entity_auto_code_offset == o_hex {
+                    count += 1;
+                }
+            }
+        }
+
+        // 4. Memory camera
+        if matches_pointer_base(&self.state.memory_camera_x, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&self.state.memory_camera_y, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&self.state.memory_camera_z, old_base, old_hex) { count += 1; }
+
+        // 5. Memory pointer list
+        for entry in &self.state.memory_pointer_list {
+            let mut matched = false;
+            if let Some((old_mod, _)) = old_base.split_once('+') {
+                if let Some(o_hex) = old_hex {
+                    if entry.module.eq_ignore_ascii_case(old_mod.trim()) && entry.module_offset == o_hex {
+                        matched = true;
+                    }
+                    if entry.code_module.eq_ignore_ascii_case(old_mod.trim()) && entry.code_offset == o_hex {
+                        matched = true;
+                    }
+                }
+            } else if let Some(o_hex) = old_hex {
+                if entry.module_offset == o_hex || entry.code_offset == o_hex || entry.absolute_address == Some(o_hex) {
+                    matched = true;
+                }
+            }
+            if matched {
+                count += 1;
+            }
+        }
+
+        // 6. Memory code list
+        for entry in &self.state.memory_code_list {
+            let mut matched = false;
+            if let Some((old_mod, _)) = old_base.split_once('+') {
+                if let Some(o_hex) = old_hex {
+                    if entry.module.eq_ignore_ascii_case(old_mod.trim()) && entry.offset == o_hex {
+                        matched = true;
+                    }
+                }
+            } else if let Some(o_hex) = old_hex {
+                if entry.offset == o_hex {
+                    matched = true;
+                }
+            }
+            if matched {
+                count += 1;
+            }
+        }
+
+        // 7. Memory panel saved
+        for saved in &self.memory_panel.saved {
+            let mut matched = false;
+            if let Some(ptr) = &saved.pointer {
+                if let Some((mod_name, mod_off)) = &ptr.module {
+                    if let Some((old_mod, _)) = old_base.split_once('+') {
+                        if let Some(o_hex) = old_hex {
+                            if mod_name.eq_ignore_ascii_case(old_mod.trim()) && *mod_off == o_hex {
+                                matched = true;
+                            }
+                        }
+                    } else if let Some(o_hex) = old_hex {
+                        if *mod_off == o_hex {
+                            matched = true;
+                        }
+                    }
+                } else if let Some(o_hex) = old_hex {
+                    if ptr.base == o_hex {
+                        matched = true;
+                    }
+                }
+            }
+            if let Some(o_hex) = old_hex {
+                if saved.address == o_hex {
+                    matched = true;
+                }
+            }
+            if matched {
+                count += 1;
+            }
+        }
+
+        // 8. Memory panel manual address
+        if matches_pointer_base(&self.memory_panel.manual_address, old_base, old_hex) {
+            count += 1;
+        }
+
+        count
+    }
+
+    fn count_step_pointer_matches(step: &MacroStep, old_base: &str, old_hex: Option<usize>) -> usize {
+        let mut count = 0;
+        if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction) {
+            if matches_pointer_base(&step.key, old_base, old_hex) {
+                count += 1;
+            }
+        }
+        if matches_pointer_base(&step.follow_3d_spec.leader_x, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.leader_y, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.leader_z, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.follower_x, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.follower_y, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.follower_z, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.camera_pitch, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.camera_yaw, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.camera_forward_a, old_base, old_hex) { count += 1; }
+        if matches_pointer_base(&step.follow_3d_spec.camera_forward_b, old_base, old_hex) { count += 1; }
+        count
+    }
+
+    pub fn batch_replace_pointer_bases(&mut self, old_base_input: &str, new_base_input: &str) -> usize {
+        let old_base = old_base_input.trim();
+        let new_base = new_base_input.trim();
+        if old_base.is_empty() || new_base.is_empty() {
+            return 0;
+        }
+
+        let effective_new_base = if let Some((old_mod, _)) = old_base.split_once('+') {
+            if !new_base.contains('+') {
+                let off_str = new_base
+                    .strip_prefix("0x")
+                    .or_else(|| new_base.strip_prefix("0X"))
+                    .unwrap_or(new_base);
+                format!("{}+{}", old_mod.trim(), off_str.trim())
+            } else {
+                new_base.to_string()
+            }
+        } else {
+            new_base.to_string()
+        };
+
+        let old_hex = parse_hex_offset(old_base.split_once('+').map(|(_, off)| off).unwrap_or(old_base));
+        let new_hex = parse_hex_offset(effective_new_base.split_once('+').map(|(_, off)| off).unwrap_or(&effective_new_base));
+
+        let mut count = 0;
+
+        // 1. Macro groups
+        for group in &mut self.state.macro_groups {
+            for preset in &mut group.presets {
+                for step in &mut preset.steps {
+                    count += Self::replace_in_macro_step(step, old_base, &effective_new_base, old_hex, new_hex);
+                }
+                if !preset.hold_stop_step.is_empty() {
+                    count += Self::replace_in_macro_step(&mut preset.hold_stop_step, old_base, &effective_new_base, old_hex, new_hex);
+                }
+                if !preset.press_stop_step.is_empty() {
+                    count += Self::replace_in_macro_step(&mut preset.press_stop_step, old_base, &effective_new_base, old_hex, new_hex);
+                }
+            }
+        }
+
+        // 2. Standalone macro presets
+        for preset in &mut self.state.macro_presets {
+            for step in &mut preset.steps {
+                count += Self::replace_in_macro_step(step, old_base, &effective_new_base, old_hex, new_hex);
+            }
+            if !preset.hold_stop_step.is_empty() {
+                count += Self::replace_in_macro_step(&mut preset.hold_stop_step, old_base, &effective_new_base, old_hex, new_hex);
+            }
+            if !preset.press_stop_step.is_empty() {
+                count += Self::replace_in_macro_step(&mut preset.press_stop_step, old_base, &effective_new_base, old_hex, new_hex);
+            }
+        }
+
+        // 3. ESP presets
+        for esp in &mut self.state.esp_presets {
+            if replace_pointer_in_str(&mut esp.target_x, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.target_y, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.target_z, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.entity_root, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.camera_x, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.camera_y, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.camera_z, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.camera_yaw, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.camera_pitch, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.camera_direction_a, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if replace_pointer_in_str(&mut esp.camera_direction_b, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+            if let Some((old_mod, _)) = old_base.split_once('+') {
+                if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                    if esp.entity_auto_code_module.eq_ignore_ascii_case(old_mod.trim()) && esp.entity_auto_code_offset == o_hex {
+                        if let Some((new_mod, _)) = effective_new_base.split_once('+') {
+                            esp.entity_auto_code_module = new_mod.trim().to_string();
+                        }
+                        esp.entity_auto_code_offset = n_hex;
+                        count += 1;
+                    }
+                }
+            } else if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                if esp.entity_auto_code_offset == o_hex {
+                    esp.entity_auto_code_offset = n_hex;
+                    count += 1;
+                }
+            }
+        }
+
+        // 4. Memory camera
+        if replace_pointer_in_str(&mut self.state.memory_camera_x, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut self.state.memory_camera_y, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut self.state.memory_camera_z, old_base, &effective_new_base, old_hex, new_hex) { count += 1; }
+
+        // 5. Memory pointer list
+        for entry in &mut self.state.memory_pointer_list {
+            let mut changed = false;
+            if let Some((old_mod, _)) = old_base.split_once('+') {
+                if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                    if entry.module.eq_ignore_ascii_case(old_mod.trim()) && entry.module_offset == o_hex {
+                        if let Some((new_mod, _)) = effective_new_base.split_once('+') {
+                            entry.module = new_mod.trim().to_string();
+                        }
+                        entry.module_offset = n_hex;
+                        changed = true;
+                    }
+                    if entry.code_module.eq_ignore_ascii_case(old_mod.trim()) && entry.code_offset == o_hex {
+                        if let Some((new_mod, _)) = effective_new_base.split_once('+') {
+                            entry.code_module = new_mod.trim().to_string();
+                        }
+                        entry.code_offset = n_hex;
+                        changed = true;
+                    }
+                }
+            } else if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                if entry.module_offset == o_hex {
+                    entry.module_offset = n_hex;
+                    changed = true;
+                }
+                if entry.code_offset == o_hex {
+                    entry.code_offset = n_hex;
+                    changed = true;
+                }
+                if entry.absolute_address == Some(o_hex) {
+                    entry.absolute_address = Some(n_hex);
+                    changed = true;
+                }
+            }
+            if changed {
+                count += 1;
+            }
+        }
+
+        // 6. Memory code list
+        for entry in &mut self.state.memory_code_list {
+            let mut changed = false;
+            if let Some((old_mod, _)) = old_base.split_once('+') {
+                if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                    if entry.module.eq_ignore_ascii_case(old_mod.trim()) && entry.offset == o_hex {
+                        if let Some((new_mod, _)) = effective_new_base.split_once('+') {
+                            entry.module = new_mod.trim().to_string();
+                        }
+                        entry.offset = n_hex;
+                        changed = true;
+                    }
+                }
+            } else if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                if entry.offset == o_hex {
+                    entry.offset = n_hex;
+                    changed = true;
+                }
+            }
+            if changed {
+                count += 1;
+            }
+        }
+
+        // 7. Memory panel saved
+        for saved in &mut self.memory_panel.saved {
+            let mut changed = false;
+            if let Some(ptr) = &mut saved.pointer {
+                if let Some((mod_name, mod_off)) = &mut ptr.module {
+                    if let Some((old_mod, _)) = old_base.split_once('+') {
+                        if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                            if mod_name.eq_ignore_ascii_case(old_mod.trim()) && *mod_off == o_hex {
+                                if let Some((new_mod, _)) = effective_new_base.split_once('+') {
+                                    *mod_name = new_mod.trim().to_string();
+                                }
+                                *mod_off = n_hex;
+                                changed = true;
+                            }
+                        }
+                    } else if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                        if *mod_off == o_hex {
+                            *mod_off = n_hex;
+                            changed = true;
+                        }
+                    }
+                } else if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                    if ptr.base == o_hex {
+                        ptr.base = n_hex;
+                        changed = true;
+                    }
+                }
+            }
+            if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+                if saved.address == o_hex {
+                    saved.address = n_hex;
+                    changed = true;
+                }
+            }
+            if changed {
+                count += 1;
+            }
+        }
+
+        // 8. Memory panel manual address
+        if replace_pointer_in_str(&mut self.memory_panel.manual_address, old_base, &effective_new_base, old_hex, new_hex) {
+            count += 1;
+        }
+
+        if count > 0 {
+            self.persist();
+            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+        }
+
+        count
+    }
+
+    fn replace_in_macro_step(
+        step: &mut MacroStep,
+        old_base: &str,
+        new_base: &str,
+        old_hex: Option<usize>,
+        new_hex: Option<usize>,
+    ) -> usize {
+        let mut count = 0;
+        if matches!(step.action, MacroAction::ReadMemory | MacroAction::WriteMemory | MacroAction::ScanInstruction) {
+            if replace_pointer_in_str(&mut step.key, old_base, new_base, old_hex, new_hex) {
+                count += 1;
+            }
+        }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.leader_x, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.leader_y, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.leader_z, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.follower_x, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.follower_y, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.follower_z, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.camera_pitch, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.camera_yaw, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.camera_forward_a, old_base, new_base, old_hex, new_hex) { count += 1; }
+        if replace_pointer_in_str(&mut step.follow_3d_spec.camera_forward_b, old_base, new_base, old_hex, new_hex) { count += 1; }
+        count
     }
 
     fn render_memory_code_list(&mut self, ui: &mut egui::Ui) {
@@ -19649,6 +20417,203 @@ fn parse_signed_hex_offset(text: &str) -> Option<isize> {
     Some(if negative { -value } else { value })
 }
 
+fn extract_base_part(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() || trimmed.starts_with('@') || trimmed.starts_with('{') {
+        return None;
+    }
+    let base_part = if let Some(bracket_idx) = trimmed.find('[') {
+        trimmed[..bracket_idx].trim()
+    } else {
+        trimmed
+    };
+    if base_part.is_empty() {
+        return None;
+    }
+    if let Some((module, off)) = base_part.rsplit_once('+') {
+        let module = module.trim();
+        let off = off.trim();
+        if !module.is_empty() && parse_hex_offset(off).is_some() {
+            return Some(format!("{module}+{off}"));
+        }
+    }
+    if base_part.starts_with("0x") || base_part.starts_with("0X") {
+        if parse_hex_offset(base_part).is_some() {
+            return Some(base_part.to_string());
+        }
+    }
+    if base_part.len() >= 5 && usize::from_str_radix(base_part, 16).is_ok() {
+        return Some(base_part.to_string());
+    }
+    None
+}
+
+fn replace_case_insensitive(haystack: &str, needle: &str, replacement: &str) -> (String, bool) {
+    if needle.is_empty() {
+        return (haystack.to_string(), false);
+    }
+    let lower_haystack = haystack.to_ascii_lowercase();
+    let lower_needle = needle.to_ascii_lowercase();
+    if !lower_haystack.contains(&lower_needle) {
+        return (haystack.to_string(), false);
+    }
+    let mut result = String::with_capacity(haystack.len() + replacement.len());
+    let mut last_end = 0;
+    for (start, _) in lower_haystack.match_indices(&lower_needle) {
+        result.push_str(&haystack[last_end..start]);
+        result.push_str(replacement);
+        last_end = start + needle.len();
+    }
+    result.push_str(&haystack[last_end..]);
+    (result, true)
+}
+
+fn replace_pointer_in_str(
+    s: &mut String,
+    old_base: &str,
+    new_base: &str,
+    old_hex: Option<usize>,
+    new_hex: Option<usize>,
+) -> bool {
+    let original = s.clone();
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // 1. Direct case-insensitive replacement
+    let (r1, m1) = replace_case_insensitive(s, old_base, new_base);
+    if m1 {
+        *s = r1;
+        return *s != original;
+    }
+
+    // 2. Stripped 0x / 0X prefix
+    let old_stripped = old_base
+        .strip_prefix("0x")
+        .or_else(|| old_base.strip_prefix("0X"))
+        .unwrap_or(old_base);
+    let new_stripped = new_base
+        .strip_prefix("0x")
+        .or_else(|| new_base.strip_prefix("0X"))
+        .unwrap_or(new_base);
+    if old_stripped != old_base || new_stripped != new_base {
+        let (r2, m2) = replace_case_insensitive(s, old_stripped, new_stripped);
+        if m2 {
+            *s = r2;
+            return *s != original;
+        }
+    }
+
+    // 3. Module + offset variations (e.g. mod+0xhex vs mod+hex)
+    if let (Some((old_mod, old_off_str)), Some((new_mod, new_off_str))) =
+        (old_base.split_once('+'), new_base.split_once('+'))
+    {
+        let old_clean = old_off_str
+            .trim()
+            .strip_prefix("0x")
+            .or_else(|| old_off_str.trim().strip_prefix("0X"))
+            .unwrap_or(old_off_str.trim());
+        let new_clean = new_off_str
+            .trim()
+            .strip_prefix("0x")
+            .or_else(|| new_off_str.trim().strip_prefix("0X"))
+            .unwrap_or(new_off_str.trim());
+
+        let v_old_1 = format!("{}+{}", old_mod.trim(), old_clean);
+        let v_new_1 = format!("{}+{}", new_mod.trim(), new_clean);
+        let (r3, m3) = replace_case_insensitive(s, &v_old_1, &v_new_1);
+        if m3 {
+            *s = r3;
+            return *s != original;
+        }
+
+        let v_old_2 = format!("{}+0x{}", old_mod.trim(), old_clean);
+        let v_new_2 = format!("{}+0x{}", new_mod.trim(), new_clean);
+        let (r4, m4) = replace_case_insensitive(s, &v_old_2, &v_new_2);
+        if m4 {
+            *s = r4;
+            return *s != original;
+        }
+    }
+
+    // 4. If structured hex offsets match the base part before brackets
+    if let (Some(o_hex), Some(n_hex)) = (old_hex, new_hex) {
+        if let Some(bracket_idx) = s.find('[') {
+            let base_part = s[..bracket_idx].trim();
+            if let Some((m, off_str)) = base_part.split_once('+') {
+                if let Some(parsed) = parse_hex_offset(off_str) {
+                    if parsed == o_hex {
+                        let new_mod = if let Some((nm, _)) = new_base.split_once('+') {
+                            nm.trim()
+                        } else {
+                            m.trim()
+                        };
+                        *s = format!("{}+{:X} {}", new_mod, n_hex, &s[bracket_idx..]);
+                        return *s != original;
+                    }
+                }
+            } else if let Some(parsed) = parse_hex_offset(base_part) {
+                if parsed == o_hex {
+                    *s = format!("0x{:X} {}", n_hex, &s[bracket_idx..]);
+                    return *s != original;
+                }
+            }
+        }
+    }
+
+    *s != original
+}
+
+fn matches_pointer_base(s: &str, old_base: &str, old_hex: Option<usize>) -> bool {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.to_ascii_lowercase().contains(&old_base.to_ascii_lowercase()) {
+        return true;
+    }
+    let old_stripped = old_base
+        .strip_prefix("0x")
+        .or_else(|| old_base.strip_prefix("0X"))
+        .unwrap_or(old_base);
+    if old_stripped != old_base
+        && trimmed.to_ascii_lowercase().contains(&old_stripped.to_ascii_lowercase())
+    {
+        return true;
+    }
+    if let Some((old_mod, old_off_str)) = old_base.split_once('+') {
+        let clean = old_off_str
+            .trim()
+            .strip_prefix("0x")
+            .or_else(|| old_off_str.trim().strip_prefix("0X"))
+            .unwrap_or(old_off_str.trim());
+        let v1 = format!("{}+{}", old_mod.trim(), clean).to_ascii_lowercase();
+        let v2 = format!("{}+0x{}", old_mod.trim(), clean).to_ascii_lowercase();
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.contains(&v1) || lower.contains(&v2) {
+            return true;
+        }
+    }
+    if let Some(o_hex) = old_hex {
+        if let Some(bracket_idx) = trimmed.find('[') {
+            let base_part = trimmed[..bracket_idx].trim();
+            if let Some((_, off_str)) = base_part.split_once('+') {
+                if let Some(parsed) = parse_hex_offset(off_str) {
+                    if parsed == o_hex {
+                        return true;
+                    }
+                }
+            } else if let Some(parsed) = parse_hex_offset(base_part) {
+                if parsed == o_hex {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(windows)]
 fn instruction_memory_displacement(instruction: &str) -> isize {
     let Some(open) = instruction.find('[') else {
@@ -20579,5 +21544,86 @@ mod tests {
         let sign_fwd = if diff_fwd > 0 { "+" } else { "" };
         let formatted_fwd = format!("0x{test_entity_fwd:X} ({sign_fwd}{diff_fwd})\nBase: 0x{:X}", closest.unwrap());
         assert_eq!(formatted_fwd, "0x1004 (+4)\nBase: 0x1000");
+    }
+
+    #[test]
+    fn batch_pointer_base_extraction_and_replacement() {
+        // Test base extraction
+        assert_eq!(
+            extract_base_part("neox_engine.dll+8B68EC8 [468, 150]"),
+            Some("neox_engine.dll+8B68EC8".to_string())
+        );
+        assert_eq!(
+            extract_base_part("neox_engine.dll+8B68EC8"),
+            Some("neox_engine.dll+8B68EC8".to_string())
+        );
+        assert_eq!(
+            extract_base_part("0x8B68EC8 [468, 150]"),
+            Some("0x8B68EC8".to_string())
+        );
+        assert_eq!(extract_base_part("@Health"), None);
+        assert_eq!(extract_base_part("{target}"), None);
+        assert_eq!(extract_base_part(""), None);
+
+        // Test string replacement preserving offsets
+        let mut s1 = "neox_engine.dll+8B68EC8 [468, 150]".to_string();
+        let changed = replace_pointer_in_str(
+            &mut s1,
+            "neox_engine.dll+8B68EC8",
+            "neox_engine.dll+9067700",
+            Some(0x8B68EC8),
+            Some(0x9067700),
+        );
+        assert!(changed);
+        assert_eq!(s1, "neox_engine.dll+9067700 [468, 150]");
+
+        // Test case insensitivity
+        let mut s2 = "NEOX_ENGINE.DLL+8b68ec8 [10, 20]".to_string();
+        let changed = replace_pointer_in_str(
+            &mut s2,
+            "neox_engine.dll+8B68EC8",
+            "neox_engine.dll+9067700",
+            Some(0x8B68EC8),
+            Some(0x9067700),
+        );
+        assert!(changed);
+        assert_eq!(s2, "neox_engine.dll+9067700 [10, 20]");
+
+        // Test hex replacement without module
+        let mut s3 = "neox_engine.dll+8B68EC8 [468, 150]".to_string();
+        let changed = replace_pointer_in_str(
+            &mut s3,
+            "8B68EC8",
+            "9067700",
+            Some(0x8B68EC8),
+            Some(0x9067700),
+        );
+        assert!(changed);
+        assert_eq!(s3, "neox_engine.dll+9067700 [468, 150]");
+
+        // Test matching check
+        assert!(matches_pointer_base("neox_engine.dll+8B68EC8 [468, 150]", "neox_engine.dll+8B68EC8", Some(0x8B68EC8)));
+        assert!(matches_pointer_base("neox_engine.dll+8B68EC8 [468, 150]", "8B68EC8", Some(0x8B68EC8)));
+        assert!(!matches_pointer_base("neox_engine.dll+9999999 [468, 150]", "8B68EC8", Some(0x8B68EC8)));
+
+        // Test MacroStep replacement with Follow3D
+        let mut step = MacroStep::default();
+        step.action = MacroAction::ReadMemory;
+        step.key = "neox_engine.dll+8B68EC8 [468, 150]".to_string();
+        step.follow_3d_spec.leader_x = "neox_engine.dll+8B68EC8 [10]".to_string();
+        step.follow_3d_spec.leader_y = "neox_engine.dll+8B68EC8 [14]".to_string();
+        step.follow_3d_spec.follower_x = "neox_engine.dll+8B68EC8 [20]".to_string();
+        let replaced_count = CrosshairApp::replace_in_macro_step(
+            &mut step,
+            "neox_engine.dll+8B68EC8",
+            "neox_engine.dll+9067700",
+            Some(0x8B68EC8),
+            Some(0x9067700),
+        );
+        assert_eq!(replaced_count, 4);
+        assert_eq!(step.key, "neox_engine.dll+9067700 [468, 150]");
+        assert_eq!(step.follow_3d_spec.leader_x, "neox_engine.dll+9067700 [10]");
+        assert_eq!(step.follow_3d_spec.leader_y, "neox_engine.dll+9067700 [14]");
+        assert_eq!(step.follow_3d_spec.follower_x, "neox_engine.dll+9067700 [20]");
     }
 }
