@@ -859,7 +859,6 @@ fn watch_loop<F>(
                         duty_phase_start = Instant::now();
                     }
                 } else if duty_phase_start.elapsed() >= pause {
-                    unique_execute_addresses.clear();
                     rearm_existing_threads(&threads, &kind, architecture, active_slot_start);
                     duty_state_burst = true;
                     duty_phase_start = Instant::now();

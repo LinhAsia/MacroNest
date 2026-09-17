@@ -24,9 +24,7 @@ pub(super) struct EspEntityRootCapture {
     merge_pairs: bool,
     drop_nearest: bool,
     continuous: bool,
-    continuous_interval_secs: f32,
     addresses: Vec<usize>,
-    address_last_seen: std::collections::HashMap<usize, std::time::Instant>,
     rx: std::sync::mpsc::Receiver<WatchEvent>,
     active: Option<AccessWatch>,
     hud_preset_id: Option<u32>,
@@ -398,6 +396,11 @@ impl CrosshairApp {
                         None
                     }
                 });
+                let initial_addresses = if continuous {
+                    preset.entity_hit_order_addresses.clone()
+                } else {
+                    Vec::with_capacity(128)
+                };
                 self.esp_entity_root_capture = Some(EspEntityRootCapture {
                     preset_id,
                     pid,
@@ -408,9 +411,7 @@ impl CrosshairApp {
                     merge_pairs,
                     drop_nearest,
                     continuous,
-                    continuous_interval_secs,
-                    addresses: Vec::with_capacity(128),
-                    address_last_seen: std::collections::HashMap::new(),
+                    addresses: initial_addresses,
                     rx,
                     active: Some(active),
                     hud_preset_id,
@@ -466,12 +467,10 @@ impl CrosshairApp {
             match event {
                 WatchEvent::Started { .. } => {}
                 WatchEvent::AccessHit { data_address, .. } => {
-                    let now = std::time::Instant::now();
-                    capture.address_last_seen.insert(data_address, now);
                     if !capture.addresses.contains(&data_address) {
                         capture.addresses.push(data_address);
                     }
-                    capture.last_hit_at = now;
+                    capture.last_hit_at = std::time::Instant::now();
                     changed = true;
                 }
                 WatchEvent::CaptureLimitReached(limit) => {
@@ -499,25 +498,6 @@ impl CrosshairApp {
                 WatchEvent::Stopped
                 | WatchEvent::AddressHit { .. }
                 | WatchEvent::BatchProgress { .. } => {}
-            }
-        }
-        if capture.continuous && !capture.addresses.is_empty() {
-            let now = std::time::Instant::now();
-            let stale_threshold = std::time::Duration::from_secs_f32(
-                (capture.continuous_interval_secs * 2.5).max(3.0),
-            );
-            let before_len = capture.addresses.len();
-            capture.addresses.retain(|addr| {
-                capture
-                    .address_last_seen
-                    .get(addr)
-                    .map_or(true, |&last| now.duration_since(last) <= stale_threshold)
-            });
-            if capture.addresses.len() != before_len {
-                capture
-                    .address_last_seen
-                    .retain(|addr, _| capture.addresses.contains(addr));
-                changed = true;
             }
         }
         let (candidate, matched, resolved_addresses) = match capture.scan_mode {
