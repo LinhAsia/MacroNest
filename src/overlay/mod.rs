@@ -25416,13 +25416,40 @@ mod windows_overlay {
                     let mut snapshots = HashMap::with_capacity(presets.len());
                     let mut audio_updates = Vec::new();
                     read_frame.begin_sample();
+                    let mut all_preset_targets: HashMap<u32, Vec<([f32; 3], usize, usize)>> =
+                        HashMap::with_capacity(presets.len());
+                    for sample in &presets {
+                        if let Ok((pid, _, _, _, _)) =
+                            read_esp_view_inputs(&sample.preset, &mut read_frame)
+                        {
+                            if let Ok(targets) =
+                                read_esp_targets(&sample.preset, &mut read_frame, pid)
+                            {
+                                all_preset_targets.insert(sample.preset.id, targets);
+                            }
+                        }
+                    }
                     for sample in &presets {
                         let preset = &sample.preset;
+                        let mut targets =
+                            all_preset_targets.get(&preset.id).cloned().unwrap_or_default();
+                        if preset.entity_exclude_near_preset_enabled {
+                            if let Some(other_id) = preset.entity_exclude_near_preset_id {
+                                if let Some(other_targets) = all_preset_targets.get(&other_id) {
+                                    crate::model::filter_exclude_near_targets(
+                                        &mut targets,
+                                        other_targets,
+                                        preset.entity_exclude_near_max_distance,
+                                    );
+                                }
+                            }
+                        }
                         let (shapes, snapshot) = esp_shapes_for_preset(
                             preset,
                             sample.marker_asset.as_ref(),
                             &mut read_frame,
                             &mut audio_updates,
+                            targets,
                         );
                         if let Some(snapshot) = snapshot {
                             snapshots.insert(preset.id, snapshot);
@@ -26129,6 +26156,7 @@ mod windows_overlay {
         marker_asset: Option<&Arc<str>>,
         frame: &mut EspReadFrame,
         audio_updates: &mut Vec<crate::audio::EspSpatialAudioUpdate>,
+        targets: Vec<([f32; 3], usize, usize)>,
     ) -> (Vec<GeometryRenderShape>, Option<EspTargetSnapshot>) {
         if preset.target_window.trim().is_empty() {
             return (Vec::new(), None);
@@ -26140,10 +26168,7 @@ mod windows_overlay {
         if width <= 0 || height <= 0 {
             return (Vec::new(), None);
         }
-        let Ok((pid, camera, yaw, pitch, raw_direction)) = read_esp_view_inputs(preset, frame) else {
-            return (Vec::new(), None);
-        };
-        let Ok(targets) = read_esp_targets(preset, frame, pid) else {
+        let Ok((_pid, camera, yaw, pitch, raw_direction)) = read_esp_view_inputs(preset, frame) else {
             return (Vec::new(), None);
         };
         let nearest_target = targets.iter().map(|(t, _, _)| *t).min_by(|left, right| {

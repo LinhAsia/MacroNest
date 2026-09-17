@@ -1334,6 +1334,61 @@ impl CrosshairApp {
                                 }
                             });
                             ui.end_row();
+                            ui.label("");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(
+                                    &mut preset.entity_exclude_near_preset_enabled,
+                                    self.tr("Drop near preset", "Bỏ box gần preset"),
+                                )
+                                .on_hover_text(self.tr(
+                                    "Hide entities that match or are closest to entities in another active ESP preset (avoids duplicate overlapping boxes).",
+                                    "Ẩn các thực thể trùng hoặc gần nhất với thực thể trong một preset ESP khác đang bật (tránh bị 2 box đè nhau).",
+                                ));
+
+                                if preset.entity_exclude_near_preset_enabled {
+                                    let other_name = preset
+                                        .entity_exclude_near_preset_id
+                                        .and_then(|id| {
+                                            self.state
+                                                .esp_presets
+                                                .iter()
+                                                .find(|p| p.id == id)
+                                        })
+                                        .map_or(self.tr("Select preset", "Chọn preset"), |p| p.name.as_str());
+                                    ComboBox::from_id_salt(("esp_exclude_near_preset", preset.id))
+                                        .selected_text(other_name)
+                                        .width(130.0)
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut preset.entity_exclude_near_preset_id,
+                                                None,
+                                                self.tr("-- None --", "-- Không --"),
+                                            );
+                                            for other in &self.state.esp_presets {
+                                                if other.id != preset.id {
+                                                    ui.selectable_value(
+                                                        &mut preset.entity_exclude_near_preset_id,
+                                                        Some(other.id),
+                                                        &other.name,
+                                                    );
+                                                }
+                                            }
+                                        });
+
+                                    ui.label(self.tr("Max dist", "Khoảng cách"));
+                                    ui.add(
+                                        DragValue::new(&mut preset.entity_exclude_near_max_distance)
+                                            .range(0.0..=1000.0)
+                                            .speed(0.5)
+                                            .suffix("m"),
+                                    )
+                                    .on_hover_text(self.tr(
+                                        "Maximum 3D distance to match and drop (0 = always drop closest regardless of distance).",
+                                        "Khoảng cách 3D tối đa để loại bỏ (0 = luôn loại bỏ box gần nhất không giới hạn khoảng cách).",
+                                    ));
+                                }
+                            });
+                            ui.end_row();
                             ui.label("Entity colors");
                             ui.horizontal_wrapped(|ui| {
                                 ui.label("Entity #");

@@ -113,6 +113,12 @@ pub struct EspPreset {
     pub entity_hit_order_addresses: Vec<usize>,
     #[serde(default)]
     pub entity_blacklisted_addresses: Vec<usize>,
+    #[serde(default)]
+    pub entity_exclude_near_preset_enabled: bool,
+    #[serde(default)]
+    pub entity_exclude_near_preset_id: Option<u32>,
+    #[serde(default)]
+    pub entity_exclude_near_max_distance: f32,
     pub entity_auto_hud_enabled: bool,
     pub entity_auto_hud_preset_id: Option<u32>,
     pub entity_aabb_center: bool,
@@ -239,6 +245,9 @@ impl EspPreset {
             entity_hit_order_drop_nearest: false,
             entity_hit_order_addresses: Vec::new(),
             entity_blacklisted_addresses: Vec::new(),
+            entity_exclude_near_preset_enabled: false,
+            entity_exclude_near_preset_id: None,
+            entity_exclude_near_max_distance: 0.0,
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
@@ -1195,6 +1204,76 @@ pub(crate) fn project_esp_normalized(
     ))
 }
 
+/// Drops targets from `targets` that match or are closest to any target in `other_targets`.
+/// Matching priority:
+/// 1. Exact entity address match (if address != 0).
+/// 2. Closest 3D Euclidean distance (if max_distance <= 0.0 or distance <= max_distance).
+/// Each target in `other_targets` drops at most one unique target from `targets`.
+pub fn filter_exclude_near_targets(
+    targets: &mut Vec<([f32; 3], usize, usize)>,
+    other_targets: &[([f32; 3], usize, usize)],
+    max_distance: f32,
+) {
+    if targets.is_empty() || other_targets.is_empty() {
+        return;
+    }
+
+    let mut dropped_indices = std::collections::HashSet::new();
+
+    for (other_pos, other_addr, _) in other_targets {
+        // 1. Try exact entity address match first (if addr != 0)
+        if *other_addr != 0 {
+            if let Some((idx, _)) = targets
+                .iter()
+                .enumerate()
+                .find(|(i, (_, addr, _))| !dropped_indices.contains(i) && addr == other_addr)
+            {
+                dropped_indices.insert(idx);
+                continue;
+            }
+        }
+
+        // 2. Find closest target in targets by 3D distance
+        let mut min_dist_sq = f32::MAX;
+        let mut min_idx = None;
+
+        for (i, (pos, _, _)) in targets.iter().enumerate() {
+            if dropped_indices.contains(&i) {
+                continue;
+            }
+            let dx = pos[0] - other_pos[0];
+            let dy = pos[1] - other_pos[1];
+            let dz = pos[2] - other_pos[2];
+            let dist_sq = dx * dx + dy * dy + dz * dz;
+
+            if dist_sq < min_dist_sq {
+                min_dist_sq = dist_sq;
+                min_idx = Some(i);
+            }
+        }
+
+        if let Some(idx) = min_idx {
+            let limit_dist_sq = if max_distance > 0.0 {
+                max_distance * max_distance
+            } else {
+                f32::MAX
+            };
+            if min_dist_sq <= limit_dist_sq {
+                dropped_indices.insert(idx);
+            }
+        }
+    }
+
+    if !dropped_indices.is_empty() {
+        let mut idx = 0;
+        targets.retain(|_| {
+            let keep = !dropped_indices.contains(&idx);
+            idx += 1;
+            keep
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1553,6 +1632,56 @@ mod tests {
         assert!(perms.iter().any(|p| p.short_desc.contains("InvA")));
         assert!(perms.iter().any(|p| p.short_desc.contains("InvB")));
         assert!(perms.iter().any(|p| p.short_desc.contains("MirrorX")));
+    }
+
+    #[test]
+    fn test_filter_exclude_near_targets() {
+        let mut targets = vec![
+            ([10.0, 0.0, 0.0], 0x1000, 0), // Surv 1
+            ([20.0, 0.0, 0.0], 0x2000, 1), // Surv 2
+            ([30.0, 0.0, 0.0], 0x3000, 2), // Surv 3
+            ([100.0, 0.0, 0.0], 0x4000, 3), // Hunter
+        ];
+        let hunter_targets = vec![
+            ([100.2, 0.1, 0.0], 0x9999, 0), // Hunter in preset B (different address, ~0.22m away)
+        ];
+
+        // Should drop the hunter because it is closest (dist ~0.22m)
+        filter_exclude_near_targets(&mut targets, &hunter_targets, 0.0);
+        assert_eq!(targets.len(), 3);
+        assert_eq!(targets[0].1, 0x1000);
+        assert_eq!(targets[1].1, 0x2000);
+        assert_eq!(targets[2].1, 0x3000);
+
+        // Exact address match test
+        let mut targets2 = vec![
+            ([10.0, 0.0, 0.0], 0x1000, 0),
+            ([20.0, 0.0, 0.0], 0x2000, 1),
+        ];
+        let other = vec![([50.0, 50.0, 50.0], 0x1000, 0)]; // Address matches 0x1000
+        filter_exclude_near_targets(&mut targets2, &other, 5.0);
+        assert_eq!(targets2.len(), 1);
+        assert_eq!(targets2[0].1, 0x2000);
+
+        // Max distance threshold limit test
+        let mut targets3 = vec![([10.0, 0.0, 0.0], 0x1000, 0)];
+        let far_other = vec![([50.0, 0.0, 0.0], 0x9999, 0)]; // 40m away
+        filter_exclude_near_targets(&mut targets3, &far_other, 5.0); // max dist 5.0m
+        assert_eq!(targets3.len(), 1); // Not dropped because 40m > 5.0m
+    }
+
+    #[test]
+    fn test_exclude_near_preset_serde_defaults() {
+        let preset = EspPreset::default();
+        assert!(!preset.entity_exclude_near_preset_enabled);
+        assert_eq!(preset.entity_exclude_near_preset_id, None);
+        assert_eq!(preset.entity_exclude_near_max_distance, 0.0);
+
+        let json = serde_json::to_string(&preset).unwrap();
+        let loaded: EspPreset = serde_json::from_str(&json).unwrap();
+        assert!(!loaded.entity_exclude_near_preset_enabled);
+        assert_eq!(loaded.entity_exclude_near_preset_id, None);
+        assert_eq!(loaded.entity_exclude_near_max_distance, 0.0);
     }
 }
 
