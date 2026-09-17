@@ -795,15 +795,24 @@ impl CrosshairApp {
                     .num_columns(2)
                     .spacing([8.0, 4.0])
                     .show(ui, |ui| {
-                        ui.label("Target window");
+                        ui.label(self.tr("Target window", "Cửa sổ mục tiêu"));
                         let matched_window = windows
                             .iter()
                             .find(|window| window.selector == preset.target_window)
                             .or_else(|| {
                                 let title =
-                                    crate::window_list::selector_base_title(&preset.target_window);
+                                    crate::window_list::selector_base_title(&preset.target_window)
+                                        .trim();
                                 (!title.is_empty())
-                                    .then(|| windows.iter().find(|window| window.title == title))
+                                    .then(|| {
+                                        windows.iter().find(|window| {
+                                            let w_title = window.title.trim();
+                                            w_title == title
+                                                || w_title.eq_ignore_ascii_case(title)
+                                                || crate::window_list::selector_base_title(w_title)
+                                                    == title
+                                        })
+                                    })
                                     .flatten()
                             })
                             .cloned();
@@ -812,17 +821,37 @@ impl CrosshairApp {
                         {
                             preset.target_window = window.selector.clone();
                         }
-                        if !windows.is_empty() && matched_window.is_none() && !preset.target_window.is_empty() {
-                            preset.target_window.clear();
-                        }
                         let target_label = matched_window
                             .as_ref()
                             .map(|window| format!("{} [PID {}]", window.title, window.process_id))
-                            .unwrap_or_else(|| "Select window".to_string());
+                            .unwrap_or_else(|| {
+                                if !preset.target_window.is_empty() {
+                                    let base = crate::window_list::selector_base_title(
+                                        &preset.target_window,
+                                    );
+                                    let is_vi = self.state.ui_language
+                                        == crate::model::UiLanguage::Vietnamese;
+                                    if is_vi {
+                                        format!("{base} (Không mở / Ẩn)")
+                                    } else {
+                                        format!("{base} (Offline / Minimized)")
+                                    }
+                                } else {
+                                    self.tr("Select window", "Chọn cửa sổ").to_string()
+                                }
+                            });
                         ComboBox::from_id_salt(("esp_window", preset.id))
                             .selected_text(target_label)
                             .width(320.0)
                             .show_ui(ui, |ui| {
+                                if !preset.target_window.is_empty() {
+                                    let clear_label =
+                                        self.tr("-- Clear / None --", "-- Bỏ chọn / Trống --");
+                                    if ui.selectable_label(false, clear_label).clicked() {
+                                        preset.target_window.clear();
+                                    }
+                                    ui.separator();
+                                }
                                 for window in &windows {
                                     ui.selectable_value(
                                         &mut preset.target_window,
