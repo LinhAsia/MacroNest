@@ -1585,55 +1585,73 @@ impl CrosshairApp {
                     ui.ctx().request_repaint();
                 }
                 if ui
-                    .button(self.tr("Memory settings", "Memory settings"))
+                    .button(self.tr("Memory settings", "Cài đặt"))
                     .clicked()
                 {
                     self.memory_panel.memory_settings_open = true;
                 }
-                if ui.button("Find camera matrix").clicked() {
-                    self.open_camera_matrix_dialog();
-                }
-                if ui.button("Find entity list").clicked() {
-                    self.open_entity_list_dialog();
-                }
-                if ui.button(self.tr("Object proximity finder", "So sánh cụm Object")).clicked() {
-                    self.open_proximity_finder_dialog();
-                }
                 if ui
-                    .button(self.tr("Advanced options", "Advanced options"))
-                    .clicked()
-                {
-                    self.memory_panel.code_list_open = true;
-                }
-                #[cfg(windows)]
-                ui.menu_button(self.tr("Memory view", "Memory view"), |ui| {
-                    if ui
-                        .button(self.tr("Enumerate modules / DLLs", "Enumerate modules / DLLs"))
-                        .clicked()
-                    {
-                        self.open_memory_module_list();
-                        ui.ctx().request_repaint();
-                        ui.close();
-                    }
-                });
-                if ui
-                    .button(self.tr("Saved addresses", "Saved addresses"))
+                    .button(self.tr("Saved addresses", "Địa chỉ đã lưu"))
                     .clicked()
                 {
                     self.memory_panel.saved_library_open = true;
                 }
-                if ui
-                    .button(self.tr("Auto DLL Studio", "Auto DLL Studio"))
-                    .clicked()
-                {
-                    self.memory_panel.show_dll_studio = true;
-                }
-                if ui
-                    .button(self.tr("Batch update bases", "Đổi base hàng loạt"))
-                    .clicked()
-                {
-                    self.memory_panel.batch_replace_open = true;
-                }
+                ui.menu_button(self.tr("🛠 Tools", "🛠 Công cụ"), |ui| {
+                    if ui
+                        .button(self.tr("🔄 Batch update bases", "🔄 Đổi base hàng loạt"))
+                        .clicked()
+                    {
+                        self.memory_panel.batch_replace_open = true;
+                        ui.close();
+                    }
+                    if ui
+                        .button(self.tr("⚡ Auto DLL Studio", "⚡ Auto DLL Studio"))
+                        .clicked()
+                    {
+                        self.memory_panel.show_dll_studio = true;
+                        ui.close();
+                    }
+                    if ui
+                        .button(self.tr("📜 Advanced options (Code list)", "📜 Tùy chọn nâng cao (Code list)"))
+                        .clicked()
+                    {
+                        self.memory_panel.code_list_open = true;
+                        ui.close();
+                    }
+                    if ui
+                        .button(self.tr("🔍 Object proximity finder", "🔍 So sánh cụm Object"))
+                        .clicked()
+                    {
+                        self.open_proximity_finder_dialog();
+                        ui.close();
+                    }
+                    if ui
+                        .button(self.tr("🎥 Find camera matrix", "🎥 Tìm camera matrix"))
+                        .clicked()
+                    {
+                        self.open_camera_matrix_dialog();
+                        ui.close();
+                    }
+                    if ui
+                        .button(self.tr("👾 Find entity list", "👾 Tìm danh sách Entity"))
+                        .clicked()
+                    {
+                        self.open_entity_list_dialog();
+                        ui.close();
+                    }
+                    #[cfg(windows)]
+                    {
+                        ui.separator();
+                        if ui
+                            .button(self.tr("📦 Enumerate modules / DLLs", "📦 Danh sách module / DLL"))
+                            .clicked()
+                        {
+                            self.open_memory_module_list();
+                            ui.ctx().request_repaint();
+                            ui.close();
+                        }
+                    }
+                });
 
                 // Status text in remaining middle space with truncate
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
