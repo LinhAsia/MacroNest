@@ -17,12 +17,15 @@ use crate::memory_debugger::debugger::{
 pub(super) struct EspEntityRootCapture {
     pub(super) preset_id: u32,
     pid: u32,
+    target_count: usize,
     required: usize,
     scan_mode: crate::model::EspAutoScanMode,
     hit_step: usize,
     multi_strides: Vec<usize>,
     merge_pairs: bool,
     drop_nearest: bool,
+    self_dropped: bool,
+    blacklisted_self_addresses: std::collections::HashSet<usize>,
     continuous: bool,
     addresses: Vec<usize>,
     rx: std::sync::mpsc::Receiver<WatchEvent>,
@@ -129,8 +132,8 @@ impl CrosshairApp {
                     );
                 }
             }
-            let mut dropped_self = false;
-            if capture.drop_nearest && final_addresses.len() > 1 {
+            let mut dropped_self = capture.self_dropped;
+            if capture.drop_nearest && final_addresses.len() > 1 && !capture.self_dropped {
                 if let Some(preset) = self
                     .state
                     .esp_presets
@@ -142,11 +145,23 @@ impl CrosshairApp {
                         preset,
                         &final_addresses,
                     ) {
-                        final_addresses.remove(dropped_idx);
+                        let self_addr = final_addresses.remove(dropped_idx);
+                        capture.blacklisted_self_addresses.insert(self_addr);
+                        if let Some(preset_mut) = self
+                            .state
+                            .esp_presets
+                            .iter_mut()
+                            .find(|p| p.id == capture.preset_id)
+                        {
+                            if !preset_mut.entity_blacklisted_addresses.contains(&self_addr) {
+                                preset_mut.entity_blacklisted_addresses.push(self_addr);
+                            }
+                        }
                         dropped_self = true;
                     }
                 }
             }
+            final_addresses.retain(|addr| !capture.blacklisted_self_addresses.contains(addr));
             if !final_addresses.is_empty() {
                 if let Some(preset) = self
                     .state
@@ -191,8 +206,8 @@ impl CrosshairApp {
             self.esp_entity_capture_hud_hide_at = None;
         } else if let Some(mut root) = candidate {
             let mut final_count = matched.max(1) as u32;
-            let mut dropped_self = false;
-            if capture.drop_nearest && final_count > 1 {
+            let mut dropped_self = capture.self_dropped;
+            if capture.drop_nearest && final_count > 1 && !capture.self_dropped {
                 if let Some(preset) = self
                     .state
                     .esp_presets
@@ -208,6 +223,18 @@ impl CrosshairApp {
                         preset,
                         &addresses,
                     ) {
+                        let self_addr = addresses[dropped_idx];
+                        capture.blacklisted_self_addresses.insert(self_addr);
+                        if let Some(preset_mut) = self
+                            .state
+                            .esp_presets
+                            .iter_mut()
+                            .find(|p| p.id == capture.preset_id)
+                        {
+                            if !preset_mut.entity_blacklisted_addresses.contains(&self_addr) {
+                                preset_mut.entity_blacklisted_addresses.push(self_addr);
+                            }
+                        }
                         if dropped_idx == 0 {
                             root = root.saturating_add(stride);
                         }
@@ -386,6 +413,12 @@ impl CrosshairApp {
                 },
             )
         };
+        let target_count = preset.entity_auto_capture_count.clamp(1, 512) as usize;
+        let mut blacklisted_self_addresses = std::collections::HashSet::new();
+        for &addr in &preset.entity_blacklisted_addresses {
+            blacklisted_self_addresses.insert(addr);
+        }
+        let self_dropped = !blacklisted_self_addresses.is_empty();
         match started {
             Ok(active) => {
                 let now = std::time::Instant::now();
@@ -404,12 +437,15 @@ impl CrosshairApp {
                 self.esp_entity_root_capture = Some(EspEntityRootCapture {
                     preset_id,
                     pid,
+                    target_count,
                     required,
                     scan_mode,
                     hit_step,
                     multi_strides,
                     merge_pairs,
                     drop_nearest,
+                    self_dropped,
+                    blacklisted_self_addresses,
                     continuous,
                     addresses: initial_addresses,
                     rx,
@@ -467,6 +503,9 @@ impl CrosshairApp {
             match event {
                 WatchEvent::Started { .. } => {}
                 WatchEvent::AccessHit { data_address, .. } => {
+                    if capture.blacklisted_self_addresses.contains(&data_address) {
+                        continue;
+                    }
                     if !capture.addresses.contains(&data_address) {
                         capture.addresses.push(data_address);
                     }
@@ -498,6 +537,39 @@ impl CrosshairApp {
                 WatchEvent::Stopped
                 | WatchEvent::AddressHit { .. }
                 | WatchEvent::BatchProgress { .. } => {}
+            }
+        }
+        if capture.drop_nearest
+            && !capture.self_dropped
+            && capture.addresses.len() >= capture.target_count.max(2)
+        {
+            if let Some(preset) = self
+                .state
+                .esp_presets
+                .iter()
+                .find(|p| p.id == capture.preset_id)
+            {
+                if let Some(dropped_idx) = find_nearest_entity_index(
+                    capture.pid,
+                    preset,
+                    &capture.addresses,
+                ) {
+                    let self_addr = capture.addresses.remove(dropped_idx);
+                    capture.blacklisted_self_addresses.insert(self_addr);
+                    capture.self_dropped = true;
+                    if let Some(preset_mut) = self
+                        .state
+                        .esp_presets
+                        .iter_mut()
+                        .find(|p| p.id == capture.preset_id)
+                    {
+                        if !preset_mut.entity_blacklisted_addresses.contains(&self_addr) {
+                            preset_mut.entity_blacklisted_addresses.push(self_addr);
+                        }
+                        preset_mut.entity_hit_order_addresses.retain(|&a| a != self_addr);
+                    }
+                    changed = true;
+                }
             }
         }
         let (candidate, matched, resolved_addresses) = match capture.scan_mode {
@@ -565,9 +637,17 @@ impl CrosshairApp {
                     || capture.scan_mode == crate::model::EspAutoScanMode::AllHits
                 {
                     if let Some(resolved) = &resolved_addresses {
-                        if &preset.entity_hit_order_addresses != resolved {
-                            preset.entity_hit_order_addresses = resolved.clone();
-                            preset.entity_count = resolved.len() as u32;
+                        let filtered_resolved: Vec<usize> = resolved
+                            .iter()
+                            .copied()
+                            .filter(|addr| {
+                                !capture.blacklisted_self_addresses.contains(addr)
+                                    && !preset.entity_blacklisted_addresses.contains(addr)
+                            })
+                            .collect();
+                        if &preset.entity_hit_order_addresses != &filtered_resolved {
+                            preset.entity_hit_order_addresses = filtered_resolved.clone();
+                            preset.entity_count = filtered_resolved.len() as u32;
                             needs_sync = true;
                         }
                     }
@@ -1016,7 +1096,10 @@ impl CrosshairApp {
                                             );
                                         }
 
-                                        if scan_mode != crate::model::EspAutoScanMode::AllHits && !preset.entity_auto_continuous {
+                                        if scan_mode != crate::model::EspAutoScanMode::AllHits
+                                            || preset.entity_hit_order_drop_nearest
+                                            || !preset.entity_auto_continuous
+                                        {
                                             ui.label("Need");
                                             ui.add(
                                                 DragValue::new(&mut preset.entity_auto_capture_count)
@@ -1032,7 +1115,9 @@ impl CrosshairApp {
                                                 crate::model::EspAutoScanMode::Stride => {
                                                     "Stop only after this many addresses form one group at the configured Stride."
                                                 }
-                                                crate::model::EspAutoScanMode::AllHits => "",
+                                                crate::model::EspAutoScanMode::AllHits => {
+                                                    "Target count of entity addresses to capture before evaluating Drop Self."
+                                                }
                                             });
                                         }
 
@@ -1062,11 +1147,29 @@ impl CrosshairApp {
 
                                         ui.checkbox(
                                             &mut preset.entity_hit_order_drop_nearest,
-                                            "Drop self",
+                                            self.tr("Drop self", "Bỏ self"),
                                         )
-                                        .on_hover_text(
-                                            "After capturing all entities, remove the entity with the smallest distance to camera (local player).",
-                                        );
+                                        .on_hover_text(self.tr(
+                                            "After capturing the required number of entities, remove the entity with the smallest distance to camera (local player) and blacklist it.",
+                                            "Sau khi tìm đủ số lượng thực thể yêu cầu, loại bỏ thực thể gần camera nhất (nhân vật bản thân) và đưa vào blacklist.",
+                                        ));
+
+                                        if !preset.entity_blacklisted_addresses.is_empty() {
+                                            let is_vi = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+                                            let text = if is_vi {
+                                                format!("(Chặn: {})", preset.entity_blacklisted_addresses.len())
+                                            } else {
+                                                format!("(Blocked: {})", preset.entity_blacklisted_addresses.len())
+                                            };
+                                            ui.label(text);
+                                            if ui
+                                                .small_button("✖")
+                                                .on_hover_text(self.tr("Clear blacklist", "Xóa danh sách chặn"))
+                                                .clicked()
+                                            {
+                                                preset.entity_blacklisted_addresses.clear();
+                                            }
+                                        }
 
                                         ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
                                         if preset.entity_auto_hud_enabled {

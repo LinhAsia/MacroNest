@@ -25974,6 +25974,7 @@ mod windows_overlay {
                     .entity_hit_order_addresses
                     .iter()
                     .copied()
+                    .filter(|addr| !preset.entity_blacklisted_addresses.contains(addr))
                     .take(count as usize)
                     .collect::<Vec<_>>(),
             )
@@ -25989,6 +25990,7 @@ mod windows_overlay {
                 target_pid,
                 (0..count)
                     .map(|index| root + (index as usize) * (stride as usize))
+                    .filter(|addr| !preset.entity_blacklisted_addresses.contains(addr))
                     .collect::<Vec<_>>(),
             )
         };

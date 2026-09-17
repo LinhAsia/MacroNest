@@ -111,6 +111,8 @@ pub struct EspPreset {
     #[serde(default)]
     pub entity_hit_order_drop_nearest: bool,
     pub entity_hit_order_addresses: Vec<usize>,
+    #[serde(default)]
+    pub entity_blacklisted_addresses: Vec<usize>,
     pub entity_auto_hud_enabled: bool,
     pub entity_auto_hud_preset_id: Option<u32>,
     pub entity_aabb_center: bool,
@@ -236,6 +238,7 @@ impl EspPreset {
             entity_hit_order_merge_pairs: false,
             entity_hit_order_drop_nearest: false,
             entity_hit_order_addresses: Vec::new(),
+            entity_blacklisted_addresses: Vec::new(),
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
@@ -1523,14 +1526,17 @@ mod tests {
         let loaded: EspPreset = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.entity_auto_scan_mode, EspAutoScanMode::AllHits);
         assert_eq!(loaded.entity_auto_continuous_interval_secs, 1.0);
+        assert!(loaded.entity_blacklisted_addresses.is_empty());
         assert!(!loaded.entity_auto_continuous);
 
         preset.entity_auto_continuous = true;
         preset.entity_auto_continuous_interval_secs = 2.0;
+        preset.entity_blacklisted_addresses = vec![0x1234, 0x5678];
         let json2 = serde_json::to_string(&preset).unwrap();
         let loaded2: EspPreset = serde_json::from_str(&json2).unwrap();
         assert!(loaded2.entity_auto_continuous);
         assert_eq!(loaded2.entity_auto_continuous_interval_secs, 2.0);
+        assert_eq!(loaded2.entity_blacklisted_addresses, vec![0x1234, 0x5678]);
     }
 
     #[test]
