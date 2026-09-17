@@ -1232,7 +1232,11 @@ pub fn filter_exclude_near_targets(
             }
         }
 
-        // 2. Find closest target in targets by 3D distance
+        // 2. Find closest target in targets by distance within duplicate threshold.
+        // Two boxes represent the same physical entity if their horizontal positions
+        // are coincident (< 1.5m in game coordinates) and vertical positions are within
+        // character height (< 4.0m). Separate entities are kept apart by collision hulls
+        // and game map distances, so they must never be dropped.
         let mut min_dist_sq = f32::MAX;
         let mut min_idx = None;
 
@@ -1243,11 +1247,16 @@ pub fn filter_exclude_near_targets(
             let dx = pos[0] - other_pos[0];
             let dy = pos[1] - other_pos[1];
             let dz = pos[2] - other_pos[2];
-            let dist_sq = dx * dx + dy * dy + dz * dz;
 
-            if dist_sq < min_dist_sq {
-                min_dist_sq = dist_sq;
-                min_idx = Some(i);
+            let is_duplicate = (dx * dx + dz * dz <= 2.25 && dy.abs() <= 4.0)
+                || (dx * dx + dy * dy <= 2.25 && dz.abs() <= 4.0);
+
+            if is_duplicate {
+                let dist_sq = dx * dx + dy * dy + dz * dz;
+                if dist_sq < min_dist_sq {
+                    min_dist_sq = dist_sq;
+                    min_idx = Some(i);
+                }
             }
         }
 
@@ -1654,6 +1663,18 @@ mod tests {
         filter_exclude_near_targets(&mut targets2, &other);
         assert_eq!(targets2.len(), 1);
         assert_eq!(targets2[0].1, 0x2000);
+
+        // When hunter is absent or already dropped, distant survivors must NEVER be dropped!
+        let mut survivors_only = vec![
+            ([10.0, 0.0, 0.0], 0x1000, 0), // Surv 1
+            ([20.0, 0.0, 0.0], 0x2000, 1), // Surv 2
+            ([30.0, 0.0, 0.0], 0x3000, 2), // Surv 3
+        ];
+        filter_exclude_near_targets(&mut survivors_only, &hunter_targets);
+        assert_eq!(survivors_only.len(), 3); // All 3 survivors kept!
+        assert_eq!(survivors_only[0].1, 0x1000);
+        assert_eq!(survivors_only[1].1, 0x2000);
+        assert_eq!(survivors_only[2].1, 0x3000);
     }
 
     #[test]

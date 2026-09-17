@@ -2581,7 +2581,13 @@ fn find_nearest_entity_to_preset(
         }
     }
 
-    min_index
+    // Only drop if the closest entity is within reasonable proximity (< 10.0m)
+    // so we never drop an unrelated survivor if the hunter wasn't captured.
+    if min_dist_sq <= 100.0 {
+        min_index
+    } else {
+        None
+    }
 }
 
 #[cfg(windows)]
