@@ -329,7 +329,7 @@ impl CrosshairApp {
                     if let Some(ref err) = ocr_test_error {
                         ui.add_space(8.0);
                         ui.label(
-                            RichText::new(format!("❌ Error: {err}"))
+                            RichText::new(format!("Error: {err}"))
                                 .color(Color32::from_rgb(255, 85, 85))
                                 .strong(),
                         );

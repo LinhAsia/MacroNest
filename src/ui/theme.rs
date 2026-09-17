@@ -25,6 +25,31 @@ pub fn text_has_cjk(text: &str) -> bool {
 }
 
 #[cfg(windows)]
+fn add_windows_symbol_fallback_fonts(fonts: &mut FontDefinitions) {
+    for (font_key, path) in [
+        ("win_symbol", "C:\\Windows\\Fonts\\seguisym.ttf"),
+        ("win_emoji", "C:\\Windows\\Fonts\\seguiemj.ttf"),
+    ] {
+        if let Ok(font_bytes) = std::fs::read(path) {
+            fonts.font_data.insert(
+                font_key.to_owned(),
+                Arc::new(FontData::from_owned(font_bytes)),
+            );
+            fonts
+                .families
+                .entry(FontFamily::Proportional)
+                .or_default()
+                .push(font_key.to_owned());
+            fonts
+                .families
+                .entry(FontFamily::Monospace)
+                .or_default()
+                .push(font_key.to_owned());
+        }
+    }
+}
+
+#[cfg(windows)]
 fn add_windows_cjk_fallback_fonts(fonts: &mut FontDefinitions) {
     for (font_key, path) in [
         ("cjk_yahei", "C:\\Windows\\Fonts\\msyh.ttc"),
@@ -66,6 +91,8 @@ pub fn configure_fonts(ctx: &egui::Context, load_cjk_fallback: bool) {
             "../../assets/MaterialIcons-Regular.ttf"
         ))),
     );
+    #[cfg(windows)]
+    add_windows_symbol_fallback_fonts(&mut fonts);
     #[cfg(windows)]
     if load_cjk_fallback {
         add_windows_cjk_fallback_fonts(&mut fonts);

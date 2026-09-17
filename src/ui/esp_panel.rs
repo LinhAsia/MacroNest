@@ -418,7 +418,7 @@ impl CrosshairApp {
         for &addr in &preset.entity_blacklisted_addresses {
             blacklisted_self_addresses.insert(addr);
         }
-        let self_dropped = !blacklisted_self_addresses.is_empty();
+        let self_dropped = false;
         match started {
             Ok(active) => {
                 let now = std::time::Instant::now();
@@ -539,40 +539,7 @@ impl CrosshairApp {
                 | WatchEvent::BatchProgress { .. } => {}
             }
         }
-        if capture.drop_nearest
-            && !capture.self_dropped
-            && capture.addresses.len() >= capture.target_count.max(2)
-        {
-            if let Some(preset) = self
-                .state
-                .esp_presets
-                .iter()
-                .find(|p| p.id == capture.preset_id)
-            {
-                if let Some(dropped_idx) = find_nearest_entity_index(
-                    capture.pid,
-                    preset,
-                    &capture.addresses,
-                ) {
-                    let self_addr = capture.addresses.remove(dropped_idx);
-                    capture.blacklisted_self_addresses.insert(self_addr);
-                    capture.self_dropped = true;
-                    if let Some(preset_mut) = self
-                        .state
-                        .esp_presets
-                        .iter_mut()
-                        .find(|p| p.id == capture.preset_id)
-                    {
-                        if !preset_mut.entity_blacklisted_addresses.contains(&self_addr) {
-                            preset_mut.entity_blacklisted_addresses.push(self_addr);
-                        }
-                        preset_mut.entity_hit_order_addresses.retain(|&a| a != self_addr);
-                    }
-                    changed = true;
-                }
-            }
-        }
-        let (candidate, matched, resolved_addresses) = match capture.scan_mode {
+        let (candidate, matched, mut resolved_addresses) = match capture.scan_mode {
             crate::model::EspAutoScanMode::AllHits => {
                 let addresses = capture.addresses.clone();
                 let count = addresses.len();
@@ -614,6 +581,71 @@ impl CrosshairApp {
                 (cand, count, None)
             }
         };
+
+        if capture.drop_nearest && !capture.self_dropped {
+            let addrs_to_check: Option<Vec<usize>> = if let Some(resolved) = &resolved_addresses {
+                if resolved.len() >= capture.required.max(2) {
+                    Some(resolved.clone())
+                } else {
+                    None
+                }
+            } else if let Some(root) = candidate {
+                if let Some(preset) = self
+                    .state
+                    .esp_presets
+                    .iter()
+                    .find(|p| p.id == capture.preset_id)
+                {
+                    let stride = preset.entity_stride.max(1) as usize;
+                    if matched >= capture.required.max(2) {
+                        Some((0..matched).map(|i| root.saturating_add(i * stride)).collect())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else if capture.addresses.len() >= capture.target_count.max(2) {
+                Some(capture.addresses.clone())
+            } else {
+                None
+            };
+
+            if let Some(addrs) = addrs_to_check {
+                if let Some(preset) = self
+                    .state
+                    .esp_presets
+                    .iter()
+                    .find(|p| p.id == capture.preset_id)
+                {
+                    if let Some(dropped_idx) = find_nearest_entity_index(
+                        capture.pid,
+                        preset,
+                        &addrs,
+                    ) {
+                        let self_addr = addrs[dropped_idx];
+                        capture.blacklisted_self_addresses.insert(self_addr);
+                        capture.addresses.retain(|&a| a != self_addr);
+                        capture.self_dropped = true;
+                        if let Some(resolved) = &mut resolved_addresses {
+                            resolved.retain(|&a| a != self_addr);
+                        }
+                        if let Some(preset_mut) = self
+                            .state
+                            .esp_presets
+                            .iter_mut()
+                            .find(|p| p.id == capture.preset_id)
+                        {
+                            if !preset_mut.entity_blacklisted_addresses.contains(&self_addr) {
+                                preset_mut.entity_blacklisted_addresses.push(self_addr);
+                            }
+                            preset_mut.entity_hit_order_addresses.retain(|&a| a != self_addr);
+                        }
+                        changed = true;
+                    }
+                }
+            }
+        }
 
         if let Some(candidate_root) = candidate {
             if let Some(preset) = self
@@ -672,7 +704,7 @@ impl CrosshairApp {
         } else if capture.scan_mode == crate::model::EspAutoScanMode::AllHits {
             timed_out
         } else {
-            matched >= capture.required || timed_out
+            matched >= capture.required || capture.self_dropped || timed_out
         };
         if is_complete || stopped.is_some() {
             self.finalize_esp_entity_capture(capture, stopped.as_deref());
@@ -1192,7 +1224,7 @@ impl CrosshairApp {
                                             };
                                             ui.label(text);
                                             if ui
-                                                .small_button("✖")
+                                                .small_button("×")
                                                 .on_hover_text(self.tr("Clear blacklist", "Xóa danh sách chặn"))
                                                 .clicked()
                                             {
@@ -1339,7 +1371,7 @@ impl CrosshairApp {
                                                 );
                                                 ui.painter().rect_filled(rect, 2.0, color_32);
                                                 ui.label(format!("#{}", key));
-                                                if ui.small_button("❌").clicked() {
+                                                if ui.small_button("×").clicked() {
                                                     to_remove = Some(key);
                                                 }
                                             });

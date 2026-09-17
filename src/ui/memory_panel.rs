@@ -1579,7 +1579,7 @@ impl CrosshairApp {
                 }
                 if self.memory_panel.stable_pointer_dialog.is_some()
                     && ui
-                        .button(RichText::new("🎯 Stable pointer").color(Color32::from_rgb(84, 178, 222)))
+                        .button(RichText::new("Stable pointer").color(Color32::from_rgb(84, 178, 222)))
                         .clicked()
                 {
                     ui.ctx().request_repaint();
@@ -1596,44 +1596,50 @@ impl CrosshairApp {
                 {
                     self.memory_panel.saved_library_open = true;
                 }
-                ui.menu_button(self.tr("🛠 Tools", "🛠 Công cụ"), |ui| {
+                if ui
+                    .button(self.tr("Advanced options (Code list)", "Tùy chọn nâng cao (Code list)"))
+                    .clicked()
+                {
+                    self.memory_panel.code_list_open = true;
+                }
+                ui.menu_button(self.tr("Tools", "Công cụ"), |ui| {
                     if ui
-                        .button(self.tr("🔄 Batch update bases", "🔄 Đổi base hàng loạt"))
+                        .button(self.tr("Batch update bases", "Đổi base hàng loạt"))
                         .clicked()
                     {
                         self.memory_panel.batch_replace_open = true;
                         ui.close();
                     }
                     if ui
-                        .button(self.tr("⚡ Auto DLL Studio", "⚡ Auto DLL Studio"))
+                        .button(self.tr("Auto DLL Studio", "Auto DLL Studio"))
                         .clicked()
                     {
                         self.memory_panel.show_dll_studio = true;
                         ui.close();
                     }
                     if ui
-                        .button(self.tr("📜 Advanced options (Code list)", "📜 Tùy chọn nâng cao (Code list)"))
+                        .button(self.tr("Advanced options (Code list)", "Tùy chọn nâng cao (Code list)"))
                         .clicked()
                     {
                         self.memory_panel.code_list_open = true;
                         ui.close();
                     }
                     if ui
-                        .button(self.tr("🔍 Object proximity finder", "🔍 So sánh cụm Object"))
+                        .button(self.tr("Object proximity finder", "So sánh cụm Object"))
                         .clicked()
                     {
                         self.open_proximity_finder_dialog();
                         ui.close();
                     }
                     if ui
-                        .button(self.tr("🎥 Find camera matrix", "🎥 Tìm camera matrix"))
+                        .button(self.tr("Find camera matrix", "Tìm camera matrix"))
                         .clicked()
                     {
                         self.open_camera_matrix_dialog();
                         ui.close();
                     }
                     if ui
-                        .button(self.tr("👾 Find entity list", "👾 Tìm danh sách Entity"))
+                        .button(self.tr("Find entity list", "Tìm danh sách Entity"))
                         .clicked()
                     {
                         self.open_entity_list_dialog();
@@ -1643,7 +1649,7 @@ impl CrosshairApp {
                     {
                         ui.separator();
                         if ui
-                            .button(self.tr("📦 Enumerate modules / DLLs", "📦 Danh sách module / DLL"))
+                            .button(self.tr("Enumerate modules / DLLs", "Danh sách module / DLL"))
                             .clicked()
                         {
                             self.open_memory_module_list();
