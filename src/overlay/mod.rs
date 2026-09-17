@@ -25439,7 +25439,6 @@ mod windows_overlay {
                                     crate::model::filter_exclude_near_targets(
                                         &mut targets,
                                         other_targets,
-                                        preset.entity_exclude_near_max_distance,
                                     );
                                 }
                             }
@@ -25865,6 +25864,14 @@ mod windows_overlay {
     ) -> Option<f32> {
         let mut frame = EspReadFrame::default();
         frame.read_value(pid, expression, value_type).ok()
+    }
+
+    pub(crate) fn evaluate_esp_expression_address(
+        pid: u32,
+        expression: &str,
+    ) -> Option<usize> {
+        let mut frame = EspReadFrame::default();
+        frame.resolve_address(pid, expression, false).map(|(_, addr)| addr)
     }
 
     fn esp_value_type_tag(value_type: crate::model::MemoryValueType) -> u8 {

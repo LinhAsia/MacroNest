@@ -1207,12 +1207,11 @@ pub(crate) fn project_esp_normalized(
 /// Drops targets from `targets` that match or are closest to any target in `other_targets`.
 /// Matching priority:
 /// 1. Exact entity address match (if address != 0).
-/// 2. Closest 3D Euclidean distance (if max_distance <= 0.0 or distance <= max_distance).
+/// 2. Closest 3D Euclidean distance.
 /// Each target in `other_targets` drops at most one unique target from `targets`.
 pub fn filter_exclude_near_targets(
     targets: &mut Vec<([f32; 3], usize, usize)>,
     other_targets: &[([f32; 3], usize, usize)],
-    max_distance: f32,
 ) {
     if targets.is_empty() || other_targets.is_empty() {
         return;
@@ -1253,14 +1252,7 @@ pub fn filter_exclude_near_targets(
         }
 
         if let Some(idx) = min_idx {
-            let limit_dist_sq = if max_distance > 0.0 {
-                max_distance * max_distance
-            } else {
-                f32::MAX
-            };
-            if min_dist_sq <= limit_dist_sq {
-                dropped_indices.insert(idx);
-            }
+            dropped_indices.insert(idx);
         }
     }
 
@@ -1647,7 +1639,7 @@ mod tests {
         ];
 
         // Should drop the hunter because it is closest (dist ~0.22m)
-        filter_exclude_near_targets(&mut targets, &hunter_targets, 0.0);
+        filter_exclude_near_targets(&mut targets, &hunter_targets);
         assert_eq!(targets.len(), 3);
         assert_eq!(targets[0].1, 0x1000);
         assert_eq!(targets[1].1, 0x2000);
@@ -1659,15 +1651,9 @@ mod tests {
             ([20.0, 0.0, 0.0], 0x2000, 1),
         ];
         let other = vec![([50.0, 50.0, 50.0], 0x1000, 0)]; // Address matches 0x1000
-        filter_exclude_near_targets(&mut targets2, &other, 5.0);
+        filter_exclude_near_targets(&mut targets2, &other);
         assert_eq!(targets2.len(), 1);
         assert_eq!(targets2[0].1, 0x2000);
-
-        // Max distance threshold limit test
-        let mut targets3 = vec![([10.0, 0.0, 0.0], 0x1000, 0)];
-        let far_other = vec![([50.0, 0.0, 0.0], 0x9999, 0)]; // 40m away
-        filter_exclude_near_targets(&mut targets3, &far_other, 5.0); // max dist 5.0m
-        assert_eq!(targets3.len(), 1); // Not dropped because 40m > 5.0m
     }
 
     #[test]

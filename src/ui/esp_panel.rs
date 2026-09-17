@@ -26,6 +26,7 @@ pub(super) struct EspEntityRootCapture {
     merge_pairs: bool,
     drop_nearest: bool,
     self_dropped: bool,
+    near_preset_dropped: bool,
     blacklisted_self_addresses: std::collections::HashSet<usize>,
     continuous: bool,
     addresses: Vec<usize>,
@@ -168,6 +169,56 @@ impl CrosshairApp {
                     }
                 }
             }
+
+            let mut dropped_near_preset = capture.near_preset_dropped;
+            if let Some(preset) = self
+                .state
+                .esp_presets
+                .iter()
+                .find(|p| p.id == capture.preset_id)
+            {
+                if preset.entity_exclude_near_preset_enabled
+                    && final_addresses.len() > 1
+                    && !capture.near_preset_dropped
+                {
+                    if let Some(other_id) = preset.entity_exclude_near_preset_id {
+                        if let Some(other_preset) = self
+                            .state
+                            .esp_presets
+                            .iter()
+                            .find(|p| p.id == other_id)
+                            .cloned()
+                        {
+                            if let Some(dropped_idx) = find_nearest_entity_to_preset(
+                                capture.pid,
+                                preset,
+                                &final_addresses,
+                                &other_preset,
+                            ) {
+                                let dropped_addr = final_addresses.remove(dropped_idx);
+                                capture.blacklisted_self_addresses.insert(dropped_addr);
+                                if let Some(preset_mut) = self
+                                    .state
+                                    .esp_presets
+                                    .iter_mut()
+                                    .find(|p| p.id == capture.preset_id)
+                                {
+                                    if !preset_mut
+                                        .entity_blacklisted_addresses
+                                        .contains(&dropped_addr)
+                                    {
+                                        preset_mut
+                                            .entity_blacklisted_addresses
+                                            .push(dropped_addr);
+                                    }
+                                }
+                                dropped_near_preset = true;
+                            }
+                        }
+                    }
+                }
+            }
+
             final_addresses.retain(|addr| !capture.blacklisted_self_addresses.contains(addr));
             if !final_addresses.is_empty() {
                 if let Some(preset) = self
@@ -188,9 +239,21 @@ impl CrosshairApp {
                 status.to_owned()
             } else if final_addresses.is_empty() {
                 "No entity addresses found".to_owned()
+            } else if dropped_self && dropped_near_preset {
+                format!(
+                    "Captured {} addresses (dropped self & near preset -> {} active)",
+                    matched,
+                    final_addresses.len()
+                )
             } else if dropped_self {
                 format!(
                     "Captured {} addresses (dropped self -> {} active)",
+                    matched,
+                    final_addresses.len()
+                )
+            } else if dropped_near_preset {
+                format!(
+                    "Captured {} addresses (dropped near preset -> {} active)",
                     matched,
                     final_addresses.len()
                 )
@@ -480,6 +543,7 @@ impl CrosshairApp {
                     merge_pairs,
                     drop_nearest,
                     self_dropped,
+                    near_preset_dropped: false,
                     blacklisted_self_addresses,
                     continuous,
                     addresses: initial_addresses,
@@ -678,6 +742,73 @@ impl CrosshairApp {
                             preset_mut.entity_hit_order_addresses.retain(|&a| a != self_addr);
                         }
                         changed = true;
+                    }
+                }
+            }
+        }
+
+        if let Some(preset) = self
+            .state
+            .esp_presets
+            .iter()
+            .find(|p| p.id == capture.preset_id)
+        {
+            if preset.entity_exclude_near_preset_enabled && !capture.near_preset_dropped {
+                if let Some(other_id) = preset.entity_exclude_near_preset_id {
+                    if let Some(other_preset) = self
+                        .state
+                        .esp_presets
+                        .iter()
+                        .find(|p| p.id == other_id)
+                        .cloned()
+                    {
+                        let addrs_to_check: Option<Vec<usize>> = if let Some(resolved) = &resolved_addresses {
+                            if resolved.len() >= capture.required.max(2) {
+                                Some(resolved.clone())
+                            } else {
+                                None
+                            }
+                        } else if capture.addresses.len() >= capture.target_count.max(2) {
+                            Some(capture.addresses.clone())
+                        } else {
+                            None
+                        };
+
+                        if let Some(addrs) = addrs_to_check {
+                            if let Some(dropped_idx) = find_nearest_entity_to_preset(
+                                capture.pid,
+                                preset,
+                                &addrs,
+                                &other_preset,
+                            ) {
+                                let dropped_addr = addrs[dropped_idx];
+                                capture.blacklisted_self_addresses.insert(dropped_addr);
+                                capture.addresses.retain(|&a| a != dropped_addr);
+                                capture.near_preset_dropped = true;
+                                if let Some(resolved) = &mut resolved_addresses {
+                                    resolved.retain(|&a| a != dropped_addr);
+                                }
+                                if let Some(preset_mut) = self
+                                    .state
+                                    .esp_presets
+                                    .iter_mut()
+                                    .find(|p| p.id == capture.preset_id)
+                                {
+                                    if !preset_mut
+                                        .entity_blacklisted_addresses
+                                        .contains(&dropped_addr)
+                                    {
+                                        preset_mut
+                                            .entity_blacklisted_addresses
+                                            .push(dropped_addr);
+                                    }
+                                    preset_mut
+                                        .entity_hit_order_addresses
+                                        .retain(|&a| a != dropped_addr);
+                                }
+                                changed = true;
+                            }
+                        }
                     }
                 }
             }
@@ -1364,7 +1495,7 @@ impl CrosshairApp {
                                                 None,
                                                 self.tr("-- None --", "-- Không --"),
                                             );
-                                            for other in &self.state.esp_presets {
+                                             for other in &self.state.esp_presets {
                                                 if other.id != preset.id {
                                                     ui.selectable_value(
                                                         &mut preset.entity_exclude_near_preset_id,
@@ -1374,18 +1505,6 @@ impl CrosshairApp {
                                                 }
                                             }
                                         });
-
-                                    ui.label(self.tr("Max dist", "Khoảng cách"));
-                                    ui.add(
-                                        DragValue::new(&mut preset.entity_exclude_near_max_distance)
-                                            .range(0.0..=1000.0)
-                                            .speed(0.5)
-                                            .suffix("m"),
-                                    )
-                                    .on_hover_text(self.tr(
-                                        "Maximum 3D distance to match and drop (0 = always drop closest regardless of distance).",
-                                        "Khoảng cách 3D tối đa để loại bỏ (0 = luôn loại bỏ box gần nhất không giới hạn khoảng cách).",
-                                    ));
                                 }
                             });
                             ui.end_row();
@@ -2370,6 +2489,95 @@ fn find_nearest_entity_index(
         if dist_sq < min_dist_sq {
             min_dist_sq = dist_sq;
             min_index = Some(index);
+        }
+    }
+
+    min_index
+}
+
+#[cfg(windows)]
+fn find_nearest_entity_to_preset(
+    pid: u32,
+    preset: &crate::model::EspPreset,
+    addresses: &[usize],
+    other_preset: &crate::model::EspPreset,
+) -> Option<usize> {
+    if addresses.is_empty() {
+        return None;
+    }
+
+    let mut other_positions: Vec<[f32; 3]> = Vec::new();
+
+    if other_preset.entity_list_enabled {
+        let other_addrs: Vec<usize> = if !other_preset.entity_hit_order_addresses.is_empty() {
+            other_preset
+                .entity_hit_order_addresses
+                .iter()
+                .copied()
+                .filter(|a| !other_preset.entity_blacklisted_addresses.contains(a))
+                .take(other_preset.entity_count.clamp(1, 64) as usize)
+                .collect()
+        } else if !other_preset.entity_root.trim().is_empty() {
+            if let Some(root) = crate::overlay::evaluate_esp_expression_address(pid, &other_preset.entity_root) {
+                let stride = other_preset.entity_stride.max(1) as usize;
+                let count = other_preset.entity_count.clamp(1, 64) as usize;
+                (0..count).map(|i| root.saturating_add(i * stride)).collect()
+            } else {
+                Vec::new()
+            }
+        } else {
+            Vec::new()
+        };
+
+        for other_addr in other_addrs {
+            if let Some(pos) = addresses.iter().position(|&a| a == other_addr) {
+                return Some(pos);
+            }
+
+            let Some(x_addr) = crate::model::entity_field_address(other_addr, 0, 1, other_preset.entity_x_offset) else { continue; };
+            let Some(y_addr) = crate::model::entity_field_address(other_addr, 0, 1, other_preset.entity_y_offset) else { continue; };
+            let Some(z_addr) = crate::model::entity_field_address(other_addr, 0, 1, other_preset.entity_z_offset) else { continue; };
+
+            let Some(x) = read_esp_f32_from_address(pid, x_addr, other_preset.value_type) else { continue; };
+            let Some(y) = read_esp_f32_from_address(pid, y_addr, other_preset.value_type) else { continue; };
+            let Some(z) = read_esp_f32_from_address(pid, z_addr, other_preset.value_type) else { continue; };
+            other_positions.push([x, y, z]);
+        }
+    } else {
+        let x = crate::overlay::evaluate_esp_expression_float(pid, &other_preset.target_x, other_preset.value_type);
+        let y = crate::overlay::evaluate_esp_expression_float(pid, &other_preset.target_y, other_preset.value_type);
+        let z = crate::overlay::evaluate_esp_expression_float(pid, &other_preset.target_z, other_preset.value_type);
+        if let (Some(x), Some(y), Some(z)) = (x, y, z) {
+            other_positions.push([x, y, z]);
+        }
+    }
+
+    if other_positions.is_empty() {
+        return None;
+    }
+
+    let mut min_dist_sq = f32::MAX;
+    let mut min_index = None;
+
+    for (index, &entity_address) in addresses.iter().enumerate() {
+        let Some(x_addr) = crate::model::entity_field_address(entity_address, 0, 1, preset.entity_x_offset) else { continue; };
+        let Some(y_addr) = crate::model::entity_field_address(entity_address, 0, 1, preset.entity_y_offset) else { continue; };
+        let Some(z_addr) = crate::model::entity_field_address(entity_address, 0, 1, preset.entity_z_offset) else { continue; };
+
+        let Some(x) = read_esp_f32_from_address(pid, x_addr, preset.value_type) else { continue; };
+        let Some(y) = read_esp_f32_from_address(pid, y_addr, preset.value_type) else { continue; };
+        let Some(z) = read_esp_f32_from_address(pid, z_addr, preset.value_type) else { continue; };
+
+        for other_pos in &other_positions {
+            let dx = x - other_pos[0];
+            let dy = y - other_pos[1];
+            let dz = z - other_pos[2];
+            let dist_sq = dx * dx + dy * dy + dz * dz;
+
+            if dist_sq < min_dist_sq {
+                min_dist_sq = dist_sq;
+                min_index = Some(index);
+            }
         }
     }
 
