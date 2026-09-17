@@ -25436,9 +25436,16 @@ mod windows_overlay {
                         if preset.entity_exclude_near_preset_enabled {
                             if let Some(other_id) = preset.entity_exclude_near_preset_id {
                                 if let Some(other_targets) = all_preset_targets.get(&other_id) {
+                                    let other_vertical_offset = presets
+                                        .iter()
+                                        .find(|s| s.preset.id == other_id)
+                                        .map(|s| s.preset.target_vertical_offset)
+                                        .unwrap_or(0.0);
                                     crate::model::filter_exclude_near_targets(
                                         &mut targets,
+                                        preset.target_vertical_offset,
                                         other_targets,
+                                        other_vertical_offset,
                                     );
                                 }
                             }

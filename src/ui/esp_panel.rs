@@ -768,10 +768,13 @@ impl CrosshairApp {
                             } else {
                                 None
                             }
-                        } else if capture.addresses.len() >= capture.target_count.max(2) {
-                            Some(capture.addresses.clone())
                         } else {
-                            None
+                            let min_needed = capture.target_count.saturating_sub(if capture.self_dropped { 1 } else { 0 }).max(2);
+                            if capture.addresses.len() >= min_needed {
+                                Some(capture.addresses.clone())
+                            } else {
+                                None
+                            }
                         };
 
                         if let Some(addrs) = addrs_to_check {
@@ -2541,14 +2544,14 @@ fn find_nearest_entity_to_preset(
             let Some(x) = read_esp_f32_from_address(pid, x_addr, other_preset.value_type) else { continue; };
             let Some(y) = read_esp_f32_from_address(pid, y_addr, other_preset.value_type) else { continue; };
             let Some(z) = read_esp_f32_from_address(pid, z_addr, other_preset.value_type) else { continue; };
-            other_positions.push([x, y, z]);
+            other_positions.push([x, y, z + other_preset.target_vertical_offset]);
         }
     } else {
         let x = crate::overlay::evaluate_esp_expression_float(pid, &other_preset.target_x, other_preset.value_type);
         let y = crate::overlay::evaluate_esp_expression_float(pid, &other_preset.target_y, other_preset.value_type);
         let z = crate::overlay::evaluate_esp_expression_float(pid, &other_preset.target_z, other_preset.value_type);
         if let (Some(x), Some(y), Some(z)) = (x, y, z) {
-            other_positions.push([x, y, z]);
+            other_positions.push([x, y, z + other_preset.target_vertical_offset]);
         }
     }
 
@@ -2567,12 +2570,15 @@ fn find_nearest_entity_to_preset(
         let Some(x) = read_esp_f32_from_address(pid, x_addr, preset.value_type) else { continue; };
         let Some(y) = read_esp_f32_from_address(pid, y_addr, preset.value_type) else { continue; };
         let Some(z) = read_esp_f32_from_address(pid, z_addr, preset.value_type) else { continue; };
+        let z_eff = z + preset.target_vertical_offset;
 
         for other_pos in &other_positions {
             let dx = x - other_pos[0];
             let dy = y - other_pos[1];
-            let dz = z - other_pos[2];
-            let dist_sq = dx * dx + dy * dy + dz * dz;
+            let dz = z_eff - other_pos[2];
+            let dist_3d_sq = dx * dx + dy * dy + dz * dz;
+            let horizontal_dist_sq = dx * dx + dy * dy;
+            let dist_sq = dist_3d_sq.min(horizontal_dist_sq);
 
             if dist_sq < min_dist_sq {
                 min_dist_sq = dist_sq;
@@ -2581,9 +2587,9 @@ fn find_nearest_entity_to_preset(
         }
     }
 
-    // Only drop if the closest entity is within reasonable proximity (< 10.0m)
+    // Only drop if the closest entity is within reasonable proximity (< 8.0m)
     // so we never drop an unrelated survivor if the hunter wasn't captured.
-    if min_dist_sq <= 100.0 {
+    if min_dist_sq <= 64.0 {
         min_index
     } else {
         None

@@ -1211,7 +1211,9 @@ pub(crate) fn project_esp_normalized(
 /// Each target in `other_targets` drops at most one unique target from `targets`.
 pub fn filter_exclude_near_targets(
     targets: &mut Vec<([f32; 3], usize, usize)>,
+    target_vertical_offset: f32,
     other_targets: &[([f32; 3], usize, usize)],
+    other_vertical_offset: f32,
 ) {
     if targets.is_empty() || other_targets.is_empty() {
         return;
@@ -1233,12 +1235,13 @@ pub fn filter_exclude_near_targets(
         }
 
         // 2. Find closest target in targets by distance within duplicate threshold.
-        // Two boxes represent the same physical entity if their horizontal positions
-        // are coincident (< 1.5m in game coordinates) and vertical positions are within
-        // character height (< 4.0m). Separate entities are kept apart by collision hulls
-        // and game map distances, so they must never be dropped.
+        // Two boxes represent the same physical entity if their effective 3D distance
+        // (accounting for target_vertical_offset) is within duplicate threshold (< 2.0m, dist_3d_sq <= 4.0),
+        // or horizontal distance < 1.0m with height within 3.0m.
         let mut min_dist_sq = f32::MAX;
         let mut min_idx = None;
+
+        let other_z_eff = other_pos[2] + other_vertical_offset;
 
         for (i, (pos, _, _)) in targets.iter().enumerate() {
             if dropped_indices.contains(&i) {
@@ -1246,15 +1249,18 @@ pub fn filter_exclude_near_targets(
             }
             let dx = pos[0] - other_pos[0];
             let dy = pos[1] - other_pos[1];
-            let dz = pos[2] - other_pos[2];
+            let z_eff = pos[2] + target_vertical_offset;
+            let dz = z_eff - other_z_eff;
 
-            let is_duplicate = (dx * dx + dz * dz <= 2.25 && dy.abs() <= 4.0)
-                || (dx * dx + dy * dy <= 2.25 && dz.abs() <= 4.0);
+            let dist_3d_sq = dx * dx + dy * dy + dz * dz;
+            let horizontal_dist_sq = dx * dx + dy * dy;
+
+            let is_duplicate = dist_3d_sq <= 4.0 || (horizontal_dist_sq <= 1.0 && dz.abs() <= 3.0);
 
             if is_duplicate {
-                let dist_sq = dx * dx + dy * dy + dz * dz;
-                if dist_sq < min_dist_sq {
-                    min_dist_sq = dist_sq;
+                let metric = dist_3d_sq.min(horizontal_dist_sq);
+                if metric < min_dist_sq {
+                    min_dist_sq = metric;
                     min_idx = Some(i);
                 }
             }
@@ -1648,7 +1654,7 @@ mod tests {
         ];
 
         // Should drop the hunter because it is closest (dist ~0.22m)
-        filter_exclude_near_targets(&mut targets, &hunter_targets);
+        filter_exclude_near_targets(&mut targets, 0.0, &hunter_targets, 0.0);
         assert_eq!(targets.len(), 3);
         assert_eq!(targets[0].1, 0x1000);
         assert_eq!(targets[1].1, 0x2000);
@@ -1660,9 +1666,22 @@ mod tests {
             ([20.0, 0.0, 0.0], 0x2000, 1),
         ];
         let other = vec![([50.0, 50.0, 50.0], 0x1000, 0)]; // Address matches 0x1000
-        filter_exclude_near_targets(&mut targets2, &other);
+        filter_exclude_near_targets(&mut targets2, 0.0, &other, 0.0);
         assert_eq!(targets2.len(), 1);
         assert_eq!(targets2[0].1, 0x2000);
+
+        // Disparate raw vertical coordinate test (e.g. +12.0 on surv preset, -25.0 on hunter preset)
+        // In memory raw Z has 37.0m difference, but effective Z aligns perfectly!
+        let mut targets_vertical = vec![
+            ([10.0, 0.0, 0.0], 0x1000, 0),
+            ([100.0, 0.0, 0.0], 0x4000, 1), // Hunter raw Z = 0.0, offset = +12.0 -> eff Z = 12.0
+        ];
+        let hunter_vertical = vec![
+            ([100.2, 0.1, 37.0], 0x9999, 0), // Hunter raw Z = 37.0, offset = -25.0 -> eff Z = 12.0
+        ];
+        filter_exclude_near_targets(&mut targets_vertical, 12.0, &hunter_vertical, -25.0);
+        assert_eq!(targets_vertical.len(), 1);
+        assert_eq!(targets_vertical[0].1, 0x1000); // Only survivor 0x1000 remains!
 
         // When hunter is absent or already dropped, distant survivors must NEVER be dropped!
         let mut survivors_only = vec![
@@ -1670,7 +1689,7 @@ mod tests {
             ([20.0, 0.0, 0.0], 0x2000, 1), // Surv 2
             ([30.0, 0.0, 0.0], 0x3000, 2), // Surv 3
         ];
-        filter_exclude_near_targets(&mut survivors_only, &hunter_targets);
+        filter_exclude_near_targets(&mut survivors_only, 0.0, &hunter_targets, 0.0);
         assert_eq!(survivors_only.len(), 3); // All 3 survivors kept!
         assert_eq!(survivors_only[0].1, 0x1000);
         assert_eq!(survivors_only[1].1, 0x2000);
