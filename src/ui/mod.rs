@@ -14874,10 +14874,11 @@ impl eframe::App for CrosshairApp {
                 UiCommand::StartEspScan {
                     preset_id,
                     timeout_ms,
+                    session_id,
                 } => {
                     #[cfg(windows)]
                     {
-                        self.start_esp_entity_root_capture(preset_id, timeout_ms);
+                        self.start_esp_entity_root_capture(preset_id, timeout_ms, session_id);
                         ctx.request_repaint();
                     }
                 }

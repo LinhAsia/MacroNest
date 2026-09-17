@@ -21840,6 +21840,61 @@ if supports_move_mouse || show_detection_tuning {
                                         .changed();
                                 }
                             });
+                        if step.action == MacroAction::StartEspScan {
+                            *live_sync |= ui
+                                .checkbox(
+                                    &mut step.wait_for_completion,
+                                    Self::tr_lang(language, "Wait for completion", "Chờ quét xong"),
+                                )
+                                .on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Pause macro execution until entity scan finishes (or times out) before proceeding to the next step.",
+                                    "Tạm dừng macro chờ cho đến khi quét xong (hoặc hết thời gian timeout) rồi mới chạy bước tiếp theo.",
+                                ))
+                                .changed();
+
+                            let mut has_timeout = step.timed_override;
+                            if ui
+                                .checkbox(
+                                    &mut has_timeout,
+                                    Self::tr_lang(language, "Timeout", "Giới hạn thời gian"),
+                                )
+                                .on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Maximum time in ms to scan before stopping (unchecked = wait until target count is found).",
+                                    "Thời gian quét tối đa (ms) trước khi dừng (không chọn = quét cho đến khi tìm đủ số lượng).",
+                                ))
+                                .changed()
+                            {
+                                step.timed_override = has_timeout;
+                                *live_sync = true;
+                            }
+                            if has_timeout {
+                                let duration_id = ui.id().with((id_prefix, "esp-scan-timeout"));
+                                let response = Self::render_variable_text_edit(
+                                    ui,
+                                    &mut step.duration_expr,
+                                    duration_id,
+                                    60.0,
+                                    100.0,
+                                    21.0,
+                                    21.0,
+                                    "2000",
+                                    false,
+                                );
+                                ui.weak("ms");
+                                Self::apply_vietnamese_input_if_changed(
+                                    &response,
+                                    vietnamese_input_enabled,
+                                    vietnamese_input_mode,
+                                    &mut step.duration_expr,
+                                );
+                                *live_sync |= response.changed();
+                                if response.changed() {
+                                    Self::remember_duration_input(step);
+                                }
+                            }
+                        }
                         if step.action == MacroAction::Esp3DAimLock {
                             ui.label("Smooth:");
                             *live_sync |= ui
