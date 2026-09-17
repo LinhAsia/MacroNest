@@ -24,7 +24,9 @@ pub(super) struct EspEntityRootCapture {
     merge_pairs: bool,
     drop_nearest: bool,
     continuous: bool,
+    continuous_interval_secs: f32,
     addresses: Vec<usize>,
+    address_last_seen: std::collections::HashMap<usize, std::time::Instant>,
     rx: std::sync::mpsc::Receiver<WatchEvent>,
     active: Option<AccessWatch>,
     hud_preset_id: Option<u32>,
@@ -360,15 +362,32 @@ impl CrosshairApp {
             timeout_ms
         };
         let (tx, rx) = std::sync::mpsc::channel();
-        let started = AccessWatch::start_unique(
-            pid,
-            instruction_address,
-            self.state.memory_debugger_architecture,
-            ESP_ENTITY_ROOT_CAPTURE_LIMIT,
-            move |event| {
-                let _ = tx.send(event);
-            },
-        );
+        let continuous_interval_secs = preset.entity_auto_continuous_interval_secs.clamp(0.2, 10.0);
+        let started = if continuous {
+            let pause = std::time::Duration::from_secs_f32(continuous_interval_secs);
+            let burst = std::time::Duration::from_millis(200);
+            AccessWatch::start_unique_throttled(
+                pid,
+                instruction_address,
+                self.state.memory_debugger_architecture,
+                ESP_ENTITY_ROOT_CAPTURE_LIMIT,
+                burst,
+                pause,
+                move |event| {
+                    let _ = tx.send(event);
+                },
+            )
+        } else {
+            AccessWatch::start_unique(
+                pid,
+                instruction_address,
+                self.state.memory_debugger_architecture,
+                ESP_ENTITY_ROOT_CAPTURE_LIMIT,
+                move |event| {
+                    let _ = tx.send(event);
+                },
+            )
+        };
         match started {
             Ok(active) => {
                 let now = std::time::Instant::now();
@@ -389,7 +408,9 @@ impl CrosshairApp {
                     merge_pairs,
                     drop_nearest,
                     continuous,
+                    continuous_interval_secs,
                     addresses: Vec::with_capacity(128),
+                    address_last_seen: std::collections::HashMap::new(),
                     rx,
                     active: Some(active),
                     hud_preset_id,
@@ -445,10 +466,12 @@ impl CrosshairApp {
             match event {
                 WatchEvent::Started { .. } => {}
                 WatchEvent::AccessHit { data_address, .. } => {
+                    let now = std::time::Instant::now();
+                    capture.address_last_seen.insert(data_address, now);
                     if !capture.addresses.contains(&data_address) {
                         capture.addresses.push(data_address);
                     }
-                    capture.last_hit_at = std::time::Instant::now();
+                    capture.last_hit_at = now;
                     changed = true;
                 }
                 WatchEvent::CaptureLimitReached(limit) => {
@@ -476,6 +499,25 @@ impl CrosshairApp {
                 WatchEvent::Stopped
                 | WatchEvent::AddressHit { .. }
                 | WatchEvent::BatchProgress { .. } => {}
+            }
+        }
+        if capture.continuous && !capture.addresses.is_empty() {
+            let now = std::time::Instant::now();
+            let stale_threshold = std::time::Duration::from_secs_f32(
+                (capture.continuous_interval_secs * 2.5).max(3.0),
+            );
+            let before_len = capture.addresses.len();
+            capture.addresses.retain(|addr| {
+                capture
+                    .address_last_seen
+                    .get(addr)
+                    .map_or(true, |&last| now.duration_since(last) <= stale_threshold)
+            });
+            if capture.addresses.len() != before_len {
+                capture
+                    .address_last_seen
+                    .retain(|addr, _| capture.addresses.contains(addr));
+                changed = true;
             }
         }
         let (candidate, matched, resolved_addresses) = match capture.scan_mode {
@@ -951,8 +993,25 @@ impl CrosshairApp {
                                                 }
                                             });
 
-                                        ui.checkbox(&mut preset.entity_auto_continuous, "Continuous")
-                                            .on_hover_text("Keep scanning continuously without stopping until Stop is clicked. Newly discovered entity addresses are immediately added and displayed in ESP.");
+                                        ui.checkbox(&mut preset.entity_auto_continuous, self.tr("Continuous", "Liên tục"))
+                                            .on_hover_text(self.tr(
+                                                "Keep scanning continuously with throttled duty-cycle without lag. Newly discovered entity addresses are immediately added and displayed in ESP.",
+                                                "Quét ngắt quãng liên tục không gây lag game. Các địa chỉ phân thân/đổi dạng mới được tự động thêm vào ESP.",
+                                            ));
+
+                                        if preset.entity_auto_continuous {
+                                            ui.label(self.tr("Interval", "Khoảng nghỉ"));
+                                            ui.add(
+                                                DragValue::new(&mut preset.entity_auto_continuous_interval_secs)
+                                                    .range(0.2..=10.0)
+                                                    .speed(0.1)
+                                                    .suffix("s"),
+                                            )
+                                            .on_hover_text(self.tr(
+                                                "Pause interval between burst scans to eliminate game lag (default: 1.0s).",
+                                                "Khoảng nghỉ giữa các đợt quét ngắt quãng để triệt tiêu lag game (mặc định: 1.0s).",
+                                            ));
+                                        }
 
                                         if scan_mode == crate::model::EspAutoScanMode::AllHits && !preset.entity_auto_continuous {
                                             ui.label("Duration");

@@ -488,6 +488,7 @@ impl AccessWatch {
                 unique_addresses: false,
                 rotation_ms: batch_ms.max(1),
                 single_pass: true,
+                continuous_duty_cycle: None,
             },
             architecture,
             notify,
@@ -526,6 +527,38 @@ impl AccessWatch {
             true,
             notify,
         )
+    }
+
+    pub fn start_unique_throttled<F>(
+        pid: u32,
+        instruction_address: usize,
+        architecture: MemoryDebuggerArchitecture,
+        unique_limit: usize,
+        burst: Duration,
+        pause: Duration,
+        notify: F,
+    ) -> io::Result<Self>
+    where
+        F: Fn(WatchEvent) + Send + 'static,
+    {
+        let target = target_architecture(pid, architecture)?;
+        let instruction = decode_at(&Process::open(pid)?, instruction_address, target)?;
+        WatchSession::start(
+            pid,
+            WatchKind::Execute {
+                addresses: vec![instruction_address],
+                instructions: vec![instruction],
+                capture_limit: unique_limit.max(1),
+                matcher: None,
+                unique_addresses: true,
+                rotation_ms: 1_000,
+                single_pass: false,
+                continuous_duty_cycle: Some((burst, pause)),
+            },
+            architecture,
+            notify,
+        )
+        .map(Self)
     }
 
     pub fn start_matching<F, M>(
@@ -596,6 +629,7 @@ impl AccessWatch {
                 unique_addresses,
                 rotation_ms: 1_000,
                 single_pass: false,
+                continuous_duty_cycle: None,
             },
             architecture,
             notify,
@@ -625,6 +659,7 @@ enum WatchKind {
         unique_addresses: bool,
         rotation_ms: u64,
         single_pass: bool,
+        continuous_duty_cycle: Option<(Duration, Duration)>,
     },
 }
 
@@ -808,7 +843,29 @@ fn watch_loop<F>(
     let mut seen_instruction_details = HashMap::<usize, (String, String)>::new();
     let mut active_slot_start = 0usize;
     let mut last_slot_rotation = Instant::now();
+    let mut duty_state_burst = true;
+    let mut duty_phase_start = Instant::now();
+    let duty_cycle = match &kind {
+        WatchKind::Execute { continuous_duty_cycle, .. } => *continuous_duty_cycle,
+        _ => None,
+    };
     while !stop.load(Ordering::Acquire) {
+        if debugger_started {
+            if let Some((burst, pause)) = duty_cycle {
+                if duty_state_burst {
+                    if duty_phase_start.elapsed() >= burst {
+                        unsafe { disarm_paused_threads(&threads, architecture) };
+                        duty_state_burst = false;
+                        duty_phase_start = Instant::now();
+                    }
+                } else if duty_phase_start.elapsed() >= pause {
+                    unique_execute_addresses.clear();
+                    rearm_existing_threads(&threads, &kind, architecture, active_slot_start);
+                    duty_state_burst = true;
+                    duty_phase_start = Instant::now();
+                }
+            }
+        }
         if debugger_started
             && (kind.addresses().len() > 4 || kind.single_pass())
             && last_slot_rotation.elapsed() >= kind.rotation_interval()
@@ -833,8 +890,9 @@ fn watch_loop<F>(
                 });
             }
         }
+        let event_wait_ms = if duty_cycle.is_some() { 30 } else { 100 };
         let mut event = DEBUG_EVENT::default();
-        if unsafe { WaitForDebugEvent(&mut event, 100) } == 0 {
+        if unsafe { WaitForDebugEvent(&mut event, event_wait_ms) } == 0 {
             if io::Error::last_os_error().raw_os_error() == Some(ERROR_SEM_TIMEOUT) {
                 continue;
             }
@@ -852,7 +910,7 @@ fn watch_loop<F>(
             },
             CREATE_THREAD_DEBUG_EVENT => unsafe {
                 let thread = event.u.CreateThread.hThread;
-                if debugger_started
+                if debugger_started && duty_state_burst
                     && let Err(error) =
                         arm_thread(thread, &kind, architecture, active_slot_start)
                 {
@@ -1011,6 +1069,7 @@ fn watch_loop<F>(
                     } else {
                         debugger_started = true;
                         last_slot_rotation = Instant::now();
+                        duty_phase_start = Instant::now();
                         notify(WatchEvent::Started {
                             armed_threads: armed,
                             total_threads: total,

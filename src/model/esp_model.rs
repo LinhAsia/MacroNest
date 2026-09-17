@@ -62,6 +62,10 @@ fn default_entity_auto_scan_duration_secs() -> f32 {
     1.0
 }
 
+fn default_entity_auto_continuous_interval_secs() -> f32 {
+    1.0
+}
+
 fn default_selected_permutation() -> usize {
     1
 }
@@ -96,6 +100,8 @@ pub struct EspPreset {
     pub entity_auto_continuous: bool,
     #[serde(default = "default_entity_auto_scan_duration_secs")]
     pub entity_auto_scan_duration_secs: f32,
+    #[serde(default = "default_entity_auto_continuous_interval_secs")]
+    pub entity_auto_continuous_interval_secs: f32,
     #[serde(default)]
     pub entity_multi_strides: String,
     #[serde(default = "default_entity_auto_hit_step")]
@@ -224,6 +230,7 @@ impl EspPreset {
             entity_auto_scan_mode: EspAutoScanMode::Stride,
             entity_auto_continuous: false,
             entity_auto_scan_duration_secs: 1.0,
+            entity_auto_continuous_interval_secs: 1.0,
             entity_multi_strides: String::new(),
             entity_auto_hit_step: 1,
             entity_hit_order_merge_pairs: false,
@@ -1515,13 +1522,15 @@ mod tests {
         let json = serde_json::to_string(&preset).unwrap();
         let loaded: EspPreset = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.entity_auto_scan_mode, EspAutoScanMode::AllHits);
-        assert_eq!(loaded.entity_auto_scan_duration_secs, 1.0);
+        assert_eq!(loaded.entity_auto_continuous_interval_secs, 1.0);
         assert!(!loaded.entity_auto_continuous);
 
         preset.entity_auto_continuous = true;
+        preset.entity_auto_continuous_interval_secs = 2.0;
         let json2 = serde_json::to_string(&preset).unwrap();
         let loaded2: EspPreset = serde_json::from_str(&json2).unwrap();
         assert!(loaded2.entity_auto_continuous);
+        assert_eq!(loaded2.entity_auto_continuous_interval_secs, 2.0);
     }
 
     #[test]
