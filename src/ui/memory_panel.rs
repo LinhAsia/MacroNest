@@ -7659,7 +7659,14 @@ impl CrosshairApp {
         } else {
             let val = saved.current.or_else(|| {
                 read_scan_value(pid, saved.address, saved.value_type).ok()
-            }).unwrap_or(ScanValue::I64(0));
+            }).unwrap_or_else(|| match saved.value_type {
+                ScanValueType::I8 => ScanValue::I8(0),
+                ScanValueType::I16 => ScanValue::I16(0),
+                ScanValueType::I32 => ScanValue::I32(0),
+                ScanValueType::F32 => ScanValue::F32(0.0),
+                ScanValueType::I64 => ScanValue::I64(0),
+                ScanValueType::F64 => ScanValue::F64(0.0),
+            });
             numeric_targets.push((saved.address, val));
         }
         let source_addresses = if is_text {
@@ -10606,13 +10613,15 @@ impl CrosshairApp {
                         VALUE_WIDTH,
                         20.0,
                         egui::Label::new(RichText::new("Value").strong()).truncate(),
-                    );
+                    )
+                    .on_hover_text("Snapshot value from validation / scan (static comparison baseline)");
                     Self::memory_label_cell(
                         ui,
                         CURRENT_WIDTH,
                         20.0,
                         egui::Label::new(RichText::new("Current").strong()).truncate(),
-                    );
+                    )
+                    .on_hover_text("Live value resolved in real time from the target process memory");
                 });
                 ui.separator();
                 let filter = dialog.filter.trim().to_ascii_lowercase();
@@ -10729,7 +10738,7 @@ impl CrosshairApp {
                             for visible_row in rows.clone() {
                                 let candidate =
                                     &mut dialog.candidates[visible_indices[visible_row]];
-                                if candidate.resolved_address.is_none() && candidate.valid != Some(false) {
+                                if candidate.valid != Some(false) {
                                     let base = match module_cache.get(&candidate.path.module) {
                                         Some(&b) => b,
                                         None => {
@@ -10745,9 +10754,8 @@ impl CrosshairApp {
                                             offsets: candidate.path.offsets.clone(),
                                         };
                                         candidate.resolved_address = resolve_memory_address(pid, base, Some(&pointer)).ok();
-                                    }
-                                    if candidate.resolved_address.is_none() {
-                                        candidate.valid = Some(false);
+                                    } else {
+                                        candidate.resolved_address = None;
                                     }
                                 }
                                 if let Some(address) = candidate.resolved_address {
@@ -10758,6 +10766,9 @@ impl CrosshairApp {
                                         candidate.live_value =
                                             read_scan_value(pid, address, candidate.expected_value.value_type()).ok();
                                     }
+                                } else {
+                                    candidate.live_value = None;
+                                    candidate.live_text = None;
                                 }
                             }
                         }
