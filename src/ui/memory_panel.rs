@@ -10957,12 +10957,18 @@ impl CrosshairApp {
                 thread::spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let mut paths_by_target = Vec::with_capacity(worker_targets.len());
+                        let target_count = worker_targets.len().max(1);
+                        let per_target_limit = if exhaustive {
+                            (limits.result_limit.max(50_000) / target_count).clamp(2_000, 50_000)
+                        } else {
+                            limits.result_limit
+                        };
                         for &target in &worker_targets {
                             let paths = cached_map.paths_to_with_options(
                                 &[target],
                                 limits.max_offset,
                                 limits.max_depth,
-                                limits.result_limit,
+                                per_target_limit,
                                 &must_end,
                                 exhaustive,
                             );

@@ -890,6 +890,12 @@ pub fn scan_pointer_map_and_paths_to_targets_must_end(
         progress,
         None,
     )?;
+    let target_count = targets.len().max(1);
+    let per_target_limit = if exhaustive {
+        (result_limit.max(50_000) / target_count).clamp(2_000, 50_000)
+    } else {
+        result_limit
+    };
     let paths = targets
         .iter()
         .copied()
@@ -898,7 +904,7 @@ pub fn scan_pointer_map_and_paths_to_targets_must_end(
                 &[target],
                 max_offset,
                 max_depth,
-                result_limit,
+                per_target_limit,
                 must_end_offsets,
                 exhaustive,
             );
@@ -1028,12 +1034,12 @@ fn find_pointer_paths_to_any(
     exhaustive: bool,
 ) -> Vec<PointerPath> {
     let effective_result_limit = if exhaustive {
-        result_limit.max(250_000)
+        result_limit.min(100_000)
     } else {
         result_limit
     };
     let max_frontier = if exhaustive {
-        usize::MAX
+        100_000
     } else {
         effective_result_limit.saturating_mul(4).clamp(10_000, 100_000)
     };
@@ -1068,15 +1074,19 @@ fn find_pointer_paths_to_any(
 
     let mut legacy_visited = HashSet::new();
     let mut frontier = Vec::new();
+    let mut visit_counts: HashMap<usize, u8> = HashMap::new();
     for &target in targets {
-        if exhaustive || legacy_visited.insert(target) {
+        if exhaustive {
+            visit_counts.insert(target, 1);
+            frontier.push((target, SmallOffsets::new()));
+        } else if legacy_visited.insert(target) {
             frontier.push((target, SmallOffsets::new()));
         }
     }
 
+    const MAX_VISITS_PER_NODE: u8 = 4;
     for depth in 0..max_depth.max(1) {
         let mut next = Vec::new();
-        let mut seen_next = HashSet::new();
         let req_offset = must_end_offsets.get(depth).copied();
         for (node, suffix) in frontier {
             let (start, end) = if let Some(req) = req_offset {
@@ -1117,12 +1127,14 @@ fn find_pointer_paths_to_any(
                         }
                     }
                 }
-                if depth + 1 < max_depth.max(1) {
+                if depth + 1 < max_depth.max(1) && next.len() < max_frontier {
                     if exhaustive {
-                        if seen_next.insert((location, new_suffix)) {
+                        let count = visit_counts.entry(location).or_insert(0);
+                        if *count < MAX_VISITS_PER_NODE {
+                            *count += 1;
                             next.push((location, new_suffix));
                         }
-                    } else if next.len() < max_frontier && legacy_visited.insert(location) {
+                    } else if legacy_visited.insert(location) {
                         next.push((location, new_suffix));
                     }
                 }
@@ -4822,6 +4834,34 @@ mod tests {
             true,
         );
         assert_eq!(exhaustive_paths.len(), 2);
+    }
+
+    #[test]
+    fn exhaustive_pointer_paths_handles_cycles_without_explosion() {
+        // Cycle: 0x2000 points to 0x3000, 0x3000 points to 0x2000.
+        // 0x2000 also points to 0x5000 (target).
+        // Module game.exe at 0x1000..0x1100 has pointer at 0x1010 pointing to 0x2000.
+        let pointers = vec![
+            (0x1FFE, 0x1010), // module points to 0x2000 (offset 2)
+            (0x1FFE, 0x3000), // 0x3000 points to 0x2000 (offset 2)
+            (0x2FFE, 0x2000), // 0x2000 points to 0x3000 (offset 2)
+            (0x4FFE, 0x2000), // 0x2000 points to 0x5000 (offset 2)
+        ];
+        let modules = [("game.exe".to_owned(), 0x1000, 0x100)];
+
+        let paths = find_pointer_paths_to_any(
+            &pointers,
+            &[0x5000],
+            &modules,
+            0x10,
+            5,
+            16,
+            false,
+            &[],
+            true,
+        );
+        assert!(!paths.is_empty());
+        assert_eq!(paths[0].module, "game.exe");
     }
 
     #[test]
