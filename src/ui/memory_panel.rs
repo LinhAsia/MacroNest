@@ -244,6 +244,7 @@ struct StablePointerDialog {
     filter_rx: Option<Receiver<StablePointerFilterResult>>,
     validation_rounds: usize,
     strict_multi_scan: bool,
+    exhaustive_scan: bool,
 }
 
 enum DeepPointerJobResult {
@@ -342,7 +343,11 @@ fn run_deep_pointer_comparison(
     must_end: &[usize],
     strict_multi_scan: bool,
 ) -> DeepPointerComparisonResult {
-    let comparison_limit = limits.result_limit.saturating_mul(16).clamp(10_000, 100_000);
+    let comparison_limit = if limits.exhaustive {
+        limits.result_limit.saturating_mul(16).clamp(100_000, 250_000)
+    } else {
+        limits.result_limit.saturating_mul(16).clamp(10_000, 100_000)
+    };
     let strict = strict_multi_scan && targets_a.len() > 1 && !targets_b.is_empty();
 
     if strict {
@@ -374,21 +379,23 @@ fn run_deep_pointer_comparison(
 
             let (paths_a, paths_b) = std::thread::scope(|s| {
                 let handle_a = s.spawn(|| {
-                    map_a.paths_to_with_must_end(
+                    map_a.paths_to_with_options(
                         &slot_targets_a,
                         limits.max_offset,
                         limits.max_depth,
                         comparison_limit,
                         must_end,
+                        limits.exhaustive,
                     )
                 });
                 let handle_b = s.spawn(|| {
-                    map_b.paths_to_with_must_end(
+                    map_b.paths_to_with_options(
                         &slot_targets_b,
                         limits.max_offset,
                         limits.max_depth,
                         comparison_limit,
                         must_end,
+                        limits.exhaustive,
                     )
                 });
                 (handle_a.join().unwrap(), handle_b.join().unwrap())
@@ -441,21 +448,23 @@ fn run_deep_pointer_comparison(
         };
         let (paths_a, paths_b) = std::thread::scope(|s| {
             let handle_a = s.spawn(|| {
-                map_a.paths_to_with_must_end(
+                map_a.paths_to_with_options(
                     &slot_targets_a,
                     limits.max_offset,
                     limits.max_depth,
                     comparison_limit,
                     must_end,
+                    limits.exhaustive,
                 )
             });
             let handle_b = s.spawn(|| {
-                map_b.paths_to_with_must_end(
+                map_b.paths_to_with_options(
                     &slot_targets_b,
                     limits.max_offset,
                     limits.max_depth,
                     comparison_limit,
                     must_end,
+                    limits.exhaustive,
                 )
             });
             (handle_a.join().unwrap(), handle_b.join().unwrap())
@@ -5060,6 +5069,7 @@ impl CrosshairApp {
                             PointerScanLimits::SAFE.max_bytes / (1024 * 1024);
                         self.state.memory_pointer_scan_result_limit =
                             PointerScanLimits::SAFE.result_limit;
+                        self.state.memory_pointer_exhaustive_scan = false;
                         changed = true;
                     }
                     if ui.button("Deep (7 levels / 0x4000)").clicked() {
@@ -5070,6 +5080,18 @@ impl CrosshairApp {
                             PointerScanLimits::DEEP.max_bytes / (1024 * 1024);
                         self.state.memory_pointer_scan_result_limit =
                             PointerScanLimits::DEEP.result_limit;
+                        self.state.memory_pointer_exhaustive_scan = true;
+                        changed = true;
+                    }
+                    if ui.button(self.tr("Exhaustive (Vét cạn)", "Exhaustive (Vét cạn)")).clicked() {
+                        self.state.memory_pointer_scan_depth = PointerScanLimits::EXHAUSTIVE.max_depth;
+                        self.state.memory_pointer_scan_offset =
+                            format!("{:X}", PointerScanLimits::EXHAUSTIVE.max_offset);
+                        self.state.memory_pointer_scan_memory_mb =
+                            PointerScanLimits::EXHAUSTIVE.max_bytes / (1024 * 1024);
+                        self.state.memory_pointer_scan_result_limit =
+                            PointerScanLimits::EXHAUSTIVE.result_limit;
+                        self.state.memory_pointer_exhaustive_scan = true;
                         changed = true;
                     }
                 });
@@ -5086,7 +5108,7 @@ impl CrosshairApp {
                 ui.horizontal(|ui| {
                     ui.label("Map memory (MB)");
                     changed |= ui
-                        .add(egui::DragValue::new(&mut self.state.memory_pointer_scan_memory_mb).range(256..=4096))
+                        .add(egui::DragValue::new(&mut self.state.memory_pointer_scan_memory_mb).range(256..=8192))
                         .changed();
                     ui.label("Path limit");
                     changed |= ui
@@ -5111,6 +5133,17 @@ impl CrosshairApp {
                                 .hint_text("0, 58")
                         ).changed();
                     }
+                });
+                ui.horizontal(|ui| {
+                    let exhaustive_label = self.tr("Exhaustive pointer scan (no pruning)", "Quét con trỏ vét cạn (không lược bỏ)");
+                    let exhaustive_hover = self.tr(
+                        "100% thorough search: does not prune alternative pointer branches or truncate search frontier. Guarantees finding all pointer paths.",
+                        "Tìm kiếm triệt để 100%: không lược bỏ nhánh con trỏ thay thế và không cắt tỉa frontier. Đảm bảo tìm ra toàn bộ đường đi con trỏ.",
+                    );
+                    changed |= ui.checkbox(
+                        &mut self.state.memory_pointer_exhaustive_scan,
+                        exhaustive_label,
+                    ).on_hover_text(exhaustive_hover).changed();
                 });
                 ui.separator();
                 ui.label(self.tr("Scan Hotkeys", "Scan Hotkeys"));
@@ -5152,8 +5185,9 @@ impl CrosshairApp {
             max_bytes: self
                 .state
                 .memory_pointer_scan_memory_mb
-                .clamp(256, 4096)
+                .clamp(256, 8192)
                 .saturating_mul(1024 * 1024),
+            exhaustive: self.state.memory_pointer_exhaustive_scan,
         }
     }
 
@@ -7554,6 +7588,7 @@ impl CrosshairApp {
                 filter_rx: None,
                 validation_rounds: 0,
                 strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
+                exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
             });
             return;
         };
@@ -7684,6 +7719,7 @@ impl CrosshairApp {
                     filter_rx: None,
                     validation_rounds: 0,
                     strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
+                    exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
                 });
                 return;
             }
@@ -7710,6 +7746,7 @@ impl CrosshairApp {
                     limits.max_bytes,
                     &must_end,
                     worker_progress,
+                    limits.exhaustive,
                 )
             }))
             .unwrap_or_else(|_| Err(std::io::Error::other("Pointer scan thread encountered an error")))
@@ -7730,9 +7767,17 @@ impl CrosshairApp {
             text_encoding: saved.text_encoding,
             text_byte_len: saved.text_byte_len,
             status: if source_addresses.len() == 1 {
-                format!("Scanning pointer paths for target 0x{:X}…", source_addresses[0])
+                if limits.exhaustive {
+                    format!("Exhaustive scanning pointer paths for target 0x{:X}…", source_addresses[0])
+                } else {
+                    format!("Scanning pointer paths for target 0x{:X}…", source_addresses[0])
+                }
             } else {
-                format!("Scanning pointer paths for {} target(s)…", source_addresses.len())
+                if limits.exhaustive {
+                    format!("Exhaustive scanning pointer paths for {} target(s)…", source_addresses.len())
+                } else {
+                    format!("Scanning pointer paths for {} target(s)…", source_addresses.len())
+                }
             },
             candidates: Vec::new(),
             selected: HashSet::new(),
@@ -7754,6 +7799,7 @@ impl CrosshairApp {
             filter_rx: None,
             validation_rounds: 0,
             strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
+            exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
         });
     }
 
@@ -10099,7 +10145,7 @@ impl CrosshairApp {
                                 dialog.limits.max_offset,
                             )
                         } else {
-                            let limit_note = (dialog.candidates.len()
+                            let limit_note = (!dialog.exhaustive_scan && dialog.candidates.len()
                                 >= dialog.limits.result_limit)
                                 .then_some(" (path limit reached)")
                                 .unwrap_or_default();
@@ -10245,6 +10291,25 @@ impl CrosshairApp {
                         "Scans each address independently with dedicated budget, preserving exact data types and original descriptions."
                     }).changed() {
                         self.state.memory_pointer_strict_multi_scan = dialog.strict_multi_scan;
+                        self.persist();
+                    }
+
+                    ui.add_space(8.0);
+
+                    if ui.checkbox(
+                        &mut dialog.exhaustive_scan,
+                        RichText::new(if self.state.ui_language == UiLanguage::Vietnamese {
+                            "🔥 Vét cạn (không lược bỏ)"
+                        } else {
+                            "🔥 Exhaustive scan (no pruning)"
+                        }).strong().color(Color32::from_rgb(255, 185, 90)),
+                    ).on_hover_text(if self.state.ui_language == UiLanguage::Vietnamese {
+                        "Quét triệt để toàn bộ các nhánh con trỏ, không giới hạn frontier và không lược bỏ các nhánh trùng địa chỉ trung gian. Đảm bảo tìm ra 100% con trỏ mà deep pointer scan tìm được."
+                    } else {
+                        "Exhaustively traverses all pointer branches without frontier clipping or dropping alternative paths via shared intermediate addresses. Guarantees finding all paths that deep pointer scan finds."
+                    }).changed() {
+                        dialog.limits.exhaustive = dialog.exhaustive_scan;
+                        self.state.memory_pointer_exhaustive_scan = dialog.exhaustive_scan;
                         self.persist();
                     }
                 });
@@ -10888,16 +10953,18 @@ impl CrosshairApp {
 
             if let Some(cached_map) = dialog.cached_map.clone() {
                 dialog.status = "Searching pointer paths in cached map...".to_owned();
+                let exhaustive = dialog.exhaustive_scan;
                 thread::spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let mut paths_by_target = Vec::with_capacity(worker_targets.len());
                         for &target in &worker_targets {
-                            let paths = cached_map.paths_to_with_must_end(
+                            let paths = cached_map.paths_to_with_options(
                                 &[target],
                                 limits.max_offset,
                                 limits.max_depth,
                                 limits.result_limit,
                                 &must_end,
+                                exhaustive,
                             );
                             paths_by_target.push((target, paths));
                         }
@@ -10910,6 +10977,7 @@ impl CrosshairApp {
             } else if let Ok(modules) = process_modules(pid) {
                 let pointer_width = process_pointer_width(pid).unwrap_or(std::mem::size_of::<usize>());
                 dialog.status = "Scanning memory...".to_owned();
+                let exhaustive = dialog.exhaustive_scan;
                 thread::spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         scan_pointer_map_and_paths_to_targets_must_end(
@@ -10923,6 +10991,7 @@ impl CrosshairApp {
                             limits.max_bytes,
                             &must_end,
                             worker_progress,
+                            exhaustive,
                         )
                     }))
                     .unwrap_or_else(|_| Err(std::io::Error::other("Pointer scan thread encountered an error")))
@@ -21491,6 +21560,7 @@ mod tests {
             max_offset: 0x100,
             result_limit: 10,
             max_bytes: 1024 * 1024,
+            exhaustive: false,
         };
 
         let res = run_deep_pointer_comparison(

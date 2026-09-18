@@ -558,22 +558,24 @@ fn view_projection_likelihood(matrix: &[f32; 16]) -> Option<f32> {
 
 /// Bounds for pointer scans. Keeping these explicit prevents a deep scan from
 /// consuming unbounded memory when a target process has a very large address space.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PointerScanLimits {
     pub max_offset: usize,
     pub max_depth: usize,
     pub result_limit: usize,
     pub max_bytes: usize,
+    pub exhaustive: bool,
 }
 
 impl PointerScanLimits {
-    pub const MAX_RESULT_LIMIT: usize = 65_536;
+    pub const MAX_RESULT_LIMIT: usize = 250_000;
 
     pub const SAFE: Self = Self {
         max_offset: 0x1000,
         max_depth: 5,
         result_limit: 256,
         max_bytes: 1024 * 1024 * 1024,
+        exhaustive: false,
     };
 
     pub const DEEP: Self = Self {
@@ -581,6 +583,15 @@ impl PointerScanLimits {
         max_depth: 7,
         result_limit: 16_384,
         max_bytes: 2048 * 1024 * 1024,
+        exhaustive: true,
+    };
+
+    pub const EXHAUSTIVE: Self = Self {
+        max_offset: 0x4000,
+        max_depth: 7,
+        result_limit: 100_000,
+        max_bytes: 4096 * 1024 * 1024,
+        exhaustive: true,
     };
 }
 
@@ -763,9 +774,10 @@ impl PointerMap {
         max_depth: usize,
         result_limit: usize,
     ) -> Vec<PointerPath> {
-        self.paths_to_with_must_end(&[target], max_offset, max_depth, result_limit, &[])
+        self.paths_to_with_options(&[target], max_offset, max_depth, result_limit, &[], false)
     }
 
+    #[allow(dead_code)]
     pub fn paths_to_with_must_end(
         &self,
         targets: &[usize],
@@ -773,6 +785,25 @@ impl PointerMap {
         max_depth: usize,
         result_limit: usize,
         must_end_offsets: &[usize],
+    ) -> Vec<PointerPath> {
+        self.paths_to_with_options(
+            targets,
+            max_offset,
+            max_depth,
+            result_limit,
+            must_end_offsets,
+            false,
+        )
+    }
+
+    pub fn paths_to_with_options(
+        &self,
+        targets: &[usize],
+        max_offset: usize,
+        max_depth: usize,
+        result_limit: usize,
+        must_end_offsets: &[usize],
+        exhaustive: bool,
     ) -> Vec<PointerPath> {
         find_pointer_paths_to_any(
             &self.pointers,
@@ -783,6 +814,7 @@ impl PointerMap {
             result_limit,
             false,
             must_end_offsets,
+            exhaustive,
         )
     }
 
@@ -794,7 +826,7 @@ impl PointerMap {
         max_depth: usize,
         result_limit: usize,
     ) -> Vec<PointerPath> {
-        self.paths_to_with_must_end(targets, max_offset, max_depth, result_limit, &[])
+        self.paths_to_with_options(targets, max_offset, max_depth, result_limit, &[], false)
     }
 
     #[cfg(test)]
@@ -827,6 +859,7 @@ pub fn scan_pointer_paths_to_targets_with_budget(
         max_bytes,
         &[],
         progress,
+        false,
     )
     .map(|(_, paths)| paths)
 }
@@ -842,12 +875,18 @@ pub fn scan_pointer_map_and_paths_to_targets_must_end(
     max_bytes: usize,
     must_end_offsets: &[usize],
     progress: Arc<AtomicUsize>,
+    exhaustive: bool,
 ) -> io::Result<(PointerMap, Vec<(usize, Vec<PointerPath>)>)> {
+    let effective_bytes = if exhaustive {
+        max_bytes.max(4096 * 1024 * 1024)
+    } else {
+        max_bytes
+    };
     let map = capture_pointer_map_with_budget_cancel(
         pid,
         modules,
         pointer_width,
-        max_bytes,
+        effective_bytes,
         progress,
         None,
     )?;
@@ -855,7 +894,14 @@ pub fn scan_pointer_map_and_paths_to_targets_must_end(
         .iter()
         .copied()
         .map(|target| {
-            let paths = map.paths_to_with_must_end(&[target], max_offset, max_depth, result_limit, must_end_offsets);
+            let paths = map.paths_to_with_options(
+                &[target],
+                max_offset,
+                max_depth,
+                result_limit,
+                must_end_offsets,
+                exhaustive,
+            );
             (target, paths)
         })
         .collect();
@@ -922,6 +968,7 @@ pub fn scan_pointer_paths_with_budget_options_must_end(
         result_limit,
         include_system_modules,
         must_end_offsets,
+        false,
     ))
 }
 
@@ -978,8 +1025,18 @@ fn find_pointer_paths_to_any(
     result_limit: usize,
     include_system_modules: bool,
     must_end_offsets: &[usize],
+    exhaustive: bool,
 ) -> Vec<PointerPath> {
-    let max_frontier = result_limit.saturating_mul(4).clamp(10_000, 100_000);
+    let effective_result_limit = if exhaustive {
+        result_limit.max(250_000)
+    } else {
+        result_limit
+    };
+    let max_frontier = if exhaustive {
+        usize::MAX
+    } else {
+        effective_result_limit.saturating_mul(4).clamp(10_000, 100_000)
+    };
     let mut results = Vec::new();
     let mut seen_results = HashSet::new();
 
@@ -1009,16 +1066,17 @@ fn find_pointer_paths_to_any(
         .collect();
     fast_modules.sort_unstable_by_key(|m| m.base);
 
-    let mut visited = HashSet::new();
+    let mut legacy_visited = HashSet::new();
     let mut frontier = Vec::new();
     for &target in targets {
-        if visited.insert(target) {
+        if exhaustive || legacy_visited.insert(target) {
             frontier.push((target, SmallOffsets::new()));
         }
     }
 
     for depth in 0..max_depth.max(1) {
         let mut next = Vec::new();
+        let mut seen_next = HashSet::new();
         let req_offset = must_end_offsets.get(depth).copied();
         for (node, suffix) in frontier {
             let (start, end) = if let Some(req) = req_offset {
@@ -1052,15 +1110,21 @@ fn find_pointer_paths_to_any(
                                     module_offset,
                                     offsets: new_suffix.to_reversed_vec(),
                                 });
-                                if results.len() >= result_limit.max(1) {
+                                if results.len() >= effective_result_limit.max(1) {
                                     return results;
                                 }
                             }
                         }
                     }
                 }
-                if next.len() < max_frontier && visited.insert(location) {
-                    next.push((location, new_suffix));
+                if depth + 1 < max_depth.max(1) {
+                    if exhaustive {
+                        if seen_next.insert((location, new_suffix)) {
+                            next.push((location, new_suffix));
+                        }
+                    } else if next.len() < max_frontier && legacy_visited.insert(location) {
+                        next.push((location, new_suffix));
+                    }
                 }
             }
         }
@@ -4642,6 +4706,7 @@ mod tests {
             8,
             false,
             &[],
+            false,
         );
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].module, "game.exe");
@@ -4664,6 +4729,7 @@ mod tests {
             8,
             false,
             &[0x20, 0x10],
+            false,
         );
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].offsets, vec![0x10, 0x20]);
@@ -4678,6 +4744,7 @@ mod tests {
             8,
             false,
             &[0x20],
+            false,
         );
         assert_eq!(paths_one.len(), 1);
         assert_eq!(paths_one[0].offsets, vec![0x10, 0x20]);
@@ -4692,6 +4759,7 @@ mod tests {
             8,
             false,
             &[0x99],
+            false,
         );
         assert!(paths_mismatch.is_empty());
 
@@ -4705,8 +4773,55 @@ mod tests {
             8,
             false,
             &[0x20, 0x10, 0x5],
+            false,
         );
         assert!(paths_too_deep.is_empty());
+    }
+
+    #[test]
+    fn exhaustive_pointer_paths_do_not_drop_branches_sharing_nodes() {
+        // Target is 0x5000.
+        // Node 0x2000 has pointer with value 0x4F00 (offset 0x100 to target 0x5000).
+        // Node 0x2050 has pointer with value 0x4E00 (offset 0x200 to target 0x5000).
+        // Node 0x4000 has pointer with value 0x1F00:
+        //   - offset to 0x2000 is 0x100
+        //   - offset to 0x2050 is 0x150
+        // Module game.exe at 0x1000..0x1100 has pointer at 0x1010 with value 0x3F00 (offset 0x100 to 0x4000).
+        let pointers = vec![
+            (0x1F00, 0x4000),
+            (0x3F00, 0x1010),
+            (0x4E00, 0x2050),
+            (0x4F00, 0x2000),
+        ];
+        let modules = [("game.exe".to_owned(), 0x1000, 0x100)];
+
+        // Legacy non-exhaustive mode: 0x4000 is visited once and dropped for the other branch
+        let legacy_paths = find_pointer_paths_to_any(
+            &pointers,
+            &[0x5000],
+            &modules,
+            0x200,
+            3,
+            8,
+            false,
+            &[],
+            false,
+        );
+        assert_eq!(legacy_paths.len(), 1);
+
+        // Exhaustive mode: does NOT prune 0x4000 for different suffixes, finding BOTH paths!
+        let exhaustive_paths = find_pointer_paths_to_any(
+            &pointers,
+            &[0x5000],
+            &modules,
+            0x200,
+            3,
+            8,
+            false,
+            &[],
+            true,
+        );
+        assert_eq!(exhaustive_paths.len(), 2);
     }
 
     #[test]
