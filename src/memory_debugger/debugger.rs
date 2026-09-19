@@ -132,7 +132,7 @@ pub fn resolve_module_offset(pid: u32, module: &str, offset: usize) -> io::Resul
     process_modules(pid)?
         .into_iter()
         .find(|(name, _, _)| name.eq_ignore_ascii_case(module))
-        .and_then(|(_, base, size)| (offset < size).then_some(base + offset))
+        .map(|(_, base, _)| base.wrapping_add(offset))
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "module is not loaded"))
 }
 

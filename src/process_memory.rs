@@ -146,6 +146,29 @@ pub enum ScanValue {
 }
 
 impl ScanValue {
+    #[inline]
+    pub fn as_i128(self) -> Option<i128> {
+        match self {
+            Self::I8(v) => Some(v as i128),
+            Self::I16(v) => Some(v as i128),
+            Self::I32(v) => Some(v as i128),
+            Self::I64(v) => Some(v as i128),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn as_f64(self) -> f64 {
+        match self {
+            Self::I8(v) => v as f64,
+            Self::I16(v) => v as f64,
+            Self::I32(v) => v as f64,
+            Self::I64(v) => v as f64,
+            Self::F32(v) => v as f64,
+            Self::F64(v) => v,
+        }
+    }
+
     pub const fn value_type(self) -> ScanValueType {
         match self {
             Self::I8(_) => ScanValueType::I8,
@@ -1102,7 +1125,7 @@ fn find_pointer_paths_to_any(
                 let e = pointers.partition_point(|(value, _)| *value <= node);
                 (s, e)
             };
-            for &(value, location) in &pointers[start..end] {
+            for &(value, location) in pointers[start..end].iter().rev() {
                 let offset = node - value;
                 let Some(new_suffix) = suffix.pushed(offset) else {
                     continue;

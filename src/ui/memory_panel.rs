@@ -25,7 +25,7 @@ use crate::{
         ScanValueType, SnapshotFilterResult, TextEncoding, TextScanCandidate, ViewProjectionCandidate,
         capture_memory_snapshot, capture_pointer_map_with_budget,
         compare_pointer_paths, filter_aob_scan_candidates_numeric,
-        filter_aob_scan_candidates_text, filter_memory_snapshot_with_progress, filter_scan_candidates,
+        filter_aob_scan_candidates_text, filter_memory_snapshot_with_progress,
         filter_scan_candidates_with_progress, filter_text_scan_candidates, is_aob_pattern_input,
         query_memory_region, read_memory_bytes, read_scan_value, read_text_memory,
         refresh_scan_candidates, scan_aob_memory_as_numeric, scan_aob_memory_as_text,
@@ -191,7 +191,7 @@ struct StablePointerFilterResult {
     pid: u32,
     action: MemoryScanAction,
     input_count: usize,
-    result: Result<Vec<ScanCandidate>, String>,
+    result: Result<Vec<StablePointerCandidate>, String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -10134,8 +10134,16 @@ impl CrosshairApp {
                                 })
                             })
                             .collect();
-                        dialog.candidates.sort_by_key(|candidate| {
-                            !candidate.path.module.ends_with(".exe") && !candidate.path.module.ends_with(".EXE")
+                        dialog.candidates.sort_by(|a, b| {
+                            let a_exe = a.path.module.ends_with(".exe") || a.path.module.ends_with(".EXE");
+                            let b_exe = b.path.module.ends_with(".exe") || b.path.module.ends_with(".EXE");
+                            b_exe.cmp(&a_exe)
+                                .then_with(|| a.path.offsets.len().cmp(&b.path.offsets.len()))
+                                .then_with(|| {
+                                    let sum_a: usize = a.path.offsets.iter().sum::<usize>() + a.path.module_offset;
+                                    let sum_b: usize = b.path.offsets.iter().sum::<usize>() + b.path.module_offset;
+                                    sum_a.cmp(&sum_b)
+                                })
                         });
                         dialog.selected = (!dialog.candidates.is_empty()).then(|| [0].into_iter().collect()).unwrap_or_default();
                         dialog.selection_anchor = (!dialog.candidates.is_empty()).then_some(0);
@@ -10175,23 +10183,7 @@ impl CrosshairApp {
             } else {
                 match outcome.result {
                     Ok(filtered) => {
-                        let values = filtered
-                            .into_iter()
-                            .map(|candidate| {
-                                (candidate.address, candidate.current(dialog.value_type))
-                            })
-                            .collect::<HashMap<_, _>>();
-                        dialog.candidates.retain_mut(|candidate| {
-                            let Some(value) = candidate
-                                .resolved_address
-                                .and_then(|address| values.get(&address).copied())
-                            else {
-                                return false;
-                            };
-                            candidate.filter_value = Some(value);
-                            candidate.live_value = Some(value);
-                            true
-                        });
+                        dialog.candidates = filtered;
                         dialog.selected = (!dialog.candidates.is_empty()).then(|| [0].into_iter().collect()).unwrap_or_default();
                         dialog.selection_anchor = (!dialog.candidates.is_empty()).then_some(0);
                         dialog.status = format!(
@@ -11841,6 +11833,22 @@ impl CrosshairApp {
         let value_type = dialog.value_type;
         let text_encoding = dialog.text_encoding;
         let text_byte_len = dialog.text_byte_len;
+        let manual_expected = parse_scan_value(
+            &self.memory_panel.value_input,
+            dialog.value_type,
+            self.memory_panel.hex,
+        );
+        let manual_text = if text_encoding.is_some() && !self.memory_panel.value_input.trim().is_empty() {
+            Some(self.memory_panel.value_input.trim().to_owned())
+        } else {
+            None
+        };
+        let saved_targets: HashMap<usize, (Option<ScanValue>, Option<String>)> = self
+            .memory_panel
+            .saved
+            .iter()
+            .map(|s| (s.address, (s.current, s.current_text.clone())))
+            .collect();
         let (tx, rx) = mpsc::channel();
         dialog.validation_rx = Some(rx);
         dialog.status = format!(
@@ -11870,7 +11878,7 @@ impl CrosshairApp {
 
                     for candidate in &mut candidates {
                         let module_lower = candidate.path.module.to_ascii_lowercase();
-                        let Some(&mod_base) = modules_map.get(&module_lower) else {
+                        let Some(&mod_base) = modules_map.get(&module_lower).or(candidate.resolved_base.as_ref()) else {
                             candidate.valid = Some(false);
                             candidate.resolved_base = None;
                             candidate.resolved_address = None;
@@ -11942,7 +11950,14 @@ impl CrosshairApp {
                                     String::from_utf16_lossy(&units)
                                 }
                             };
-                            let is_match = candidate.expected_text.as_deref() == Some(&text);
+                            let is_match = if let Some(ref man_t) = manual_text {
+                                man_t == &text
+                            } else if let Some((_, Some(live_t))) = saved_targets.get(&candidate.source_address) {
+                                live_t == &text || candidate.expected_text.as_deref() == Some(&text)
+                            } else {
+                                candidate.expected_text.as_deref() == Some(&text)
+                                    || candidate.resolved_address == Some(candidate.source_address)
+                            };
                             candidate.observed_text = Some(text.clone());
                             candidate.live_text = Some(text);
                             if is_match {
@@ -11974,7 +11989,15 @@ impl CrosshairApp {
                             candidate.observed_value = Some(observed);
                             candidate.live_value = Some(observed);
                             candidate.filter_value = Some(observed);
-                            if observed == candidate.expected_value {
+                            let is_match = if let Some(man_val) = manual_expected {
+                                scan_values_equal_loose(observed, man_val)
+                            } else if let Some((Some(live_s), _)) = saved_targets.get(&candidate.source_address) {
+                                scan_values_equal_loose(observed, *live_s) || scan_values_equal_loose(observed, candidate.expected_value)
+                            } else {
+                                scan_values_equal_loose(observed, candidate.expected_value)
+                                    || candidate.resolved_address == Some(candidate.source_address)
+                            };
+                            if is_match {
                                 candidate.valid = Some(true);
                                 verified += 1;
                             } else {
@@ -11986,10 +12009,29 @@ impl CrosshairApp {
                     Ok(())
                 });
 
-                candidates.sort_by_key(|candidate| match candidate.valid {
-                    Some(true) => 0,
-                    None if candidate.observed_value.is_some() || candidate.observed_text.is_some() => 1,
-                    _ => 2,
+                candidates.sort_by(|a, b| {
+                    let status_a = match a.valid {
+                        Some(true) => 0,
+                        None if a.observed_value.is_some() || a.observed_text.is_some() => 1,
+                        _ => 2,
+                    };
+                    let status_b = match b.valid {
+                        Some(true) => 0,
+                        None if b.observed_value.is_some() || b.observed_text.is_some() => 1,
+                        _ => 2,
+                    };
+                    status_a.cmp(&status_b)
+                        .then_with(|| {
+                            let a_exe = a.path.module.ends_with(".exe") || a.path.module.ends_with(".EXE");
+                            let b_exe = b.path.module.ends_with(".exe") || b.path.module.ends_with(".EXE");
+                            b_exe.cmp(&a_exe)
+                        })
+                        .then_with(|| a.path.offsets.len().cmp(&b.path.offsets.len()))
+                        .then_with(|| {
+                            let sum_a: usize = a.path.offsets.iter().sum::<usize>() + a.path.module_offset;
+                            let sum_b: usize = b.path.offsets.iter().sum::<usize>() + b.path.module_offset;
+                            sum_a.cmp(&sum_b)
+                        })
                 });
 
                 (candidates, verified, changed, broken)
@@ -12040,9 +12082,8 @@ impl CrosshairApp {
             let base = match module_cache.get(&candidate.path.module) {
                 Some(&b) => b,
                 None => {
-                    let Ok(b) = resolve_module_offset(pid, &candidate.path.module, 0) else {
-                        continue;
-                    };
+                    let b = resolve_module_offset(pid, &candidate.path.module, 0)
+                        .unwrap_or(candidate.resolved_base.unwrap_or_default());
                     module_cache.insert(candidate.path.module.clone(), b);
                     b
                 }
@@ -16385,32 +16426,26 @@ impl CrosshairApp {
         } else {
             None
         };
-        let mut inputs = dialog
-            .candidates
-            .iter()
-            .filter_map(|candidate| {
-                Some(ScanCandidate::new(
-                    candidate.resolved_address?,
-                    candidate
-                        .filter_value
-                        .or(candidate.observed_value)
-                        .or(candidate.live_value)?,
-                ))
-            })
-            .collect::<Vec<_>>();
-        if inputs.is_empty() {
-            dialog.status = "Validate candidates before applying value filters".to_owned();
+        if dialog.candidates.is_empty() {
+            dialog.status = "No pointer candidates to filter".to_owned();
             self.memory_panel.stable_pointer_dialog = Some(dialog);
             return true;
         }
-        inputs.sort_unstable_by_key(|candidate| candidate.address);
-        let input_count = dialog.candidates.len();
+        let candidates = dialog.candidates.clone();
+        let input_count = candidates.len();
         let comparison = if action == MemoryScanAction::FirstScan {
             Some(ScanComparison::Exact)
         } else {
             action.comparison()
         };
         let value_type = dialog.value_type;
+        let text_encoding = dialog.text_encoding;
+        let text_byte_len = dialog.text_byte_len;
+        let exact_text = if text_encoding.is_some() && (action == MemoryScanAction::FirstScan || action == MemoryScanAction::Exact) {
+            Some(self.memory_panel.value_input.clone())
+        } else {
+            None
+        };
         let (tx, rx) = mpsc::channel();
         dialog.filter_rx = Some(rx);
         dialog.status = format!(
@@ -16420,11 +16455,17 @@ impl CrosshairApp {
         );
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                if let Some(comparison) = comparison {
-                    filter_scan_candidates(pid, inputs, value_type, comparison, exact, range)
-                } else {
-                    refresh_scan_candidates(pid, &mut inputs, value_type).map(|()| inputs)
-                }
+                filter_stable_pointer_candidates(
+                    pid,
+                    candidates,
+                    value_type,
+                    text_encoding,
+                    text_byte_len,
+                    comparison,
+                    exact,
+                    range,
+                    exact_text,
+                )
             }))
             .unwrap_or_else(|_| Err(std::io::Error::other("Pointer filter thread encountered an error")))
             .map_err(|error| error.to_string());
@@ -20845,6 +20886,166 @@ fn tracked_object_signature(
     None
 }
 
+#[inline]
+fn scan_values_equal_loose(a: ScanValue, b: ScanValue) -> bool {
+    match (a.as_i128(), b.as_i128()) {
+        (Some(va), Some(vb)) => va == vb,
+        _ => (a.as_f64() - b.as_f64()).abs() < 0.0001,
+    }
+}
+
+fn scan_value_matches_comparison(
+    cur: ScanValue,
+    prev: Option<ScanValue>,
+    comparison: Option<ScanComparison>,
+    exact: Option<ScanValue>,
+    range: Option<(ScanValue, ScanValue)>,
+) -> bool {
+    let Some(comparison) = comparison else {
+        return true;
+    };
+    match comparison {
+        ScanComparison::Exact => exact.is_some_and(|e| scan_values_equal_loose(cur, e)),
+        ScanComparison::Changed => prev.map_or(true, |p| !scan_values_equal_loose(cur, p)),
+        ScanComparison::Unchanged => prev.map_or(false, |p| scan_values_equal_loose(cur, p)),
+        ScanComparison::Increased => match (cur.as_i128(), prev.and_then(|p| p.as_i128())) {
+            (Some(c), Some(p)) => c > p,
+            _ => prev.is_some_and(|p| cur.as_f64() > p.as_f64()),
+        },
+        ScanComparison::Decreased => match (cur.as_i128(), prev.and_then(|p| p.as_i128())) {
+            (Some(c), Some(p)) => c < p,
+            _ => prev.is_some_and(|p| cur.as_f64() < p.as_f64()),
+        },
+        ScanComparison::Less => match (cur.as_i128(), exact.and_then(|e| e.as_i128())) {
+            (Some(c), Some(e)) => c < e,
+            _ => exact.is_some_and(|e| cur.as_f64() < e.as_f64()),
+        },
+        ScanComparison::Greater => match (cur.as_i128(), exact.and_then(|e| e.as_i128())) {
+            (Some(c), Some(e)) => c > e,
+            _ => exact.is_some_and(|e| cur.as_f64() > e.as_f64()),
+        },
+        ScanComparison::Between => match (cur.as_i128(), range.and_then(|(min, max)| min.as_i128().zip(max.as_i128()))) {
+            (Some(c), Some((min, max))) => c >= min && c <= max,
+            _ => range.is_some_and(|(min, max)| cur.as_f64() >= min.as_f64() && cur.as_f64() <= max.as_f64()),
+        },
+    }
+}
+
+fn filter_stable_pointer_candidates(
+    pid: u32,
+    candidates: Vec<StablePointerCandidate>,
+    _value_type: ScanValueType,
+    text_encoding: Option<TextEncoding>,
+    text_byte_len: usize,
+    comparison: Option<ScanComparison>,
+    exact: Option<ScanValue>,
+    range: Option<(ScanValue, ScanValue)>,
+    exact_text: Option<String>,
+) -> std::io::Result<Vec<StablePointerCandidate>> {
+    let modules_map: std::collections::HashMap<String, usize> = process_modules(pid)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, base, _)| (name.to_ascii_lowercase(), base))
+        .collect();
+    let pointer_width = process_pointer_width(pid).unwrap_or(8);
+    let mut surviving = Vec::with_capacity(candidates.len());
+
+    let _ = crate::process_memory::with_cached_read_process(pid, |process| {
+        let mut ptr_buf = [0u8; 8];
+        let mut val_buf = [0u8; 8];
+        let mut text_buf = vec![0u8; text_byte_len.max(1)];
+
+        for mut candidate in candidates {
+            let module_lower = candidate.path.module.to_ascii_lowercase();
+            let Some(&mod_base) = modules_map.get(&module_lower).or(candidate.resolved_base.as_ref()) else {
+                continue;
+            };
+            let base = mod_base.wrapping_add(candidate.path.module_offset);
+            let mut curr_addr = base;
+            let mut broken = false;
+            for &offset in &candidate.path.offsets {
+                let read_res = if pointer_width == 4 {
+                    process.read(curr_addr, &mut ptr_buf[..4])
+                } else {
+                    process.read(curr_addr, &mut ptr_buf[..8])
+                };
+                if read_res.is_err() {
+                    broken = true;
+                    break;
+                }
+                let next_ptr = if pointer_width == 4 {
+                    u32::from_le_bytes(ptr_buf[..4].try_into().unwrap()) as usize
+                } else {
+                    u64::from_le_bytes(ptr_buf[..8].try_into().unwrap()) as usize
+                };
+                if next_ptr == 0 {
+                    broken = true;
+                    break;
+                }
+                curr_addr = next_ptr.wrapping_add(offset);
+            }
+            if broken {
+                continue;
+            }
+            candidate.resolved_base = Some(base);
+            candidate.resolved_address = Some(curr_addr);
+
+            if let Some(enc) = text_encoding {
+                if process.read(curr_addr, &mut text_buf).is_err() {
+                    continue;
+                }
+                let text = match enc {
+                    TextEncoding::Utf8 => {
+                        let end = text_buf.iter().position(|b| *b == 0).unwrap_or(text_buf.len());
+                        String::from_utf8_lossy(&text_buf[..end]).into_owned()
+                    }
+                    TextEncoding::Utf16 => {
+                        let units = text_buf
+                            .chunks_exact(2)
+                            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                            .take_while(|unit| *unit != 0)
+                            .collect::<Vec<_>>();
+                        String::from_utf16_lossy(&units)
+                    }
+                };
+                let prev = candidate.live_text.as_ref().or(candidate.observed_text.as_ref()).or(candidate.expected_text.as_ref());
+                let is_match = match comparison {
+                    Some(ScanComparison::Exact) => exact_text.as_ref().map_or(false, |e| e == &text),
+                    Some(ScanComparison::Changed) => prev.map_or(true, |p| p != &text),
+                    Some(ScanComparison::Unchanged) => prev.map_or(false, |p| p == &text),
+                    None => true,
+                    _ => true,
+                };
+                if is_match {
+                    candidate.observed_text = Some(text.clone());
+                    candidate.live_text = Some(text);
+                    candidate.valid = Some(true);
+                    surviving.push(candidate);
+                }
+            } else {
+                let candidate_type = candidate.expected_value.value_type();
+                let val_width = candidate_type.width();
+                if process.read(curr_addr, &mut val_buf[..val_width]).is_err() {
+                    continue;
+                }
+                let Some(observed) = candidate_type.decode(&val_buf[..val_width]) else {
+                    continue;
+                };
+                let prev = candidate.filter_value.or(candidate.live_value).or(candidate.observed_value);
+                if scan_value_matches_comparison(observed, prev, comparison, exact, range) {
+                    candidate.live_value = Some(observed);
+                    candidate.filter_value = Some(observed);
+                    candidate.observed_value = Some(observed);
+                    candidate.valid = Some(true);
+                    surviving.push(candidate);
+                }
+            }
+        }
+        Ok(())
+    });
+    Ok(surviving)
+}
+
 fn resolve_memory_address(
     pid: u32,
     base: usize,
@@ -20858,7 +21059,16 @@ fn resolve_memory_address(
         .module
         .as_ref()
         .map_or(Ok(pointer.base), |(module, offset)| {
-            resolve_module_offset(pid, module, *offset)
+            resolve_module_offset(pid, module, *offset).or_else(|_| {
+                if pointer.base != 0 {
+                    Ok(pointer.base.wrapping_add(*offset))
+                } else {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "module not loaded",
+                    ))
+                }
+            })
         })?;
     #[cfg(not(windows))]
     let mut address = pointer.base;
@@ -20885,8 +21095,8 @@ fn resolve_memory_address(
                 },
             )?,
         ) {
-            (4, ScanValue::I32(next)) => next as u32 as usize,
-            (8, ScanValue::I64(next)) => next as usize,
+            (4, ScanValue::I32(next)) => (next as u32) as usize,
+            (8, ScanValue::I64(next)) => (next as u64) as usize,
             _ => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
@@ -20900,9 +21110,7 @@ fn resolve_memory_address(
                 "null pointer in chain",
             ));
         }
-        address = next.checked_add(*offset).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "pointer overflow")
-        })?;
+        address = next.wrapping_add(*offset);
     }
     Ok(address)
 }
@@ -21736,5 +21944,53 @@ mod tests {
         assert_eq!(step.follow_3d_spec.leader_x, "neox_engine.dll+9067700 [10]");
         assert_eq!(step.follow_3d_spec.leader_y, "neox_engine.dll+9067700 [14]");
         assert_eq!(step.follow_3d_spec.follower_x, "neox_engine.dll+9067700 [20]");
+    }
+
+    #[test]
+    fn test_scan_value_loose_matching_and_filtering() {
+        use crate::process_memory::{ScanComparison, ScanValue};
+        use super::{scan_value_matches_comparison, scan_values_equal_loose};
+
+        assert!(scan_values_equal_loose(ScanValue::I8(1), ScanValue::I32(1)));
+        assert!(scan_values_equal_loose(ScanValue::I16(42), ScanValue::I64(42)));
+        assert!(!scan_values_equal_loose(ScanValue::I8(0), ScanValue::I32(1)));
+
+        assert!(scan_value_matches_comparison(
+            ScanValue::I8(1),
+            None,
+            Some(ScanComparison::Exact),
+            Some(ScanValue::I32(1)),
+            None
+        ));
+
+        assert!(scan_value_matches_comparison(
+            ScanValue::I8(2),
+            Some(ScanValue::I32(1)),
+            Some(ScanComparison::Changed),
+            None,
+            None
+        ));
+        assert!(scan_value_matches_comparison(
+            ScanValue::I8(1),
+            Some(ScanValue::I32(1)),
+            Some(ScanComparison::Unchanged),
+            None,
+            None
+        ));
+
+        assert!(scan_value_matches_comparison(
+            ScanValue::I8(5),
+            Some(ScanValue::I32(3)),
+            Some(ScanComparison::Increased),
+            None,
+            None
+        ));
+        assert!(scan_value_matches_comparison(
+            ScanValue::I8(2),
+            Some(ScanValue::I32(3)),
+            Some(ScanComparison::Decreased),
+            None,
+            None
+        ));
     }
 }
