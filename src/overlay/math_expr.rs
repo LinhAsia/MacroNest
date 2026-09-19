@@ -394,9 +394,9 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
 
     let get_value = |token: &str| -> f64 {
         let normalized = token.trim();
-        if normalized.eq_ignore_ascii_case("pi") {
+        if normalized.eq_ignore_ascii_case("math.pi") {
             std::f64::consts::PI
-        } else if normalized.eq_ignore_ascii_case("e") {
+        } else if normalized.eq_ignore_ascii_case("math.e") {
             std::f64::consts::E
         } else if let Some(hex) = normalized.strip_prefix("0x").or_else(|| normalized.strip_prefix("0X")) {
             u64::from_str_radix(hex, 16).map(|v| v as f64).unwrap_or(0.0)
@@ -517,6 +517,8 @@ pub(crate) fn is_builtin_property_name(token: &str) -> bool {
             prop.eq_ignore_ascii_case("title")
         } else if obj.eq_ignore_ascii_case("clipboard") {
             prop.eq_ignore_ascii_case("text")
+        } else if obj.eq_ignore_ascii_case("math") {
+            prop.eq_ignore_ascii_case("pi") || prop.eq_ignore_ascii_case("e")
         } else {
             false
         }
@@ -620,8 +622,8 @@ pub(crate) fn looks_like_math_expression_text(text: &str) -> bool {
         || text.contains("<=")
         || text.contains('>')
         || text.contains('<')
-        || lower == "pi"
-        || lower == "e"
+        || lower == "math.pi"
+        || lower == "math.e"
         || lower.contains("len(")
         || lower.contains("substr(")
         || lower.contains("charat(")
@@ -1511,11 +1513,24 @@ mod tests {
 
     #[test]
     fn e_and_log_functions_work() {
-        assert!((evaluate_math_expression_f64("e") - std::f64::consts::E).abs() < 0.000001);
+        assert!((evaluate_math_expression_f64("math.e") - std::f64::consts::E).abs() < 0.000001);
+        assert!((evaluate_math_expression_f64("math.pi") - std::f64::consts::PI).abs() < 0.000001);
         assert!((evaluate_math_expression_f64("exp(1)") - std::f64::consts::E).abs() < 0.000001);
-        assert!((evaluate_math_expression_f64("log(e)") - 1.0).abs() < 0.000001);
-        assert!((evaluate_math_expression_f64("ln(e)") - 1.0).abs() < 0.000001);
+        assert!((evaluate_math_expression_f64("log(math.e)") - 1.0).abs() < 0.000001);
+        assert!((evaluate_math_expression_f64("ln(math.e)") - 1.0).abs() < 0.000001);
         assert!((evaluate_math_expression_f64("log10(1000)") - 3.0).abs() < 0.000001);
+
+        let _guard = super::super::tests::TEST_MUTEX
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        RUNTIME_VARIABLES.lock().insert("e".to_string(), 25.0);
+        RUNTIME_VARIABLES.lock().insert("pi".to_string(), 42.0);
+        assert_eq!(evaluate_math_expression("e"), 25);
+        assert_eq!(evaluate_math_expression("pi"), 42);
+        assert_eq!(evaluate_math_expression("e == 25"), 1);
+        assert_eq!(evaluate_math_expression("e + 5"), 30);
+        RUNTIME_VARIABLES.lock().remove("e");
+        RUNTIME_VARIABLES.lock().remove("pi");
     }
 
     #[test]

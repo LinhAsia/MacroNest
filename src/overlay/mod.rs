@@ -31091,7 +31091,7 @@ mod windows_overlay {
                         return true;
                     }
                     let s_lower = s_trimmed.to_lowercase();
-                    if s_lower == "pi" || s_lower == "e" {
+                    if s_lower == "math.pi" || s_lower == "math.e" {
                         return true;
                     }
                     let math_funcs = [
@@ -32837,9 +32837,9 @@ mod windows_overlay {
                 (evaluate_math_expression_f64("round(863.6897460727389, 1)") - 863.7).abs()
                     < 0.000001
             );
-            assert_eq!(evaluate_math_expression("ceil(pi)"), 4);
-            assert_eq!(evaluate_math_expression("floor(pi)"), 3);
-            assert_eq!(evaluate_math_expression("degrees(pi)"), 180);
+            assert_eq!(evaluate_math_expression("ceil(math.pi)"), 4);
+            assert_eq!(evaluate_math_expression("floor(math.pi)"), 3);
+            assert_eq!(evaluate_math_expression("degrees(math.pi)"), 180);
             assert_eq!(evaluate_math_expression("radians(180)"), 3);
             assert_eq!(evaluate_math_expression("factorial(5)"), 120);
             assert_eq!(evaluate_math_expression("gcd(24, 36, 48)"), 12);
@@ -32847,7 +32847,7 @@ mod windows_overlay {
             assert_eq!(evaluate_math_expression("isqrt(17)"), 4);
             assert_eq!(evaluate_math_expression("comb(5, 2)"), 10);
             assert_eq!(evaluate_math_expression("perm(5, 2)"), 20);
-            assert_eq!(evaluate_math_expression("pi + 1"), 4);
+            assert_eq!(evaluate_math_expression("math.pi + 1"), 4);
             assert_eq!(evaluate_math_expression("min(20, 50)"), 20);
             assert_eq!(evaluate_math_expression("max(20, 50)"), 50);
             assert_eq!(evaluate_math_expression("min(max(-10, 0), 100)"), 0);

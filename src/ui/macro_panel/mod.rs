@@ -3612,7 +3612,7 @@ impl CrosshairApp {
                                                     ui.label(egui::RichText::new("- isqrt(n)").monospace());
                                                     ui.label(egui::RichText::new("- comb(n, k) / perm(n, k)").monospace());
                                                     ui.label(egui::RichText::new("- degrees(rad) / radians(deg)").monospace());
-                                                    ui.label(egui::RichText::new("- pi / e").monospace());
+                                                    ui.label(egui::RichText::new("- math.pi / math.e").monospace());
                                                     ui.label(egui::RichText::new("- myVar.toNumber").monospace());
                                                     ui.label(egui::RichText::new("- myVar.toString").monospace());
                                                     ui.add_space(4.0);

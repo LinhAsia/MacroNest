@@ -75,8 +75,8 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 
 | Syntax | Meaning | Example | Result |
 | :--- | :--- | :--- | :--- |
-| `pi` | Pi constant | `degrees(pi)` | `180` |
-| `e` | Euler's number | `round(e, 3)` | `2.718` |
+| `math.pi` | Pi constant | `degrees(math.pi)` | `180` |
+| `math.e` | Euler's number | `round(math.e, 3)` | `2.718` |
 
 ### Core Functions
 
@@ -92,8 +92,8 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `div(a, b)` | Integer division using truncation | `div(5, 2)` | `2` |
 | `mod(a, b)` | Remainder | `mod(5, 2)` | `1` |
 | `round(a, digits)` | Round to digits | `round(863.6897, 2)` | `863.69` |
-| `ceil(a)` | Round up | `ceil(pi)` | `4` |
-| `floor(a)` | Round down | `floor(pi)` | `3` |
+| `ceil(a)` | Round up | `ceil(math.pi)` | `4` |
+| `floor(a)` | Round down | `floor(math.pi)` | `3` |
 | `sqrt(a)` | Square root | `sqrt(9)` | `3` |
 | `pow(a, b)` | Power function | `pow(2, 3)` | `8` |
 | `factorial(n)` | Factorial | `factorial(5)` | `120` |
@@ -117,15 +117,15 @@ Quick Actions are small utility tools in the title bar. They are useful for fast
 | `sinh(a)` | Hyperbolic sine | `sinh(1)` | numeric result |
 | `cosh(a)` | Hyperbolic cosine | `cosh(1)` | numeric result |
 | `tanh(a)` | Hyperbolic tangent | `tanh(1)` | numeric result |
-| `degrees(rad)` | Radians to degrees | `degrees(pi)` | `180` |
+| `degrees(rad)` | Radians to degrees | `degrees(math.pi)` | `180` |
 | `radians(deg)` | Degrees to radians | `radians(180)` | about `3.14159` |
 
 ### Logarithms and Exponents
 
 | Function | Meaning | Example | Result |
 | :--- | :--- | :--- | :--- |
-| `ln(a)` | Natural log | `ln(e)` | `1` |
-| `log(a)` | Natural log | `log(e)` | `1` |
+| `ln(a)` | Natural log | `ln(math.e)` | `1` |
+| `log(a)` | Natural log | `log(math.e)` | `1` |
 | `log10(a)` | Base-10 log | `log10(1000)` | `3` |
 | `exp(a)` | `e^a` | `exp(1)` | about `2.71828` |
 
