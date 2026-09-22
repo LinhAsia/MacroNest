@@ -25409,7 +25409,7 @@ mod windows_overlay {
 
                     let interval = presets
                         .iter()
-                        .map(|sample| sample.preset.update_interval_ms.clamp(1, 1000))
+                        .map(|sample| sample.preset.update_interval_ms.clamp(4, 1000))
                         .min()
                         .unwrap_or(33);
                     let mut frames = Vec::with_capacity(presets.len());
@@ -25478,12 +25478,14 @@ mod windows_overlay {
 
                 match loop_result {
                     Ok(Some(frame_duration)) => {
-                        next_frame += frame_duration;
                         let now = Instant::now();
                         if next_frame > now {
                             thread::park_timeout(next_frame - now);
+                            next_frame += frame_duration;
                         } else {
-                            next_frame = now;
+                            // Yield CPU briefly when deadline is missed to avoid a 100% spin loop
+                            thread::sleep(Duration::from_millis(1));
+                            next_frame = Instant::now() + frame_duration;
                         }
                     }
                     Ok(None) => {

@@ -737,6 +737,8 @@ struct MemoryViewDialog {
     fit_memory_columns: bool,
     stride_address_a: String,
     stride_address_b: String,
+    track_range_hex: String,
+    filter_changed_only: bool,
 }
 
 #[cfg(windows)]
@@ -4218,6 +4220,8 @@ impl CrosshairApp {
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
+                                        track_range_hex: "1000".to_owned(),
+                                        filter_changed_only: false,
                                     });
                                 }
                             }
@@ -4582,6 +4586,8 @@ impl CrosshairApp {
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
+                                        track_range_hex: "1000".to_owned(),
+                                        filter_changed_only: false,
                                     });
                                     ui.close();
                                 }
@@ -4642,6 +4648,8 @@ impl CrosshairApp {
                                         fit_memory_columns: true,
                                         stride_address_a: String::new(),
                                         stride_address_b: String::new(),
+                                        track_range_hex: "1000".to_owned(),
+                                        filter_changed_only: false,
                                     });
                                     ui.close();
                                 }
@@ -13306,6 +13314,8 @@ impl CrosshairApp {
                 fit_memory_columns: true,
                 stride_address_a: String::new(),
                 stride_address_b: String::new(),
+                track_range_hex: "1000".to_owned(),
+                filter_changed_only: false,
             });
         }
         if let Some(addr) = open_dissect_addr {
@@ -13347,6 +13357,8 @@ impl CrosshairApp {
                 fit_memory_columns: true,
                 stride_address_a: String::new(),
                 stride_address_b: String::new(),
+                track_range_hex: "1000".to_owned(),
+                filter_changed_only: false,
             });
         }
         if open {
@@ -13760,6 +13772,8 @@ impl CrosshairApp {
                 fit_memory_columns: true,
                 stride_address_a: String::new(),
                 stride_address_b: String::new(),
+                track_range_hex: "1000".to_owned(),
+                filter_changed_only: false,
             });
         }
         if open {
@@ -14520,8 +14534,12 @@ impl CrosshairApp {
         let (start_address, read_size) = match kind {
             MemoryViewKind::Bytes => {
                 let aligned = address / row_bytes * row_bytes;
+                let track_size = parse_hex_offset(&dialog.track_range_hex)
+                    .unwrap_or(0x1000)
+                    .clamp(256, 1024 * 1024);
+                let effective_size = track_size.max(2048);
                 let start = aligned.wrapping_add_signed(dialog.scroll_offset);
-                (start, 2048)
+                (start, effective_size)
             }
             MemoryViewKind::Structure => (address, 1024),
         };
@@ -14762,7 +14780,15 @@ impl CrosshairApp {
                 } else {
                     Self::tr_lang(language, "Track changes", "Theo dõi thay đổi")
                 };
-                if ui.small_button(tracking_label).clicked() {
+                let track_btn = egui::Button::new(
+                    RichText::new(tracking_label).color(if dialog.track_changes {
+                        Color32::from_rgb(255, 110, 110)
+                    } else {
+                        Color32::from_rgb(130, 220, 130)
+                    }),
+                )
+                .small();
+                if ui.add(track_btn).clicked() {
                     if dialog.track_changes {
                         dialog.track_changes = false;
                     } else {
@@ -14771,13 +14797,44 @@ impl CrosshairApp {
                         dialog.changed_addresses.clear();
                     }
                 }
+                ui.label(RichText::new("Range: 0x").small());
+                ui.add(
+                    egui::TextEdit::singleline(&mut dialog.track_range_hex)
+                        .desired_width(46.0)
+                        .char_limit(8)
+                        .hint_text("1000"),
+                )
+                .on_hover_text("Track buffer size in hex (e.g. 800 for 2KB, 1000 for 4KB, 4000 for 16KB, 10000 for 64KB)");
+
+                let filter_btn = egui::Button::new(
+                    RichText::new(if dialog.filter_changed_only {
+                        Self::tr_lang(language, "★ Show all", "★ Hiện tất cả")
+                    } else {
+                        Self::tr_lang(language, "⚡ Only changed", "⚡ Chỉ hiện đã đổi")
+                    })
+                    .color(if dialog.filter_changed_only {
+                        Color32::from_rgb(255, 205, 80)
+                    } else {
+                        Color32::from_rgb(200, 200, 200)
+                    }),
+                )
+                .small();
+                if ui
+                    .add(filter_btn)
+                    .on_hover_text("Toggle to only show addresses that changed")
+                    .clicked()
+                {
+                    dialog.filter_changed_only = !dialog.filter_changed_only;
+                    dialog.reset_memory_scroll = true;
+                }
+
                 if !dialog.changed_addresses.is_empty() {
                     ui.label(
                         RichText::new(format!("{} changed", dialog.changed_addresses.len()))
                             .small()
-                            .weak(),
+                            .color(Color32::from_rgb(255, 215, 0)),
                     );
-                    if ui.small_button(Self::tr_lang(language, "Clear", "Xóa dấu")).clicked() {
+                    if ui.small_button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
                         dialog.changed_addresses.clear();
                     }
                 }
@@ -15100,8 +15157,20 @@ impl CrosshairApp {
         });
         ui.separator();
 
+        let mut rendered_rows = 0;
         for (row, chunk) in bytes.chunks(row_bytes).enumerate() {
             let row_address = start_address.wrapping_add(row * row_bytes);
+            if dialog.filter_changed_only {
+                let has_changed = (0..chunk.len()).any(|offset| {
+                    dialog
+                        .changed_addresses
+                        .contains(&row_address.wrapping_add(offset))
+                });
+                if !has_changed {
+                    continue;
+                }
+            }
+            rendered_rows += 1;
             let is_target_row = (row_address <= dialog.address)
                 && (dialog.address < row_address.saturating_add(row_bytes));
 
@@ -15289,6 +15358,19 @@ impl CrosshairApp {
                     })
                     .collect::<String>();
                 Self::memory_view_cell(ui, ascii_width, &ascii);
+            });
+        }
+        if dialog.filter_changed_only && rendered_rows == 0 {
+            ui.vertical_centered(|ui| {
+                ui.add_space(20.0);
+                ui.label(
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "No changed addresses in this tracked range. Toggle '⚡ Only changed' off to view all rows.",
+                        "Không tìm thấy địa chỉ nào thay đổi trong vùng theo dõi này. Bấm tắt '⚡ Chỉ hiện đã đổi' để xem tất cả.",
+                    ))
+                    .weak(),
+                );
             });
         }
     }
@@ -17827,6 +17909,8 @@ impl CrosshairApp {
                 fit_memory_columns: true,
                 stride_address_a: String::new(),
                 stride_address_b: String::new(),
+                track_range_hex: "1000".to_owned(),
+                filter_changed_only: false,
             });
         }
     }
@@ -18804,6 +18888,8 @@ impl CrosshairApp {
             fit_memory_columns: true,
             stride_address_a: String::new(),
             stride_address_b: String::new(),
+            track_range_hex: "1000".to_owned(),
+            filter_changed_only: false,
         });
     }
 
@@ -21444,6 +21530,8 @@ mod tests {
             fit_memory_columns: true,
             stride_address_a: String::new(),
             stride_address_b: String::new(),
+            track_range_hex: "1000".to_owned(),
+            filter_changed_only: false,
         };
 
         CrosshairApp::navigate_memory_view_dialog(&mut dialog, 0x2000);
@@ -21548,6 +21636,30 @@ mod tests {
         CrosshairApp::track_memory_changes(&mut previous, &mut changed, 0x1000, &[1, 9, 3]);
         CrosshairApp::track_memory_changes(&mut previous, &mut changed, 0x1000, &[1, 2, 3]);
         assert_eq!(changed, HashSet::from([0x1001]));
+    }
+
+    #[test]
+    fn memory_change_tracking_range_and_filter() {
+        let default_range = parse_hex_offset("1000").unwrap_or(0x1000).clamp(256, 1024 * 1024);
+        assert_eq!(default_range, 0x1000);
+        let custom_range = parse_hex_offset("4000").unwrap_or(0x1000).clamp(256, 1024 * 1024);
+        assert_eq!(custom_range, 0x4000);
+
+        let mut changed = HashSet::new();
+        changed.insert(0x1004);
+
+        let row_address: usize = 0x1000;
+        let chunk = [0u8; 16];
+        let has_changed = (0..chunk.len()).any(|offset| {
+            changed.contains(&row_address.wrapping_add(offset))
+        });
+        assert!(has_changed);
+
+        let row_address_2: usize = 0x1010;
+        let has_changed_2 = (0..chunk.len()).any(|offset| {
+            changed.contains(&row_address_2.wrapping_add(offset))
+        });
+        assert!(!has_changed_2);
     }
 
     #[test]
