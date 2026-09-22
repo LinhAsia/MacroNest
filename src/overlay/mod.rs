@@ -30827,7 +30827,7 @@ mod windows_overlay {
     ) -> bool {
         let start = Instant::now();
         let timeout = max_timeout_ms
-            .map(Duration::from_millis)
+            .map(|ms| Duration::from_millis(ms.saturating_add(3000)))
             .unwrap_or(Duration::from_secs(120));
 
         while LAST_COMPLETED_ESP_SCAN_SESSION.load(Ordering::Acquire) < session_id {

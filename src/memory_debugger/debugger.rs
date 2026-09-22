@@ -813,7 +813,7 @@ fn watch_loop<F>(
     };
     let mut attached = false;
     let mut last_error = io::Error::last_os_error();
-    for _ in 0..25 {
+    for _ in 0..50 {
         if unsafe { DebugActiveProcess(pid) } != 0 {
             attached = true;
             break;
@@ -1138,7 +1138,7 @@ fn watch_loop<F>(
         }
     }
     // 5. Detach debugger with retries
-    for _ in 0..5 {
+    for _ in 0..10 {
         if unsafe { DebugActiveProcessStop(pid) } != 0 {
             break;
         }

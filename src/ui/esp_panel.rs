@@ -40,6 +40,10 @@ pub(super) struct EspEntityRootCapture {
 #[cfg(windows)]
 const ESP_ENTITY_ROOT_CAPTURE_LIMIT: usize = 4096;
 
+#[cfg(windows)]
+pub(crate) static PENDING_ESP_CLEANUP: parking_lot::Mutex<Option<std::thread::JoinHandle<()>>> =
+    parking_lot::Mutex::new(None);
+
 impl CrosshairApp {
     #[cfg(windows)]
     fn show_esp_entity_capture_hud(&self, hud_preset_id: Option<u32>, text: String) {
@@ -67,16 +71,35 @@ impl CrosshairApp {
         mut capture: EspEntityRootCapture,
         status_override: Option<&str>,
     ) {
-        if capture.session_id > 0 {
-            crate::overlay::LAST_COMPLETED_ESP_SCAN_SESSION
-                .fetch_max(capture.session_id, std::sync::atomic::Ordering::Release);
-            crate::overlay::ACTIVE_ESP_SCAN_SESSION.store(0, std::sync::atomic::Ordering::Release);
-            crate::overlay::ACTIVE_ESP_SCAN_PRESET_ID.store(0, std::sync::atomic::Ordering::Release);
-        }
+        let session_id = capture.session_id;
+        let old_handle = PENDING_ESP_CLEANUP.lock().take();
         if let Some(mut active) = capture.active.take() {
-            std::thread::spawn(move || {
+            let handle = std::thread::spawn(move || {
+                if let Some(prev) = old_handle {
+                    let _ = prev.join();
+                }
                 active.stop();
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if session_id > 0 {
+                    crate::overlay::LAST_COMPLETED_ESP_SCAN_SESSION
+                        .fetch_max(session_id, std::sync::atomic::Ordering::Release);
+                    crate::overlay::ACTIVE_ESP_SCAN_SESSION.store(0, std::sync::atomic::Ordering::Release);
+                    crate::overlay::ACTIVE_ESP_SCAN_PRESET_ID.store(0, std::sync::atomic::Ordering::Release);
+                }
             });
+            *PENDING_ESP_CLEANUP.lock() = Some(handle);
+        } else {
+            if let Some(prev) = old_handle {
+                std::thread::spawn(move || {
+                    let _ = prev.join();
+                });
+            }
+            if session_id > 0 {
+                crate::overlay::LAST_COMPLETED_ESP_SCAN_SESSION
+                    .fetch_max(session_id, std::sync::atomic::Ordering::Release);
+                crate::overlay::ACTIVE_ESP_SCAN_SESSION.store(0, std::sync::atomic::Ordering::Release);
+                crate::overlay::ACTIVE_ESP_SCAN_PRESET_ID.store(0, std::sync::atomic::Ordering::Release);
+            }
         }
         let (candidate, matched, resolved_addresses) = match capture.scan_mode {
             crate::model::EspAutoScanMode::AllHits => {
@@ -379,6 +402,9 @@ impl CrosshairApp {
             }
         };
         self.stop_esp_entity_root_capture(Some("Stopped"));
+        if let Some(handle) = PENDING_ESP_CLEANUP.lock().take() {
+            let _ = handle.join();
+        }
         let Some(preset) = self
             .state
             .esp_presets
