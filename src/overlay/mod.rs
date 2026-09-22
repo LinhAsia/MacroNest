@@ -25204,7 +25204,15 @@ mod windows_overlay {
                 if ESP_WORKER_GENERATION.load(Ordering::Acquire) != generation {
                     break;
                 }
-                match render_rx.recv_timeout(Duration::from_millis(8)) {
+                let has_pending_motion = animations
+                    .values()
+                    .any(|a| a.smoothing_ms > 1 && a.current != a.target);
+                let wait_timeout = if has_pending_motion {
+                    Duration::from_millis(8)
+                } else {
+                    Duration::from_millis(50)
+                };
+                match render_rx.recv_timeout(wait_timeout) {
                     Ok(mut frames) => {
                         last_sample_at = Instant::now();
                         while let Ok(newer) = render_rx.try_recv() {
@@ -25286,8 +25294,7 @@ mod windows_overlay {
                     paint_cooldown_frames = 2;
                 }
 
-                let has_moving_animations = animation_changed || animations.values().any(|a| a.smoothing_ms > 1);
-                if !shapes_changed && paint_cooldown_frames == 0 && !has_moving_animations {
+                if !shapes_changed && paint_cooldown_frames == 0 && !animation_changed {
                     continue;
                 }
 
@@ -25405,7 +25412,7 @@ mod windows_overlay {
 
                     let interval = presets
                         .iter()
-                        .map(|sample| sample.preset.update_interval_ms.clamp(4, 1000))
+                        .map(|sample| sample.preset.update_interval_ms.clamp(10, 1000))
                         .min()
                         .unwrap_or(33);
                     let mut frames = Vec::with_capacity(presets.len());
@@ -25469,7 +25476,12 @@ mod windows_overlay {
                     if !send_latest(frames) {
                         return None;
                     }
-                    Some(Duration::from_millis(interval as u64))
+                    let frame_delay = if had_shapes {
+                        interval
+                    } else {
+                        interval.max(33)
+                    };
+                    Some(Duration::from_millis(frame_delay as u64))
                 }));
 
                 match loop_result {
@@ -25479,9 +25491,9 @@ mod windows_overlay {
                             thread::park_timeout(next_frame - now);
                             next_frame += frame_duration;
                         } else {
-                            // Yield CPU briefly when deadline is missed to avoid a 100% spin loop
-                            thread::sleep(Duration::from_millis(1));
-                            next_frame = Instant::now() + frame_duration;
+                            // If deadline was missed, advance to next window and yield briefly
+                            next_frame = now + frame_duration;
+                            thread::sleep(Duration::from_millis(2));
                         }
                     }
                     Ok(None) => {
@@ -25666,7 +25678,8 @@ mod windows_overlay {
     struct EspReadFrame {
         pids: HashMap<String, (Instant, Option<u32>)>,
         values: HashMap<(u32, usize, u8), f32>,
-        memory_blocks: HashMap<(u32, usize), Vec<u8>>,
+        memory_blocks: HashMap<(u32, usize), Option<Vec<u8>>>,
+        failed_addresses: HashMap<usize, Instant>,
         resolved_addresses: HashMap<u32, HashMap<String, EspResolvedAddress>>,
     }
 
@@ -25674,6 +25687,10 @@ mod windows_overlay {
         fn begin_sample(&mut self) {
             self.values.clear();
             self.memory_blocks.clear();
+            if self.failed_addresses.len() > 1024 {
+                self.failed_addresses
+                    .retain(|_, at| at.elapsed() < Duration::from_millis(1000));
+            }
         }
 
         fn pid_for(&mut self, target_window: &str) -> Option<u32> {
@@ -25836,6 +25853,12 @@ mod windows_overlay {
             address: usize,
             value_type: crate::model::MemoryValueType,
         ) -> std::io::Result<f32> {
+            if address < 0x10000 || address >= 0x7FFF_FFFF_0000 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "invalid memory address",
+                ));
+            }
             // Nearby fields such as X/Y/Z normally live in one object. Reading one small block
             // turns three or more cross-process syscalls into one without caching stale values.
             const ALIGNMENT: usize = 16;
@@ -25844,21 +25867,24 @@ mod windows_overlay {
             let offset = address - block_address;
             let width = esp_value_width(value_type);
             let key = (pid, block_address);
-            if !self.memory_blocks.contains_key(&key)
-                && let Ok(bytes) =
-                    crate::process_memory::read_memory_bytes(pid, block_address, BLOCK_SIZE)
-                && bytes.len() == BLOCK_SIZE
-            {
-                self.memory_blocks.insert(key, bytes);
+            if !self.memory_blocks.contains_key(&key) {
+                let block = match crate::process_memory::read_memory_bytes(pid, block_address, BLOCK_SIZE) {
+                    Ok(bytes) if bytes.len() == BLOCK_SIZE => Some(bytes),
+                    _ => None,
+                };
+                self.memory_blocks.insert(key, block);
             }
-            if let Some(bytes) = self.memory_blocks.get(&key)
+            if let Some(Some(bytes)) = self.memory_blocks.get(&key)
                 && let Some(value) = bytes
                     .get(offset..offset + width)
                     .and_then(|bytes| decode_esp_numeric_bytes(bytes, value_type))
             {
                 return Ok(value);
             }
-            read_esp_numeric_value(pid, address, value_type)
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "unreadable memory",
+            ))
         }
     }
 
@@ -25913,6 +25939,7 @@ mod windows_overlay {
         })
     }
 
+    #[allow(dead_code)]
     fn read_esp_numeric_value(
         pid: u32,
         address: usize,
@@ -26018,7 +26045,11 @@ mod windows_overlay {
                     .entity_hit_order_addresses
                     .iter()
                     .copied()
-                    .filter(|addr| !preset.entity_blacklisted_addresses.contains(addr))
+                    .filter(|addr| {
+                        *addr >= 0x10000
+                            && *addr < 0x7FFF_FFFF_0000
+                            && !preset.entity_blacklisted_addresses.contains(addr)
+                    })
                     .take(count as usize)
                     .collect::<Vec<_>>(),
             )
@@ -26030,16 +26061,28 @@ mod windows_overlay {
             let (target_pid, root) = frame
                 .resolve_address(pid, root_expression, false)
                 .ok_or_else(|| "Entity root could not be resolved".to_owned())?;
+            if root < 0x10000 || root >= 0x7FFF_FFFF_0000 {
+                return Err("Entity root points to NULL or invalid address".to_owned());
+            }
             (
                 target_pid,
                 (0..count)
                     .map(|index| root + (index as usize) * (stride as usize))
-                    .filter(|addr| !preset.entity_blacklisted_addresses.contains(addr))
+                    .filter(|addr| {
+                        *addr >= 0x10000
+                            && *addr < 0x7FFF_FFFF_0000
+                            && !preset.entity_blacklisted_addresses.contains(addr)
+                    })
                     .collect::<Vec<_>>(),
             )
         };
         let mut targets = Vec::with_capacity(count.min(64) as usize);
         for (entity_index, entity_address) in entity_addresses.into_iter().enumerate() {
+            if let Some(failed_at) = frame.failed_addresses.get(&entity_address) {
+                if failed_at.elapsed() < Duration::from_millis(500) {
+                    continue;
+                }
+            }
             let Some(x_address) =
                 crate::model::entity_field_address(entity_address, 0, 1, preset.entity_x_offset)
             else {
@@ -26074,14 +26117,18 @@ mod windows_overlay {
                 Some(crate::model::aabb_center_component(first, second))
             };
             let Some(x) = read_component(x_address) else {
+                frame.failed_addresses.insert(entity_address, Instant::now());
                 continue;
             };
             let Some(y) = read_component(y_address) else {
+                frame.failed_addresses.insert(entity_address, Instant::now());
                 continue;
             };
             let Some(z) = read_component(z_address) else {
+                frame.failed_addresses.insert(entity_address, Instant::now());
                 continue;
             };
+            frame.failed_addresses.remove(&entity_address);
             let target = [x, y, z];
             if target.iter().all(|value| value.is_finite())
                 && target.iter().any(|value| value.abs() > f32::EPSILON)
