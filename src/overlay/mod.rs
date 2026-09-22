@@ -295,10 +295,6 @@ mod windows_overlay {
     }
 
     pub(crate) fn take_memory_trigger_events() -> Vec<HotkeyBinding> {
-        if is_ui_in_foreground() {
-            MEMORY_TRIGGER_EVENTS.lock().clear();
-            return Vec::new();
-        }
         std::mem::take(&mut *MEMORY_TRIGGER_EVENTS.lock())
     }
     static STOP_REQUESTED_MACRO_PRESETS: Lazy<Mutex<HashSet<u32>>> =
@@ -6472,11 +6468,7 @@ mod windows_overlay {
                     .is_some_and(|h| hotkey::binding_matches(h, binding))
             })
         };
-        let ui_is_foreground = is_ui_in_foreground();
-        if ui_is_foreground && !is_record_hotkey {
-            return Some(false);
-        }
-        if !ui_is_foreground && !is_repeat {
+        if !is_repeat {
             let mut events = MEMORY_TRIGGER_EVENTS.lock();
             // ponytail: UI drains this every frame; cap protects against a stalled UI.
             if events.len() < 128 {
@@ -6484,6 +6476,10 @@ mod windows_overlay {
                 drop(events);
                 request_ui_repaint();
             }
+        }
+        let ui_is_foreground = is_ui_in_foreground();
+        if ui_is_foreground && !is_record_hotkey {
+            return Some(false);
         }
 
         let hook_state = HOOK_STATE.lock();

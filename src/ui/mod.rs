@@ -13575,7 +13575,9 @@ impl CrosshairApp {
             return;
         }
         let Some(target) = self.capture_target.clone() else {
-            self.capture_ignored_keys.clear();
+            if self.memory_panel.capturing_hotkey.is_none() {
+                self.capture_ignored_keys.clear();
+            }
             return;
         };
         let Some(captured) = self.capture_next_input(ctx) else {
@@ -13594,7 +13596,7 @@ impl CrosshairApp {
         let accepts_mouse = self
             .capture_target
             .as_ref()
-            .is_none_or(|target| self.capture_request_accepts_mouse(target));
+            .is_some_and(|target| self.capture_request_accepts_mouse(target));
         if self.capture_wait_for_mouse_release {
             if Self::is_vk_down(0x01)
                 || Self::is_vk_down(0x02)

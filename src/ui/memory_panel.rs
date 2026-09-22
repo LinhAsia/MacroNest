@@ -2402,16 +2402,17 @@ impl CrosshairApp {
                 .memory_panel
                 .process_pid
                 .is_some_and(|pid| !crate::process_memory::is_process_alive(pid));
-            let window_dead = !self.open_window_infos.is_empty()
-                && !self.memory_panel.process_selector.is_empty()
-                && !self.memory_panel.process_selector.starts_with("pid:")
-                && !self
-                    .open_window_infos
-                    .iter()
-                    .any(|w| w.selector == self.memory_panel.process_selector);
-            if pid_dead || window_dead {
+            if pid_dead {
                 self.select_memory_process(String::new(), None, ui.ctx());
                 self.memory_panel.status = "Target process exited".to_owned();
+            } else if let Some(pid) = self.memory_panel.process_pid {
+                if let Some(matching) = self.open_window_infos.iter().find(|w| w.process_id == pid) {
+                    if !self.memory_panel.process_selector.starts_with("pid:")
+                        && self.memory_panel.process_selector != matching.selector
+                    {
+                        self.memory_panel.process_selector = matching.selector.clone();
+                    }
+                }
             }
         }
         let _size = ui.available_size();
@@ -3132,7 +3133,9 @@ impl CrosshairApp {
                 }
                 let response =
                     ui.add_sized([26.0, 26.0], button)
-                        .on_hover_text(if assigned_label.is_some() {
+                        .on_hover_text(if capturing {
+                            "Click to cancel"
+                        } else if assigned_label.is_some() {
                             "Click to clear hotkey"
                         } else {
                             "Click to assign hotkey"
@@ -3148,7 +3151,11 @@ impl CrosshairApp {
                     Self::paint_expanded_hotkey(ui, &response, label);
                 }
                 if response.clicked() {
-                    if assigned_label.is_some() {
+                    if capturing {
+                        self.memory_panel.capturing_hotkey = None;
+                        self.capture_hotkey_combo_keys = None;
+                        self.capture_hotkey_combo_vks.clear();
+                    } else if assigned_label.is_some() {
                         self.memory_panel.hotkeys.remove(&action);
                         self.memory_panel.capturing_hotkey = None;
                         self.capture_hotkey_combo_keys = None;
@@ -3157,8 +3164,11 @@ impl CrosshairApp {
                     } else {
                         self.memory_panel.capturing_hotkey = Some(action);
                         self.capture_ignored_keys = self.snapshot_pressed_capture_keys();
+                        self.capture_ignored_keys.extend([0x01, 0x02, 0x04, 0x05, 0x06]);
                         self.capture_hotkey_combo_keys = None;
                         self.capture_hotkey_combo_vks.clear();
+                        self.capture_wait_for_mouse_release = true;
+                        self.capture_ignore_mouse_until_release = true;
                     }
                 }
             }
@@ -19280,8 +19290,16 @@ impl CrosshairApp {
             return;
         };
         ctx.request_repaint_after(Duration::from_millis(16));
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) || Self::is_vk_down(0x1B) {
+            self.memory_panel.capturing_hotkey = None;
+            self.capture_hotkey_combo_keys = None;
+            self.capture_hotkey_combo_vks.clear();
+            return;
+        }
         if let Some(binding) = self.capture_next_input(ctx) {
-            self.finish_memory_hotkey_capture(action, binding);
+            if binding.key != "MouseLeft" {
+                self.finish_memory_hotkey_capture(action, binding);
+            }
         }
     }
 
@@ -19295,12 +19313,20 @@ impl CrosshairApp {
 
     fn poll_memory_hotkeys(&mut self, ctx: &egui::Context) {
         let events = crate::overlay::take_memory_trigger_events();
-        let target_matches = !events.is_empty()
-            && Self::memory_hotkey_should_trigger(
-                self.state.memory_hotkey_require_target_focus,
-                self.memory_panel.process_pid,
-                window_list::process_id_for_window(None),
-            );
+        if events.is_empty() {
+            if self.memory_panel.scanning {
+                ctx.request_repaint_after(Duration::from_millis(35));
+            }
+            return;
+        }
+        if ctx.memory(|m| m.focused().is_some()) {
+            return;
+        }
+        let target_matches = Self::memory_hotkey_should_trigger(
+            self.state.memory_hotkey_require_target_focus,
+            self.memory_panel.process_pid,
+            window_list::process_id_for_window(None),
+        );
         if target_matches {
             let bindings = self
                 .memory_panel
