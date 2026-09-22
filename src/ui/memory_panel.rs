@@ -17752,27 +17752,45 @@ impl CrosshairApp {
                                     }
                                     let b1_opt = tokens1.get(idx).copied().flatten();
                                     let b2_opt = tokens2.get(idx).copied().flatten();
-                                    let is_diff = b1_opt != b2_opt || b1_opt.is_none();
+                                    let byte_match = classify_manual_aob_byte_match(b1_opt, b2_opt);
                                     let byte_text = &result_tokens[idx];
-                                    let (bg_color, fg_color) = if is_diff {
-                                        (
-                                            Color32::from_rgba_unmultiplied(220, 50, 50, 75),
-                                            Color32::from_rgb(255, 120, 120),
-                                        )
-                                    } else {
-                                        (
+                                    let (bg_color, fg_color) = match byte_match {
+                                        ManualAobByteMatch::SameByte => (
                                             Color32::from_rgba_unmultiplied(50, 180, 80, 50),
                                             Color32::from_rgb(120, 235, 150),
-                                        )
+                                        ),
+                                        ManualAobByteMatch::SameWildcard => (
+                                            Color32::TRANSPARENT,
+                                            Color32::from_rgb(220, 220, 220),
+                                        ),
+                                        ManualAobByteMatch::Different => (
+                                            Color32::from_rgba_unmultiplied(220, 50, 50, 75),
+                                            Color32::from_rgb(255, 120, 120),
+                                        ),
+                                    };
+                                    let hover_info = match byte_match {
+                                        ManualAobByteMatch::SameByte => {
+                                            format!("Byte {:02X} matches", b1_opt.unwrap_or(0))
+                                        }
+                                        ManualAobByteMatch::SameWildcard => {
+                                            "Both samples have wildcard (??)".to_string()
+                                        }
+                                        ManualAobByteMatch::Different => {
+                                            let s1 = b1_opt.map_or("??".to_string(), |b| format!("{:02X}", b));
+                                            let s2 = b2_opt.map_or("??".to_string(), |b| format!("{:02X}", b));
+                                            format!("Difference: Sample 1 [{s1}] != Sample 2 [{s2}]")
+                                        }
                                     };
                                     let label =
                                         RichText::new(byte_text).monospace().color(fg_color);
-                                    let resp = ui.label(label);
-                                    ui.painter().rect_filled(
-                                        resp.rect.expand2(vec2(1.0, 0.0)),
-                                        2.0,
-                                        bg_color,
-                                    );
+                                    let resp = ui.label(label).on_hover_text(hover_info);
+                                    if bg_color.a() > 0 {
+                                        ui.painter().rect_filled(
+                                            resp.rect.expand2(vec2(1.0, 0.0)),
+                                            2.0,
+                                            bg_color,
+                                        );
+                                    }
                                 }
                             });
                         }
@@ -21345,6 +21363,21 @@ fn parse_manual_aob_tokens(input: &str) -> Vec<Option<u8>> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ManualAobByteMatch {
+    SameByte,
+    SameWildcard,
+    Different,
+}
+
+fn classify_manual_aob_byte_match(b1: Option<u8>, b2: Option<u8>) -> ManualAobByteMatch {
+    match (b1, b2) {
+        (Some(x), Some(y)) if x == y => ManualAobByteMatch::SameByte,
+        (None, None) => ManualAobByteMatch::SameWildcard,
+        _ => ManualAobByteMatch::Different,
+    }
+}
+
 fn compare_manual_aob_token_lists(
     tokens1: &[Option<u8>],
     tokens2: &[Option<u8>],
@@ -21403,6 +21436,22 @@ mod tests {
         assert_eq!(res2.join(" "), "48 89 ?? 24 ?? 57 48");
         assert_eq!(fixed2, 5);
         assert_eq!(wildcards2, 2);
+    }
+
+    #[test]
+    fn test_manual_aob_compare_with_same_wildcards() {
+        let a = "48 89 ?? 24 ?? 57 48";
+        let b = "48 89 ?? 24 ?? 57 48";
+        let t1 = parse_manual_aob_tokens(a);
+        let t2 = parse_manual_aob_tokens(b);
+        assert_eq!(classify_manual_aob_byte_match(t1[0], t2[0]), ManualAobByteMatch::SameByte);
+        assert_eq!(classify_manual_aob_byte_match(t1[2], t2[2]), ManualAobByteMatch::SameWildcard);
+        assert_eq!(classify_manual_aob_byte_match(t1[4], t2[4]), ManualAobByteMatch::SameWildcard);
+
+        let c = "48 89 5C 24 10 57 48";
+        let t3 = parse_manual_aob_tokens(c);
+        assert_eq!(classify_manual_aob_byte_match(t1[2], t3[2]), ManualAobByteMatch::Different);
+        assert_eq!(classify_manual_aob_byte_match(t1[4], t3[4]), ManualAobByteMatch::Different);
     }
 
     #[test]
