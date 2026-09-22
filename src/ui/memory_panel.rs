@@ -28,7 +28,7 @@ use crate::{
         filter_aob_scan_candidates_text, filter_memory_snapshot_with_progress,
         filter_scan_candidates_with_progress, filter_text_scan_candidates, is_aob_pattern_input,
         query_memory_region, read_memory_bytes, read_scan_value, read_text_memory,
-        refresh_scan_candidates, scan_aob_memory_as_numeric, scan_aob_memory_as_text,
+        scan_aob_memory_as_numeric, scan_aob_memory_as_text,
         scan_aob_memory_range_with_progress,
         scan_aob_memory_with_progress, scan_entity_lists_with_progress,
         scan_memory_range_with_progress,
@@ -3560,6 +3560,9 @@ impl CrosshairApp {
                 }
             });
             ui.separator();
+            if self.memory_panel.process_pid.is_some() && visible_count > 0 {
+                ui.ctx().request_repaint_after(Duration::from_millis(50));
+            }
             egui::ScrollArea::vertical()
                 .id_salt(if pinned {
                     "pinned-memory-results"
@@ -3907,6 +3910,9 @@ impl CrosshairApp {
                     self.sort_saved_addresses();
                 }
                 ui.separator();
+                if self.memory_panel.process_pid.is_some() && !self.memory_panel.saved.is_empty() {
+                    ui.ctx().request_repaint_after(Duration::from_millis(50));
+                }
                 let row_height = 26.0;
                 let count = self.memory_panel.saved.len();
                 let pinned_idx = usize::from(self.memory_panel.address_list_pinned);
@@ -16961,10 +16967,10 @@ impl CrosshairApp {
         };
         let value_type = self.memory_panel.value_type;
         let mut updated = 0;
-        for candidate in &mut self.memory_panel.candidates {
+        for (index, candidate) in self.memory_panel.candidates.iter_mut().enumerate() {
             if let Ok(live) = read_scan_value(pid, candidate.address, value_type) {
                 candidate.set_current(live);
-                self.memory_panel.live_candidate_values.insert(candidate.address, live);
+                self.memory_panel.live_candidate_values.insert(index, live);
                 updated += 1;
             }
         }
@@ -18910,7 +18916,7 @@ impl CrosshairApp {
                 for (start, end, rendered_at) in
                     self.memory_panel.visible_scan_ranges.into_iter().flatten()
                 {
-                    if rendered_at.elapsed() > Duration::from_millis(100) {
+                    if rendered_at.elapsed() > Duration::from_millis(1000) {
                         continue;
                     }
                     let text_end = end.min(self.memory_panel.text_candidates.len());
@@ -18934,16 +18940,10 @@ impl CrosshairApp {
                     }
                     let num_end = end.min(self.memory_panel.candidates.len());
                     if start < num_end {
-                        let mut visible = self.memory_panel.candidates[start..num_end].to_vec();
-                        if refresh_scan_candidates(pid, &mut visible, self.memory_panel.value_type)
-                            .is_ok()
-                        {
-                            for (offset, candidate) in visible.into_iter().enumerate() {
-                                self.memory_panel.live_candidate_values.insert(
-                                    start + offset,
-                                    candidate.current(self.memory_panel.value_type),
-                                );
-                            }
+                        for (offset, candidate) in self.memory_panel.candidates[start..num_end].iter().enumerate() {
+                            let val = read_scan_value(pid, candidate.address, self.memory_panel.value_type)
+                                .unwrap_or_else(|_| candidate.current(self.memory_panel.value_type));
+                            self.memory_panel.live_candidate_values.insert(start + offset, val);
                         }
                     }
                 }
@@ -19312,6 +19312,9 @@ impl CrosshairApp {
     }
 
     fn poll_memory_hotkeys(&mut self, ctx: &egui::Context) {
+        if self.memory_panel.capturing_hotkey.is_some() {
+            return;
+        }
         let events = crate::overlay::take_memory_trigger_events();
         if events.is_empty() {
             if self.memory_panel.scanning {
@@ -19319,9 +19322,7 @@ impl CrosshairApp {
             }
             return;
         }
-        if ctx.memory(|m| m.focused().is_some()) {
-            return;
-        }
+        let is_any_focused = ctx.memory(|m| m.focused().is_some());
         let target_matches = Self::memory_hotkey_should_trigger(
             self.state.memory_hotkey_require_target_focus,
             self.memory_panel.process_pid,
@@ -19335,6 +19336,9 @@ impl CrosshairApp {
                 .map(|(action, binding)| (*action, binding.clone()))
                 .collect::<Vec<_>>();
             for event in events {
+                if is_any_focused && Self::is_plain_text_edit_key(&event) {
+                    continue;
+                }
                 for (action, expected) in &bindings {
                     if hotkey::binding_matches_allow_held_modifiers(expected, &event) {
                         self.start_memory_action(*action);
@@ -19360,6 +19364,26 @@ impl CrosshairApp {
         foreground_pid: Option<u32>,
     ) -> bool {
         target_pid.is_some() && target_pid == foreground_pid
+    }
+
+    pub(crate) fn is_plain_text_edit_key(binding: &HotkeyBinding) -> bool {
+        if binding.ctrl || binding.alt || binding.win || !binding.combo_keys.is_empty() {
+            return false;
+        }
+        let key = binding.key.as_str();
+        if key.starts_with('F') && key.len() > 1 && key[1..].chars().all(|c| c.is_ascii_digit()) {
+            return false;
+        }
+        if key.starts_with("Mouse") || key.starts_with("Numpad") {
+            return false;
+        }
+        if matches!(
+            key,
+            "Enter" | "Return" | "Escape" | "Tab" | "Insert" | "Delete" | "Home" | "End" | "PageUp" | "PageDown"
+        ) {
+            return false;
+        }
+        key == "Space" || key.chars().count() == 1
     }
 
     fn persist_memory_hotkeys(&mut self) {
@@ -21650,6 +21674,33 @@ mod tests {
             None,
             None
         ));
+    }
+
+    #[test]
+    fn plain_text_edit_keys_filter_correctly() {
+        use crate::model::HotkeyBinding;
+
+        let plain_digit = HotkeyBinding { key: "1".to_string(), ..Default::default() };
+        let plain_char = HotkeyBinding { key: "a".to_string(), ..Default::default() };
+        let plain_space = HotkeyBinding { key: "Space".to_string(), ..Default::default() };
+        assert!(CrosshairApp::is_plain_text_edit_key(&plain_digit));
+        assert!(CrosshairApp::is_plain_text_edit_key(&plain_char));
+        assert!(CrosshairApp::is_plain_text_edit_key(&plain_space));
+
+        let f1 = HotkeyBinding { key: "F1".to_string(), ..Default::default() };
+        let f12 = HotkeyBinding { key: "F12".to_string(), ..Default::default() };
+        let ctrl_1 = HotkeyBinding { key: "1".to_string(), ctrl: true, ..Default::default() };
+        let alt_s = HotkeyBinding { key: "s".to_string(), alt: true, ..Default::default() };
+        let numpad1 = HotkeyBinding { key: "Numpad1".to_string(), ..Default::default() };
+        let enter = HotkeyBinding { key: "Enter".to_string(), ..Default::default() };
+        let mouse1 = HotkeyBinding { key: "MouseX1".to_string(), ..Default::default() };
+        assert!(!CrosshairApp::is_plain_text_edit_key(&f1));
+        assert!(!CrosshairApp::is_plain_text_edit_key(&f12));
+        assert!(!CrosshairApp::is_plain_text_edit_key(&ctrl_1));
+        assert!(!CrosshairApp::is_plain_text_edit_key(&alt_s));
+        assert!(!CrosshairApp::is_plain_text_edit_key(&numpad1));
+        assert!(!CrosshairApp::is_plain_text_edit_key(&enter));
+        assert!(!CrosshairApp::is_plain_text_edit_key(&mouse1));
     }
 
     #[test]
