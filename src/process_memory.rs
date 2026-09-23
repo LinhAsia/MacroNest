@@ -2413,6 +2413,155 @@ pub fn scan_aob_memory_range_with_progress(
         .collect())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AobWildcardScenarioOutcome {
+    pub label: String,
+    pub pattern: String,
+    pub wildcard_count: usize,
+    pub match_count: usize,
+    pub sample_address: Option<usize>,
+}
+
+pub fn scan_aob_wildcard_batch(
+    pid: u32,
+    scenarios: Vec<(String, String, usize)>,
+    match_limit: usize,
+    options: MemoryScanOptions,
+    cancel: Arc<AtomicBool>,
+    on_progress: impl Fn(usize, usize) + Send + Sync,
+) -> io::Result<Vec<AobWildcardScenarioOutcome>> {
+    let total_scenarios = scenarios.len();
+    if total_scenarios == 0 {
+        return Ok(Vec::new());
+    }
+
+    let process = ScanProcess::open(pid, false)?;
+    let regions = scan_regions_for(&process, options);
+
+    // Pre-cache candidate regions into memory to evaluate all patterns in-memory rapidly
+    let max_snapshot_bytes = 256 * 1024 * 1024;
+    let mut chunks = Vec::new();
+    let mut total_read = 0usize;
+    let mut buffer = Vec::new();
+
+    for region in &regions {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        if total_read >= max_snapshot_bytes {
+            break;
+        }
+        let read_len = region.size.min(max_snapshot_bytes - total_read);
+        buffer.resize(read_len, 0);
+        if let Ok(count) = process.read(region.base, &mut buffer) {
+            if count > 0 {
+                chunks.push((region.base, buffer[..count].to_vec()));
+                total_read += count;
+            }
+        }
+    }
+
+    let mut outcomes = Vec::with_capacity(total_scenarios);
+
+    for (index, (label, pattern_str, wildcard_count)) in scenarios.into_iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        on_progress(index + 1, total_scenarios);
+
+        let Some(pattern) = parse_aob_pattern(&pattern_str) else {
+            outcomes.push(AobWildcardScenarioOutcome {
+                label,
+                pattern: pattern_str,
+                wildcard_count,
+                match_count: 0,
+                sample_address: None,
+            });
+            continue;
+        };
+
+        if pattern.is_empty() {
+            outcomes.push(AobWildcardScenarioOutcome {
+                label,
+                pattern: pattern_str,
+                wildcard_count,
+                match_count: 0,
+                sample_address: None,
+            });
+            continue;
+        }
+
+        let mut matches = Vec::new();
+
+        if !chunks.is_empty() {
+            let first_exact_idx = pattern.iter().position(|b| matches!(b, AobByte::Exact(_)));
+            let first_exact_byte = first_exact_idx.and_then(|i| match pattern[i] {
+                AobByte::Exact(b) => Some(b),
+                _ => None,
+            });
+
+            'chunk_search: for (base, data) in &chunks {
+                if data.len() < pattern.len() {
+                    continue;
+                }
+                if let (Some(f_idx), Some(target_byte)) = (first_exact_idx, first_exact_byte) {
+                    let mut cursor = f_idx;
+                    let max_target_pos = data.len().saturating_sub(pattern.len() - f_idx);
+                    while cursor <= max_target_pos {
+                        let sub = &data[cursor..=max_target_pos];
+                        if let Some(pos) = sub.iter().position(|&b| b == target_byte) {
+                            let match_target_idx = cursor + pos;
+                            let cand_offset = match_target_idx - f_idx;
+                            if aob_bytes_equal(&data[cand_offset..cand_offset + pattern.len()], &pattern) {
+                                matches.push(base + cand_offset);
+                                if matches.len() >= match_limit {
+                                    break 'chunk_search;
+                                }
+                            }
+                            cursor = match_target_idx + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                } else {
+                    let max_start = data.len().saturating_sub(pattern.len());
+                    for offset in 0..=max_start {
+                        if aob_bytes_equal(&data[offset..offset + pattern.len()], &pattern) {
+                            matches.push(base + offset);
+                            if matches.len() >= match_limit {
+                                break 'chunk_search;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            if let Ok(addrs) = scan_aob_memory_addresses(
+                pid,
+                &pattern_str,
+                match_limit,
+                options,
+                Arc::new(AtomicUsize::new(0)),
+            ) {
+                matches = addrs;
+            }
+        }
+
+        let match_count = matches.len();
+        let sample_address = matches.first().copied();
+
+        outcomes.push(AobWildcardScenarioOutcome {
+            label,
+            pattern: pattern_str,
+            wildcard_count,
+            match_count,
+            sample_address,
+        });
+    }
+
+    Ok(outcomes)
+}
+
 pub fn filter_aob_scan_candidates_numeric(
     pid: u32,
     candidates: Vec<ScanCandidate>,
@@ -4571,6 +4720,20 @@ mod tests {
                 size: 0x800,
             })
         );
+    }
+
+    #[test]
+    fn aob_wildcard_scenario_outcome_fields() {
+        let outcome = AobWildcardScenarioOutcome {
+            label: "Wildcard 4 byte (+04..+07)".to_string(),
+            pattern: "48 89 5C 24 ?? ?? ?? ?? 48".to_string(),
+            wildcard_count: 4,
+            match_count: 1,
+            sample_address: Some(0x7FF70001000),
+        };
+        assert_eq!(outcome.wildcard_count, 4);
+        assert_eq!(outcome.match_count, 1);
+        assert_eq!(outcome.sample_address, Some(0x7FF70001000));
     }
 
     #[test]

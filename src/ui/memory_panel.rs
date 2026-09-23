@@ -1053,6 +1053,29 @@ pub(crate) struct LastSelectedProcessInfo {
     pub last_pid: u32,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AobWildcardScenario {
+    pub label: String,
+    pub pattern: String,
+    pub wildcard_count: usize,
+    pub match_count: usize,
+    pub sample_address: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AobWildcardFilter {
+    All,
+    UniqueOnly,
+    WithMatches,
+    ZeroMatches,
+}
+
+pub enum WildcardScanMessage {
+    Progress { tested: usize, total: usize },
+    Finished(Vec<AobWildcardScenario>),
+    Failed(String),
+}
+
 pub(crate) struct MemoryPanelState {
     process_selector: String,
     process_pid: Option<u32>,
@@ -1125,6 +1148,14 @@ pub(crate) struct MemoryPanelState {
     pub(super) manual_aob_input_1: String,
     pub(super) manual_aob_input_2: String,
     pub(super) manual_aob_feedback: Option<(String, Instant)>,
+    pub(super) aob_wildcard_scenarios: Vec<AobWildcardScenario>,
+    pub(super) aob_wildcard_rx: Option<Receiver<WildcardScanMessage>>,
+    pub(super) aob_wildcard_cancel: Arc<AtomicBool>,
+    pub(super) aob_wildcard_scanning: bool,
+    pub(super) aob_wildcard_status: String,
+    pub(super) aob_wildcard_filter: AobWildcardFilter,
+    pub(super) aob_wildcard_selected: Option<AobWildcardScenario>,
+    pub(super) aob_wildcard_source_input: String,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     pub(super) capturing_hotkey: Option<MemoryScanAction>,
     edit_value_index: Option<usize>,
@@ -1260,6 +1291,14 @@ impl Default for MemoryPanelState {
             manual_aob_input_1: String::new(),
             manual_aob_input_2: String::new(),
             manual_aob_feedback: None,
+            aob_wildcard_scenarios: Vec::new(),
+            aob_wildcard_rx: None,
+            aob_wildcard_cancel: Arc::new(AtomicBool::new(false)),
+            aob_wildcard_scanning: false,
+            aob_wildcard_status: String::new(),
+            aob_wildcard_filter: AobWildcardFilter::All,
+            aob_wildcard_selected: None,
+            aob_wildcard_source_input: String::new(),
             hotkeys: HashMap::new(),
             capturing_hotkey: None,
             edit_value_index: None,
@@ -2808,6 +2847,20 @@ impl CrosshairApp {
                     } else if !self.memory_panel.is_aob_scan {
                         let hex_label = self.tr("Hex", "Hex");
                         ui.checkbox(&mut self.memory_panel.hex, hex_label);
+                    } else if self.memory_panel.is_aob_scan && !self.memory_panel.value_input.trim().is_empty() {
+                        let btn = ui.button(
+                            RichText::new(self.tr("⚡ Auto ??", "⚡ Auto ??"))
+                                .color(Color32::from_rgb(90, 205, 250))
+                        ).on_hover_text(self.tr(
+                            "Auto test wildcard permutations (??) and count address results",
+                            "Tự động tạo các trường hợp wildcard (??) và đếm số địa chỉ tìm được"
+                        ));
+                        if btn.clicked() {
+                            let val = self.memory_panel.value_input.clone();
+                            self.memory_panel.manual_aob_input_1 = val.clone();
+                            self.memory_panel.show_manual_aob_compare = true;
+                            self.start_aob_wildcard_exploration(&val);
+                        }
                     }
                 });
                 if self.memory_panel.text_encoding.is_some() {
@@ -17063,7 +17116,406 @@ impl CrosshairApp {
         }
     }
 
+    fn poll_aob_wildcard_job(&mut self) {
+        let Some(rx) = self.memory_panel.aob_wildcard_rx.as_ref() else {
+            return;
+        };
+        loop {
+            match rx.try_recv() {
+                Ok(WildcardScanMessage::Progress { tested, total }) => {
+                    self.memory_panel.aob_wildcard_status = format!(
+                        "{} ({}/{})",
+                        self.tr("Testing wildcard scenarios", "Đang thử nghiệm các trường hợp wildcard"),
+                        tested,
+                        total
+                    );
+                }
+                Ok(WildcardScanMessage::Finished(results)) => {
+                    self.memory_panel.aob_wildcard_rx = None;
+                    self.memory_panel.aob_wildcard_scanning = false;
+                    let unique_count = results.iter().filter(|r| r.match_count == 1).count();
+                    self.memory_panel.aob_wildcard_status = format!(
+                        "{} ({} {}, {} {})",
+                        self.tr("Scan complete", "Hoàn tất kiểm tra"),
+                        results.len(),
+                        self.tr("scenarios", "trường hợp"),
+                        unique_count,
+                        self.tr("unique match (1 result)", "kết quả duy nhất (1 địa chỉ)")
+                    );
+                    if self.memory_panel.aob_wildcard_selected.is_none() {
+                        self.memory_panel.aob_wildcard_selected = results
+                            .iter()
+                            .find(|r| r.match_count == 1)
+                            .cloned()
+                            .or_else(|| results.first().cloned());
+                    }
+                    self.memory_panel.aob_wildcard_scenarios = results;
+                    break;
+                }
+                Ok(WildcardScanMessage::Failed(err)) => {
+                    self.memory_panel.aob_wildcard_rx = None;
+                    self.memory_panel.aob_wildcard_scanning = false;
+                    self.memory_panel.aob_wildcard_status = format!("{}: {}", self.tr("Scan error", "Lỗi quét"), err);
+                    break;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.memory_panel.aob_wildcard_rx = None;
+                    self.memory_panel.aob_wildcard_scanning = false;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn start_aob_wildcard_exploration(&mut self, input_aob: &str) {
+        self.memory_panel.aob_wildcard_cancel.store(true, Ordering::Relaxed);
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.memory_panel.aob_wildcard_cancel = Arc::clone(&cancel);
+
+        let candidates = generate_aob_wildcard_candidates(input_aob);
+        if candidates.is_empty() {
+            self.memory_panel.aob_wildcard_status = self.tr("Invalid or empty AOB pattern", "Mã AOB không hợp lệ hoặc trống").to_string();
+            return;
+        }
+
+        self.memory_panel.aob_wildcard_source_input = input_aob.to_string();
+
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.aob_wildcard_scanning = false;
+            self.memory_panel.aob_wildcard_scenarios = candidates
+                .into_iter()
+                .map(|(label, pattern, wildcard_count)| AobWildcardScenario {
+                    label,
+                    pattern,
+                    wildcard_count,
+                    match_count: 0,
+                    sample_address: None,
+                })
+                .collect();
+            self.memory_panel.aob_wildcard_status = self.tr(
+                "Generated wildcard scenarios. Select a process above to scan memory and count matching addresses.",
+                "Đã tạo các trường hợp wildcard. Hãy chọn Process ở trên để quét kiểm tra số lượng địa chỉ khớp."
+            ).to_string();
+            self.memory_panel.aob_wildcard_selected = self.memory_panel.aob_wildcard_scenarios.first().cloned();
+            return;
+        };
+
+        self.memory_panel.aob_wildcard_scanning = true;
+        self.memory_panel.aob_wildcard_status = format!(
+            "{} (PID {})...",
+            self.tr("Testing wildcard scenarios", "Đang thử nghiệm các trường hợp wildcard"),
+            pid
+        );
+
+        let scan_options = if self.memory_panel.scan_scope_all {
+            MemoryScanOptions {
+                writable: true,
+                executable: true,
+                copy_on_write: true,
+                active_memory_only: false,
+                mem_private: true,
+                mem_image: true,
+                mem_mapped: true,
+                alignment: None,
+            }
+        } else {
+            let exec = self.memory_panel.scan_executable || !self.memory_panel.scan_writable;
+            MemoryScanOptions {
+                writable: self.memory_panel.scan_writable,
+                executable: exec,
+                copy_on_write: self.memory_panel.scan_copy_on_write,
+                active_memory_only: self.memory_panel.scan_active_memory_only,
+                mem_private: self.memory_panel.scan_mem_private,
+                mem_image: self.memory_panel.scan_mem_image,
+                mem_mapped: self.memory_panel.scan_mem_mapped,
+                alignment: None,
+            }
+        };
+
+        let (tx, rx) = mpsc::channel();
+        self.memory_panel.aob_wildcard_rx = Some(rx);
+
+        thread::spawn(move || {
+            let res = crate::process_memory::scan_aob_wildcard_batch(
+                pid,
+                candidates,
+                25,
+                scan_options,
+                cancel,
+                |tested, total| {
+                    let _ = tx.send(WildcardScanMessage::Progress { tested, total });
+                },
+            );
+            match res {
+                Ok(outcomes) => {
+                    let scenarios = outcomes
+                        .into_iter()
+                        .map(|o| AobWildcardScenario {
+                            label: o.label,
+                            pattern: o.pattern,
+                            wildcard_count: o.wildcard_count,
+                            match_count: o.match_count,
+                            sample_address: o.sample_address,
+                        })
+                        .collect();
+                    let _ = tx.send(WildcardScanMessage::Finished(scenarios));
+                }
+                Err(err) => {
+                    let _ = tx.send(WildcardScanMessage::Failed(err.to_string()));
+                }
+            }
+        });
+    }
+
+    fn render_manual_aob_wildcard_explorer(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(self.tr("⚡ Auto Wildcard Permutations (??)", "⚡ Tự động tìm kiếm & thử nghiệm Wildcard (??)")).strong());
+                if self.memory_panel.aob_wildcard_scanning {
+                    ui.spinner();
+                    ui.label(RichText::new(&self.memory_panel.aob_wildcard_status).color(Color32::from_rgb(90, 205, 250)));
+                    if ui.button(self.tr("Cancel", "Dừng")).clicked() {
+                        self.memory_panel.aob_wildcard_cancel.store(true, Ordering::Relaxed);
+                        self.memory_panel.aob_wildcard_scanning = false;
+                        self.memory_panel.aob_wildcard_rx = None;
+                    }
+                } else if !self.memory_panel.aob_wildcard_scenarios.is_empty() {
+                    ui.label(RichText::new(&self.memory_panel.aob_wildcard_status).small().color(Color32::from_rgb(180, 220, 180)));
+                    if ui.button(self.tr("Rescan", "Quét lại")).clicked() {
+                        let src = self.memory_panel.aob_wildcard_source_input.clone();
+                        if !src.is_empty() {
+                            self.start_aob_wildcard_exploration(&src);
+                        }
+                    }
+                } else {
+                    ui.label(RichText::new(self.tr(
+                        "Paste an AOB above and click '⚡ Auto Wildcard' to test patterns",
+                        "Dán mã AOB ở trên rồi bấm '⚡ Tự động thử wildcard ??' để kiểm tra"
+                    )).small().weak());
+                }
+            });
+
+            if self.memory_panel.process_pid.is_none() {
+                ui.label(RichText::new(self.tr(
+                    "⚠️ No target process selected. Select a process above to scan memory and count matching addresses.",
+                    "⚠️ Chưa chọn Process. Hãy đính kèm hoặc chọn Process ở trên để app quét bộ nhớ và đếm số địa chỉ khớp."
+                )).small().color(Color32::from_rgb(255, 190, 80)));
+            }
+
+            if !self.memory_panel.aob_wildcard_scenarios.is_empty() {
+                ui.add_space(4.0);
+                let total = self.memory_panel.aob_wildcard_scenarios.len();
+                let unique_count = self.memory_panel.aob_wildcard_scenarios.iter().filter(|s| s.match_count == 1).count();
+                let with_matches = self.memory_panel.aob_wildcard_scenarios.iter().filter(|s| s.match_count > 0).count();
+                let zero_count = self.memory_panel.aob_wildcard_scenarios.iter().filter(|s| s.match_count == 0).count();
+
+                ui.horizontal_wrapped(|ui| {
+                    if ui.selectable_label(
+                        self.memory_panel.aob_wildcard_filter == AobWildcardFilter::All,
+                        format!("{} ({})", self.tr("All", "Tất cả"), total),
+                    ).clicked() {
+                        self.memory_panel.aob_wildcard_filter = AobWildcardFilter::All;
+                    }
+                    if ui.selectable_label(
+                        self.memory_panel.aob_wildcard_filter == AobWildcardFilter::UniqueOnly,
+                        RichText::new(format!("⭐ {} ({})", self.tr("Unique (1 match)", "Duy nhất (1 kết quả)"), unique_count))
+                            .color(if unique_count > 0 { Color32::from_rgb(90, 240, 140) } else { Color32::from_rgb(150, 150, 150) }),
+                    ).clicked() {
+                        self.memory_panel.aob_wildcard_filter = AobWildcardFilter::UniqueOnly;
+                    }
+                    if ui.selectable_label(
+                        self.memory_panel.aob_wildcard_filter == AobWildcardFilter::WithMatches,
+                        format!("{} ({})", self.tr("With Matches (>=1)", "Có kết quả (>= 1)"), with_matches),
+                    ).clicked() {
+                        self.memory_panel.aob_wildcard_filter = AobWildcardFilter::WithMatches;
+                    }
+                    if ui.selectable_label(
+                        self.memory_panel.aob_wildcard_filter == AobWildcardFilter::ZeroMatches,
+                        format!("{} ({})", self.tr("0 Matches", "0 kết quả"), zero_count),
+                    ).clicked() {
+                        self.memory_panel.aob_wildcard_filter = AobWildcardFilter::ZeroMatches;
+                    }
+                });
+
+                ui.add_space(2.0);
+
+                let filter = self.memory_panel.aob_wildcard_filter;
+                let mut selected_to_view = None;
+                let mut copy_pattern = None;
+                let mut use_as_sample_1 = None;
+
+                egui::ScrollArea::vertical()
+                    .id_salt("aob_wildcard_scenarios_scroll")
+                    .max_height(180.0)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(self.tr("Scenario / Case", "Trường hợp")).strong());
+                            ui.add_space(80.0);
+                            ui.label(RichText::new(self.tr("Wildcards", "Wildcard")).strong());
+                            ui.add_space(30.0);
+                            ui.label(RichText::new(self.tr("Address Results", "Số địa chỉ tìm được")).strong());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(RichText::new(self.tr("Actions", "Thao tác")).strong());
+                            });
+                        });
+                        ui.separator();
+
+                        for (idx, scenario) in self.memory_panel.aob_wildcard_scenarios.iter().enumerate() {
+                            let matches_filter = match filter {
+                                AobWildcardFilter::All => true,
+                                AobWildcardFilter::UniqueOnly => scenario.match_count == 1,
+                                AobWildcardFilter::WithMatches => scenario.match_count > 0,
+                                AobWildcardFilter::ZeroMatches => scenario.match_count == 0,
+                            };
+                            if !matches_filter {
+                                continue;
+                            }
+
+                            let is_active = self.memory_panel.aob_wildcard_selected.as_ref().map_or(false, |s| s.pattern == scenario.pattern);
+
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 8.0;
+
+                                let label_text = format!("#{}: {}", idx + 1, scenario.label);
+                                let label_resp = ui.selectable_label(is_active, RichText::new(label_text).monospace());
+                                if label_resp.clicked() {
+                                    selected_to_view = Some(scenario.clone());
+                                }
+
+                                ui.label(RichText::new(format!("{} x ??", scenario.wildcard_count)).small().color(Color32::from_rgb(180, 180, 180)));
+
+                                if self.memory_panel.process_pid.is_none() {
+                                    ui.label(RichText::new(self.tr("Not scanned", "Chưa quét")).small().weak());
+                                } else if scenario.match_count == 1 {
+                                    let addr_str = scenario.sample_address.map_or(String::new(), |a| format!(" @ 0x{:X}", a));
+                                    ui.label(
+                                        RichText::new(format!("✔ 1 {} (Unique!){}", self.tr("result", "kết quả"), addr_str))
+                                            .strong()
+                                            .color(Color32::from_rgb(90, 240, 140))
+                                    );
+                                } else if scenario.match_count > 1 {
+                                    let limit_mark = if scenario.match_count >= 25 { "+" } else { "" };
+                                    ui.label(
+                                        RichText::new(format!("⚠ {}{} {}", scenario.match_count, limit_mark, self.tr("results", "kết quả")))
+                                            .color(Color32::from_rgb(240, 205, 80))
+                                    );
+                                } else {
+                                    ui.label(
+                                        RichText::new(format!("0 {}", self.tr("results", "kết quả")))
+                                            .color(Color32::from_rgb(140, 140, 140))
+                                    );
+                                }
+
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button(self.tr("-> Sample 1", "-> Mẫu 1")).on_hover_text(self.tr("Use this pattern in Sample 1", "Dán mã AOB này vào ô Mẫu 1")).clicked() {
+                                        use_as_sample_1 = Some(scenario.pattern.clone());
+                                    }
+                                    if ui.button(self.tr("Copy", "Sao chép")).on_hover_text(self.tr("Copy this AOB pattern", "Sao chép mã AOB này")).clicked() {
+                                        copy_pattern = Some((scenario.pattern.clone(), scenario.label.clone()));
+                                    }
+                                    let show_btn = ui.button(RichText::new(self.tr("AOB Code", "Xem mã AOB")).color(Color32::from_rgb(90, 205, 250)));
+                                    if show_btn.clicked() {
+                                        selected_to_view = Some(scenario.clone());
+                                    }
+                                });
+                            });
+                        }
+                    });
+
+                if let Some(sc) = selected_to_view {
+                    self.memory_panel.aob_wildcard_selected = Some(sc);
+                }
+                if let Some((pat, lbl)) = copy_pattern {
+                    ui.ctx().copy_text(pat);
+                    self.memory_panel.manual_aob_feedback = Some((
+                        format!("{} ({})", self.tr("Copied AOB pattern to clipboard", "Đã sao chép mã AOB"), lbl),
+                        Instant::now(),
+                    ));
+                }
+                if let Some(pat) = use_as_sample_1 {
+                    self.memory_panel.manual_aob_input_1 = pat;
+                    self.memory_panel.manual_aob_feedback = Some((
+                        self.tr("Moved pattern to Sample 1!", "Đã đưa mã AOB lên Mẫu 1!").to_string(),
+                        Instant::now(),
+                    ));
+                }
+
+                if let Some(selected) = self.memory_panel.aob_wildcard_selected.clone() {
+                    let mut close_preview = false;
+                    let mut copy_selected = false;
+                    let mut apply_to_sample_1 = false;
+                    let mut apply_to_sample_2 = false;
+
+                    ui.add_space(4.0);
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(format!("{}: {}", self.tr("Full AOB Code", "Mã AOB đầy đủ"), selected.label)).strong().color(Color32::from_rgb(90, 205, 250)));
+                            let match_text = if selected.match_count == 1 {
+                                let addr_str = selected.sample_address.map_or(String::new(), |a| format!(" @ 0x{:X}", a));
+                                RichText::new(format!("⭐ 1 {} (Unique!){}", self.tr("result", "kết quả"), addr_str)).color(Color32::from_rgb(90, 240, 140)).strong()
+                            } else if selected.match_count > 1 {
+                                RichText::new(format!("{} {}", selected.match_count, self.tr("results", "kết quả"))).color(Color32::from_rgb(240, 205, 80))
+                            } else {
+                                RichText::new(format!("0 {}", self.tr("results", "kết quả"))).color(Color32::from_rgb(140, 140, 140))
+                            };
+                            ui.label(match_text);
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button(self.tr("Hide", "Ẩn")).clicked() {
+                                    close_preview = true;
+                                }
+                                if ui.button(self.tr("Use in Sample 2 ->", "Dán vào Mẫu 2 ->")).clicked() {
+                                    apply_to_sample_2 = true;
+                                }
+                                if ui.button(self.tr("Use in Sample 1 ->", "Dán vào Mẫu 1 ->")).clicked() {
+                                    apply_to_sample_1 = true;
+                                }
+                                if ui.button(RichText::new(self.tr("📋 Copy Full AOB", "📋 Sao chép mã AOB")).strong()).clicked() {
+                                    copy_selected = true;
+                                }
+                            });
+                        });
+                        ui.add_space(2.0);
+                        ui.add(
+                            egui::TextEdit::multiline(&mut selected.pattern.as_str())
+                                .font(egui::TextStyle::Monospace)
+                                .desired_rows(2)
+                                .desired_width(ui.available_width()),
+                        );
+                    });
+
+                    if close_preview {
+                        self.memory_panel.aob_wildcard_selected = None;
+                    }
+                    if apply_to_sample_1 {
+                        self.memory_panel.manual_aob_input_1 = selected.pattern.clone();
+                        self.memory_panel.manual_aob_feedback = Some((
+                            self.tr("Applied pattern to Sample 1", "Đã dán vào Mẫu 1").to_string(),
+                            Instant::now(),
+                        ));
+                    }
+                    if apply_to_sample_2 {
+                        self.memory_panel.manual_aob_input_2 = selected.pattern.clone();
+                        self.memory_panel.manual_aob_feedback = Some((
+                            self.tr("Applied pattern to Sample 2", "Đã dán vào Mẫu 2").to_string(),
+                            Instant::now(),
+                        ));
+                    }
+                    if copy_selected {
+                        ui.ctx().copy_text(selected.pattern.clone());
+                        self.memory_panel.manual_aob_feedback = Some((
+                            self.tr("Copied full AOB pattern to clipboard!", "Đã sao chép mã AOB đầy đủ vào bộ nhớ tạm!").to_string(),
+                            Instant::now(),
+                        ));
+                    }
+                }
+            }
+        });
+    }
+
     fn poll_memory_job(&mut self) {
+        self.poll_aob_wildcard_job();
         let Some(rx) = self.memory_panel.job_rx.as_ref() else {
             return;
         };
@@ -17645,6 +18097,10 @@ impl CrosshairApp {
         if !self.memory_panel.show_manual_aob_compare {
             return;
         }
+        self.poll_aob_wildcard_job();
+        if self.memory_panel.aob_wildcard_scanning {
+            ctx.request_repaint_after(Duration::from_millis(80));
+        }
         let mut open = true;
         let mut request_close = false;
         let screen_rect = ctx.screen_rect();
@@ -17655,12 +18111,16 @@ impl CrosshairApp {
             .pivot(egui::Align2::CENTER_CENTER)
             .default_pos(screen_rect.center())
             .constrain_to(inset_bounds)
-            .default_width(740.0)
-            .default_height(580.0)
-            .min_width(520.0)
-            .min_height(380.0);
+            .default_width(780.0)
+            .default_height(640.0)
+            .min_width(540.0)
+            .min_height(400.0);
 
         window.show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("manual-aob-dialog-scroll-area")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(self.tr(
@@ -17697,6 +18157,19 @@ impl CrosshairApp {
                     if ui.button(self.tr("Clear", "Xóa")).clicked() {
                         self.memory_panel.manual_aob_input_1.clear();
                     }
+                    if !tokens1.is_empty() {
+                        let btn = ui.button(
+                            RichText::new(self.tr("⚡ Auto Wildcard (??)", "⚡ Tự động thử wildcard ??"))
+                                .color(Color32::from_rgb(90, 205, 250))
+                        ).on_hover_text(self.tr(
+                            "Generate multiple wildcard permutations (??) from Sample 1 and scan memory to count address matches",
+                            "Tự động tạo các trường hợp wildcard (??) từ Mẫu 1 và quét bộ nhớ để đếm số địa chỉ tìm được"
+                        ));
+                        if btn.clicked() {
+                            let input = self.memory_panel.manual_aob_input_1.clone();
+                            self.start_aob_wildcard_exploration(&input);
+                        }
+                    }
                 });
                 let hint_1 = self.tr(
                     "Paste or type AOB pattern 1 (e.g. 48 89 5C 24 08 57 ?? 48...)",
@@ -17728,6 +18201,19 @@ impl CrosshairApp {
                     ui.label(RichText::new(format!("{} ({} bytes):", self.tr("AOB Sample 2", "Mẫu AOB 2"), tokens2.len())).strong());
                     if ui.button(self.tr("Clear", "Xóa")).clicked() {
                         self.memory_panel.manual_aob_input_2.clear();
+                    }
+                    if !tokens2.is_empty() {
+                        let btn = ui.button(
+                            RichText::new(self.tr("⚡ Auto Wildcard (??)", "⚡ Tự động thử wildcard ??"))
+                                .color(Color32::from_rgb(90, 205, 250))
+                        ).on_hover_text(self.tr(
+                            "Generate multiple wildcard permutations (??) from Sample 2 and scan memory to count address matches",
+                            "Tự động tạo các trường hợp wildcard (??) từ Mẫu 2 và quét bộ nhớ để đếm số địa chỉ tìm được"
+                        ));
+                        if btn.clicked() {
+                            let input = self.memory_panel.manual_aob_input_2.clone();
+                            self.start_aob_wildcard_exploration(&input);
+                        }
                     }
                 });
                 ui.add_space(2.0);
@@ -17875,6 +18361,19 @@ impl CrosshairApp {
                             Instant::now(),
                         ));
                     }
+                    if !result_pattern.is_empty() {
+                        let btn = ui.button(
+                            RichText::new(self.tr("⚡ Auto Wildcard (??)", "⚡ Tự động thử wildcard ??"))
+                                .color(Color32::from_rgb(90, 205, 250))
+                        ).on_hover_text(self.tr(
+                            "Generate multiple wildcard permutations (??) from comparison result and scan memory to count address matches",
+                            "Tự động tạo các trường hợp wildcard (??) từ kết quả so sánh và quét bộ nhớ để đếm số địa chỉ tìm được"
+                        ));
+                        if btn.clicked() {
+                            let input = result_pattern.clone();
+                            self.start_aob_wildcard_exploration(&input);
+                        }
+                    }
 
                     if let Some((msg, time)) = &self.memory_panel.manual_aob_feedback {
                         if time.elapsed() < Duration::from_secs(4) {
@@ -17963,6 +18462,9 @@ impl CrosshairApp {
                         }
                     });
             }
+            ui.add_space(4.0);
+            self.render_manual_aob_wildcard_explorer(ui);
+            });
         });
 
         if !open || request_close {
@@ -21568,6 +22070,196 @@ fn compare_manual_aob_token_lists(
     (result, fixed_count, wildcard_count)
 }
 
+fn format_aob_tokens_to_string(tokens: &[Option<u8>]) -> (String, usize) {
+    let mut parts = Vec::with_capacity(tokens.len());
+    let mut wc = 0;
+    for t in tokens {
+        match t {
+            Some(b) => parts.push(format!("{:02X}", b)),
+            None => {
+                parts.push("??".to_string());
+                wc += 1;
+            }
+        }
+    }
+    (parts.join(" "), wc)
+}
+
+pub fn generate_aob_wildcard_candidates(input_aob: &str) -> Vec<(String, String, usize)> {
+    let tokens = parse_manual_aob_tokens(input_aob);
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    let len = tokens.len();
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+
+    let (orig_pat, orig_wc) = format_aob_tokens_to_string(&tokens);
+    candidates.push((
+        format!("Gốc ({} wildcard)", orig_wc),
+        orig_pat.clone(),
+        orig_wc,
+    ));
+    seen.insert(orig_pat);
+
+    // 1-byte masks
+    for i in 0..len {
+        if tokens[i].is_some() {
+            let mut mutated = tokens.clone();
+            mutated[i] = None;
+            let (pat, wc) = format_aob_tokens_to_string(&mutated);
+            if seen.insert(pat.clone()) {
+                candidates.push((format!("Wildcard 1 byte (+{:02X})", i), pat, wc));
+            }
+        }
+    }
+
+    // 2-byte masks (immediate/operand)
+    if len >= 2 {
+        for i in 0..len - 1 {
+            if tokens[i].is_some() || tokens[i + 1].is_some() {
+                let mut mutated = tokens.clone();
+                mutated[i] = None;
+                mutated[i + 1] = None;
+                let (pat, wc) = format_aob_tokens_to_string(&mutated);
+                if seen.insert(pat.clone()) {
+                    candidates.push((
+                        format!("Wildcard 2 byte (+{:02X}..+{:02X})", i, i + 1),
+                        pat,
+                        wc,
+                    ));
+                }
+            }
+        }
+    }
+
+    // 4-byte masks (32-bit displacement / call / jump / immediate)
+    if len >= 4 {
+        for i in 0..=len - 4 {
+            let mut mutated = tokens.clone();
+            for k in 0..4 {
+                mutated[i + k] = None;
+            }
+            let (pat, wc) = format_aob_tokens_to_string(&mutated);
+            if seen.insert(pat.clone()) {
+                candidates.push((
+                    format!("Wildcard 4 byte (+{:02X}..+{:02X})", i, i + 3),
+                    pat,
+                    wc,
+                ));
+            }
+        }
+    }
+
+    // 3-byte masks
+    if len >= 5 {
+        for i in 0..=len - 3 {
+            let mut mutated = tokens.clone();
+            for k in 0..3 {
+                mutated[i + k] = None;
+            }
+            let (pat, wc) = format_aob_tokens_to_string(&mutated);
+            if seen.insert(pat.clone()) {
+                candidates.push((
+                    format!("Wildcard 3 byte (+{:02X}..+{:02X})", i, i + 2),
+                    pat,
+                    wc,
+                ));
+            }
+        }
+    }
+
+    // Suffix displacement (last 4 bytes)
+    if len >= 6 {
+        let mut mutated = tokens.clone();
+        for k in (len - 4)..len {
+            mutated[k] = None;
+        }
+        let (pat, wc) = format_aob_tokens_to_string(&mutated);
+        if seen.insert(pat.clone()) {
+            candidates.push((
+                format!("Displacement cuối 4 byte (+{:02X}..+{:02X})", len - 4, len - 1),
+                pat,
+                wc,
+            ));
+        }
+    }
+
+    // Suffix 6 bytes
+    if len >= 8 {
+        let mut mutated = tokens.clone();
+        for k in (len - 6)..len {
+            mutated[k] = None;
+        }
+        let (pat, wc) = format_aob_tokens_to_string(&mutated);
+        if seen.insert(pat.clone()) {
+            candidates.push((
+                format!("Đuôi 6 byte (+{:02X}..+{:02X})", len - 6, len - 1),
+                pat,
+                wc,
+            ));
+        }
+    }
+
+    // Prefix 2 bytes
+    if len >= 6 {
+        let mut mutated = tokens.clone();
+        mutated[0] = None;
+        mutated[1] = None;
+        let (pat, wc) = format_aob_tokens_to_string(&mutated);
+        if seen.insert(pat.clone()) {
+            candidates.push(("Đầu 2 byte (+00..+01)".to_string(), pat, wc));
+        }
+    }
+
+    // 8-byte masks (64-bit address or pointer)
+    if len >= 12 {
+        for i in 0..=len - 8 {
+            let mut mutated = tokens.clone();
+            for k in 0..8 {
+                mutated[i + k] = None;
+            }
+            let (pat, wc) = format_aob_tokens_to_string(&mutated);
+            if seen.insert(pat.clone()) {
+                candidates.push((
+                    format!("Wildcard 8 byte (+{:02X}..+{:02X})", i, i + 7),
+                    pat,
+                    wc,
+                ));
+            }
+        }
+    }
+
+    // Dual 2-byte operand pairs
+    if len >= 8 {
+        for &(start1, start2) in &[(1, 5), (2, 6), (1, len.saturating_sub(2))] {
+            if start2 + 1 < len {
+                let mut mutated = tokens.clone();
+                mutated[start1] = None;
+                mutated[start1 + 1] = None;
+                mutated[start2] = None;
+                mutated[start2 + 1] = None;
+                let (pat, wc) = format_aob_tokens_to_string(&mutated);
+                if seen.insert(pat.clone()) {
+                    candidates.push((
+                        format!(
+                            "Dual 2 byte (+{:02X}..+{:02X} & +{:02X}..+{:02X})",
+                            start1,
+                            start1 + 1,
+                            start2,
+                            start2 + 1
+                        ),
+                        pat,
+                        wc,
+                    ));
+                }
+            }
+        }
+    }
+
+    candidates
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -21582,6 +22274,18 @@ mod tests {
         assert_eq!(pattern, "48 89 ?? 24 ?? 57 48");
         assert_eq!(total, 7);
         assert_eq!(wildcards, 2);
+    }
+
+    #[test]
+    fn test_generate_aob_wildcard_candidates() {
+        let input = "48 89 5C 24 08";
+        let candidates = generate_aob_wildcard_candidates(input);
+        assert!(!candidates.is_empty());
+        assert_eq!(candidates[0].1, "48 89 5C 24 08");
+        assert_eq!(candidates[0].2, 0);
+        assert!(candidates.iter().any(|(_lbl, pat, wc)| *wc == 1 && pat.contains("??")));
+        assert!(candidates.iter().any(|(_lbl, pat, wc)| *wc == 2 && pat.contains("?? ??")));
+        assert!(candidates.iter().any(|(_lbl, pat, wc)| *wc == 4 && pat.contains("?? ?? ?? ??")));
     }
 
     #[test]
