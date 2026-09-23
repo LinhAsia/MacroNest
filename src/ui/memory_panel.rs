@@ -1140,6 +1140,7 @@ pub(crate) struct MemoryPanelState {
     module_list_dialog: Option<ModuleListDialog>,
     memory_settings_open: bool,
     code_list_open: bool,
+    pub(crate) show_code_list_address: bool,
     unpinned_memory_popups: HashSet<&'static str>,
     code_list_actions_validated: bool,
     selected_code: HashSet<usize>,
@@ -1274,6 +1275,7 @@ impl Default for MemoryPanelState {
             module_list_dialog: None,
             memory_settings_open: false,
             code_list_open: false,
+            show_code_list_address: false,
             unpinned_memory_popups: HashSet::new(),
             code_list_actions_validated: false,
             selected_code: HashSet::new(),
@@ -6550,6 +6552,7 @@ impl CrosshairApp {
             Delete(usize),
             ReplaceAll,
             Compare(bool),
+            ToggleShowAddress,
         }
 
         let mut pending_action = None;
@@ -6620,10 +6623,23 @@ impl CrosshairApp {
                     .on_hover_text(
                         "Listen to four selected instructions for this long, retain their data, then rotate to the next four",
                     );
+                    ui.separator();
+                    let toggle_addr_label = if self.memory_panel.show_code_list_address {
+                        self.tr("Hide Address/Module", "Ẩn Address/Module")
+                    } else {
+                        self.tr("Show Address/Module", "Hiện Address/Module")
+                    };
+                    if ui.button(toggle_addr_label).clicked() {
+                        self.memory_panel.show_code_list_address = !self.memory_panel.show_code_list_address;
+                    }
                 });
                 ui.horizontal(|ui| {
-                    Self::memory_view_cell(ui, 190.0, "Address / Module");
-                    Self::memory_view_cell(ui, 300.0, "Name / Instruction");
+                    if self.memory_panel.show_code_list_address {
+                        Self::memory_view_cell(ui, 190.0, "Address / Module");
+                        Self::memory_view_cell(ui, 300.0, "Name / Instruction");
+                    } else {
+                        Self::memory_view_cell(ui, 490.0, "Name / Instruction");
+                    }
                     Self::memory_view_cell(ui, 350.0, "Action / Status");
                 });
                 #[cfg(windows)]
@@ -6648,10 +6664,18 @@ impl CrosshairApp {
 
                         let row_res = ui
                             .horizontal(|ui| {
-                                let address_response =
-                                    Self::memory_view_cell(ui, 190.0, &address_str);
-                                let instruction_response =
-                                    Self::memory_view_cell(ui, 300.0, &instruction_text);
+                                let (address_response, instruction_response) =
+                                    if self.memory_panel.show_code_list_address {
+                                        (
+                                            Some(Self::memory_view_cell(ui, 190.0, &address_str)),
+                                            Self::memory_view_cell(ui, 300.0, &instruction_text),
+                                        )
+                                    } else {
+                                        (
+                                            None,
+                                            Self::memory_view_cell(ui, 490.0, &instruction_text),
+                                        )
+                                    };
                                 let action_label = if entry.replaced {
                                     "NOP Active"
                                 } else if entry.writes {
@@ -6704,13 +6728,16 @@ impl CrosshairApp {
                                 if delete_response.clicked() {
                                     pending_action = Some(CodeAction::Delete(index));
                                 }
-                                address_response
-                                    .union(instruction_response)
+                                let mut combined_res = instruction_response
                                     .union(action_response)
                                     .union(copy_aob_response)
                                     .union(relocate_response)
                                     .union(rename_response)
-                                    .union(delete_response)
+                                    .union(delete_response);
+                                if let Some(addr_resp) = address_response {
+                                    combined_res = addr_resp.union(combined_res);
+                                }
+                                combined_res
                             })
                             .inner;
 
@@ -6744,8 +6771,17 @@ impl CrosshairApp {
                                 ));
                                 ui.close();
                             }
-                            ui.separator();
                             let is_vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+                            let toggle_addr_label = if self.memory_panel.show_code_list_address {
+                                if is_vietnamese { "Ẩn Address/Module" } else { "Hide Address/Module" }
+                            } else {
+                                if is_vietnamese { "Hiện Address/Module" } else { "Show Address/Module" }
+                            };
+                            if ui.button(toggle_addr_label).clicked() {
+                                pending_action = Some(CodeAction::ToggleShowAddress);
+                                ui.close();
+                            }
+                            ui.separator();
 
                             let rename_label = if is_vietnamese { "Đổi tên mã này (Rename)" } else { "Rename code entry" };
                             if ui.button(rename_label).clicked() {
@@ -6917,6 +6953,9 @@ impl CrosshairApp {
             Some(CodeAction::Compare(nearby)) => {
                 #[cfg(windows)]
                 self.open_code_compare_watch(nearby);
+            }
+            Some(CodeAction::ToggleShowAddress) => {
+                self.memory_panel.show_code_list_address = !self.memory_panel.show_code_list_address;
             }
             None => {}
         }
@@ -21723,6 +21762,12 @@ mod tests {
             None,
             None
         ));
+    }
+
+    #[test]
+    fn code_list_address_column_defaults_to_hidden() {
+        let state = MemoryPanelState::default();
+        assert!(!state.show_code_list_address);
     }
 
     #[test]
