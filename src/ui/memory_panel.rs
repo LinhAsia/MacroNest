@@ -15,7 +15,7 @@ use crate::{
     hotkey,
     model::{
         AppPanel, EspPreset, HotkeyBinding, MacroAction, MacroStep,
-        MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod, MemoryPointerEntry,
+        MemoryAobDirection, MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod, MemoryPointerEntry,
         UiLanguage,
     },
     process_memory::{
@@ -967,6 +967,7 @@ struct CodeRelocateResult {
     module_base: usize,
     old_offset: usize,
     aob_signature: String,
+    aob_target_offset: usize,
     result: Result<Vec<usize>, String>,
 }
 
@@ -5184,6 +5185,39 @@ impl CrosshairApp {
                         "Khi bật, phím tắt scan bộ nhớ chỉ hoạt động khi đang focus vào cửa sổ target. Khi tắt, phím tắt hoạt động từ bất kỳ cửa sổ nào.",
                     ))
                     .changed();
+                ui.separator();
+                ui.label(RichText::new(self.tr("AOB Signature Direction", "Hướng tạo AOB Signature")).strong());
+                for (dir, label, desc) in [
+                    (
+                        MemoryAobDirection::After,
+                        self.tr("After (Phía sau)", "Phía sau (Từ địa chỉ trở đi)"),
+                        self.tr(
+                            "Extract AOB starting from the target address forward (subsequent instructions).",
+                            "Lấy chữ ký AOB bắt đầu từ địa chỉ mục tiêu trở đi (các lệnh phía sau).",
+                        ),
+                    ),
+                    (
+                        MemoryAobDirection::Before,
+                        self.tr("Before (Phía trước)", "Phía trước (Các lệnh phía trước)"),
+                        self.tr(
+                            "Extract AOB from instructions preceding the target address up to the target instruction.",
+                            "Lấy chữ ký AOB từ các câu lệnh phía trước dẫn đến câu lệnh mục tiêu.",
+                        ),
+                    ),
+                    (
+                        MemoryAobDirection::Both,
+                        self.tr("Both sides (2 bên)", "Cả 2 bên (Địa chỉ ở giữa)"),
+                        self.tr(
+                            "Extract AOB centered around the target address (preceding and subsequent instructions).",
+                            "Lấy chữ ký AOB cả 2 bên bao quanh địa chỉ mục tiêu (địa chỉ nằm ở giữa).",
+                        ),
+                    ),
+                ] {
+                    changed |= ui
+                        .radio_value(&mut self.state.memory_aob_direction, dir, label)
+                        .on_hover_text(desc)
+                        .changed();
+                }
         if changed {
             self.persist();
         }
@@ -6553,6 +6587,7 @@ impl CrosshairApp {
             ReplaceAll,
             Compare(bool),
             ToggleShowAddress,
+            RegenerateAob(usize),
         }
 
         let mut pending_action = None;
@@ -6632,6 +6667,30 @@ impl CrosshairApp {
                     if ui.button(toggle_addr_label).clicked() {
                         self.memory_panel.show_code_list_address = !self.memory_panel.show_code_list_address;
                     }
+                    ui.separator();
+                    ui.label("AOB:");
+                    let current_dir = self.state.memory_aob_direction;
+                    let dir_text = match current_dir {
+                        MemoryAobDirection::After => self.tr("After (Sau)", "Phía sau"),
+                        MemoryAobDirection::Before => self.tr("Before (Trước)", "Phía trước"),
+                        MemoryAobDirection::Both => self.tr("Both (2 bên)", "2 bên"),
+                    };
+                    egui::ComboBox::from_id_salt("code-list-aob-direction")
+                        .selected_text(dir_text)
+                        .width(85.0)
+                        .show_ui(ui, |ui| {
+                            let mut selected = self.state.memory_aob_direction;
+                            for (dir, label) in [
+                                (MemoryAobDirection::After, self.tr("After (Phía sau)", "Phía sau (Từ địa chỉ trở đi)")),
+                                (MemoryAobDirection::Before, self.tr("Before (Phía trước)", "Phía trước (Các lệnh phía trước)")),
+                                (MemoryAobDirection::Both, self.tr("Both sides (2 bên)", "Cả 2 bên (Địa chỉ ở giữa)")),
+                            ] {
+                                if ui.selectable_value(&mut selected, dir, label).changed() {
+                                    self.state.memory_aob_direction = selected;
+                                    self.persist();
+                                }
+                            }
+                        });
                 });
                 ui.horizontal(|ui| {
                     if self.memory_panel.show_code_list_address {
@@ -6691,11 +6750,19 @@ impl CrosshairApp {
                                     pending_action = Some(CodeAction::StartAccessWatch(index));
                                 }
                                 let copy_aob_enabled = !entry.aob_signature.is_empty();
+                                let copy_aob_tooltip = if entry.aob_target_offset > 0 {
+                                    format!(
+                                        "Copy saved AOB signature (target at +0x{:X})",
+                                        entry.aob_target_offset
+                                    )
+                                } else {
+                                    "Copy the saved six-instruction AOB signature".to_owned()
+                                };
                                 let copy_aob_response = ui.add_enabled(
                                     copy_aob_enabled,
                                     egui::Button::new("Copy AOB").small().min_size(egui::vec2(68.0, 19.0)),
                                 )
-                                .on_hover_text("Copy the saved six-instruction AOB signature");
+                                .on_hover_text(copy_aob_tooltip);
                                 if copy_aob_response.clicked() && copy_aob_enabled {
                                     ui.ctx().copy_text(entry.aob_signature.clone());
                                     self.memory_panel.code_relocate_status =
@@ -6779,6 +6846,15 @@ impl CrosshairApp {
                             };
                             if ui.button(toggle_addr_label).clicked() {
                                 pending_action = Some(CodeAction::ToggleShowAddress);
+                                ui.close();
+                            }
+                            let regen_label = if is_vietnamese {
+                                "Tạo lại AOB theo cài đặt hiện tại (Regenerate AOB)"
+                            } else {
+                                "Regenerate AOB with current direction setting"
+                            };
+                            if ui.button(regen_label).clicked() {
+                                pending_action = Some(CodeAction::RegenerateAob(index));
                                 ui.close();
                             }
                             ui.separator();
@@ -6957,6 +7033,10 @@ impl CrosshairApp {
             Some(CodeAction::ToggleShowAddress) => {
                 self.memory_panel.show_code_list_address = !self.memory_panel.show_code_list_address;
             }
+            Some(CodeAction::RegenerateAob(index)) => {
+                #[cfg(windows)]
+                self.regenerate_code_entry_aob(index);
+            }
             None => {}
         }
         #[cfg(windows)]
@@ -7000,6 +7080,7 @@ impl CrosshairApp {
         let module = entry.module.clone();
         let old_offset = entry.offset;
         let aob_signature = entry.aob_signature.clone();
+        let aob_target_offset = entry.aob_target_offset;
         let worker_module = module.clone();
         let worker_aob = aob_signature.clone();
         let worker_module_base = module_base;
@@ -7036,6 +7117,7 @@ impl CrosshairApp {
                 module_base: worker_module_base,
                 old_offset,
                 aob_signature: worker_aob,
+                aob_target_offset,
                 result,
             });
         });
@@ -7111,7 +7193,8 @@ impl CrosshairApp {
         };
         match outcome.result {
             Ok(matches) if matches.len() == 1 => {
-                self.apply_code_entry_relocate(index, &outcome.module, outcome.old_offset, matches[0]);
+                let target_offset = matches[0].saturating_add(outcome.aob_target_offset);
+                self.apply_code_entry_relocate(index, &outcome.module, outcome.old_offset, target_offset);
             }
             Ok(matches) if matches.is_empty() => {
                 self.memory_panel.code_relocate_status =
@@ -7121,7 +7204,8 @@ impl CrosshairApp {
                 let candidates = matches
                     .into_iter()
                     .map(|offset| {
-                        let address = outcome.module_base.saturating_add(offset);
+                        let target_offset = offset.saturating_add(outcome.aob_target_offset);
+                        let address = outcome.module_base.saturating_add(target_offset);
                         let instruction = match disassemble_from(
                             outcome.pid,
                             address,
@@ -7132,7 +7216,7 @@ impl CrosshairApp {
                             _ => String::new(),
                         };
                         CodeRelocateCandidate {
-                            offset,
+                            offset: target_offset,
                             address,
                             instruction,
                         }
@@ -7373,12 +7457,13 @@ impl CrosshairApp {
             self.memory_panel.status = "Instruction is already in the code list".to_owned();
             return;
         }
-        let aob_signature = match get_instruction_aob_signature(
+        let (aob_signature, aob_target_offset) = match get_instruction_aob_signature(
             pid,
             address,
             self.state.memory_debugger_architecture,
+            self.state.memory_aob_direction,
         ) {
-            Ok(signature) => signature,
+            Ok(result) => result,
             Err(error) => {
                 self.memory_panel.status = format!("Unable to save instruction AOB: {error}");
                 return;
@@ -7388,6 +7473,7 @@ impl CrosshairApp {
         if let Some(index) = existing {
             let entry = &mut self.state.memory_code_list[index];
             entry.aob_signature = aob_signature;
+            entry.aob_target_offset = aob_target_offset;
             entry.instruction = instruction.to_owned();
             entry.writes = writes;
             crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
@@ -7402,6 +7488,7 @@ impl CrosshairApp {
             offset,
             instruction: instruction.to_owned(),
             aob_signature,
+            aob_target_offset,
             writes,
             original_bytes: None,
             replaced: false,
@@ -7410,6 +7497,47 @@ impl CrosshairApp {
         self.memory_panel.code_list_open = true;
         self.memory_panel.status = "Instruction and AOB added to code list".to_owned();
         self.persist();
+    }
+
+    #[cfg(windows)]
+    fn regenerate_code_entry_aob(&mut self, code_index: usize) {
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.code_relocate_status = "Select a process first".to_owned();
+            return;
+        };
+        let Some(entry) = self.state.memory_code_list.get(code_index) else {
+            return;
+        };
+        let Ok(address) = resolve_module_offset(pid, &entry.module, entry.offset) else {
+            self.memory_panel.code_relocate_status = format!("Module '{}' not found", entry.module);
+            return;
+        };
+        match get_instruction_aob_signature(
+            pid,
+            address,
+            self.state.memory_debugger_architecture,
+            self.state.memory_aob_direction,
+        ) {
+            Ok((signature, target_offset)) => {
+                let entry = &mut self.state.memory_code_list[code_index];
+                entry.aob_signature = signature;
+                entry.aob_target_offset = target_offset;
+                let dir_str = match self.state.memory_aob_direction {
+                    MemoryAobDirection::After => "After",
+                    MemoryAobDirection::Before => "Before",
+                    MemoryAobDirection::Both => "Both sides",
+                };
+                self.memory_panel.code_relocate_status = format!(
+                    "Regenerated AOB for '{}' ({dir_str})",
+                    entry.name
+                );
+                crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
+                self.persist();
+            }
+            Err(error) => {
+                self.memory_panel.code_relocate_status = format!("Failed to regenerate AOB: {error}");
+            }
+        }
     }
 
     #[cfg(windows)]
@@ -21768,6 +21896,25 @@ mod tests {
     fn code_list_address_column_defaults_to_hidden() {
         let state = MemoryPanelState::default();
         assert!(!state.show_code_list_address);
+    }
+
+    #[test]
+    fn aob_direction_defaults_and_target_offset() {
+        let app_state = crate::model::AppState::default();
+        assert_eq!(app_state.memory_aob_direction, MemoryAobDirection::After);
+
+        let code_entry = MemoryCodeEntry::default();
+        assert_eq!(code_entry.aob_target_offset, 0);
+
+        let json = serde_json::json!({
+            "name": "test",
+            "module": "game.exe",
+            "offset": 100,
+            "instruction": "nop",
+            "writes": false
+        });
+        let deserialized: MemoryCodeEntry = serde_json::from_value(json).expect("deserialize entry");
+        assert_eq!(deserialized.aob_target_offset, 0);
     }
 
     #[test]

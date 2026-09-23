@@ -1,7 +1,7 @@
 //! x64 hardware watchpoints for an explicitly selected offline process.
 
 use super::memory::Process;
-use crate::model::MemoryDebuggerArchitecture;
+use crate::model::{MemoryAobDirection, MemoryDebuggerArchitecture};
 use iced_x86::{
     Decoder, DecoderOptions, Formatter, Instruction, InstructionInfoFactory, IntelFormatter,
     OpAccess, OpKind, Register,
@@ -1477,25 +1477,124 @@ pub fn get_instruction_bytes(pid: u32, address: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn disassemble_instruction_at(
+    process: &Process,
+    address: usize,
+    architecture: TargetArchitecture,
+) -> io::Result<(usize, String, String, usize)> {
+    let instruction = decode_at(process, address, architecture)?;
+    let len = instruction.len();
+    let mut encoded = [0u8; 15];
+    let read = process.read(address, &mut encoded[..len])?;
+    let bytes = encoded[..read]
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut formatter = IntelFormatter::new();
+    let mut assembly = String::new();
+    formatter.format(&instruction, &mut assembly);
+    Ok((address, bytes, assembly, len))
+}
+
+fn find_preceding_instructions(
+    process: &Process,
+    target_address: usize,
+    architecture: TargetArchitecture,
+    max_count: usize,
+) -> Vec<(usize, String, String, usize)> {
+    if max_count == 0 {
+        return Vec::new();
+    }
+    let mut curr = target_address;
+    let mut reversed = Vec::new();
+
+    for _ in 0..max_count {
+        let mut best_start = None;
+        for len in (1..=15).rev() {
+            let Some(start) = curr.checked_sub(len) else { break; };
+            let mut raw = [0u8; 15];
+            let Ok(read) = process.read(start, &mut raw[..len]) else { continue; };
+            if read != len { continue; }
+            if raw[..len].iter().all(|&b| b == 0) || raw[..len].iter().all(|&b| b == 0xCC) {
+                continue;
+            }
+            if let Ok((addr, bytes, asm, actual_len)) = disassemble_instruction_at(process, start, architecture) {
+                if actual_len == len && (start + len) == curr {
+                    best_start = Some((addr, bytes, asm, actual_len));
+                    break;
+                }
+            }
+        }
+        if let Some(entry) = best_start {
+            curr = entry.0;
+            reversed.push(entry);
+        } else {
+            break;
+        }
+    }
+
+    reversed.reverse();
+    reversed
+}
+
 pub fn get_instruction_aob_signature(
     pid: u32,
     address: usize,
-    architecture: MemoryDebuggerArchitecture,
-) -> io::Result<String> {
-    let lines = disassemble_from(pid, address, architecture, 6)?;
-    let signature = lines
+    configured: MemoryDebuggerArchitecture,
+    direction: MemoryAobDirection,
+) -> io::Result<(String, usize)> {
+    let architecture = target_architecture(pid, configured)?;
+    let process = Process::open(pid)?;
+
+    let desired_before = match direction {
+        MemoryAobDirection::After => 0,
+        MemoryAobDirection::Before => 5,
+        MemoryAobDirection::Both => 3,
+    };
+
+    let preceding = find_preceding_instructions(&process, address, architecture, desired_before);
+    let p_len = preceding.len();
+    let subsequent_count = 6usize.saturating_sub(p_len).max(1);
+
+    let mut all_lines = preceding;
+    let mut current = address;
+    for _ in 0..subsequent_count {
+        let Ok((addr, bytes, asm, len)) = disassemble_instruction_at(&process, current, architecture) else {
+            break;
+        };
+        all_lines.push((addr, bytes, asm, len));
+        let next = current.saturating_add(len);
+        if next <= current {
+            break;
+        }
+        current = next;
+    }
+
+    if all_lines.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "instruction has no readable bytes",
+        ));
+    }
+
+    let first_addr = all_lines[0].0;
+    let target_offset = address.saturating_sub(first_addr);
+
+    let signature = all_lines
         .into_iter()
-        .map(|(_, bytes, _)| bytes)
+        .map(|(_, bytes, _, _)| bytes)
         .filter(|bytes| !bytes.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
+
     if signature.is_empty() {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "instruction has no readable bytes",
         ))
     } else {
-        Ok(signature)
+        Ok((signature, target_offset))
     }
 }
 

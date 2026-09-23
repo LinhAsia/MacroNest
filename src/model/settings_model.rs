@@ -461,6 +461,14 @@ pub enum MemoryDebuggerArchitecture {
     X64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum MemoryAobDirection {
+    #[default]
+    After,
+    Before,
+    Both,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct MemoryCodeEntry {
     pub name: String,
@@ -469,6 +477,8 @@ pub struct MemoryCodeEntry {
     pub instruction: String,
     #[serde(default)]
     pub aob_signature: String,
+    #[serde(default)]
+    pub aob_target_offset: usize,
     pub writes: bool,
     #[serde(default)]
     pub original_bytes: Option<Vec<u8>>,
@@ -525,6 +535,8 @@ pub struct AppState {
     pub memory_hotkey_require_target_focus: bool,
     pub memory_debugger_method: MemoryDebuggerMethod,
     pub memory_debugger_architecture: MemoryDebuggerArchitecture,
+    #[serde(default)]
+    pub memory_aob_direction: MemoryAobDirection,
     pub memory_pointer_scan_depth: usize,
     pub memory_pointer_scan_offset: String,
     pub memory_pointer_scan_memory_mb: usize,
@@ -980,6 +992,7 @@ impl Default for AppState {
             memory_hotkey_require_target_focus: false,
             memory_debugger_method: MemoryDebuggerMethod::Windows,
             memory_debugger_architecture: MemoryDebuggerArchitecture::Auto,
+            memory_aob_direction: MemoryAobDirection::After,
             memory_pointer_scan_depth: 5,
             memory_pointer_scan_offset: "1000".to_owned(),
             memory_pointer_scan_memory_mb: 1024,
