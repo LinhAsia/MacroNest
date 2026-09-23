@@ -459,8 +459,8 @@ impl CrosshairApp {
                 ui.add_space(2.0);
                 ui.label(
                     RichText::new(self.tr(
-                        "⚠️ Note: You must click 'Auto-Flash Firmware' below to apply the spoofing to your Arduino.",
-                        "⚠️ Lưu ý: Bạn cần nhấn 'Tự động nạp firmware' phía dưới để áp dụng spoof vào Arduino."
+                        "[!] Note: You must click 'Auto-Flash Firmware' below to apply the spoofing to your Arduino.",
+                        "[!] Lưu ý: Bạn cần nhấn 'Tự động nạp firmware' phía dưới để áp dụng spoof vào Arduino."
                     ))
                     .small()
                     .color(Color32::from_rgb(220, 180, 80)),

@@ -2849,7 +2849,7 @@ impl CrosshairApp {
                         ui.checkbox(&mut self.memory_panel.hex, hex_label);
                     } else if self.memory_panel.is_aob_scan && !self.memory_panel.value_input.trim().is_empty() {
                         let btn = ui.button(
-                            RichText::new(self.tr("⚡ Auto ??", "⚡ Auto ??"))
+                            RichText::new(self.tr("Auto ??", "Auto ??"))
                                 .color(Color32::from_rgb(90, 205, 250))
                         ).on_hover_text(self.tr(
                             "Auto test wildcard permutations (??) and count address results",
@@ -5937,7 +5937,7 @@ impl CrosshairApp {
             let btn = ui.add_enabled(
                 can_replace,
                 egui::Button::new(
-                    RichText::new(self.tr("🚀 Replace All Occurrences", "🚀 Thay thế tất cả"))
+                    RichText::new(self.tr("Replace All Occurrences", "Thay thế tất cả"))
                         .color(if can_replace { Color32::WHITE } else { Color32::GRAY })
                         .strong(),
                 ),
@@ -6035,7 +6035,7 @@ impl CrosshairApp {
                             };
 
                             let btn_label = if is_current {
-                                self.tr("✓ Selected", "✓ Đã chọn")
+                                self.tr("Selected", "Đã chọn")
                             } else {
                                 self.tr("Select as Old", "Chọn làm Cũ")
                             };
@@ -10471,7 +10471,7 @@ impl CrosshairApp {
             let scanned = dialog.progress.load(Ordering::Relaxed);
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("⏳ Scanning memory... read {:.1} MB", scanned as f64 / 1_048_576.0)).strong());
+                ui.label(RichText::new(format!("Scanning memory... read {:.1} MB", scanned as f64 / 1_048_576.0)).strong());
             });
         } else {
             ui.group(|ui| {
@@ -10487,9 +10487,9 @@ impl CrosshairApp {
                     }
 
                     let rescan_label = if self.state.ui_language == UiLanguage::Vietnamese {
-                        "🔍 Quét lại (Re-scan)"
+                        "Quét lại (Re-scan)"
                     } else {
-                        "🔍 Re-scan"
+                        "Re-scan"
                     };
                     if ui.button(RichText::new(rescan_label).strong().color(Color32::from_rgb(105, 255, 150)))
                         .on_hover_text(if dialog.cached_map.is_some() {
@@ -10524,9 +10524,9 @@ impl CrosshairApp {
                     if ui.checkbox(
                         &mut dialog.strict_multi_scan,
                         RichText::new(if self.state.ui_language == UiLanguage::Vietnamese {
-                            "🎯 Bảo toàn độ chính xác khi quét nhiều địa chỉ"
+                            "Bảo toàn độ chính xác khi quét nhiều địa chỉ"
                         } else {
-                            "🎯 High-accuracy multi-address scan"
+                            "High-accuracy multi-address scan"
                         }).strong(),
                     ).on_hover_text(if self.state.ui_language == UiLanguage::Vietnamese {
                         "Quét độc lập từng địa chỉ với bộ nhớ đệm riêng biệt, bảo toàn đúng kiểu dữ liệu và mô tả gốc của từng biến đã chọn."
@@ -10542,9 +10542,9 @@ impl CrosshairApp {
                     if ui.checkbox(
                         &mut dialog.exhaustive_scan,
                         RichText::new(if self.state.ui_language == UiLanguage::Vietnamese {
-                            "🔥 Vét cạn (không lược bỏ)"
+                            "Vét cạn (không lược bỏ)"
                         } else {
-                            "🔥 Exhaustive scan (no pruning)"
+                            "Exhaustive scan (no pruning)"
                         }).strong().color(Color32::from_rgb(255, 185, 90)),
                     ).on_hover_text(if self.state.ui_language == UiLanguage::Vietnamese {
                         "Quét triệt để toàn bộ các nhánh con trỏ, không giới hạn frontier và không lược bỏ các nhánh trùng địa chỉ trung gian. Đảm bảo tìm ra 100% con trỏ mà deep pointer scan tìm được."
@@ -11660,9 +11660,9 @@ impl CrosshairApp {
             }
             if dialog.map_a.is_some() && dialog.map_b.is_some() {
                 let recompare_label = if language == UiLanguage::Vietnamese {
-                    "⟲ So sánh lại (Re-compare)"
+                    "So sánh lại (Re-compare)"
                 } else {
-                    "⟲ Re-compare"
+                    "Re-compare"
                 };
                 if ui.button(RichText::new(recompare_label).strong().color(Color32::from_rgb(105, 255, 150)))
                     .on_hover_text(if language == UiLanguage::Vietnamese {
@@ -11740,9 +11740,9 @@ impl CrosshairApp {
                 ui.checkbox(
                     &mut dialog.strict_multi_scan,
                     RichText::new(if language == UiLanguage::Vietnamese {
-                        "🎯 Bảo toàn độ chính xác khi quét nhiều địa chỉ"
+                        "Bảo toàn độ chính xác khi quét nhiều địa chỉ"
                     } else {
-                        "🎯 High-accuracy multi-address scan"
+                        "High-accuracy multi-address scan"
                     }).strong(),
                 )
                 .on_hover_text(if language == UiLanguage::Vietnamese {
@@ -15044,9 +15044,9 @@ impl CrosshairApp {
 
                 let filter_btn = egui::Button::new(
                     RichText::new(if dialog.filter_changed_only {
-                        Self::tr_lang(language, "★ Show all", "★ Hiện tất cả")
+                        Self::tr_lang(language, "Show all", "Hiện tất cả")
                     } else {
-                        Self::tr_lang(language, "⚡ Only changed", "⚡ Chỉ hiện đã đổi")
+                        Self::tr_lang(language, "Only changed", "Chỉ hiện đã đổi")
                     })
                     .color(if dialog.filter_changed_only {
                         Color32::from_rgb(255, 205, 80)
@@ -15602,8 +15602,8 @@ impl CrosshairApp {
                 ui.label(
                     RichText::new(Self::tr_lang(
                         language,
-                        "No changed addresses in this tracked range. Toggle '⚡ Only changed' off to view all rows.",
-                        "Không tìm thấy địa chỉ nào thay đổi trong vùng theo dõi này. Bấm tắt '⚡ Chỉ hiện đã đổi' để xem tất cả.",
+                        "No changed addresses in this tracked range. Toggle 'Only changed' off to view all rows.",
+                        "Không tìm thấy địa chỉ nào thay đổi trong vùng theo dõi này. Bấm tắt 'Chỉ hiện đã đổi' để xem tất cả.",
                     ))
                     .weak(),
                 );
@@ -17271,7 +17271,7 @@ impl CrosshairApp {
     fn render_manual_aob_wildcard_explorer(&mut self, ui: &mut egui::Ui) {
         ui.group(|ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new(self.tr("⚡ Auto Wildcard Permutations (??)", "⚡ Tự động tìm kiếm & thử nghiệm Wildcard (??)")).strong());
+                ui.label(RichText::new(self.tr("Auto Wildcard Permutations (??)", "Tự động thử nghiệm Wildcard (??)")).strong());
                 if self.memory_panel.aob_wildcard_scanning {
                     ui.spinner();
                     ui.label(RichText::new(&self.memory_panel.aob_wildcard_status).color(Color32::from_rgb(90, 205, 250)));
@@ -17290,16 +17290,16 @@ impl CrosshairApp {
                     }
                 } else {
                     ui.label(RichText::new(self.tr(
-                        "Paste an AOB above and click '⚡ Auto Wildcard' to test patterns",
-                        "Dán mã AOB ở trên rồi bấm '⚡ Tự động thử wildcard ??' để kiểm tra"
+                        "Paste an AOB above and click 'Auto Wildcard' to test patterns",
+                        "Dán mã AOB ở trên rồi bấm 'Tự động thử wildcard' để kiểm tra"
                     )).small().weak());
                 }
             });
 
             if self.memory_panel.process_pid.is_none() {
                 ui.label(RichText::new(self.tr(
-                    "⚠️ No target process selected. Select a process above to scan memory and count matching addresses.",
-                    "⚠️ Chưa chọn Process. Hãy đính kèm hoặc chọn Process ở trên để app quét bộ nhớ và đếm số địa chỉ khớp."
+                    "[!] No target process selected. Select a process above to scan memory and count matching addresses.",
+                    "[!] Chưa chọn Process. Hãy đính kèm hoặc chọn Process ở trên để app quét bộ nhớ và đếm số địa chỉ khớp."
                 )).small().color(Color32::from_rgb(255, 190, 80)));
             }
 
@@ -17319,7 +17319,7 @@ impl CrosshairApp {
                     }
                     if ui.selectable_label(
                         self.memory_panel.aob_wildcard_filter == AobWildcardFilter::UniqueOnly,
-                        RichText::new(format!("⭐ {} ({})", self.tr("Unique (1 match)", "Duy nhất (1 kết quả)"), unique_count))
+                        RichText::new(format!("{} ({})", self.tr("Unique (1 match)", "Duy nhất (1 kết quả)"), unique_count))
                             .color(if unique_count > 0 { Color32::from_rgb(90, 240, 140) } else { Color32::from_rgb(150, 150, 150) }),
                     ).clicked() {
                         self.memory_panel.aob_wildcard_filter = AobWildcardFilter::UniqueOnly;
@@ -17390,14 +17390,14 @@ impl CrosshairApp {
                                 } else if scenario.match_count == 1 {
                                     let addr_str = scenario.sample_address.map_or(String::new(), |a| format!(" @ 0x{:X}", a));
                                     ui.label(
-                                        RichText::new(format!("✔ 1 {} (Unique!){}", self.tr("result", "kết quả"), addr_str))
+                                        RichText::new(format!("1 {} (Unique!){}", self.tr("result", "kết quả"), addr_str))
                                             .strong()
                                             .color(Color32::from_rgb(90, 240, 140))
                                     );
                                 } else if scenario.match_count > 1 {
                                     let limit_mark = if scenario.match_count >= 25 { "+" } else { "" };
                                     ui.label(
-                                        RichText::new(format!("⚠ {}{} {}", scenario.match_count, limit_mark, self.tr("results", "kết quả")))
+                                        RichText::new(format!("{}{} {}", scenario.match_count, limit_mark, self.tr("results", "kết quả")))
                                             .color(Color32::from_rgb(240, 205, 80))
                                     );
                                 } else {
@@ -17453,7 +17453,7 @@ impl CrosshairApp {
                             ui.label(RichText::new(format!("{}: {}", self.tr("Full AOB Code", "Mã AOB đầy đủ"), selected.label)).strong().color(Color32::from_rgb(90, 205, 250)));
                             let match_text = if selected.match_count == 1 {
                                 let addr_str = selected.sample_address.map_or(String::new(), |a| format!(" @ 0x{:X}", a));
-                                RichText::new(format!("⭐ 1 {} (Unique!){}", self.tr("result", "kết quả"), addr_str)).color(Color32::from_rgb(90, 240, 140)).strong()
+                                RichText::new(format!("1 {} (Unique!){}", self.tr("result", "kết quả"), addr_str)).color(Color32::from_rgb(90, 240, 140)).strong()
                             } else if selected.match_count > 1 {
                                 RichText::new(format!("{} {}", selected.match_count, self.tr("results", "kết quả"))).color(Color32::from_rgb(240, 205, 80))
                             } else {
@@ -17471,7 +17471,7 @@ impl CrosshairApp {
                                 if ui.button(self.tr("Use in Sample 1 ->", "Dán vào Mẫu 1 ->")).clicked() {
                                     apply_to_sample_1 = true;
                                 }
-                                if ui.button(RichText::new(self.tr("📋 Copy Full AOB", "📋 Sao chép mã AOB")).strong()).clicked() {
+                                if ui.button(RichText::new(self.tr("Copy Full AOB", "Sao chép mã AOB")).strong()).clicked() {
                                     copy_selected = true;
                                 }
                             });
@@ -18159,7 +18159,7 @@ impl CrosshairApp {
                     }
                     if !tokens1.is_empty() {
                         let btn = ui.button(
-                            RichText::new(self.tr("⚡ Auto Wildcard (??)", "⚡ Tự động thử wildcard ??"))
+                            RichText::new(self.tr("Auto Wildcard (??)", "Tự động thử wildcard ??"))
                                 .color(Color32::from_rgb(90, 205, 250))
                         ).on_hover_text(self.tr(
                             "Generate multiple wildcard permutations (??) from Sample 1 and scan memory to count address matches",
@@ -18204,7 +18204,7 @@ impl CrosshairApp {
                     }
                     if !tokens2.is_empty() {
                         let btn = ui.button(
-                            RichText::new(self.tr("⚡ Auto Wildcard (??)", "⚡ Tự động thử wildcard ??"))
+                            RichText::new(self.tr("Auto Wildcard (??)", "Tự động thử wildcard ??"))
                                 .color(Color32::from_rgb(90, 205, 250))
                         ).on_hover_text(self.tr(
                             "Generate multiple wildcard permutations (??) from Sample 2 and scan memory to count address matches",
@@ -18363,7 +18363,7 @@ impl CrosshairApp {
                     }
                     if !result_pattern.is_empty() {
                         let btn = ui.button(
-                            RichText::new(self.tr("⚡ Auto Wildcard (??)", "⚡ Tự động thử wildcard ??"))
+                            RichText::new(self.tr("Auto Wildcard (??)", "Tự động thử wildcard ??"))
                                 .color(Color32::from_rgb(90, 205, 250))
                         ).on_hover_text(self.tr(
                             "Generate multiple wildcard permutations (??) from comparison result and scan memory to count address matches",

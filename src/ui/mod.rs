@@ -14343,9 +14343,9 @@ impl CrosshairApp {
                             bottom: y + h,
                         });
                         let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
-                            "✓ Đã chụp ảnh màn hình và sao chép vào bộ nhớ tạm".to_owned()
+                            "Đã chụp ảnh màn hình và sao chép vào bộ nhớ tạm".to_owned()
                         } else {
-                            "✓ Screenshot copied to clipboard".to_owned()
+                            "Screenshot copied to clipboard".to_owned()
                         };
                         crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, false);
                     }
@@ -14464,25 +14464,25 @@ impl CrosshairApp {
                                         }
                                     }));
                                     let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
-                                        format!("✓ Đã sao chép {char_count} ký tự vào bộ nhớ tạm")
+                                        format!("Đã sao chép {char_count} ký tự vào bộ nhớ tạm")
                                     } else {
-                                        format!("✓ Copied {char_count} characters to clipboard")
+                                        format!("Copied {char_count} characters to clipboard")
                                     };
                                     crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, false);
                                 } else {
                                     let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
-                                        "⚠ Không tìm thấy chữ trong vùng chọn".to_owned()
+                                        "Không tìm thấy chữ trong vùng chọn".to_owned()
                                     } else {
-                                        "⚠ No text found in selected region".to_owned()
+                                        "No text found in selected region".to_owned()
                                     };
                                     crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, true);
                                 }
                             }
                             _ => {
                                 let toast_msg = if ui_language == crate::model::UiLanguage::Vietnamese {
-                                    "⚠ Lỗi nhận diện chữ".to_owned()
+                                    "Lỗi nhận diện chữ".to_owned()
                                 } else {
-                                    "⚠ OCR recognition failed".to_owned()
+                                    "OCR recognition failed".to_owned()
                                 };
                                 crate::overlay::show_ocr_copy_toast_async(rect, toast_msg, true);
                             }
@@ -14689,7 +14689,7 @@ impl eframe::App for CrosshairApp {
             self.recording_icon_applied = is_recording;
             crate::platform::update_native_taskbar_recording_state(is_recording);
             if is_recording {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title("MacroNest 🔴 [REC]".to_owned()));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title("MacroNest [REC]".to_owned()));
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title("MacroNest".to_owned()));
             }

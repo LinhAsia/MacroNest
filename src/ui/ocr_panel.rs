@@ -387,8 +387,8 @@ impl CrosshairApp {
                                         ui.label(
                                             RichText::new(Self::tr_lang(
                                                 language,
-                                                "💡 Extracted Numeric values:",
-                                                "💡 Extracted Numeric values:",
+                                                "Extracted Numeric values:",
+                                                "Các giá trị số trích xuất được:",
                                             ))
                                             .strong()
                                             .color(Color32::from_rgb(255, 232, 96)),
