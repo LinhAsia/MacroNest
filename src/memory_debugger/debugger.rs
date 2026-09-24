@@ -962,7 +962,7 @@ fn watch_loop<F>(
                                             &decoded,
                                             &context,
                                             *address,
-                                            if read_write { "truy cập" } else { "ghi" },
+                                            if read_write { "access" } else { "write" },
                                             architecture,
                                         );
                                         let pair = (instruction_decoded, details);
@@ -1016,7 +1016,9 @@ fn watch_loop<F>(
                                         access_hits += 1;
                                         let should_stop = access_hits >= *capture_limit;
                                         if should_stop {
-                                            disarm_paused_threads(&threads, architecture);
+                                            if let Some(&thread) = threads.get(&event.dwThreadId) {
+                                                disarm_thread(thread, architecture);
+                                            }
                                             capture_limit_reached = true;
                                             stop.store(true, Ordering::Release);
                                         }
@@ -1028,7 +1030,9 @@ fn watch_loop<F>(
                                             notify(WatchEvent::CaptureLimitReached(access_hits));
                                         }
                                     } else if execute_candidates_seen >= *capture_limit {
-                                        disarm_paused_threads(&threads, architecture);
+                                        if let Some(&thread) = threads.get(&event.dwThreadId) {
+                                            disarm_thread(thread, architecture);
+                                        }
                                         capture_limit_reached = true;
                                         stop.store(true, Ordering::Release);
                                         notify(WatchEvent::CaptureLimitReached(
@@ -1094,23 +1098,43 @@ fn watch_loop<F>(
         }
         unsafe { ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status) };
     }
-    // 1. Suspend all threads so none can hit a hardware breakpoint during cleanup
+    // 1. Disarm all known threads safely one by one
     for &thread in threads.values() {
         unsafe {
             let _ = SuspendThread(thread);
-        }
-    }
-    // 2. Disarm debug registers on all suspended threads
-    for &thread in threads.values() {
-        unsafe {
             disarm_thread(thread, architecture);
-        }
-    }
-    // 3. Resume all threads
-    for &thread in threads.values() {
-        unsafe {
             let _ = ResumeThread(thread);
         }
+    }
+    // 2. Disarm any threads spawned in the process that were not in the map
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot != INVALID_HANDLE_VALUE {
+        let mut entry = THREADENTRY32 {
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            ..THREADENTRY32::default()
+        };
+        let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid && !threads.contains_key(&entry.th32ThreadID) {
+                let thread = unsafe {
+                    OpenThread(
+                        THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                        0,
+                        entry.th32ThreadID,
+                    )
+                };
+                if !thread.is_null() {
+                    unsafe {
+                        let _ = SuspendThread(thread);
+                        disarm_thread(thread, architecture);
+                        let _ = ResumeThread(thread);
+                        CloseHandle(thread);
+                    }
+                }
+            }
+            more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+        }
+        unsafe { CloseHandle(snapshot) };
     }
     // 4. Drain any pending debug events
     let flush_start = std::time::Instant::now();
@@ -1765,7 +1789,7 @@ fn register_value(register: Register, context: &CONTEXT) -> Option<u64> {
 unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
     if architecture == TargetArchitecture::X86 {
         let mut context = WOW64_CONTEXT {
-            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS,
+            ContextFlags: WOW64_CONTEXT_DEBUG_REGISTERS | WOW64_CONTEXT_CONTROL,
             ..WOW64_CONTEXT::default()
         };
         if unsafe { Wow64GetThreadContext(thread, &mut context) } != 0 {
@@ -1775,13 +1799,14 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
             context.Dr3 = 0;
             context.Dr6 = 0;
             context.Dr7 = 0;
+            context.EFlags &= !0x100;
             unsafe { Wow64SetThreadContext(thread, &context) };
         }
         return;
     }
     let mut aligned = AlignedContext::default();
     let context = &mut aligned.0;
-    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64;
+    context.ContextFlags = CONTEXT_DEBUG_REGISTERS_AMD64 | CONTEXT_CONTROL_AMD64;
     if unsafe { GetThreadContext(thread, context) } != 0 {
         context.Dr0 = 0;
         context.Dr1 = 0;
@@ -1789,6 +1814,7 @@ unsafe fn disarm_thread(thread: HANDLE, architecture: TargetArchitecture) {
         context.Dr3 = 0;
         context.Dr6 = 0;
         context.Dr7 = 0;
+        context.EFlags &= !0x100;
         unsafe { SetThreadContext(thread, context) };
     }
 }

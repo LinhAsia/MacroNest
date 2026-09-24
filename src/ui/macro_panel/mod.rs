@@ -18742,11 +18742,13 @@ if supports_move_mouse || show_detection_tuning {
             let name = step.if_variable_name.trim();
             if !name.is_empty() {
                 vars.insert(name.to_owned());
-                vars.insert(format!("{name}_1"));
-                vars.insert(format!("{name}_2"));
-                vars.insert(format!("{name}_count"));
-                vars.insert(format!("{name}_all"));
-                vars.insert(format!("{name}_last"));
+                if step.scan_instruction_target_count > 1 {
+                    vars.insert(format!("{name}_1"));
+                    vars.insert(format!("{name}_2"));
+                    vars.insert(format!("{name}_count"));
+                    vars.insert(format!("{name}_all"));
+                    vars.insert(format!("{name}_last"));
+                }
             }
             Self::extract_braced_vars(&step.key, vars);
         }

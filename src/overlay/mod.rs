@@ -30850,12 +30850,12 @@ mod windows_overlay {
 
     fn cooperative_zero_delay_loop_yield(delay_ms: u64, last_yield: &mut Instant) {
         if delay_ms == 0 {
-            if last_yield.elapsed() >= Duration::from_millis(10) {
-                // ponytail: yield 1ms every 10ms to keep macro execution super fast while ensuring Windows UI queue doesn't deadlock
+            if last_yield.elapsed() >= Duration::from_millis(5) {
+                // ponytail: yield 1ms every 5ms to keep execution fast without starving OS scheduler or game threads
                 thread::sleep(Duration::from_millis(1));
                 *last_yield = Instant::now();
             } else {
-                std::hint::spin_loop();
+                std::thread::yield_now();
             }
         }
     }
@@ -32390,25 +32390,48 @@ mod windows_overlay {
         let _ = crate::process_memory::write_scan_value(pid, address, value);
     }
 
-    fn store_scanned_instruction_addresses(var_name: &str, addresses: &[usize]) {
+    pub(crate) fn store_scanned_instruction_addresses(var_name: &str, addresses: &[usize], target_count: usize) {
         let name = var_name.trim();
         if name.is_empty() {
             return;
         }
+
+        if let Some(&first) = addresses.first() {
+            let hex_str = format!("0x{:X}", first);
+            set_variable_value(name, first as f64);
+            TEXT_VARIABLES.lock().insert(name.to_owned(), hex_str);
+        } else {
+            set_variable_value(name, 0.0);
+            TEXT_VARIABLES.lock().remove(name);
+        }
+
+        if target_count <= 1 {
+            let mut text_vars = TEXT_VARIABLES.lock();
+            text_vars.remove(&format!("{name}_count"));
+            text_vars.remove(&format!("{name}_all"));
+            text_vars.remove(&format!("{name}_list"));
+            text_vars.remove(&format!("{name}_last"));
+            text_vars.remove(&format!("{name}_0"));
+            text_vars.remove(&format!("{name}_1"));
+            text_vars.remove(&format!("{name}_2"));
+            drop(text_vars);
+
+            let mut run_vars = RUNTIME_VARIABLES.lock();
+            run_vars.remove(&format!("{name}_count"));
+            run_vars.remove(&format!("{name}_all"));
+            run_vars.remove(&format!("{name}_list"));
+            run_vars.remove(&format!("{name}_last"));
+            run_vars.remove(&format!("{name}_0"));
+            run_vars.remove(&format!("{name}_1"));
+            run_vars.remove(&format!("{name}_2"));
+            return;
+        }
+
         let count = addresses.len();
         set_variable_value(&format!("{name}_count"), count as f64);
         TEXT_VARIABLES
             .lock()
             .insert(format!("{name}_count"), count.to_string());
-
-        if let Some(&first) = addresses.first() {
-            let hex_str = format!("0x{:X}", first);
-            set_variable_value(name, first as f64);
-            TEXT_VARIABLES.lock().insert(name.to_owned(), hex_str.clone());
-        } else {
-            set_variable_value(name, 0.0);
-            TEXT_VARIABLES.lock().remove(name);
-        }
 
         if let Some(&last) = addresses.last() {
             let hex_str = format!("0x{:X}", last);
@@ -32429,9 +32452,7 @@ mod windows_overlay {
             set_variable_value(&format!("{name}_{}", i + 1), addr as f64);
             TEXT_VARIABLES
                 .lock()
-                .insert(format!("{name}_{}", i + 1), hex_str.clone());
-            set_variable_value(&format!("{name}_{i}"), addr as f64);
-            TEXT_VARIABLES.lock().insert(format!("{name}_{i}"), hex_str);
+                .insert(format!("{name}_{}", i + 1), hex_str);
         }
     }
 
@@ -32559,7 +32580,7 @@ mod windows_overlay {
                     }) => {
                         if !collected.contains(&data_address) {
                             collected.push(data_address);
-                            store_scanned_instruction_addresses(&var_name, &collected);
+                            store_scanned_instruction_addresses(&var_name, &collected, target_count);
                         }
                     }
                     Ok(crate::memory_debugger::debugger::WatchEvent::CaptureLimitReached(_))
@@ -32609,7 +32630,7 @@ mod windows_overlay {
                         }) => {
                             if !collected.contains(&data_address) {
                                 collected.push(data_address);
-                                store_scanned_instruction_addresses(&var_name_clone, &collected);
+                                store_scanned_instruction_addresses(&var_name_clone, &collected, target_count);
                             }
                         }
                         Ok(crate::memory_debugger::debugger::WatchEvent::CaptureLimitReached(_))
@@ -40040,6 +40061,31 @@ mod tests {
         assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
     }
 
+    #[test]
+    fn test_store_scanned_instruction_addresses_count_1() {
+        use super::windows_overlay::store_scanned_instruction_addresses;
+        use crate::overlay::{RUNTIME_VARIABLES, TEXT_VARIABLES};
+
+        store_scanned_instruction_addresses("test_var_single", &[0x123456], 1);
+        assert_eq!(RUNTIME_VARIABLES.lock().get("test_var_single").copied(), Some(0x123456 as f64));
+        assert!(TEXT_VARIABLES.lock().get("test_var_single_count").is_none());
+        assert!(TEXT_VARIABLES.lock().get("test_var_single_1").is_none());
+        assert!(TEXT_VARIABLES.lock().get("test_var_single_all").is_none());
+        assert!(RUNTIME_VARIABLES.lock().get("test_var_single_count").is_none());
+    }
+
+    #[test]
+    fn test_store_scanned_instruction_addresses_count_multiple() {
+        use super::windows_overlay::store_scanned_instruction_addresses;
+        use crate::overlay::{RUNTIME_VARIABLES, TEXT_VARIABLES};
+
+        store_scanned_instruction_addresses("test_var_multi", &[0x1000, 0x2000], 2);
+        assert_eq!(RUNTIME_VARIABLES.lock().get("test_var_multi").copied(), Some(0x1000 as f64));
+        assert_eq!(RUNTIME_VARIABLES.lock().get("test_var_multi_1").copied(), Some(0x1000 as f64));
+        assert_eq!(RUNTIME_VARIABLES.lock().get("test_var_multi_2").copied(), Some(0x2000 as f64));
+        assert_eq!(RUNTIME_VARIABLES.lock().get("test_var_multi_count").copied(), Some(2.0));
+        assert!(TEXT_VARIABLES.lock().get("test_var_multi_count").is_some());
+    }
 }
 
 #[cfg(not(windows))]

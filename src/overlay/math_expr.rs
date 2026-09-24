@@ -544,10 +544,21 @@ pub(crate) fn set_variable_value(target_var: &str, value: f64) {
         return;
     }
 
-    TEXT_VARIABLES.lock().remove(&target_name);
+    {
+        let mut vars = RUNTIME_VARIABLES.lock();
+        if let Some(existing) = vars.get_mut(&target_name) {
+            if *existing == value {
+                return;
+            }
+            *existing = value;
+            drop(vars);
+            TEXT_VARIABLES.lock().remove(&target_name);
+            return;
+        }
+        vars.insert(target_name.clone(), value);
+    }
 
-    let mut vars = RUNTIME_VARIABLES.lock();
-    vars.insert(target_name, value);
+    TEXT_VARIABLES.lock().remove(&target_name);
 }
 
 pub(crate) fn smart_set_variable_from_expression(target_var: &str, expr_raw: &str) {
