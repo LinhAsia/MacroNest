@@ -1938,6 +1938,7 @@ impl CrosshairApp {
                 .with_resizable(true)
                 .with_always_on_top();
             ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
+                Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
                 Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     open = false;
@@ -2133,6 +2134,7 @@ impl CrosshairApp {
             egui::ViewportId::from_hash_of("memory-scan-results"),
             builder,
             |ctx, _| {
+                Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
                 Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     unpin = true;
@@ -2246,6 +2248,7 @@ impl CrosshairApp {
             egui::ViewportId::from_hash_of("memory-address-list"),
             builder,
             |ctx, _| {
+                Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
                 Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     unpin = true;
@@ -2371,6 +2374,17 @@ impl CrosshairApp {
             .fill(ctx.style().visuals.panel_fill)
             .stroke(egui::Stroke::new(1.5, Color32::from_rgb(78, 92, 112)))
             .inner_margin(egui::Margin::same(7))
+    }
+
+    fn apply_memory_pinned_zoom(ctx: &egui::Context, scale: f32) {
+        let zoom = if scale.is_finite() && scale > 0.1 {
+            scale.clamp(0.5, 2.5)
+        } else {
+            1.0
+        };
+        if (ctx.zoom_factor() - zoom).abs() > 0.001 {
+            ctx.set_zoom_factor(zoom);
+        }
     }
 
     fn constrain_memory_popup_to_monitor(ctx: &egui::Context) {
@@ -5359,7 +5373,34 @@ impl CrosshairApp {
                         .on_hover_text(desc)
                         .changed();
                 }
+                ui.separator();
+                ui.label(RichText::new(self.tr("Pinned Window UI Scale", "Độ to UI cửa sổ ghim")).strong());
+                ui.horizontal(|ui| {
+                    let mut scale_pct = (self.state.memory_pinned_ui_scale * 100.0).round() as i32;
+                    let slider = egui::Slider::new(&mut scale_pct, 50..=250)
+                        .suffix("%")
+                        .step_by(5.0);
+                    if ui.add(slider).changed() {
+                        self.state.memory_pinned_ui_scale = (scale_pct as f32) / 100.0;
+                        changed = true;
+                    }
+                    if ui
+                        .add_enabled(
+                            (self.state.memory_pinned_ui_scale - 1.0).abs() > 0.001,
+                            egui::Button::new(self.tr("Reset", "Đặt lại")),
+                        )
+                        .on_hover_text(self.tr(
+                            "Reset UI scale back to default (100%)",
+                            "Đặt lại tỉ lệ UI về mặc định (100%)",
+                        ))
+                        .clicked()
+                    {
+                        self.state.memory_pinned_ui_scale = 1.0;
+                        changed = true;
+                    }
+                });
         if changed {
+            ui.ctx().request_repaint();
             self.persist();
         }
     }
@@ -11674,6 +11715,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of(popup_id),
                 builder,
                 |ctx, _| {
+                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -12895,6 +12937,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of(("memory-instruction-watch", dialog.address)),
                 builder,
                 |ctx, _| {
+                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -13773,6 +13816,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of("memory-code-compare"),
                 builder,
                 |ctx, _| {
+                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -14177,6 +14221,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of(("memory-code-access", dialog.code_index)),
                 builder,
                 |ctx, _| {
+                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -15134,6 +15179,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of("memory-view-pinned-struct"),
                 builder,
                 |ctx, _| {
+                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
                     if !ctx.wants_keyboard_input() {
                         if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
                             nav_delta = -1;

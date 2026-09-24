@@ -38,6 +38,10 @@ fn default_quick_video_record_fps() -> u32 {
     60
 }
 
+fn default_memory_pinned_ui_scale() -> f32 {
+    1.0
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum GlobalConstantStoredValue {
@@ -556,6 +560,8 @@ pub struct AppState {
     pub memory_camera_viewport_height: String,
     pub memory_code_list: Vec<MemoryCodeEntry>,
     pub memory_pointer_list: Vec<MemoryPointerEntry>,
+    #[serde(default = "default_memory_pinned_ui_scale")]
+    pub memory_pinned_ui_scale: f32,
     pub ui_language: UiLanguage,
     pub vietnamese_input_enabled: bool,
     pub vietnamese_input_mode: VietnameseInputMode,
@@ -1008,6 +1014,7 @@ impl Default for AppState {
             memory_camera_viewport_height: "1080".to_owned(),
             memory_code_list: Vec::new(),
             memory_pointer_list: Vec::new(),
+            memory_pinned_ui_scale: 1.0,
             ui_language: UiLanguage::English,
             vietnamese_input_enabled: false,
             vietnamese_input_mode: VietnameseInputMode::Telex,
@@ -1144,6 +1151,12 @@ mod tests {
     use serde_json::json;
 
     use super::AppState;
+
+    #[test]
+    fn app_state_defaults_memory_pinned_ui_scale() {
+        let state: AppState = serde_json::from_value(json!({})).expect("default app state");
+        assert!((state.memory_pinned_ui_scale - 1.0).abs() < f32::EPSILON);
+    }
 
     #[test]
     fn app_state_deserializes_legacy_alias_fields() {
