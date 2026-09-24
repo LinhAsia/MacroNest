@@ -531,10 +531,10 @@ impl CrosshairApp {
             )
         };
         let target_count = preset.entity_auto_capture_count.clamp(1, 512) as usize;
-        let mut blacklisted_self_addresses = std::collections::HashSet::new();
-        for &addr in &preset.entity_blacklisted_addresses {
-            blacklisted_self_addresses.insert(addr);
+        if let Some(preset_mut) = self.state.esp_presets.iter_mut().find(|p| p.id == preset_id) {
+            preset_mut.entity_blacklisted_addresses.clear();
         }
+        let blacklisted_self_addresses = std::collections::HashSet::new();
         let self_dropped = false;
         match started {
             Ok(active) => {
