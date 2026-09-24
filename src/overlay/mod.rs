@@ -31676,9 +31676,16 @@ mod windows_overlay {
             let mut cached = cached.borrow_mut();
             if let Some((cached_selector, cached_at, pid)) = cached.as_ref()
                 && cached_selector == selector
-                && cached_at.elapsed() < Duration::from_millis(250)
             {
-                return *pid;
+                if cached_at.elapsed() < Duration::from_millis(250) {
+                    return *pid;
+                }
+                if let Some(p) = *pid {
+                    if crate::process_memory::is_process_alive(p) {
+                        *cached = Some((selector.to_owned(), Instant::now(), Some(p)));
+                        return Some(p);
+                    }
+                }
             }
             let pid = window_list::process_id_for_window(Some(selector));
             *cached = Some((selector.to_owned(), Instant::now(), pid));
@@ -34417,13 +34424,32 @@ mod windows_overlay {
     }
 
     fn trigger_hud_display(owner_preset_id: u32, step: &MacroStep) {
+        thread_local! {
+            static LAST_HUD_STEP: std::cell::RefCell<Option<(u32, String, String, Instant)>> = const { std::cell::RefCell::new(None) };
+            static LAST_HUD_REFRESH: std::cell::RefCell<Option<Instant>> = const { std::cell::RefCell::new(None) };
+        }
+        let is_redundant = LAST_HUD_STEP.with(|last| {
+            let mut guard = last.borrow_mut();
+            if let Some((last_owner, last_key, last_text, last_at)) = guard.as_ref()
+                && *last_owner == owner_preset_id
+                && *last_key == step.key
+                && *last_text == step.text_override
+                && last_at.elapsed() < Duration::from_millis(50)
+            {
+                true
+            } else {
+                *guard = Some((owner_preset_id, step.key.clone(), step.text_override.clone(), Instant::now()));
+                false
+            }
+        });
+        if is_redundant {
+            return;
+        }
+
         if show_hud_preset(owner_preset_id, step).is_err() {
             show_legacy_hud_text(owner_preset_id, step);
         }
 
-        thread_local! {
-            static LAST_HUD_REFRESH: std::cell::RefCell<Option<Instant>> = const { std::cell::RefCell::new(None) };
-        }
         let should_notify = LAST_HUD_REFRESH.with(|last| {
             let mut guard = last.borrow_mut();
             if guard.is_none() || guard.unwrap().elapsed() >= Duration::from_millis(16) {

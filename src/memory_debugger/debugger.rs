@@ -1107,40 +1107,42 @@ fn watch_loop<F>(
         }
     }
     // 2. Disarm any threads spawned in the process that were not in the map
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
-    if snapshot != INVALID_HANDLE_VALUE {
-        let mut entry = THREADENTRY32 {
-            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
-            ..THREADENTRY32::default()
-        };
-        let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
-        while more {
-            if entry.th32OwnerProcessID == pid && !threads.contains_key(&entry.th32ThreadID) {
-                let thread = unsafe {
-                    OpenThread(
-                        THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
-                        0,
-                        entry.th32ThreadID,
-                    )
-                };
-                if !thread.is_null() {
-                    unsafe {
-                        let _ = SuspendThread(thread);
-                        disarm_thread(thread, architecture);
-                        let _ = ResumeThread(thread);
-                        CloseHandle(thread);
+    if threads.is_empty() {
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot != INVALID_HANDLE_VALUE {
+            let mut entry = THREADENTRY32 {
+                dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+                ..THREADENTRY32::default()
+            };
+            let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+            while more {
+                if entry.th32OwnerProcessID == pid && !threads.contains_key(&entry.th32ThreadID) {
+                    let thread = unsafe {
+                        OpenThread(
+                            THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                            0,
+                            entry.th32ThreadID,
+                        )
+                    };
+                    if !thread.is_null() {
+                        unsafe {
+                            let _ = SuspendThread(thread);
+                            disarm_thread(thread, architecture);
+                            let _ = ResumeThread(thread);
+                            CloseHandle(thread);
+                        }
                     }
                 }
+                more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
             }
-            more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+            unsafe { CloseHandle(snapshot) };
         }
-        unsafe { CloseHandle(snapshot) };
     }
     // 4. Drain any pending debug events
     let flush_start = std::time::Instant::now();
-    while flush_start.elapsed() < std::time::Duration::from_millis(50) {
+    while flush_start.elapsed() < std::time::Duration::from_millis(20) {
         let mut event = DEBUG_EVENT::default();
-        if unsafe { WaitForDebugEvent(&mut event, 5) } != 0 {
+        if unsafe { WaitForDebugEvent(&mut event, 0) } != 0 {
             let mut status = DBG_CONTINUE;
             if event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT {
                 let exception = unsafe { event.u.Exception.ExceptionRecord.ExceptionCode };
