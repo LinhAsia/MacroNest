@@ -141,7 +141,7 @@ impl MemoryScanAction {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct SavedMemoryAddress {
     address: usize,
     value_type: ScanValueType,
@@ -971,6 +971,21 @@ struct CodeRelocateResult {
     result: Result<Vec<usize>, String>,
 }
 
+#[cfg(windows)]
+struct RelocatedCodeEntry {
+    index: usize,
+    module: String,
+    old_offset: usize,
+    new_offset: usize,
+}
+
+#[cfg(windows)]
+struct CodeRelocateBatchResult {
+    pid: u32,
+    successful: Vec<RelocatedCodeEntry>,
+    total_checked: usize,
+}
+
 enum ScanJobCandidates {
     Numeric(Vec<ScanCandidate>),
     Text(Vec<TextScanCandidate>),
@@ -1132,9 +1147,12 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     code_relocate_rx: Option<Receiver<CodeRelocateResult>>,
     #[cfg(windows)]
+    code_relocate_all_rx: Option<Receiver<CodeRelocateBatchResult>>,
+    #[cfg(windows)]
     code_relocate_status: String,
     #[cfg(windows)]
     code_relocate_choice_dialog: Option<CodeRelocateChoiceDialog>,
+    code_relocated_flash: HashMap<usize, Instant>,
     scanning: bool,
     scan_progress: Arc<AtomicUsize>,
     scan_input_count: usize,
@@ -1275,9 +1293,12 @@ impl Default for MemoryPanelState {
             #[cfg(windows)]
             code_relocate_rx: None,
             #[cfg(windows)]
+            code_relocate_all_rx: None,
+            #[cfg(windows)]
             code_relocate_status: String::new(),
             #[cfg(windows)]
             code_relocate_choice_dialog: None,
+            code_relocated_flash: HashMap::new(),
             scanning: false,
             scan_progress: Arc::new(AtomicUsize::new(0)),
             scan_input_count: 0,
@@ -3862,8 +3883,7 @@ impl CrosshairApp {
                 ui.separator();
                 let editing = self.memory_panel.edit_value_index.is_some()
                     || self.memory_panel.edit_description_index.is_some();
-                let has_kb_focus = ui.ctx().memory(|memory| memory.focused().is_some())
-                    || ui.ctx().wants_keyboard_input();
+                let has_kb_focus = ui.ctx().wants_keyboard_input();
                 if self.memory_panel.saved_list_active
                     && !editing
                     && !has_kb_focus
@@ -3872,6 +3892,38 @@ impl CrosshairApp {
                     self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
                 }
                 if self.memory_panel.saved_list_active && !editing && !has_kb_focus {
+                    let (arrow_up, arrow_down) = ui.input(|input| {
+                        (
+                            !input.modifiers.shift && !input.modifiers.ctrl && input.key_pressed(egui::Key::ArrowUp),
+                            !input.modifiers.shift && !input.modifiers.ctrl && input.key_pressed(egui::Key::ArrowDown),
+                        )
+                    });
+                    if arrow_up && !self.memory_panel.saved.is_empty() {
+                        let cur = self.memory_panel.selected_saved.iter().copied().min().unwrap_or(0);
+                        if cur > 0 {
+                            let next = cur - 1;
+                            self.memory_panel.selected_saved.clear();
+                            self.memory_panel.selected_saved.insert(next);
+                            self.memory_panel.saved_selection_anchor = Some(next);
+                            let target_addr = self.memory_panel.saved[next].address;
+                            if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                Self::navigate_memory_view_dialog(view, target_addr);
+                            }
+                        }
+                    }
+                    if arrow_down && !self.memory_panel.saved.is_empty() {
+                        let cur = self.memory_panel.selected_saved.iter().copied().max().unwrap_or(0);
+                        if cur + 1 < self.memory_panel.saved.len() {
+                            let next = cur + 1;
+                            self.memory_panel.selected_saved.clear();
+                            self.memory_panel.selected_saved.insert(next);
+                            self.memory_panel.saved_selection_anchor = Some(next);
+                            let target_addr = self.memory_panel.saved[next].address;
+                            if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                Self::navigate_memory_view_dialog(view, target_addr);
+                            }
+                        }
+                    }
                     let (shift_w, shift_s, delete, shift_delete, edit) = ui.input(|input| {
                         (
                             input.modifiers.shift && input.key_pressed(egui::Key::W),
@@ -6617,6 +6669,8 @@ impl CrosshairApp {
         }
         #[cfg(windows)]
         self.poll_code_entry_relocate();
+        #[cfg(windows)]
+        self.poll_code_entry_relocate_all();
         let mut corrected_actions = false;
         #[cfg(windows)]
         let debugger_active = self
@@ -6671,6 +6725,7 @@ impl CrosshairApp {
             RestoreOriginal(usize),
             StartAccessWatch(usize),
             Relocate(usize),
+            RelocateAll,
             Rename(usize),
             Delete(usize),
             ReplaceAll,
@@ -6755,6 +6810,25 @@ impl CrosshairApp {
                     };
                     if ui.button(toggle_addr_label).clicked() {
                         self.memory_panel.show_code_list_address = !self.memory_panel.show_code_list_address;
+                    }
+                    #[cfg(windows)]
+                    {
+                        ui.separator();
+                        let relocate_all_enabled = !self.state.memory_code_list.is_empty()
+                            && self.memory_panel.code_relocate_rx.is_none()
+                            && self.memory_panel.code_relocate_all_rx.is_none();
+                        let relocate_all_label = if self.memory_panel.code_relocate_all_rx.is_some() {
+                            self.tr("Relocating all...", "Đang relocate tất cả...")
+                        } else {
+                            self.tr("Relocate all", "Relocate tất cả")
+                        };
+                        if ui
+                            .add_enabled(relocate_all_enabled, Button::new(relocate_all_label))
+                            .on_hover_text("Relocate all instructions that match uniquely in their modules")
+                            .clicked()
+                        {
+                            pending_action = Some(CodeAction::RelocateAll);
+                        }
                     }
                     ui.separator();
                     ui.label("AOB:");
@@ -6859,7 +6933,8 @@ impl CrosshairApp {
                                 }
                                 let relocate_enabled = !entry.aob_signature.is_empty()
                                     && !entry.replaced
-                                    && self.memory_panel.code_relocate_rx.is_none();
+                                    && self.memory_panel.code_relocate_rx.is_none()
+                                    && self.memory_panel.code_relocate_all_rx.is_none();
                                 let relocate_response = ui.add_enabled(
                                     relocate_enabled,
                                     egui::Button::new("Relocate").small().min_size(egui::vec2(62.0, 19.0)),
@@ -6873,7 +6948,8 @@ impl CrosshairApp {
                                 let rename_response = ui.add_sized(
                                     [58.0, 19.0],
                                     egui::Button::new("Rename").small(),
-                                );
+                                )
+                                .on_hover_text("Rename this code entry label");
                                 if rename_response.clicked() {
                                     pending_action = Some(CodeAction::Rename(index));
                                 }
@@ -6915,6 +6991,37 @@ impl CrosshairApp {
                                 row_res.rect,
                                 2.0,
                                 egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+
+                        let mut flash_alpha = 0.0f32;
+                        if let Some(flash_time) = self.memory_panel.code_relocated_flash.get(&index) {
+                            let elapsed = flash_time.elapsed().as_secs_f32();
+                            let duration = 1.6f32;
+                            if elapsed < duration {
+                                ui.ctx().request_repaint();
+                                flash_alpha = (1.0 - (elapsed / duration)).clamp(0.0, 1.0);
+                            }
+                        }
+                        if flash_alpha > 0.0 {
+                            let glow_fill = Color32::from_rgba_premultiplied(
+                                (40.0 * flash_alpha) as u8,
+                                (220.0 * flash_alpha) as u8,
+                                (130.0 * flash_alpha) as u8,
+                                (130.0 * flash_alpha) as u8,
+                            );
+                            let glow_stroke = Color32::from_rgba_premultiplied(
+                                (60.0 * flash_alpha) as u8,
+                                (255.0 * flash_alpha) as u8,
+                                (160.0 * flash_alpha) as u8,
+                                (240.0 * flash_alpha) as u8,
+                            );
+                            ui.painter().rect_filled(row_res.rect, 2.0, glow_fill);
+                            ui.painter().rect_stroke(
+                                row_res.rect,
+                                2.0,
+                                egui::Stroke::new(1.5, glow_stroke),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -7122,6 +7229,10 @@ impl CrosshairApp {
             Some(CodeAction::ToggleShowAddress) => {
                 self.memory_panel.show_code_list_address = !self.memory_panel.show_code_list_address;
             }
+            Some(CodeAction::RelocateAll) => {
+                #[cfg(windows)]
+                self.start_code_entry_relocate_all();
+            }
             Some(CodeAction::RegenerateAob(index)) => {
                 #[cfg(windows)]
                 self.regenerate_code_entry_aob(index);
@@ -7129,7 +7240,7 @@ impl CrosshairApp {
             None => {}
         }
         #[cfg(windows)]
-        if self.memory_panel.code_relocate_rx.is_some() {
+        if self.memory_panel.code_relocate_rx.is_some() || self.memory_panel.code_relocate_all_rx.is_some() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
         #[cfg(windows)]
@@ -7247,6 +7358,7 @@ impl CrosshairApp {
             );
             crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
             crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+            self.memory_panel.code_relocated_flash.insert(code_index, Instant::now());
             self.persist();
         }
     }
@@ -7335,6 +7447,169 @@ impl CrosshairApp {
                     format!("AOB relocation failed: {error}");
             }
         }
+    }
+
+    #[cfg(windows)]
+    fn start_code_entry_relocate_all(&mut self) {
+        if self.memory_panel.code_relocate_rx.is_some()
+            || self.memory_panel.code_relocate_all_rx.is_some()
+        {
+            return;
+        }
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.code_relocate_status = "Select a process first".to_owned();
+            return;
+        };
+
+        struct CandidateItem {
+            index: usize,
+            module: String,
+            old_offset: usize,
+            aob_signature: String,
+            aob_target_offset: usize,
+        }
+
+        let items: Vec<CandidateItem> = self
+            .state
+            .memory_code_list
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| !entry.replaced && !entry.aob_signature.is_empty())
+            .map(|(index, entry)| CandidateItem {
+                index,
+                module: entry.module.clone(),
+                old_offset: entry.offset,
+                aob_signature: entry.aob_signature.clone(),
+                aob_target_offset: entry.aob_target_offset,
+            })
+            .collect();
+
+        if items.is_empty() {
+            self.memory_panel.code_relocate_status =
+                "No eligible code entries with saved AOB to relocate".to_owned();
+            return;
+        }
+
+        let total_checked = items.len();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let modules = process_modules(pid).unwrap_or_default();
+            let options = MemoryScanOptions {
+                writable: false,
+                executable: true,
+                copy_on_write: true,
+                active_memory_only: false,
+                mem_private: false,
+                mem_image: true,
+                mem_mapped: false,
+                alignment: None,
+            };
+            let mut successful = Vec::new();
+            for item in items {
+                let Some((_, module_base, module_size)) = modules
+                    .iter()
+                    .find(|(name, _, _)| name.eq_ignore_ascii_case(&item.module))
+                else {
+                    continue;
+                };
+                let matches = scan_aob_memory_range_with_progress(
+                    pid,
+                    &item.aob_signature,
+                    *module_base,
+                    *module_size,
+                    32,
+                    options,
+                    Arc::new(AtomicUsize::new(0)),
+                );
+                if let Ok(matched) = matches {
+                    // Only apply if exactly 1 match found. If 0 or >1, skip silently without asking.
+                    if matched.len() == 1 {
+                        let candidate_address = matched[0].address;
+                        let new_offset = (candidate_address - *module_base)
+                            .saturating_add(item.aob_target_offset);
+                        successful.push(RelocatedCodeEntry {
+                            index: item.index,
+                            module: item.module,
+                            old_offset: item.old_offset,
+                            new_offset,
+                        });
+                    }
+                }
+            }
+            let _ = tx.send(CodeRelocateBatchResult {
+                pid,
+                successful,
+                total_checked,
+            });
+        });
+        self.memory_panel.code_relocate_all_rx = Some(rx);
+        self.memory_panel.code_relocate_status = format!(
+            "Relocating {total_checked} instructions in background..."
+        );
+    }
+
+    #[cfg(windows)]
+    fn poll_code_entry_relocate_all(&mut self) {
+        let Some(rx) = self.memory_panel.code_relocate_all_rx.as_ref() else {
+            return;
+        };
+        let outcome = match rx.try_recv() {
+            Ok(outcome) => outcome,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.memory_panel.code_relocate_all_rx = None;
+                self.memory_panel.code_relocate_status =
+                    "Batch AOB relocation stopped unexpectedly".to_owned();
+                return;
+            }
+        };
+        self.memory_panel.code_relocate_all_rx = None;
+        if self.memory_panel.process_pid != Some(outcome.pid) {
+            self.memory_panel.code_relocate_status =
+                "Process changed while relocating; try again".to_owned();
+            return;
+        }
+
+        let mut relocated_count = 0;
+        let now = Instant::now();
+        for item in outcome.successful {
+            if let Some(entry) = self.state.memory_code_list.get_mut(item.index) {
+                if entry.module.eq_ignore_ascii_case(&item.module)
+                    && entry.offset == item.old_offset
+                {
+                    entry.offset = item.new_offset;
+                    for preset in &mut self.state.esp_presets {
+                        if preset
+                            .entity_auto_code_module
+                            .eq_ignore_ascii_case(&item.module)
+                            && preset.entity_auto_code_offset == item.old_offset
+                        {
+                            preset.entity_auto_code_offset = item.new_offset;
+                        }
+                    }
+                    for pointer in &mut self.state.memory_pointer_list {
+                        if pointer.code_module.eq_ignore_ascii_case(&item.module)
+                            && pointer.code_offset == item.old_offset
+                        {
+                            pointer.code_offset = item.new_offset;
+                        }
+                    }
+                    self.memory_panel
+                        .code_relocated_flash
+                        .insert(item.index, now);
+                    relocated_count += 1;
+                }
+            }
+        }
+        if relocated_count > 0 {
+            crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
+            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
+            self.persist();
+        }
+        self.memory_panel.code_relocate_status = format!(
+            "Relocated {relocated_count} of {} instruction(s)",
+            outcome.total_checked
+        );
     }
 
     #[cfg(windows)]
@@ -12788,76 +13063,84 @@ impl CrosshairApp {
         let mut clear_captured = false;
         let mut start_requested = false;
         ui.horizontal(|ui| {
-            ui.add(egui::Label::new(&dialog.status).selectable(true));
+            ui.add(
+                egui::Label::new(
+                    RichText::new(&dialog.status)
+                        .strong()
+                        .color(Color32::from_rgb(100, 200, 255)),
+                )
+                .selectable(true),
+            );
+            ui.add_space(8.0);
             ui.checkbox(&mut dialog.auto_stop_on_hit, "Auto-stop on 1st hit");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add_enabled(!dialog.hits.is_empty(), Button::new("Copy all"))
-                    .on_hover_text("Copy all captured instructions, hits, and details to clipboard")
-                    .clicked()
-                {
-                    let mut text = String::from("#\tAddress\tHits\tInstruction\tDetails\n");
-                    for (i, hit) in dialog.hits.iter().enumerate() {
-                        text.push_str(&format!(
-                            "{}\t0x{:X}\t{}\t{}\t{}\n",
-                            i + 1,
-                            hit.address,
-                            hit.count,
-                            hit.instruction,
-                            hit.details
-                        ));
+        });
+        ui.horizontal_wrapped(|ui| {
+            if dialog.active.is_some() {
+                if ui.button("Stop").clicked() {
+                    if let Some(mut active) = dialog.active.take() {
+                        active.stop();
                     }
-                    ui.ctx().copy_text(text);
-                    dialog.status = format!("Copied {} instructions to clipboard", dialog.hits.len());
+                    if !dialog.status.starts_with("Debugger safely stopped") {
+                        dialog.status = "Debugger stopped".to_owned();
+                    }
                 }
-                if ui
-                    .add_enabled(!dialog.hits.is_empty(), Button::new("Add all to code list"))
-                    .clicked()
-                {
-                    dialog.pending_code_add_all = true;
-                }
-                if ui
-                    .add_enabled(dialog.selected.is_some(), Button::new("Add to code list"))
-                    .clicked()
-                {
-                    dialog.pending_code_add = dialog.selected;
-                }
-                if ui
-                    .add_enabled(dialog.selected.is_some(), Button::new("Show disassembler"))
-                    .clicked()
-                {
-                    dialog.pending_disassembler = dialog.selected;
-                }
-                if ui
-                    .add_enabled(dialog.selected.is_some(), Button::new("Copy Bytes (AOB)"))
-                    .clicked()
-                {
-                    if let Some(index) = dialog.selected {
-                        if let Some(hit) = dialog.hits.get(index) {
-                            let aob = Self::extract_aob_bytes_from_details(&hit.details);
-                            if !aob.is_empty() {
-                                ui.ctx().copy_text(aob.clone());
-                                dialog.status = format!("Copied AOB bytes: {aob}");
-                            }
+            } else if ui.button("Start / Re-attach").clicked() {
+                start_requested = true;
+            }
+            if ui.button("Clear captured").clicked() {
+                clear_captured = true;
+            }
+            if ui
+                .add_enabled(dialog.selected.is_some(), Button::new("Add to code list"))
+                .clicked()
+            {
+                dialog.pending_code_add = dialog.selected;
+            }
+            if ui
+                .add_enabled(!dialog.hits.is_empty(), Button::new("Add all to code list"))
+                .clicked()
+            {
+                dialog.pending_code_add_all = true;
+            }
+            if ui
+                .add_enabled(dialog.selected.is_some(), Button::new("Show disassembler"))
+                .clicked()
+            {
+                dialog.pending_disassembler = dialog.selected;
+            }
+            if ui
+                .add_enabled(dialog.selected.is_some(), Button::new("Copy Bytes (AOB)"))
+                .clicked()
+            {
+                if let Some(index) = dialog.selected {
+                    if let Some(hit) = dialog.hits.get(index) {
+                        let aob = Self::extract_aob_bytes_from_details(&hit.details);
+                        if !aob.is_empty() {
+                            ui.ctx().copy_text(aob.clone());
+                            dialog.status = format!("Copied AOB bytes: {aob}");
                         }
                     }
                 }
-                if dialog.active.is_some() {
-                    if ui.button("Stop").clicked() {
-                        if let Some(mut active) = dialog.active.take() {
-                            active.stop();
-                        }
-                        if !dialog.status.starts_with("Debugger safely stopped") {
-                            dialog.status = "Debugger stopped".to_owned();
-                        }
-                    }
-                } else if ui.button("Start / Re-attach").clicked() {
-                    start_requested = true;
+            }
+            if ui
+                .add_enabled(!dialog.hits.is_empty(), Button::new("Copy all"))
+                .on_hover_text("Copy all captured instructions, hits, and details to clipboard")
+                .clicked()
+            {
+                let mut text = String::from("#\tAddress\tHits\tInstruction\tDetails\n");
+                for (i, hit) in dialog.hits.iter().enumerate() {
+                    text.push_str(&format!(
+                        "{}\t0x{:X}\t{}\t{}\t{}\n",
+                        i + 1,
+                        hit.address,
+                        hit.count,
+                        hit.instruction,
+                        hit.details
+                    ));
                 }
-                if ui.button("Clear captured").clicked() {
-                    clear_captured = true;
-                }
-            });
+                ui.ctx().copy_text(text);
+                dialog.status = format!("Copied {} instructions to clipboard", dialog.hits.len());
+            }
         });
         if clear_captured {
             dialog.hits.clear();
@@ -14825,6 +15108,14 @@ impl CrosshairApp {
             (vec![0u8; read_size], vec![false; read_size])
         };
         let mut open = true;
+        let mut nav_delta = 0isize;
+        if !ctx.wants_keyboard_input() {
+            if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+                nav_delta = -1;
+            } else if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+                nav_delta = 1;
+            }
+        }
         if dialog.pinned {
             let fit_columns = dialog.fit_memory_columns;
             let mut builder = egui::ViewportBuilder::default()
@@ -14843,6 +15134,13 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of("memory-view-pinned-struct"),
                 builder,
                 |ctx, _| {
+                    if !ctx.wants_keyboard_input() {
+                        if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+                            nav_delta = -1;
+                        } else if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+                            nav_delta = 1;
+                        }
+                    }
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -14872,6 +15170,10 @@ impl CrosshairApp {
                     Self::render_memory_popup_resize_handles(ctx);
                 },
             );
+            if nav_delta != 0 {
+                self.navigate_memory_view_relative_in_list(nav_delta, &mut dialog);
+                ctx.request_repaint();
+            }
             if unpin {
                 dialog.pinned = false;
             }
@@ -14893,6 +15195,13 @@ impl CrosshairApp {
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
+                if !ui.ctx().wants_keyboard_input() {
+                    if ui.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+                        nav_delta = -1;
+                    } else if ui.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+                        nav_delta = 1;
+                    }
+                }
                 let pin_label = self.tr("Pin", "Ghim");
                 if ui.button(pin_label).clicked() {
                     dialog.pinned = true;
@@ -14908,6 +15217,10 @@ impl CrosshairApp {
                     region,
                 );
             });
+        if nav_delta != 0 {
+            self.navigate_memory_view_relative_in_list(nav_delta, &mut dialog);
+            ctx.request_repaint();
+        }
         if !open {
             self.memory_panel.memory_view_dialog = None;
         } else {
@@ -14991,12 +15304,16 @@ impl CrosshairApp {
         let row_bytes =
             memory_display_width(dialog.display_type) * dialog.memory_columns.max(1);
         if matches!(dialog.kind, MemoryViewKind::Bytes) {
-            let move_rows = if ui.ctx().memory(|memory| memory.focused().is_none()) {
+            let move_rows = if !ui.ctx().wants_keyboard_input() {
                 ui.input(|input| {
-                    if input.key_pressed(egui::Key::ArrowUp) {
-                        -1
-                    } else if input.key_pressed(egui::Key::ArrowDown) {
-                        1
+                    if input.modifiers.shift || input.modifiers.ctrl {
+                        if input.key_pressed(egui::Key::ArrowUp) {
+                            -1
+                        } else if input.key_pressed(egui::Key::ArrowDown) {
+                            1
+                        } else {
+                            0
+                        }
                     } else if input.key_pressed(egui::Key::PageUp) {
                         -16
                     } else if input.key_pressed(egui::Key::PageDown) {
@@ -19487,6 +19804,87 @@ impl CrosshairApp {
         true
     }
 
+    fn navigate_memory_view_relative_in_list(
+        &mut self,
+        delta: isize,
+        dialog: &mut MemoryViewDialog,
+    ) -> bool {
+        Self::navigate_memory_view_relative_in_list_state(
+            &mut self.memory_panel,
+            delta,
+            dialog,
+        )
+    }
+
+    fn navigate_memory_view_relative_in_list_state(
+        panel: &mut MemoryPanelState,
+        delta: isize,
+        dialog: &mut MemoryViewDialog,
+    ) -> bool {
+        let current_address = dialog.address;
+        let in_saved = panel
+            .saved
+            .iter()
+            .position(|item| item.address == current_address);
+        let in_candidates = panel
+            .candidates
+            .iter()
+            .position(|item| item.address == current_address);
+
+        if panel.saved_list_active
+            || in_saved.is_some()
+            || (!panel.saved.is_empty() && in_candidates.is_none())
+        {
+            if panel.saved.is_empty() {
+                return false;
+            }
+            let cur = in_saved
+                .or_else(|| panel.selected_saved.iter().copied().min())
+                .unwrap_or(0);
+            let next = if delta < 0 {
+                cur.saturating_sub(1)
+            } else {
+                (cur + 1).min(panel.saved.len().saturating_sub(1))
+            };
+            panel.selected_saved.clear();
+            panel.selected_saved.insert(next);
+            panel.saved_selection_anchor = Some(next);
+            panel.saved_list_active = true;
+            let item = &panel.saved[next];
+            let new_address = item.address;
+            let val_type = item.value_type;
+            let text_enc = item.text_encoding;
+            Self::navigate_memory_view_dialog(dialog, new_address);
+            if text_enc.is_some() {
+                dialog.display_type = MemoryDisplayType::Text;
+            } else {
+                dialog.display_type = memory_display_type_for_scan_type(val_type);
+            }
+            return true;
+        } else if !panel.candidates.is_empty() {
+            let cur = in_candidates
+                .or_else(|| panel.selected_results.iter().copied().min())
+                .unwrap_or(0);
+            let next = if delta < 0 {
+                cur.saturating_sub(1)
+            } else {
+                (cur + 1).min(panel.candidates.len().saturating_sub(1))
+            };
+            panel.selected_results.clear();
+            panel.selected_results.insert(next);
+            panel.saved_list_active = false;
+            let new_address = panel.candidates[next].address;
+            Self::navigate_memory_view_dialog(dialog, new_address);
+            return true;
+        } else {
+            let row_bytes = memory_display_width(dialog.display_type)
+                * dialog.memory_columns.max(1);
+            let offset_change = (delta as isize) * (row_bytes as isize);
+            dialog.scroll_offset = dialog.scroll_offset.saturating_add(offset_change);
+            return true;
+        }
+    }
+
     fn memory_view_window_start(address: usize, row_bytes: usize, scroll_offset: isize) -> usize {
         let aligned = address / row_bytes * row_bytes;
         let rows_before = (MEMORY_VIEW_READ_BYTES / 2 / row_bytes).max(3);
@@ -23325,5 +23723,80 @@ mod tests {
             None,
             None
         ));
+    }
+
+    #[test]
+    fn test_navigate_memory_view_relative_in_list() {
+        let mut panel = MemoryPanelState::default();
+        panel.saved.push(SavedMemoryAddress {
+            address: 0x1000,
+            value_type: ScanValueType::I32,
+            ..Default::default()
+        });
+        panel.saved.push(SavedMemoryAddress {
+            address: 0x2000,
+            value_type: ScanValueType::I32,
+            ..Default::default()
+        });
+        panel.saved.push(SavedMemoryAddress {
+            address: 0x3000,
+            value_type: ScanValueType::I32,
+            ..Default::default()
+        });
+        panel.saved_list_active = true;
+
+        let mut dialog = MemoryViewDialog {
+            address: 0x1000,
+            tracked_base: None,
+            kind: MemoryViewKind::Bytes,
+            display_type: MemoryDisplayType::I32Hex,
+            relative_addresses: false,
+            pinned: false,
+            elements: Vec::new(),
+            pending_add: None,
+            pending_track: None,
+            pointer_width: 8,
+            previous_bytes: Vec::new(),
+            previous_byte_map: HashMap::new(),
+            track_changes: false,
+            changed_addresses: HashSet::new(),
+            classes: Vec::new(),
+            selected_class: 0,
+            class_detection_status: String::new(),
+            class_detection_attempted: false,
+            auto_dissected: false,
+            history: Vec::new(),
+            structure_back_step: String::new(),
+            structure_forward_step: String::new(),
+            selected_structure_address: None,
+            scroll_offset: 0,
+            memory_columns: 1,
+            reset_memory_scroll: false,
+            memory_scroll_override: None,
+            memory_region_override: None,
+            fit_memory_columns: false,
+            stride_address_a: String::new(),
+            stride_address_b: String::new(),
+            track_range_hex: String::new(),
+            filter_changed_only: false,
+        };
+
+        // Down from 0x1000 should navigate to 0x2000
+        let navigated = CrosshairApp::navigate_memory_view_relative_in_list_state(&mut panel, 1, &mut dialog);
+        assert!(navigated);
+        assert_eq!(dialog.address, 0x2000);
+        assert!(panel.selected_saved.contains(&1));
+
+        // Down from 0x2000 should navigate to 0x3000
+        let navigated = CrosshairApp::navigate_memory_view_relative_in_list_state(&mut panel, 1, &mut dialog);
+        assert!(navigated);
+        assert_eq!(dialog.address, 0x3000);
+        assert!(panel.selected_saved.contains(&2));
+
+        // Up from 0x3000 should navigate back to 0x2000
+        let navigated = CrosshairApp::navigate_memory_view_relative_in_list_state(&mut panel, -1, &mut dialog);
+        assert!(navigated);
+        assert_eq!(dialog.address, 0x2000);
+        assert!(panel.selected_saved.contains(&1));
     }
 }
