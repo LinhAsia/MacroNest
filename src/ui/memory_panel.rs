@@ -4506,18 +4506,41 @@ impl CrosshairApp {
                                 }
                                 ui.separator();
                                 let debugger_selection_valid = selected_count > 0;
+                                let debugger_tooltip = if selected_count <= 1 {
+                                    self.tr(
+                                        "Watch instructions accessing this address using CPU hardware breakpoints (DR0-DR3)",
+                                        "Theo dõi lệnh truy cập địa chỉ này bằng hardware breakpoint phần cứng (DR0-DR3)",
+                                    )
+                                } else if selected_count <= 4 {
+                                    self.tr(
+                                        "Watch all selected addresses simultaneously using CPU hardware breakpoints (DR0-DR3)",
+                                        "Theo dõi đồng thời tất cả địa chỉ đã chọn bằng hardware breakpoint phần cứng (DR0-DR3)",
+                                    )
+                                } else {
+                                    self.tr(
+                                        "Hardware breakpoints support 4 addresses simultaneously (rotates high-frequency batches for remaining addresses)",
+                                        "Hardware breakpoint hỗ trợ 4 địa chỉ đồng thời (luân phiên tần số cao cho các địa chỉ còn lại)",
+                                    )
+                                };
                                 if ui
                                     .add_enabled(
                                         debugger_selection_valid,
                                         Button::new(format!(
                                             "{} ({debugger_arch})",
-                                            self.tr(
-                                                "Find instructions accessing this address",
-                                                "Tìm lệnh truy cập địa chỉ này"
-                                            )
+                                            if selected_count <= 1 {
+                                                self.tr(
+                                                    "Find instructions accessing this address",
+                                                    "Tìm lệnh truy cập địa chỉ này",
+                                                )
+                                            } else {
+                                                self.tr(
+                                                    "Find instructions accessing selected addresses",
+                                                    "Tìm lệnh truy cập các địa chỉ đã chọn",
+                                                )
+                                            }
                                         )),
                                     )
-                                    .on_hover_text("More than four addresses rotate in batches of four")
+                                    .on_hover_text(debugger_tooltip)
                                     .clicked()
                                 {
                                     instruction_watch = Some(true);
@@ -4528,13 +4551,20 @@ impl CrosshairApp {
                                         debugger_selection_valid,
                                         Button::new(format!(
                                             "{} ({debugger_arch})",
-                                            self.tr(
-                                                "Find instructions writing this address",
-                                                "Tìm lệnh ghi vào địa chỉ này"
-                                            )
+                                            if selected_count <= 1 {
+                                                self.tr(
+                                                    "Find instructions writing this address",
+                                                    "Tìm lệnh ghi vào địa chỉ này",
+                                                )
+                                            } else {
+                                                self.tr(
+                                                    "Find instructions writing to selected addresses",
+                                                    "Tìm lệnh ghi vào các địa chỉ đã chọn",
+                                                )
+                                            }
                                         )),
                                     )
-                                    .on_hover_text("More than four addresses rotate in batches of four")
+                                    .on_hover_text(debugger_tooltip)
                                     .clicked()
                                 {
                                     instruction_watch = Some(false);
@@ -5163,7 +5193,7 @@ impl CrosshairApp {
                         self.state.memory_pointer_exhaustive_scan = true;
                         changed = true;
                     }
-                    if ui.button(self.tr("Exhaustive (Vét cạn)", "Exhaustive (Vét cạn)")).clicked() {
+                    if ui.button(self.tr("Exhaustive", "Vét cạn")).clicked() {
                         self.state.memory_pointer_scan_depth = PointerScanLimits::EXHAUSTIVE.max_depth;
                         self.state.memory_pointer_scan_offset =
                             format!("{:X}", PointerScanLimits::EXHAUSTIVE.max_offset);
@@ -5243,7 +5273,7 @@ impl CrosshairApp {
                 for (dir, label, desc) in [
                     (
                         MemoryAobDirection::After,
-                        self.tr("After (Phía sau)", "Phía sau (Từ địa chỉ trở đi)"),
+                        self.tr("After", "Phía sau (Từ địa chỉ trở đi)"),
                         self.tr(
                             "Extract AOB starting from the target address forward (subsequent instructions).",
                             "Lấy chữ ký AOB bắt đầu từ địa chỉ mục tiêu trở đi (các lệnh phía sau).",
@@ -5251,7 +5281,7 @@ impl CrosshairApp {
                     ),
                     (
                         MemoryAobDirection::Before,
-                        self.tr("Before (Phía trước)", "Phía trước (Các lệnh phía trước)"),
+                        self.tr("Before", "Phía trước (Các lệnh phía trước)"),
                         self.tr(
                             "Extract AOB from instructions preceding the target address up to the target instruction.",
                             "Lấy chữ ký AOB từ các câu lệnh phía trước dẫn đến câu lệnh mục tiêu.",
@@ -5259,7 +5289,7 @@ impl CrosshairApp {
                     ),
                     (
                         MemoryAobDirection::Both,
-                        self.tr("Both sides (2 bên)", "Cả 2 bên (Địa chỉ ở giữa)"),
+                        self.tr("Both sides", "Cả 2 bên (Địa chỉ ở giữa)"),
                         self.tr(
                             "Extract AOB centered around the target address (preceding and subsequent instructions).",
                             "Lấy chữ ký AOB cả 2 bên bao quanh địa chỉ mục tiêu (địa chỉ nằm ở giữa).",
@@ -6724,9 +6754,9 @@ impl CrosshairApp {
                     ui.label("AOB:");
                     let current_dir = self.state.memory_aob_direction;
                     let dir_text = match current_dir {
-                        MemoryAobDirection::After => self.tr("After (Sau)", "Phía sau"),
-                        MemoryAobDirection::Before => self.tr("Before (Trước)", "Phía trước"),
-                        MemoryAobDirection::Both => self.tr("Both (2 bên)", "2 bên"),
+                        MemoryAobDirection::After => self.tr("After", "Phía sau"),
+                        MemoryAobDirection::Before => self.tr("Before", "Phía trước"),
+                        MemoryAobDirection::Both => self.tr("Both sides", "2 bên"),
                     };
                     egui::ComboBox::from_id_salt("code-list-aob-direction")
                         .selected_text(dir_text)
@@ -6734,9 +6764,9 @@ impl CrosshairApp {
                         .show_ui(ui, |ui| {
                             let mut selected = self.state.memory_aob_direction;
                             for (dir, label) in [
-                                (MemoryAobDirection::After, self.tr("After (Phía sau)", "Phía sau (Từ địa chỉ trở đi)")),
-                                (MemoryAobDirection::Before, self.tr("Before (Phía trước)", "Phía trước (Các lệnh phía trước)")),
-                                (MemoryAobDirection::Both, self.tr("Both sides (2 bên)", "Cả 2 bên (Địa chỉ ở giữa)")),
+                                (MemoryAobDirection::After, self.tr("After", "Phía sau (Từ địa chỉ trở đi)")),
+                                (MemoryAobDirection::Before, self.tr("Before", "Phía trước (Các lệnh phía trước)")),
+                                (MemoryAobDirection::Both, self.tr("Both sides", "Cả 2 bên (Địa chỉ ở giữa)")),
                             ] {
                                 if ui.selectable_value(&mut selected, dir, label).changed() {
                                     self.state.memory_aob_direction = selected;

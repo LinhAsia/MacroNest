@@ -379,7 +379,7 @@ impl WriteWatch {
             pid,
             WatchKind::Write {
                 addresses,
-                rotation_ms: 1_000,
+                rotation_ms: 100,
             },
             architecture,
             notify,
@@ -422,7 +422,7 @@ impl AddressAccessWatch {
             pid,
             WatchKind::ReadWrite {
                 addresses,
-                rotation_ms: 1_000,
+                rotation_ms: 100,
             },
             architecture,
             notify,
@@ -889,7 +889,7 @@ fn watch_loop<F>(
                 });
             }
         }
-        let event_wait_ms = if duty_cycle.is_some() { 30 } else { 100 };
+        let event_wait_ms = if duty_cycle.is_some() { 30 } else { 25 };
         let mut event = DEBUG_EVENT::default();
         if unsafe { WaitForDebugEvent(&mut event, event_wait_ms) } == 0 {
             if io::Error::last_os_error().raw_os_error() == Some(ERROR_SEM_TIMEOUT) {
