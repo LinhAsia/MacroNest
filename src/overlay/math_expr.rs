@@ -227,6 +227,36 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                                 let value = resolved_args.first().copied().unwrap_or(0.0);
                                 if value < 0.0 { 0.0 } else { value.sqrt() }
                             }
+                            "hypot" => {
+                                match resolved_args.len() {
+                                    0 => 0.0,
+                                    1 => resolved_args[0].abs(),
+                                    2 => resolved_args[0].hypot(resolved_args[1]),
+                                    _ => {
+                                        let mut sum_sq = 0.0;
+                                        for arg in resolved_args {
+                                            sum_sq += arg * arg;
+                                        }
+                                        sum_sq.sqrt()
+                                    }
+                                }
+                            }
+                            "distance" | "dist" => {
+                                match resolved_args.len() {
+                                    4 => {
+                                        let dx = resolved_args[0] - resolved_args[2];
+                                        let dy = resolved_args[1] - resolved_args[3];
+                                        dx.hypot(dy)
+                                    }
+                                    6 => {
+                                        let dx = resolved_args[0] - resolved_args[3];
+                                        let dy = resolved_args[1] - resolved_args[4];
+                                        let dz = resolved_args[2] - resolved_args[5];
+                                        (dx * dx + dy * dy + dz * dz).sqrt()
+                                    }
+                                    _ => 0.0,
+                                }
+                            }
                             "pow" => {
                                 let base = resolved_args.first().copied().unwrap_or(0.0);
                                 let exponent = resolved_args.get(1).copied().unwrap_or(1.0);
@@ -1603,5 +1633,20 @@ mod tests {
             let mut text_vars = TEXT_VARIABLES.lock();
             text_vars.clear();
         }
+    }
+
+    #[test]
+    fn hypot_and_distance_math_functions_work() {
+        let _guard = super::super::tests::TEST_MUTEX.lock().unwrap();
+        // 2D hypot
+        assert!((evaluate_math_expression_f64("hypot(3, 4)") - 5.0).abs() < 1e-9);
+        // 3D hypot
+        assert!((evaluate_math_expression_f64("hypot(1, 2, 2)") - 3.0).abs() < 1e-9);
+        // 2D distance
+        assert!((evaluate_math_expression_f64("distance(0, 0, 3, 4)") - 5.0).abs() < 1e-9);
+        assert!((evaluate_math_expression_f64("dist(10, 20, 13, 24)") - 5.0).abs() < 1e-9);
+        // 3D distance
+        assert!((evaluate_math_expression_f64("distance(1, 2, 3, 1, 2, 6)") - 3.0).abs() < 1e-9);
+        assert!((evaluate_math_expression_f64("dist(0, 0, 0, 1, 2, 2)") - 3.0).abs() < 1e-9);
     }
 }
