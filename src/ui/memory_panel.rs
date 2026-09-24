@@ -4783,7 +4783,8 @@ impl CrosshairApp {
                                             .clicked()
                                         {
                                             if let Some(pid) = self.memory_panel.process_pid {
-                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 32) {
+                                                let start_addr = aob_read_start_address(saved.address, 32, self.state.memory_aob_direction);
+                                                if let Ok(bytes) = read_memory_bytes(pid, start_addr, 32).or_else(|_| read_memory_bytes(pid, saved.address, 32)) {
                                                     let aob = format_aob_hex(&bytes);
                                                     ui.ctx().copy_text(aob);
                                                     self.memory_panel.status = "Copied AOB (32 bytes) to clipboard".to_string();
@@ -4800,7 +4801,8 @@ impl CrosshairApp {
                                             .clicked()
                                         {
                                             if let Some(pid) = self.memory_panel.process_pid {
-                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                                let start_addr = aob_read_start_address(saved.address, 64, self.state.memory_aob_direction);
+                                                if let Ok(bytes) = read_memory_bytes(pid, start_addr, 64).or_else(|_| read_memory_bytes(pid, saved.address, 64)) {
                                                     let aob = format_aob_hex(&bytes);
                                                     ui.ctx().copy_text(aob);
                                                     self.memory_panel.status = "Copied AOB (64 bytes) to clipboard".to_string();
@@ -4817,7 +4819,8 @@ impl CrosshairApp {
                                             .clicked()
                                         {
                                             if let Some(pid) = self.memory_panel.process_pid {
-                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 128) {
+                                                let start_addr = aob_read_start_address(saved.address, 128, self.state.memory_aob_direction);
+                                                if let Ok(bytes) = read_memory_bytes(pid, start_addr, 128).or_else(|_| read_memory_bytes(pid, saved.address, 128)) {
                                                     let aob = format_aob_hex(&bytes);
                                                     ui.ctx().copy_text(aob);
                                                     self.memory_panel.status = "Copied AOB (128 bytes) to clipboard".to_string();
@@ -4834,7 +4837,8 @@ impl CrosshairApp {
                                             .clicked()
                                         {
                                             if let Some(pid) = self.memory_panel.process_pid {
-                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                                let start_addr = aob_read_start_address(saved.address, 64, self.state.memory_aob_direction);
+                                                if let Ok(bytes) = read_memory_bytes(pid, start_addr, 64).or_else(|_| read_memory_bytes(pid, saved.address, 64)) {
                                                     self.memory_panel.manual_aob_input_1 = format_aob_hex(&bytes);
                                                     self.memory_panel.show_manual_aob_compare = true;
                                                 }
@@ -4850,7 +4854,8 @@ impl CrosshairApp {
                                             .clicked()
                                         {
                                             if let Some(pid) = self.memory_panel.process_pid {
-                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                                let start_addr = aob_read_start_address(saved.address, 64, self.state.memory_aob_direction);
+                                                if let Ok(bytes) = read_memory_bytes(pid, start_addr, 64).or_else(|_| read_memory_bytes(pid, saved.address, 64)) {
                                                     self.memory_panel.manual_aob_input_2 = format_aob_hex(&bytes);
                                                     self.memory_panel.show_manual_aob_compare = true;
                                                 }
@@ -4869,12 +4874,13 @@ impl CrosshairApp {
                                             .clicked()
                                         {
                                             if let Some(pid) = self.memory_panel.process_pid {
-                                                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                                                let start_addr = aob_read_start_address(saved.address, 64, self.state.memory_aob_direction);
+                                                if let Ok(bytes) = read_memory_bytes(pid, start_addr, 64).or_else(|_| read_memory_bytes(pid, saved.address, 64)) {
                                                     let aob = format_aob_hex(&bytes);
                                                     if let Some(entry) = self.memory_panel.saved.get_mut(index) {
                                                         entry.aob_sample_1 = Some(bytes.clone());
                                                     }
-                                                    self.memory_panel.global_aob_sample_1 = Some((bytes, saved.address));
+                                                    self.memory_panel.global_aob_sample_1 = Some((bytes, start_addr));
                                                     ui.ctx().copy_text(aob.clone());
                                                     self.memory_panel.status = "Sample 1 captured (64 bytes)".to_string();
                                                 }
@@ -17172,13 +17178,11 @@ impl CrosshairApp {
                         unique_count,
                         self.tr("unique match (1 result)", "kết quả duy nhất (1 địa chỉ)")
                     );
-                    if self.memory_panel.aob_wildcard_selected.is_none() {
-                        self.memory_panel.aob_wildcard_selected = results
-                            .iter()
-                            .find(|r| r.match_count == 1)
-                            .cloned()
-                            .or_else(|| results.first().cloned());
-                    }
+                    self.memory_panel.aob_wildcard_selected = results
+                        .iter()
+                        .find(|r| r.match_count == 1)
+                        .cloned()
+                        .or_else(|| results.first().cloned());
                     self.memory_panel.aob_wildcard_scenarios = results;
                     break;
                 }
@@ -17231,6 +17235,7 @@ impl CrosshairApp {
             return;
         };
 
+        self.memory_panel.aob_wildcard_selected = None;
         self.memory_panel.aob_wildcard_scanning = true;
         self.memory_panel.aob_wildcard_status = format!(
             "{} (PID {})...",
@@ -17880,9 +17885,10 @@ impl CrosshairApp {
         let mut entries = Vec::new();
         for idx in indices {
             if let Some(saved) = self.memory_panel.saved.get(idx) {
-                if let Ok(bytes) = read_memory_bytes(pid, saved.address, 64) {
+                let start_addr = aob_read_start_address(saved.address, 64, self.state.memory_aob_direction);
+                if let Ok(bytes) = read_memory_bytes(pid, start_addr, 64).or_else(|_| read_memory_bytes(pid, saved.address, 64)) {
                     entries.push(AobCompareEntry {
-                        address: saved.address,
+                        address: start_addr,
                         label: if saved.description.is_empty() {
                             format!("0x{:X}", saved.address)
                         } else {
@@ -21971,6 +21977,14 @@ fn resolve_memory_address(
     Ok(address)
 }
 
+fn aob_read_start_address(address: usize, len: usize, direction: MemoryAobDirection) -> usize {
+    match direction {
+        MemoryAobDirection::After => address,
+        MemoryAobDirection::Before => address.saturating_sub(len),
+        MemoryAobDirection::Both => address.saturating_sub(len / 2),
+    }
+}
+
 fn format_aob_hex(bytes: &[u8]) -> String {
     if bytes.is_empty() {
         return String::new();
@@ -22125,166 +22139,298 @@ pub fn generate_aob_wildcard_candidates(input_aob: &str) -> Vec<(String, String,
     let mut seen = HashSet::new();
 
     let (orig_pat, orig_wc) = format_aob_tokens_to_string(&tokens);
-    candidates.push((
-        format!("Gốc ({} wildcard)", orig_wc),
-        orig_pat.clone(),
-        orig_wc,
-    ));
-    seen.insert(orig_pat);
 
-    // 1-byte masks
-    for i in 0..len {
-        if tokens[i].is_some() {
+    let non_zero_indices: Vec<usize> = tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &t)| match t {
+            Some(b) if b != 0 => Some(i),
+            _ => None,
+        })
+        .collect();
+
+    let zero_indices: Vec<usize> = tokens
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &t)| match t {
+            Some(0) => Some(i),
+            _ => None,
+        })
+        .collect();
+
+    // Strategy 1: Data / Struct pattern (has zero bytes as structural anchors)
+    if !zero_indices.is_empty() && !non_zero_indices.is_empty() {
+        // Step 1: Maximum wildcard - mask ALL non-zero bytes, keeping ONLY 00 bytes (and existing ??)
+        let mut mutated = tokens.clone();
+        for &idx in &non_zero_indices {
+            mutated[idx] = None;
+        }
+        let (pat, wc) = format_aob_tokens_to_string(&mutated);
+        if seen.insert(pat.clone()) {
+            candidates.push((format!("Mask all non-zero ({} wildcards)", wc), pat, wc));
+        }
+
+        // Step 2: Progressive reduction - replace ?? back with original non-zero values
+        let m = non_zero_indices.len();
+        if m >= 2 {
+            // Restore in progressive percentages: 25%, 50%, 75%
+            let percentages = if m >= 4 {
+                vec![25, 50, 75]
+            } else {
+                vec![50]
+            };
+
+            for pct in percentages {
+                let keep_count = ((m * pct + 50) / 100).clamp(1, m.saturating_sub(1));
+                let mut mutated = tokens.clone();
+                for &idx in &non_zero_indices[keep_count..] {
+                    mutated[idx] = None;
+                }
+                let (pat, wc) = format_aob_tokens_to_string(&mutated);
+                if seen.insert(pat.clone()) {
+                    candidates.push((
+                        format!("Narrow: Keep {}% non-zero ({} wildcards)", pct, wc),
+                        pat,
+                        wc,
+                    ));
+                }
+            }
+
+            // Reverse direction: Keep trailing non-zero bytes
+            if m >= 4 {
+                let keep_count = (m / 2).max(1);
+                let mut mutated = tokens.clone();
+                for &idx in &non_zero_indices[..m.saturating_sub(keep_count)] {
+                    mutated[idx] = None;
+                }
+                let (pat, wc) = format_aob_tokens_to_string(&mutated);
+                if seen.insert(pat.clone()) {
+                    candidates.push((
+                        format!("Narrow: Keep tail non-zero ({} wildcards)", wc),
+                        pat,
+                        wc,
+                    ));
+                }
+            }
+
+            // Keep header non-zero cluster (first 1..4 non-zero bytes), mask the rest
+            let header_keep = (m / 4).clamp(1, 4).min(m.saturating_sub(1));
             let mut mutated = tokens.clone();
-            mutated[i] = None;
+            for &idx in &non_zero_indices[header_keep..] {
+                mutated[idx] = None;
+            }
             let (pat, wc) = format_aob_tokens_to_string(&mutated);
             if seen.insert(pat.clone()) {
-                candidates.push((format!("Wildcard 1 byte (+{:02X})", i), pat, wc));
+                candidates.push((
+                    format!("Keep header non-zero (rest wildcard)"),
+                    pat,
+                    wc,
+                ));
+            }
+
+            // Keep trailer non-zero cluster (last 1..4 non-zero bytes), mask the rest
+            let trailer_keep = (m / 4).clamp(1, 4).min(m.saturating_sub(1));
+            let mut mutated = tokens.clone();
+            for &idx in &non_zero_indices[..m.saturating_sub(trailer_keep)] {
+                mutated[idx] = None;
+            }
+            let (pat, wc) = format_aob_tokens_to_string(&mutated);
+            if seen.insert(pat.clone()) {
+                candidates.push((
+                    format!("Keep trailer non-zero (rest wildcard)"),
+                    pat,
+                    wc,
+                ));
+            }
+
+            // Keep both header & trailer non-zero, mask middle non-zero
+            if m >= 6 {
+                let h_keep = (m / 6).clamp(1, 3);
+                let t_keep = (m / 6).clamp(1, 3);
+                if h_keep + t_keep < m {
+                    let mut mutated = tokens.clone();
+                    for &idx in &non_zero_indices[h_keep..m.saturating_sub(t_keep)] {
+                        mutated[idx] = None;
+                    }
+                    let (pat, wc) = format_aob_tokens_to_string(&mutated);
+                    if seen.insert(pat.clone()) {
+                        candidates.push((
+                            format!("Keep header & trailer (middle wildcard)"),
+                            pat,
+                            wc,
+                        ));
+                    }
+                }
+            }
+
+            // Mask multi-byte non-zero runs (>= 4 bytes: pointers, float/double fields, timestamps)
+            // while preserving small scalar flags (< 4 bytes) and all 00 bytes
+            let mut cluster_mutated = tokens.clone();
+            let mut run_start: Option<usize> = None;
+            let mut run_len = 0;
+            let mut found_cluster = false;
+            for i in 0..=len {
+                let is_nonzero = i < len && match tokens[i] {
+                    Some(b) => b != 0,
+                    None => false,
+                };
+                if is_nonzero {
+                    if run_start.is_none() {
+                        run_start = Some(i);
+                    }
+                    run_len += 1;
+                } else {
+                    if let Some(start) = run_start {
+                        if run_len >= 4 {
+                            found_cluster = true;
+                            for k in start..start + run_len {
+                                cluster_mutated[k] = None;
+                            }
+                        }
+                    }
+                    run_start = None;
+                    run_len = 0;
+                }
+            }
+            if found_cluster {
+                let (pat, wc) = format_aob_tokens_to_string(&cluster_mutated);
+                if seen.insert(pat.clone()) {
+                    candidates.push((
+                        format!("Mask pointer clusters (>=4B, keep flags & zeros)"),
+                        pat,
+                        wc,
+                    ));
+                }
+            }
+
+            // Mask 8-byte pointer slots (64-bit alignment)
+            if len >= 16 {
+                let mut mutated = tokens.clone();
+                let mut masked_any = false;
+                for chunk_start in (0..=len.saturating_sub(8)).step_by(8) {
+                    let has_nonzero = (chunk_start..chunk_start + 8).any(|i| match tokens[i] {
+                        Some(b) => b != 0,
+                        _ => false,
+                    });
+                    let has_zero = (chunk_start..chunk_start + 8).any(|i| tokens[i] == Some(0));
+                    if has_nonzero && !has_zero {
+                        for k in chunk_start..chunk_start + 8 {
+                            mutated[k] = None;
+                        }
+                        masked_any = true;
+                    }
+                }
+                if masked_any {
+                    let (pat, wc) = format_aob_tokens_to_string(&mutated);
+                    if seen.insert(pat.clone()) {
+                        candidates.push((
+                            format!("Mask 64-bit pointer slots"),
+                            pat,
+                            wc,
+                        ));
+                    }
+                }
+            }
+
+            // Mask 4-byte displacement slots (32-bit alignment)
+            if len >= 8 {
+                let mut mutated = tokens.clone();
+                let mut masked_any = false;
+                for chunk_start in (0..=len.saturating_sub(4)).step_by(4) {
+                    let all_nonzero = (chunk_start..chunk_start + 4).all(|i| match tokens[i] {
+                        Some(b) => b != 0,
+                        _ => false,
+                    });
+                    if all_nonzero {
+                        for k in chunk_start..chunk_start + 4 {
+                            mutated[k] = None;
+                        }
+                        masked_any = true;
+                    }
+                }
+                if masked_any {
+                    let (pat, wc) = format_aob_tokens_to_string(&mutated);
+                    if seen.insert(pat.clone()) {
+                        candidates.push((
+                            format!("Mask 32-bit field offsets"),
+                            pat,
+                            wc,
+                        ));
+                    }
+                }
             }
         }
-    }
-
-    // 2-byte masks (immediate/operand)
-    if len >= 2 {
-        for i in 0..len - 1 {
-            if tokens[i].is_some() || tokens[i + 1].is_some() {
-                let mut mutated = tokens.clone();
+    } else {
+        // Strategy 2: Code instructions (few or no zero bytes)
+        // Keep opcode (+00), mask operands
+        if len >= 2 {
+            let mut mutated = tokens.clone();
+            for i in 1..len {
                 mutated[i] = None;
-                mutated[i + 1] = None;
-                let (pat, wc) = format_aob_tokens_to_string(&mutated);
-                if seen.insert(pat.clone()) {
-                    candidates.push((
-                        format!("Wildcard 2 byte (+{:02X}..+{:02X})", i, i + 1),
-                        pat,
-                        wc,
-                    ));
-                }
-            }
-        }
-    }
-
-    // 4-byte masks (32-bit displacement / call / jump / immediate)
-    if len >= 4 {
-        for i in 0..=len - 4 {
-            let mut mutated = tokens.clone();
-            for k in 0..4 {
-                mutated[i + k] = None;
             }
             let (pat, wc) = format_aob_tokens_to_string(&mutated);
             if seen.insert(pat.clone()) {
-                candidates.push((
-                    format!("Wildcard 4 byte (+{:02X}..+{:02X})", i, i + 3),
-                    pat,
-                    wc,
-                ));
+                candidates.push((format!("Keep opcode (+00), mask operands"), pat, wc));
             }
         }
-    }
 
-    // 3-byte masks
-    if len >= 5 {
-        for i in 0..=len - 3 {
-            let mut mutated = tokens.clone();
-            for k in 0..3 {
-                mutated[i + k] = None;
-            }
-            let (pat, wc) = format_aob_tokens_to_string(&mutated);
-            if seen.insert(pat.clone()) {
-                candidates.push((
-                    format!("Wildcard 3 byte (+{:02X}..+{:02X})", i, i + 2),
-                    pat,
-                    wc,
-                ));
-            }
-        }
-    }
-
-    // Suffix displacement (last 4 bytes)
-    if len >= 6 {
-        let mut mutated = tokens.clone();
-        for k in (len - 4)..len {
-            mutated[k] = None;
-        }
-        let (pat, wc) = format_aob_tokens_to_string(&mutated);
-        if seen.insert(pat.clone()) {
-            candidates.push((
-                format!("Displacement cuối 4 byte (+{:02X}..+{:02X})", len - 4, len - 1),
-                pat,
-                wc,
-            ));
-        }
-    }
-
-    // Suffix 6 bytes
-    if len >= 8 {
-        let mut mutated = tokens.clone();
-        for k in (len - 6)..len {
-            mutated[k] = None;
-        }
-        let (pat, wc) = format_aob_tokens_to_string(&mutated);
-        if seen.insert(pat.clone()) {
-            candidates.push((
-                format!("Đuôi 6 byte (+{:02X}..+{:02X})", len - 6, len - 1),
-                pat,
-                wc,
-            ));
-        }
-    }
-
-    // Prefix 2 bytes
-    if len >= 6 {
-        let mut mutated = tokens.clone();
-        mutated[0] = None;
-        mutated[1] = None;
-        let (pat, wc) = format_aob_tokens_to_string(&mutated);
-        if seen.insert(pat.clone()) {
-            candidates.push(("Đầu 2 byte (+00..+01)".to_string(), pat, wc));
-        }
-    }
-
-    // 8-byte masks (64-bit address or pointer)
-    if len >= 12 {
-        for i in 0..=len - 8 {
-            let mut mutated = tokens.clone();
-            for k in 0..8 {
-                mutated[i + k] = None;
-            }
-            let (pat, wc) = format_aob_tokens_to_string(&mutated);
-            if seen.insert(pat.clone()) {
-                candidates.push((
-                    format!("Wildcard 8 byte (+{:02X}..+{:02X})", i, i + 7),
-                    pat,
-                    wc,
-                ));
-            }
-        }
-    }
-
-    // Dual 2-byte operand pairs
-    if len >= 8 {
-        for &(start1, start2) in &[(1, 5), (2, 6), (1, len.saturating_sub(2))] {
-            if start2 + 1 < len {
+        // Progressive code masks (keep 25%, 50%, 75% of instructions)
+        if len >= 4 {
+            for pct in [25, 50, 75] {
+                let keep_count = ((len * pct + 50) / 100).clamp(1, len.saturating_sub(1));
                 let mut mutated = tokens.clone();
-                mutated[start1] = None;
-                mutated[start1 + 1] = None;
-                mutated[start2] = None;
-                mutated[start2 + 1] = None;
+                for i in keep_count..len {
+                    mutated[i] = None;
+                }
                 let (pat, wc) = format_aob_tokens_to_string(&mutated);
                 if seen.insert(pat.clone()) {
                     candidates.push((
-                        format!(
-                            "Dual 2 byte (+{:02X}..+{:02X} & +{:02X}..+{:02X})",
-                            start1,
-                            start1 + 1,
-                            start2,
-                            start2 + 1
-                        ),
+                        format!("Narrow: Keep {}% code ({} wildcards)", pct, wc),
                         pat,
                         wc,
                     ));
                 }
             }
         }
+
+        // Suffix 4-byte displacement (typical call/jump offset or immediate)
+        if len >= 5 {
+            let mut mutated = tokens.clone();
+            for k in (len - 4)..len {
+                mutated[k] = None;
+            }
+            let (pat, wc) = format_aob_tokens_to_string(&mutated);
+            if seen.insert(pat.clone()) {
+                candidates.push((
+                    format!("Mask call/jump displacement (+{:02X}..+{:02X})", len - 4, len - 1),
+                    pat,
+                    wc,
+                ));
+            }
+        }
+
+        // Suffix 8-byte pointer (typical 64-bit absolute address or QWORD immediate)
+        if len >= 10 {
+            let mut mutated = tokens.clone();
+            for k in (len - 8)..len {
+                mutated[k] = None;
+            }
+            let (pat, wc) = format_aob_tokens_to_string(&mutated);
+            if seen.insert(pat.clone()) {
+                candidates.push((
+                    format!("Mask 64-bit displacement (+{:02X}..+{:02X})", len - 8, len - 1),
+                    pat,
+                    wc,
+                ));
+            }
+        }
+    }
+
+    // Always include Original as baseline
+    if seen.insert(orig_pat.clone()) {
+        candidates.push((format!("Original ({} wildcards)", orig_wc), orig_pat, orig_wc));
+    } else {
+        candidates.push((format!("Original ({} wildcards)", orig_wc), orig_pat, orig_wc));
     }
 
     candidates
@@ -22308,14 +22454,23 @@ mod tests {
 
     #[test]
     fn test_generate_aob_wildcard_candidates() {
-        let input = "48 89 5C 24 08";
-        let candidates = generate_aob_wildcard_candidates(input);
-        assert!(!candidates.is_empty());
-        assert_eq!(candidates[0].1, "48 89 5C 24 08");
-        assert_eq!(candidates[0].2, 0);
-        assert!(candidates.iter().any(|(_lbl, pat, wc)| *wc == 1 && pat.contains("??")));
-        assert!(candidates.iter().any(|(_lbl, pat, wc)| *wc == 2 && pat.contains("?? ??")));
-        assert!(candidates.iter().any(|(_lbl, pat, wc)| *wc == 4 && pat.contains("?? ?? ?? ??")));
+        let code_input = "48 89 5C 24 08";
+        let code_candidates = generate_aob_wildcard_candidates(code_input);
+        assert!(!code_candidates.is_empty());
+        assert!(code_candidates.iter().any(|(lbl, _pat, wc)| *wc > 0 && lbl.contains("Keep opcode")));
+        assert!(code_candidates.iter().any(|(lbl, _pat, wc)| *wc > 0 && lbl.contains("Narrow: Keep")));
+
+        // Test struct/data pattern with zeroes and non-zero bytes (user example scenario)
+        let struct_input = "01 00 00 00 00 00 00 00 56 49 60 8C 00 17 03 90";
+        let struct_candidates = generate_aob_wildcard_candidates(struct_input);
+        assert!(!struct_candidates.is_empty());
+        // Candidate 0 must be "Mask all non-zero" with max wildcards, preserving 00
+        assert_eq!(struct_candidates[0].0, "Mask all non-zero (8 wildcards)");
+        assert_eq!(struct_candidates[0].1, "?? 00 00 00 00 00 00 00 ?? ?? ?? ?? 00 ?? ?? ??");
+        // Must contain progressive reduction restoring non-zero bytes
+        assert!(struct_candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Narrow: Keep")));
+        // Must NOT have single-byte placeholder mutations like "?? 00 00 00 ... 56 49 ..."
+        assert!(!struct_candidates.iter().any(|(lbl, _pat, _wc)| lbl.contains("Wildcard 1 byte")));
     }
 
     #[test]
@@ -22649,6 +22804,17 @@ mod tests {
         });
         let deserialized: MemoryCodeEntry = serde_json::from_value(json).expect("deserialize entry");
         assert_eq!(deserialized.aob_target_offset, 0);
+    }
+
+    #[test]
+    fn test_aob_read_start_address_directions() {
+        let addr = 0x1000;
+        assert_eq!(aob_read_start_address(addr, 64, MemoryAobDirection::After), 0x1000);
+        assert_eq!(aob_read_start_address(addr, 64, MemoryAobDirection::Before), 0x1000 - 64);
+        assert_eq!(aob_read_start_address(addr, 64, MemoryAobDirection::Both), 0x1000 - 32);
+
+        assert_eq!(aob_read_start_address(addr, 32, MemoryAobDirection::Both), 0x1000 - 16);
+        assert_eq!(aob_read_start_address(addr, 128, MemoryAobDirection::Both), 0x1000 - 64);
     }
 
     #[test]
