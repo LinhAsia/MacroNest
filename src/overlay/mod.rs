@@ -31541,7 +31541,9 @@ mod windows_overlay {
             .strip_prefix("0x")
             .or_else(|| address_text.strip_prefix("0X"))
         {
-            return usize::from_str_radix(hex, 16).ok();
+            if let Ok(addr) = usize::from_str_radix(hex, 16) {
+                return Some(addr);
+            }
         }
         if address_text
             .chars()
@@ -31559,6 +31561,58 @@ mod windows_overlay {
         }
         address_text.parse::<usize>().ok().or_else(|| {
             usize::from_str_radix(&address_text, 16).ok().or_else(|| {
+                let compact = address_text.replace(' ', "");
+                let operator = compact
+                    .char_indices()
+                    .skip(1)
+                    .find(|(_, character)| matches!(character, '+' | '-'));
+                if let Some((position, _)) = operator {
+                    let base_str = &compact[..position];
+                    let base = base_str
+                        .strip_prefix("0x")
+                        .or_else(|| base_str.strip_prefix("0X"))
+                        .and_then(|h| usize::from_str_radix(h, 16).ok())
+                        .or_else(|| usize::from_str_radix(base_str, 16).ok());
+                    if let Some(mut addr) = base {
+                        let mut pos = position;
+                        let mut ok = true;
+                        while pos < compact.len() {
+                            let op = compact.as_bytes()[pos];
+                            let start = pos + 1;
+                            pos = compact[start..]
+                                .char_indices()
+                                .find(|(_, c)| matches!(c, '+' | '-'))
+                                .map_or(compact.len(), |(n, _)| start + n);
+                            let off_str = &compact[start..pos];
+                            let off_hex = off_str
+                                .strip_prefix("0x")
+                                .or_else(|| off_str.strip_prefix("0X"))
+                                .unwrap_or(off_str);
+                            let off = usize::from_str_radix(off_hex, 16).ok();
+                            if let Some(off) = off {
+                                if op == b'+' {
+                                    if let Some(next) = addr.checked_add(off) {
+                                        addr = next;
+                                    } else {
+                                        ok = false;
+                                        break;
+                                    }
+                                } else if let Some(next) = addr.checked_sub(off) {
+                                    addr = next;
+                                } else {
+                                    ok = false;
+                                    break;
+                                }
+                            } else {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if ok {
+                            return Some(addr);
+                        }
+                    }
+                }
                 let value = evaluate_math_expression_f64(&address_text);
                 (value.is_finite() && value >= 0.0 && value <= usize::MAX as f64)
                     .then_some(value as usize)
@@ -32831,10 +32885,23 @@ mod windows_overlay {
 
         #[test]
         fn parses_unprefixed_hex_memory_address_for_macro_and_esp() {
+            let _guard = TEST_MUTEX.lock().unwrap();
             assert_eq!(parse_memory_address("215DF862E18"), Some(0x215DF862E18));
             assert_eq!(parse_memory_address("215df862e18"), Some(0x215DF862E18));
             assert_eq!(parse_memory_address("20385101704"), Some(0x20385101704));
             assert_eq!(parse_memory_address("4096"), Some(4096));
+            assert_eq!(parse_memory_address("0x1FE98E2F528 + 8"), Some(0x1FE98E2F530));
+            assert_eq!(parse_memory_address("0x1FE98E2F528 + 0x8"), Some(0x1FE98E2F530));
+            assert_eq!(parse_memory_address("0x1FE98E2F528+8"), Some(0x1FE98E2F530));
+            assert_eq!(parse_memory_address("0x1000 + 10 - 8"), Some(0x1008));
+            assert_eq!(parse_memory_address("215DF862E18 + 8"), Some(0x215DF862E20));
+
+            TEXT_VARIABLES.lock().insert("q".to_string(), "0x1FE98E2F528".to_string());
+            assert_eq!(parse_memory_address("{q} + 8"), Some(0x1FE98E2F530));
+            assert_eq!(parse_memory_address("{q} + 0x8"), Some(0x1FE98E2F530));
+            assert_eq!(parse_memory_address("{q}+8"), Some(0x1FE98E2F530));
+            assert_eq!(parse_memory_address("q + 8"), Some(0x1FE98E2F530));
+            TEXT_VARIABLES.lock().remove("q");
         }
 
         #[test]
