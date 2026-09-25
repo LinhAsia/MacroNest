@@ -605,6 +605,13 @@ pub(crate) enum MacroActionSubmenuKind {
     Esp,
     AudioSense,
     Funny,
+    Loop,
+    Window,
+    Crosshair,
+    Pin,
+    Hud,
+    KeyLock,
+    Step,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

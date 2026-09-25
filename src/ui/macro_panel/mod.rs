@@ -118,67 +118,78 @@ impl CrosshairApp {
                     key_trimmed.clone()
                 };
 
-                egui::ComboBox::from_id_salt(ui.id().with("instruction-combo"))
-                    .width(105.0)
-                    .selected_text(Self::truncate_window_title(&selected_label, 16))
-                    .show_ui(ui, |ui| {
-                        let has_codes = !memory_codes.is_empty()
-                            || memory_pointers.iter().any(|p| !p.code_module.is_empty());
-                        if !has_codes {
-                            ui.label(
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "(No saved instructions in Memory Panel)",
-                                    "(Chưa có instruction nào trong Memory Panel)",
-                                ))
-                                .weak()
-                                .italics(),
-                            );
-                        }
+                const INSTRUCTION_COMBO_WIDTH: f32 = 120.0;
+                let combo_resp = ui.allocate_ui_with_layout(
+                    egui::vec2(INSTRUCTION_COMBO_WIDTH, ui.spacing().interact_size.y),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_width(INSTRUCTION_COMBO_WIDTH);
+                        egui::ComboBox::from_id_salt(ui.id().with("instruction-combo"))
+                            .width(INSTRUCTION_COMBO_WIDTH)
+                            .truncate()
+                            .selected_text(&selected_label)
+                            .show_ui(ui, |ui| {
+                                let has_codes = !memory_codes.is_empty()
+                                    || memory_pointers.iter().any(|p| !p.code_module.is_empty());
+                                if !has_codes {
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "(No saved instructions in Memory Panel)",
+                                            "(Chưa có instruction nào trong Memory Panel)",
+                                        ))
+                                        .weak()
+                                        .italics(),
+                                    );
+                                }
 
-                        for code in memory_codes {
-                            let item_key = if !code.name.trim().is_empty() {
-                                format!("@{}", code.name.trim())
-                            } else {
-                                format!("{}+{:X}", code.module, code.offset)
-                            };
-                            let is_sel = key_trimmed == item_key || key_trimmed == code.name.trim();
-                            let label = if !code.name.trim().is_empty() {
-                                format!(
-                                    "{} ({}+{:X})  {}",
-                                    code.name.trim(),
-                                    code.module,
-                                    code.offset,
-                                    code.instruction
-                                )
-                            } else {
-                                format!("{}+{:X}  {}", code.module, code.offset, code.instruction)
-                            };
-                            if ui
-                                .selectable_label(is_sel, label)
-                                .on_hover_text(&code.instruction)
-                                .clicked()
-                            {
-                                step.key = item_key;
-                                changed = true;
-                            }
-                        }
+                                for code in memory_codes {
+                                    let item_key = if !code.name.trim().is_empty() {
+                                        format!("@{}", code.name.trim())
+                                    } else {
+                                        format!("{}+{:X}", code.module, code.offset)
+                                    };
+                                    let is_sel = key_trimmed == item_key || key_trimmed == code.name.trim();
+                                    let label = if !code.name.trim().is_empty() {
+                                        format!(
+                                            "{} ({}+{:X})  {}",
+                                            code.name.trim(),
+                                            code.module,
+                                            code.offset,
+                                            code.instruction
+                                        )
+                                    } else {
+                                        format!("{}+{:X}  {}", code.module, code.offset, code.instruction)
+                                    };
+                                    if ui
+                                        .selectable_label(is_sel, label)
+                                        .on_hover_text(&code.instruction)
+                                        .clicked()
+                                    {
+                                        step.key = item_key;
+                                        changed = true;
+                                    }
+                                }
 
-                        for p in memory_pointers.iter().filter(|p| !p.code_module.is_empty()) {
-                            let item_key = format!("@{}", p.name.trim());
-                            let is_sel = key_trimmed == item_key || key_trimmed == p.name.trim();
-                            let label = format!(
-                                "{} ({}+{:X}) [Ptr]",
-                                p.name.trim(),
-                                p.code_module,
-                                p.code_offset
-                            );
-                            if ui.selectable_label(is_sel, label).clicked() {
-                                step.key = item_key;
-                                changed = true;
-                            }
-                        }
-                    });
+                                for p in memory_pointers.iter().filter(|p| !p.code_module.is_empty()) {
+                                    let item_key = format!("@{}", p.name.trim());
+                                    let is_sel = key_trimmed == item_key || key_trimmed == p.name.trim();
+                                    let label = format!(
+                                        "{} ({}+{:X}) [Ptr]",
+                                        p.name.trim(),
+                                        p.code_module,
+                                        p.code_offset
+                                    );
+                                    if ui.selectable_label(is_sel, label).clicked() {
+                                        step.key = item_key;
+                                        changed = true;
+                                    }
+                                }
+                            })
+                            .response
+                    },
+                );
+                combo_resp.inner.on_hover_text(&selected_label);
 
                 ui.label("→");
                 let var_len = step.if_variable_name.chars().count();
@@ -279,10 +290,10 @@ impl CrosshairApp {
                         .selectable_value(&mut step.memory_value_type, MemoryValueType::F64, "Double (8 Bytes)")
                         .changed();
                 });
-            let address_response = Self::render_expandable_text_edit(
+            let address_response = Self::render_variable_text_edit(
                     ui,
                     &mut step.key,
-                    ui.make_persistent_id("memory-address"),
+                    ui.id().with("memory-address"),
                     150.0,
                     360.0,
                     21.0,
@@ -3396,8 +3407,16 @@ impl CrosshairApp {
         let timer_popup_id = egui::Id::new((id_source, "timer-submenu-popup"));
         let if_popup_id = egui::Id::new((id_source, "if-submenu-popup"));
         let geometry_popup_id = egui::Id::new((id_source, "geometry-submenu-popup"));
+        let esp_popup_id = egui::Id::new((id_source, "esp-submenu-popup"));
         let audio_sense_popup_id = egui::Id::new((id_source, "audiosense-submenu-popup"));
         let funny_popup_id = egui::Id::new((id_source, "funny-submenu-popup"));
+        let loop_popup_id = egui::Id::new((id_source, "loop-submenu-popup"));
+        let window_popup_id = egui::Id::new((id_source, "window-submenu-popup"));
+        let crosshair_popup_id = egui::Id::new((id_source, "crosshair-submenu-popup"));
+        let pin_popup_id = egui::Id::new((id_source, "pin-submenu-popup"));
+        let hud_popup_id = egui::Id::new((id_source, "hud-submenu-popup"));
+        let keylock_popup_id = egui::Id::new((id_source, "keylock-submenu-popup"));
+        let step_popup_id = egui::Id::new((id_source, "step-submenu-popup"));
         ui.ctx().data_mut(|data| {
             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
             data.insert_temp(macro_popup_id, false);
@@ -3408,8 +3427,16 @@ impl CrosshairApp {
             data.insert_temp(timer_popup_id, false);
             data.insert_temp(if_popup_id, false);
             data.insert_temp(geometry_popup_id, false);
+            data.insert_temp(esp_popup_id, false);
             data.insert_temp(audio_sense_popup_id, false);
             data.insert_temp(funny_popup_id, false);
+            data.insert_temp(loop_popup_id, false);
+            data.insert_temp(window_popup_id, false);
+            data.insert_temp(crosshair_popup_id, false);
+            data.insert_temp(pin_popup_id, false);
+            data.insert_temp(hud_popup_id, false);
+            data.insert_temp(keylock_popup_id, false);
+            data.insert_temp(step_popup_id, false);
         });
         egui::Popup::close_id(ui.ctx(), macro_popup_id);
         egui::Popup::close_id(ui.ctx(), mouse_popup_id);
@@ -3418,8 +3445,16 @@ impl CrosshairApp {
         egui::Popup::close_id(ui.ctx(), timer_popup_id);
         egui::Popup::close_id(ui.ctx(), if_popup_id);
         egui::Popup::close_id(ui.ctx(), geometry_popup_id);
+        egui::Popup::close_id(ui.ctx(), esp_popup_id);
         egui::Popup::close_id(ui.ctx(), audio_sense_popup_id);
         egui::Popup::close_id(ui.ctx(), funny_popup_id);
+        egui::Popup::close_id(ui.ctx(), loop_popup_id);
+        egui::Popup::close_id(ui.ctx(), window_popup_id);
+        egui::Popup::close_id(ui.ctx(), crosshair_popup_id);
+        egui::Popup::close_id(ui.ctx(), pin_popup_id);
+        egui::Popup::close_id(ui.ctx(), hud_popup_id);
+        egui::Popup::close_id(ui.ctx(), keylock_popup_id);
+        egui::Popup::close_id(ui.ctx(), step_popup_id);
         for (_, _, _, popup_key) in Self::mouse_click_action_groups().iter().copied() {
             let child_popup_id = egui::Id::new((id_source, popup_key, "popup"));
             ui.ctx()
@@ -8875,7 +8910,7 @@ impl CrosshairApp {
                                                 self.state.ui_theme,
                                             ))
                                             .show_ui(ui, |ui| {
-                                                ui.set_min_width(520.0);
+                                                ui.set_min_width(455.0);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                 ui.separator();
                                                 let action_hover_id = ui.make_persistent_id((
@@ -8883,8 +8918,6 @@ impl CrosshairApp {
                                                     preset.id,
                                                     "hold-stop-action-hover",
                                                 ));
-                                                let mouse_group_id =
-                                                    (group.id, preset.id, "hold-stop-mouse-group");
                                                 let block_top_level_hover =
                                                     Self::pointer_in_mouse_click_child_popup(
                                                         ui,
@@ -8897,168 +8930,21 @@ impl CrosshairApp {
                                                         block_top_level_hover,
                                                     );
                                                 });
-                                                egui::Grid::new((group.id, preset.id, "hold-stop-action-grid"))
-                                                    .num_columns(8)
-                                                    .spacing([6.0, 6.0])
-                                                    .show(ui, |ui| {
-                                                        let mut grid_col = 0;
-                                                        for action in [
-                                                            MacroAction::KeyPress,
-                                                            MacroAction::KeyDown,
-                                                            MacroAction::KeyUp,
-                                                            MacroAction::TypeText,
-                                                            MacroAction::BackgroundKey,
-                                                            MacroAction::ApplyWindowPreset,
-                                                            MacroAction::FocusWindowPreset,
-                                                            MacroAction::TriggerCommandPreset,
-                                                            MacroAction::EnableCrosshairProfile,
-                                                            MacroAction::DisableCrosshair,
-                                                            MacroAction::EnablePinPreset,
-                                                            MacroAction::DisablePin,
-                                                            MacroAction::PlaySoundPreset,
-                                                            MacroAction::ApplyMouseSensitivityPreset,
-                                                            MacroAction::LoopStart,
-                                                            MacroAction::LoopEnd,
-                                                            MacroAction::StopIfKeyPressed,
-                                                            MacroAction::ShowHud,
-                                                            MacroAction::HideHud,
-                                                            MacroAction::HideTaskbar,
-                                                            MacroAction::ShowTaskbar,
-                                                            MacroAction::LockKeys,
-                                                            MacroAction::UnlockKeys,
-                                                            MacroAction::EnableMacroPreset,
-                                                            MacroAction::DisableMacroPreset,
-                                                                MacroAction::EnableStep,
-                                                                MacroAction::DisableStep,
-                                                             MacroAction::SetVariable,
-                                                             MacroAction::OcrSearch,
-                                                             MacroAction::JumpToStep,
-                                                        ]
-                                                        {
-                                                            Self::render_macro_action_option(
-                                                                ui,
-                                                                language,
-                                                                &mut step.action,
-                                                                action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                                false,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 {
-                                                                ui.end_row();
-                                                            }
-                                                        }
-                                                        Self::render_mouse_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            mouse_group_id,
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_trigger_macro_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-trigger-macro-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_network_action_single_option(
-                                                            ui,
-                                                            language,
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_memory_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-memory-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_image_search_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-image-search-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_timer_action_group_option(
-                                                             ui,
-                                                             language,
-                                                             (group.id, preset.id, "hold-stop-timer-group"),
-                                                             &mut step.action,
-                                                             &mut live_sync,
-                                                             action_hover_id,
-                                                         );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_if_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-if-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_geometry_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-geometry-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_esp_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-esp-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_audio_sense_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-audiosense-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_funny_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "hold-stop-funny-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                });
+                                                Self::render_macro_action_picker_grid(
+
+                                                    ui,
+
+                                                    language,
+
+                                                    (group.id, preset.id, "hold-stop-action-grid"),
+
+                                                    &mut step.action,
+
+                                                    &mut live_sync,
+
+                                                    action_hover_id,
+
+                                                );
                                                 Self::forward_action_popup_scroll(ui);
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -11307,7 +11193,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 self.state.ui_theme,
                                             ))
                                             .show_ui(ui, |ui| {
-                                                ui.set_min_width(520.0);
+                                                ui.set_min_width(455.0);
                                                 live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                 ui.separator();
                                                 let action_hover_id = ui.make_persistent_id((
@@ -11315,8 +11201,6 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     preset.id,
                                                     "press-stop-action-hover",
                                                 ));
-                                                let mouse_group_id =
-                                                    (group.id, preset.id, "press-stop-mouse-group");
                                                 let block_top_level_hover =
                                                     Self::pointer_in_mouse_click_child_popup(
                                                         ui,
@@ -11329,168 +11213,21 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         block_top_level_hover,
                                                     );
                                                 });
-                                                egui::Grid::new((group.id, preset.id, "press-stop-action-grid"))
-                                                    .num_columns(8)
-                                                    .spacing([6.0, 6.0])
-                                                    .show(ui, |ui| {
-                                                        let mut grid_col = 0;
-                                                        for action in [
-                                                            MacroAction::KeyPress,
-                                                            MacroAction::KeyDown,
-                                                            MacroAction::KeyUp,
-                                                            MacroAction::TypeText,
-                                                            MacroAction::BackgroundKey,
-                                                            MacroAction::ApplyWindowPreset,
-                                                            MacroAction::FocusWindowPreset,
-                                                            MacroAction::TriggerCommandPreset,
-                                                            MacroAction::EnableCrosshairProfile,
-                                                            MacroAction::DisableCrosshair,
-                                                            MacroAction::EnablePinPreset,
-                                                            MacroAction::DisablePin,
-                                                            MacroAction::PlaySoundPreset,
-                                                            MacroAction::ApplyMouseSensitivityPreset,
-                                                            MacroAction::LoopStart,
-                                                            MacroAction::LoopEnd,
-                                                            MacroAction::StopIfKeyPressed,
-                                                            MacroAction::ShowHud,
-                                                            MacroAction::HideHud,
-                                                            MacroAction::HideTaskbar,
-                                                            MacroAction::ShowTaskbar,
-                                                            MacroAction::LockKeys,
-                                                            MacroAction::UnlockKeys,
-                                                            MacroAction::EnableMacroPreset,
-                                                            MacroAction::DisableMacroPreset,
-                                                                MacroAction::EnableStep,
-                                                                MacroAction::DisableStep,
-                                                             MacroAction::SetVariable,
-                                                             MacroAction::OcrSearch,
-                                                             MacroAction::JumpToStep,
-                                                        ]
-                                                        {
-                                                            Self::render_macro_action_option(
-                                                                ui,
-                                                                language,
-                                                                &mut step.action,
-                                                                action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                                false,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 {
-                                                                ui.end_row();
-                                                            }
-                                                        }
-                                                        Self::render_mouse_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            mouse_group_id,
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_trigger_macro_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "press-stop-trigger-macro-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_network_action_single_option(
-                                                            ui,
-                                                            language,
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_memory_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "press-stop-memory-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_image_search_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "press-stop-image-search-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_timer_action_group_option(
-                                                             ui,
-                                                             language,
-                                                             (group.id, preset.id, "press-stop-timer-group"),
-                                                             &mut step.action,
-                                                             &mut live_sync,
-                                                             action_hover_id,
-                                                         );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_if_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "press-stop-if-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_geometry_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "press-stop-geometry-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_esp_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "press-stop-esp-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_audio_sense_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "press-stop-audiosense-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                                        Self::render_funny_action_group_option(
-                                                            ui,
-                                                            language,
-                                                            (group.id, preset.id, "press-stop-funny-group"),
-                                                            &mut step.action,
-                                                            &mut live_sync,
-                                                            action_hover_id,
-                                                        );
-                                                        grid_col += 1;
-                                                        if grid_col % 8 == 0 { ui.end_row(); }
-                                });
+                                                Self::render_macro_action_picker_grid(
+
+                                                    ui,
+
+                                                    language,
+
+                                                    (group.id, preset.id, "press-stop-action-grid"),
+
+                                                    &mut step.action,
+
+                                                    &mut live_sync,
+
+                                                    action_hover_id,
+
+                                                );
                                                 Self::forward_action_popup_scroll(ui);
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -14671,7 +14408,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     self.state.ui_theme,
                                                 ))
                                                 .show_ui(ui, |ui| {
-                                                    ui.set_min_width(520.0);
+                                                    ui.set_min_width(455.0);
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                     ui.separator();
                                                     let action_hover_id = ui.make_persistent_id((
@@ -14680,12 +14417,6 @@ if supports_move_mouse || show_detection_tuning {
                                                         step_index,
                                                         "action-hover",
                                                     ));
-                                                    let mouse_group_id = (
-                                                        group.id,
-                                                        preset.id,
-                                                        step_index,
-                                                        "mouse-group",
-                                                    );
                                                     let block_top_level_hover =
                                                         Self::pointer_in_mouse_click_child_popup(
                                                             ui,
@@ -14698,167 +14429,21 @@ if supports_move_mouse || show_detection_tuning {
                                                             block_top_level_hover,
                                                         );
                                                     });
-                                                    egui::Grid::new((group.id, preset.id, step_index, "action-grid"))
-                                                        .num_columns(8)
-                                                        .spacing([6.0, 6.0])
-                                                        .show(ui, |ui| {
-                                                            let mut grid_col = 0;
-                                                            for action in [
-                                                                MacroAction::KeyPress,
-                                                                MacroAction::KeyDown,
-                                                                MacroAction::KeyUp,
-                                                                MacroAction::TypeText,
-                                                                MacroAction::BackgroundKey,
-                                                                MacroAction::ApplyWindowPreset,
-                                                                MacroAction::FocusWindowPreset,
-                                                                MacroAction::TriggerCommandPreset,
-                                                                MacroAction::EnableCrosshairProfile,
-                                                                MacroAction::DisableCrosshair,
-                                                                MacroAction::EnablePinPreset,
-                                                                MacroAction::DisablePin,
-                                                                MacroAction::PlaySoundPreset,
-                                                                    MacroAction::ApplyMouseSensitivityPreset,
-                                                                MacroAction::LoopStart,
-                                                                MacroAction::LoopEnd,
-                                                                MacroAction::StopIfKeyPressed,
-                                                                MacroAction::ShowHud,
-                                                                MacroAction::HideHud,
-                                                                MacroAction::HideTaskbar,
-                                                                MacroAction::ShowTaskbar,
-                                                                MacroAction::LockKeys,
-                                                                MacroAction::UnlockKeys,
-                                                                MacroAction::EnableMacroPreset,
-                                                                MacroAction::DisableMacroPreset,
-                                                                MacroAction::EnableStep,
-                                                                MacroAction::DisableStep,
-                                                                MacroAction::SetVariable,
-                                                                MacroAction::OcrSearch,
-                                                                MacroAction::JumpToStep,
-                                                            ] {
-                                                                Self::render_macro_action_option(
-                                                                    ui,
-                                                                    language,
-                                                                    &mut step.action,
-                                                                    action,
-                                                                    &mut live_sync,
-                                                                    action_hover_id,
-                                                                    false,
-                                                                );
-                                                                grid_col += 1;
-                                                                if grid_col % 8 == 0 {
-                                                                    ui.end_row();
-                                                                }
-                                                            }
-                                                            Self::render_mouse_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                mouse_group_id,
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_trigger_macro_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "trigger-macro-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_network_action_single_option(
-                                                                ui,
-                                                                language,
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_memory_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "memory-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_image_search_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "image-search-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_timer_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "timer-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_if_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "if-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_geometry_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "geometry-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_esp_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "esp-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_audio_sense_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "audiosense-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                            Self::render_funny_action_group_option(
-                                                                ui,
-                                                                language,
-                                                                (group.id, preset.id, step_index, "funny-group"),
-                                                                &mut step.action,
-                                                                &mut live_sync,
-                                                                action_hover_id,
-                                                            );
-                                                            grid_col += 1;
-                                                            if grid_col % 8 == 0 { ui.end_row(); }
-                                                        });
+                                                    Self::render_macro_action_picker_grid(
+
+                                                        ui,
+
+                                                        language,
+
+                                                        (group.id, preset.id, step_index, "action-grid"),
+
+                                                        &mut step.action,
+
+                                                        &mut live_sync,
+
+                                                        action_hover_id,
+
+                                                    );
                                                     Self::forward_action_popup_scroll(ui);
                                                 });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -19780,7 +19365,7 @@ if supports_move_mouse || show_detection_tuning {
                             .num_columns(2)
                             .spacing([6.0, 6.0])
                             .show(ui, |ui| {
-                                for action in Self::trigger_macro_action_choices().iter().copied() {
+                                for (idx, action) in Self::trigger_macro_action_choices().iter().copied().enumerate() {
                                     Self::render_macro_action_option(
                                         ui,
                                         language,
@@ -19790,6 +19375,9 @@ if supports_move_mouse || show_detection_tuning {
                                         action_hover_id,
                                         true,
                                     );
+                                    if (idx + 1) % 2 == 0 {
+                                        ui.end_row();
+                                    }
                                 }
                             });
                     });
@@ -20286,6 +19874,8 @@ if supports_move_mouse || show_detection_tuning {
             MacroAction::TriggerMacroPreset,
             MacroAction::TriggerMacroPresetIfEnabled,
             MacroAction::StopMacroPreset,
+            MacroAction::EnableMacroPreset,
+            MacroAction::DisableMacroPreset,
         ]
     }
 
@@ -20575,6 +20165,427 @@ if supports_move_mouse || show_detection_tuning {
                 ),
             );
         }
+    }
+
+    fn loop_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::LoopStart,
+            MacroAction::LoopEnd,
+            MacroAction::StopIfKeyPressed,
+        ]
+    }
+
+    fn window_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::ApplyWindowPreset,
+            MacroAction::FocusWindowPreset,
+            MacroAction::TriggerCommandPreset,
+            MacroAction::ShowTaskbar,
+            MacroAction::HideTaskbar,
+        ]
+    }
+
+    fn crosshair_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::EnableCrosshairProfile,
+            MacroAction::DisableCrosshair,
+        ]
+    }
+
+    fn pin_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::EnablePinPreset,
+            MacroAction::DisablePin,
+        ]
+    }
+
+    fn hud_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::ShowHud,
+            MacroAction::HideHud,
+        ]
+    }
+
+    fn key_lock_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::LockKeys,
+            MacroAction::UnlockKeys,
+        ]
+    }
+
+    fn step_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::EnableStep,
+            MacroAction::DisableStep,
+        ]
+    }
+
+    fn render_macro_action_submenu_group(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+        kind: MacroActionSubmenuKind,
+        popup_key: &'static str,
+        icon_codepoint: u32,
+        label: &'static str,
+        tooltip: &str,
+        actions: &'static [MacroAction],
+        columns: usize,
+        popup_width: f32,
+    ) {
+        let id_source = action_hover_id;
+        let hover_blocked = Self::macro_action_hover_blocked(ui, action_hover_id);
+        let selected = actions.contains(current);
+        let owner_id = egui::Id::new("macro-action-submenu-owner");
+        let popup_id = egui::Id::new((id_source, popup_key));
+        let active_owner = ui
+            .ctx()
+            .data(|data| data.get_temp::<MacroActionSubmenuKind>(owner_id));
+        let top_level_hovered = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(action_hover_id))
+            .unwrap_or(false);
+        let mut open = ui
+            .ctx()
+            .data(|data| data.get_temp::<bool>(popup_id))
+            .unwrap_or(false);
+        if active_owner != Some(kind) {
+            open = false;
+        }
+        if top_level_hovered {
+            open = false;
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(owner_id, None::<MacroActionSubmenuKind>));
+        }
+        if open {
+            let parent_layer = ui.layer_id();
+            let popup_layer = egui::LayerId::new(egui::Order::Foreground, popup_id);
+            ui.ctx().set_sublayer(parent_layer, popup_layer);
+            ui.ctx().move_to_top(popup_layer);
+        }
+        let inner = ui.allocate_ui_with_layout(
+            vec2(58.0, 42.0),
+            egui::Layout::top_down(egui::Align::Center),
+            |ui| {
+                let response = ui.add_sized(
+                    [34.0, 24.0],
+                    Button::new(Self::material_icon_text(icon_codepoint, 18.0)).selected(selected),
+                );
+                if response.clicked() || (!hover_blocked && response.hovered()) {
+                    Self::clear_macro_action_submenus(ui, id_source);
+                    open = true;
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(owner_id, kind)
+                    });
+                }
+                let popup_rect_id = ui.make_persistent_id((id_source, popup_key, "rect"));
+                let popup_response = egui::Popup::from_response(&response)
+                    .id(popup_id)
+                    .open_bool(&mut open)
+                    .align(egui::RectAlign::BOTTOM_START)
+                    .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                    .width(popup_width)
+                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .show(|ui| {
+                        let rect = ui.max_rect();
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(popup_rect_id, rect));
+                        egui::Grid::new((id_source, popup_key, "grid"))
+                            .num_columns(columns)
+                            .spacing([6.0, 6.0])
+                            .show(ui, |ui| {
+                                for (idx, action) in actions.iter().copied().enumerate() {
+                                    Self::render_macro_action_option(
+                                        ui,
+                                        language,
+                                        current,
+                                        action,
+                                        live_sync,
+                                        action_hover_id,
+                                        true,
+                                    );
+                                    if (idx + 1) % columns == 0 {
+                                        ui.end_row();
+                                    }
+                                }
+                            });
+                    });
+                let popup_rect: Option<egui::Rect> =
+                    ui.ctx().data(|data| data.get_temp(popup_rect_id));
+                if open {
+                    if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+                        let mut keep_open_rect = response.rect.expand(10.0);
+                        if let Some(rect) = popup_rect {
+                            keep_open_rect = keep_open_rect.union(rect.expand(10.0));
+                            if rect.contains(pointer_pos) {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(owner_id, kind)
+                                });
+                            }
+                        }
+                        if !keep_open_rect.contains(pointer_pos) {
+                            open = false;
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                            });
+                        }
+                    } else {
+                        open = false;
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(owner_id, None::<MacroActionSubmenuKind>)
+                        });
+                    }
+                }
+                ui.ctx().data_mut(|data| data.insert_temp(popup_id, open));
+                let label_color = if selected {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.label(
+                    RichText::new(label)
+                        .size(9.0)
+                        .color(label_color),
+                );
+                if let Some(popup) = popup_response {
+                    popup.response
+                } else {
+                    response
+                }
+            },
+        );
+        let response = inner.inner;
+        if !open {
+            Self::show_instant_hover_tooltip(
+                ui,
+                &response,
+                tooltip,
+            );
+        }
+    }
+
+    fn render_loop_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        Self::render_macro_action_submenu_group(
+            ui,
+            language,
+            current,
+            live_sync,
+            action_hover_id,
+            MacroActionSubmenuKind::Loop,
+            "loop-submenu-popup",
+            0xe028,
+            "Loop",
+            &Self::tr_lang(language, "Loop Actions (Loop, End, Break)", "Thao tác Vòng lặp (Loop, End, Break)"),
+            Self::loop_macro_actions(),
+            3,
+            195.0,
+        );
+    }
+
+    fn render_window_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        Self::render_macro_action_submenu_group(
+            ui,
+            language,
+            current,
+            live_sync,
+            action_hover_id,
+            MacroActionSubmenuKind::Window,
+            "window-submenu-popup",
+            0xe8b8,
+            "Window",
+            &Self::tr_lang(language, "Window & Taskbar Actions", "Thao tác Cửa sổ & Taskbar"),
+            Self::window_macro_actions(),
+            3,
+            195.0,
+        );
+    }
+
+    fn render_crosshair_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        Self::render_macro_action_submenu_group(
+            ui,
+            language,
+            current,
+            live_sync,
+            action_hover_id,
+            MacroActionSubmenuKind::Crosshair,
+            "crosshair-submenu-popup",
+            0xe3c5,
+            "Cross",
+            &Self::tr_lang(language, "Crosshair Profile (On / Off)", "Tâm ngắm Crosshair (Bật / Tắt)"),
+            Self::crosshair_macro_actions(),
+            2,
+            135.0,
+        );
+    }
+
+    fn render_pin_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        Self::render_macro_action_submenu_group(
+            ui,
+            language,
+            current,
+            live_sync,
+            action_hover_id,
+            MacroActionSubmenuKind::Pin,
+            "pin-submenu-popup",
+            0xe0c8,
+            "Pin",
+            &Self::tr_lang(language, "Pin Preset (On / Off)", "Ghim cửa sổ Pin (Bật / Tắt)"),
+            Self::pin_macro_actions(),
+            2,
+            135.0,
+        );
+    }
+
+    fn render_hud_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        Self::render_macro_action_submenu_group(
+            ui,
+            language,
+            current,
+            live_sync,
+            action_hover_id,
+            MacroActionSubmenuKind::Hud,
+            "hud-submenu-popup",
+            0xe8f4,
+            "HUD",
+            &Self::tr_lang(language, "HUD Display (Show / Hide)", "Hiển thị HUD (Bật / Tắt)"),
+            Self::hud_macro_actions(),
+            2,
+            135.0,
+        );
+    }
+
+    fn render_key_lock_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        Self::render_macro_action_submenu_group(
+            ui,
+            language,
+            current,
+            live_sync,
+            action_hover_id,
+            MacroActionSubmenuKind::KeyLock,
+            "keylock-submenu-popup",
+            0xe897,
+            "Lock",
+            &Self::tr_lang(language, "Key Lock (On / Off)", "Khóa phím (Bật / Tắt)"),
+            Self::key_lock_macro_actions(),
+            2,
+            135.0,
+        );
+    }
+
+    fn render_step_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        Self::render_macro_action_submenu_group(
+            ui,
+            language,
+            current,
+            live_sync,
+            action_hover_id,
+            MacroActionSubmenuKind::Step,
+            "step-submenu-popup",
+            0xe86c,
+            "Step",
+            &Self::tr_lang(language, "Step State (Enable / Disable)", "Trạng thái Step (Bật / Tắt)"),
+            Self::step_macro_actions(),
+            2,
+            135.0,
+        );
+    }
+
+    fn render_macro_action_picker_grid(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        grid_id: impl std::hash::Hash + Copy,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        egui::Grid::new(grid_id)
+            .num_columns(7)
+            .spacing([6.0, 6.0])
+            .show(ui, |ui| {
+                // Row 1: Key & Mouse inputs
+                Self::render_macro_action_option(ui, language, current, MacroAction::KeyPress, live_sync, action_hover_id, false);
+                Self::render_macro_action_option(ui, language, current, MacroAction::KeyDown, live_sync, action_hover_id, false);
+                Self::render_macro_action_option(ui, language, current, MacroAction::KeyUp, live_sync, action_hover_id, false);
+                Self::render_macro_action_option(ui, language, current, MacroAction::TypeText, live_sync, action_hover_id, false);
+                Self::render_macro_action_option(ui, language, current, MacroAction::BackgroundKey, live_sync, action_hover_id, false);
+                Self::render_mouse_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                Self::render_macro_action_option(ui, language, current, MacroAction::ApplyMouseSensitivityPreset, live_sync, action_hover_id, false);
+                ui.end_row();
+
+                // Row 2: Flow & Control
+                Self::render_loop_action_group_option(ui, language, current, live_sync, action_hover_id);
+                Self::render_if_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                Self::render_macro_action_option(ui, language, current, MacroAction::JumpToStep, live_sync, action_hover_id, false);
+                Self::render_macro_action_option(ui, language, current, MacroAction::SetVariable, live_sync, action_hover_id, false);
+                Self::render_timer_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                Self::render_step_action_group_option(ui, language, current, live_sync, action_hover_id);
+                Self::render_trigger_macro_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                ui.end_row();
+
+                // Row 3: System & Overlays
+                Self::render_window_action_group_option(ui, language, current, live_sync, action_hover_id);
+                Self::render_crosshair_action_group_option(ui, language, current, live_sync, action_hover_id);
+                Self::render_pin_action_group_option(ui, language, current, live_sync, action_hover_id);
+                Self::render_hud_action_group_option(ui, language, current, live_sync, action_hover_id);
+                Self::render_key_lock_action_group_option(ui, language, current, live_sync, action_hover_id);
+                Self::render_macro_action_option(ui, language, current, MacroAction::PlaySoundPreset, live_sync, action_hover_id, false);
+                Self::render_audio_sense_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                ui.end_row();
+
+                // Row 4: Detection & Advanced
+                Self::render_memory_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                Self::render_image_search_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                Self::render_macro_action_option(ui, language, current, MacroAction::OcrSearch, live_sync, action_hover_id, false);
+                Self::render_esp_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                Self::render_geometry_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                Self::render_network_action_single_option(ui, language, current, live_sync, action_hover_id);
+                Self::render_funny_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
+                ui.end_row();
+            });
     }
 
     fn render_audio_sense_preset_selector(
