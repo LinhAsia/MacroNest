@@ -9941,10 +9941,11 @@ if supports_move_mouse || show_detection_tuning {
                                                                  let mode_label = match current_mode.as_str() {
                                                                      "VarCompare" => Self::tr_lang(language, "Var compare", "Var compare"),
                                                                      "StopKey" => Self::tr_lang(language, "Stop key", "Stop key"),
+                                                                     "Timeout" => Self::tr_lang(language, "Timeout", "Timeout (Thời gian)"),
                                                                      _ => Self::tr_lang(language, "Break Loop", "Break Loop"),
                                                                  };
                                                                  egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-loop-break-mode"))
-                                                                     .width(100.0)
+                                                                     .width(115.0)
                                                                      .selected_text(mode_label)
                                                                      .show_ui(ui, |ui| {
                                                                          if ui.selectable_label(current_mode == "Immediate", Self::tr_lang(language, "Break Loop", "Break Loop")).clicked() {
@@ -9960,6 +9961,14 @@ if supports_move_mouse || show_detection_tuning {
                                                                          if ui.selectable_label(current_mode == "StopKey", Self::tr_lang(language, "Stop key", "Stop key")).clicked() {
                                                                              step.break_loop_mode = "StopKey".to_string();
                                                                              step.break_loop_by_variable = false;
+                                                                             live_sync = true;
+                                                                         }
+                                                                         if ui.selectable_label(current_mode == "Timeout", Self::tr_lang(language, "Timeout", "Timeout (Thời gian)")).clicked() {
+                                                                             step.break_loop_mode = "Timeout".to_string();
+                                                                             step.break_loop_by_variable = false;
+                                                                             if step.key.trim().is_empty() {
+                                                                                 step.key = "1000".to_string();
+                                                                             }
                                                                              live_sync = true;
                                                                          }
                                                                      });
@@ -10056,6 +10065,55 @@ if supports_move_mouse || show_detection_tuning {
                                                                              live_sync = true;
                                                                          },
                                                                      );
+                                                                 } else if mode == "Timeout" {
+                                                                     let key_id = ui.id().with("hold-stop-loop-break-timeout-val");
+                                                                     let response = Self::render_variable_text_edit(
+                                                                         ui,
+                                                                         &mut step.key,
+                                                                         key_id,
+                                                                         76.0,
+                                                                         140.0,
+                                                                         21.0, 21.0,
+                                                                         Self::tr_lang(language, "duration/expr", "thời gian/biểu thức"),
+                                                                         false,
+                                                                     );
+                                                                     Self::apply_vietnamese_input_if_changed(
+                                                                         &response,
+                                                                         self.state.vietnamese_input_enabled,
+                                                                         self.state.vietnamese_input_mode,
+                                                                         &mut step.key,
+                                                                     );
+                                                                     live_sync |= response.changed();
+                                                                     Self::render_variable_suggestions(ui, &response, &mut step.key, &timer_names, language);
+                                                                     let unit_text = if step.wait_time_unit.is_empty() { "ms" } else { &step.wait_time_unit };
+                                                                     egui::ComboBox::from_id_salt((group.id, preset.id, "hold-stop-loop-timeout-unit"))
+                                                                         .width(42.0)
+                                                                         .selected_text(unit_text)
+                                                                         .show_ui(ui, |ui| {
+                                                                             for unit in &["ms", "s", "m"] {
+                                                                                 let label = *unit;
+                                                                                 let val = if label == "ms" { "" } else { label };
+                                                                                 if ui.selectable_label(step.wait_time_unit == val, label).clicked() {
+                                                                                     step.wait_time_unit = val.to_string();
+                                                                                     live_sync = true;
+                                                                                 }
+                                                                             }
+                                                                         });
+                                                                     let timeout_ms = step.get_break_loop_timeout_ms();
+                                                                     if let Some(start_time) = crate::overlay::get_break_loop_timer(preset.id, 0) {
+                                                                         let elapsed = start_time.elapsed().as_millis() as u64;
+                                                                         let text = if timeout_ms > elapsed {
+                                                                             format!("({}ms left)", timeout_ms - elapsed)
+                                                                         } else {
+                                                                             format!("({}ms)", elapsed)
+                                                                         };
+                                                                         ui.add_space(2.0);
+                                                                         ui.label(
+                                                                             RichText::new(text)
+                                                                                 .size(10.0)
+                                                                                 .color(Color32::from_rgb(0, 191, 255))
+                                                                         ).on_hover_text(Self::tr_lang(language, "Active timer countdown", "Thời gian đếm ngược đang chạy"));
+                                                                     }
                                                                  }
                                                              });
                                                              if step.get_break_loop_mode() == "VarCompare" {
@@ -12308,10 +12366,11 @@ if supports_move_mouse || show_detection_tuning {
                                                                  let mode_label = match current_mode.as_str() {
                                                                      "VarCompare" => Self::tr_lang(language, "Var compare", "Var compare"),
                                                                      "StopKey" => Self::tr_lang(language, "Stop key", "Stop key"),
+                                                                     "Timeout" => Self::tr_lang(language, "Timeout", "Timeout (Thời gian)"),
                                                                      _ => Self::tr_lang(language, "Break Loop", "Break Loop"),
                                                                  };
                                                                  egui::ComboBox::from_id_salt((group.id, preset.id, "press-stop-loop-break-mode"))
-                                                                     .width(100.0)
+                                                                     .width(115.0)
                                                                      .selected_text(mode_label)
                                                                      .show_ui(ui, |ui| {
                                                                          if ui.selectable_label(current_mode == "Immediate", Self::tr_lang(language, "Break Loop", "Break Loop")).clicked() {
@@ -12327,6 +12386,14 @@ if supports_move_mouse || show_detection_tuning {
                                                                          if ui.selectable_label(current_mode == "StopKey", Self::tr_lang(language, "Stop key", "Stop key")).clicked() {
                                                                              step.break_loop_mode = "StopKey".to_string();
                                                                              step.break_loop_by_variable = false;
+                                                                             live_sync = true;
+                                                                         }
+                                                                         if ui.selectable_label(current_mode == "Timeout", Self::tr_lang(language, "Timeout", "Timeout (Thời gian)")).clicked() {
+                                                                             step.break_loop_mode = "Timeout".to_string();
+                                                                             step.break_loop_by_variable = false;
+                                                                             if step.key.trim().is_empty() {
+                                                                                 step.key = "1000".to_string();
+                                                                             }
                                                                              live_sync = true;
                                                                          }
                                                                      });
@@ -12423,6 +12490,55 @@ if supports_move_mouse || show_detection_tuning {
                                                                              live_sync = true;
                                                                          },
                                                                      );
+                                                                 } else if mode == "Timeout" {
+                                                                     let key_id = ui.id().with("press-stop-loop-timeout-val");
+                                                                     let response = Self::render_variable_text_edit(
+                                                                         ui,
+                                                                         &mut step.key,
+                                                                         key_id,
+                                                                         76.0,
+                                                                         140.0,
+                                                                         21.0, 21.0,
+                                                                         Self::tr_lang(language, "duration/expr", "thời gian/biểu thức"),
+                                                                         false,
+                                                                     );
+                                                                     Self::apply_vietnamese_input_if_changed(
+                                                                         &response,
+                                                                         self.state.vietnamese_input_enabled,
+                                                                         self.state.vietnamese_input_mode,
+                                                                         &mut step.key,
+                                                                     );
+                                                                     live_sync |= response.changed();
+                                                                     Self::render_variable_suggestions(ui, &response, &mut step.key, &timer_names, language);
+                                                                     let unit_text = if step.wait_time_unit.is_empty() { "ms" } else { &step.wait_time_unit };
+                                                                     egui::ComboBox::from_id_salt((group.id, preset.id, "press-stop-loop-timeout-unit"))
+                                                                         .width(42.0)
+                                                                         .selected_text(unit_text)
+                                                                         .show_ui(ui, |ui| {
+                                                                             for unit in &["ms", "s", "m"] {
+                                                                                 let label = *unit;
+                                                                                 let val = if label == "ms" { "" } else { label };
+                                                                                 if ui.selectable_label(step.wait_time_unit == val, label).clicked() {
+                                                                                     step.wait_time_unit = val.to_string();
+                                                                                     live_sync = true;
+                                                                                 }
+                                                                             }
+                                                                         });
+                                                                     let timeout_ms = step.get_break_loop_timeout_ms();
+                                                                     if let Some(start_time) = crate::overlay::get_break_loop_timer(preset.id, 0) {
+                                                                         let elapsed = start_time.elapsed().as_millis() as u64;
+                                                                         let text = if timeout_ms > elapsed {
+                                                                             format!("({}ms left)", timeout_ms - elapsed)
+                                                                         } else {
+                                                                             format!("({}ms)", elapsed)
+                                                                         };
+                                                                         ui.add_space(2.0);
+                                                                         ui.label(
+                                                                             RichText::new(text)
+                                                                                 .size(10.0)
+                                                                                 .color(Color32::from_rgb(0, 191, 255))
+                                                                         ).on_hover_text(Self::tr_lang(language, "Active timer countdown", "Thời gian đếm ngược đang chạy"));
+                                                                     }
                                                                  }
                                                              });
                                                              if step.get_break_loop_mode() == "VarCompare" {
@@ -15788,10 +15904,11 @@ if supports_move_mouse || show_detection_tuning {
                                                                  let mode_label = match current_mode.as_str() {
                                                                      "VarCompare" => Self::tr_lang(language, "Var compare", "Var compare"),
                                                                      "StopKey" => Self::tr_lang(language, "Stop key", "Stop key"),
+                                                                     "Timeout" => Self::tr_lang(language, "Timeout", "Timeout (Thời gian)"),
                                                                      _ => Self::tr_lang(language, "Break Loop", "Break Loop"),
                                                                  };
                                                                  egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "stop-loop-break-mode"))
-                                                                     .width(100.0)
+                                                                     .width(115.0)
                                                                      .selected_text(mode_label)
                                                                      .show_ui(ui, |ui| {
                                                                          if ui.selectable_label(current_mode == "Immediate", Self::tr_lang(language, "Break Loop", "Break Loop")).clicked() {
@@ -15807,6 +15924,14 @@ if supports_move_mouse || show_detection_tuning {
                                                                          if ui.selectable_label(current_mode == "StopKey", Self::tr_lang(language, "Stop key", "Stop key")).clicked() {
                                                                              step.break_loop_mode = "StopKey".to_string();
                                                                              step.break_loop_by_variable = false;
+                                                                             live_sync = true;
+                                                                         }
+                                                                         if ui.selectable_label(current_mode == "Timeout", Self::tr_lang(language, "Timeout", "Timeout (Thời gian)")).clicked() {
+                                                                             step.break_loop_mode = "Timeout".to_string();
+                                                                             step.break_loop_by_variable = false;
+                                                                             if step.key.trim().is_empty() {
+                                                                                 step.key = "1000".to_string();
+                                                                             }
                                                                              live_sync = true;
                                                                          }
                                                                      });
@@ -15907,6 +16032,55 @@ if supports_move_mouse || show_detection_tuning {
                                                                              live_sync = true;
                                                                          },
                                                                      );
+                                                                 } else if mode == "Timeout" {
+                                                                     let key_id = ui.id().with((step_index, "loop-break-timeout-val"));
+                                                                     let response = Self::render_variable_text_edit(
+                                                                         ui,
+                                                                         &mut step.key,
+                                                                         key_id,
+                                                                         76.0,
+                                                                         140.0,
+                                                                         21.0, 21.0,
+                                                                         Self::tr_lang(language, "duration/expr", "thời gian/biểu thức"),
+                                                                         false,
+                                                                     );
+                                                                     Self::apply_vietnamese_input_if_changed(
+                                                                         &response,
+                                                                         self.state.vietnamese_input_enabled,
+                                                                         self.state.vietnamese_input_mode,
+                                                                         &mut step.key,
+                                                                     );
+                                                                     live_sync |= response.changed();
+                                                                     Self::render_variable_suggestions(ui, &response, &mut step.key, &timer_names, language);
+                                                                     let unit_text = if step.wait_time_unit.is_empty() { "ms" } else { &step.wait_time_unit };
+                                                                     egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "loop-break-timeout-unit"))
+                                                                         .width(42.0)
+                                                                         .selected_text(unit_text)
+                                                                         .show_ui(ui, |ui| {
+                                                                             for unit in &["ms", "s", "m"] {
+                                                                                 let label = *unit;
+                                                                                 let val = if label == "ms" { "" } else { label };
+                                                                                 if ui.selectable_label(step.wait_time_unit == val, label).clicked() {
+                                                                                     step.wait_time_unit = val.to_string();
+                                                                                     live_sync = true;
+                                                                                 }
+                                                                             }
+                                                                         });
+                                                                     let timeout_ms = step.get_break_loop_timeout_ms();
+                                                                     if let Some(start_time) = crate::overlay::get_break_loop_timer(preset.id, step_index) {
+                                                                         let elapsed = start_time.elapsed().as_millis() as u64;
+                                                                         let text = if timeout_ms > elapsed {
+                                                                             format!("({}ms left)", timeout_ms - elapsed)
+                                                                         } else {
+                                                                             format!("({}ms)", elapsed)
+                                                                         };
+                                                                         ui.add_space(2.0);
+                                                                         ui.label(
+                                                                             RichText::new(text)
+                                                                                 .size(MACRO_STEP_TEXT_SIZE)
+                                                                                 .color(Color32::from_rgb(0, 191, 255))
+                                                                         ).on_hover_text(Self::tr_lang(language, "Active timer countdown", "Thời gian đếm ngược đang chạy"));
+                                                                     }
                                                                  }
                                                              });
                                                              if step.get_break_loop_mode() == "VarCompare" {

@@ -803,6 +803,22 @@ impl MacroStep {
         }
     }
 
+    pub fn get_break_loop_timeout_ms(&self) -> u64 {
+        let text = self.key.trim();
+        if text.is_empty() {
+            return 0;
+        }
+        let interpolated = crate::overlay::interpolate_variables(text);
+        let base_val = crate::overlay::evaluate_math_expression_f64(&interpolated);
+        let multiplier = match self.wait_time_unit.as_str() {
+            "s" => 1000.0,
+            "m" => 60000.0,
+            "h" => 3600000.0,
+            _ => 1.0,
+        };
+        (base_val.max(0.0) * multiplier).round() as u64
+    }
+
     pub fn get_delay_ms(&self) -> u64 {
         if !self.delay_expr.trim().is_empty() {
             let interpolated = crate::overlay::interpolate_variables(&self.delay_expr);
@@ -1418,5 +1434,21 @@ mod tests {
         step.action = MacroAction::KeyPress;
         step.key = "infinite".to_string();
         assert!(!step.is_infinite_loop());
+    }
+
+    #[test]
+    fn test_break_loop_timeout_ms() {
+        let mut step = MacroStep::default();
+        step.key = "1500".to_string();
+        step.wait_time_unit = "".to_string();
+        assert_eq!(step.get_break_loop_timeout_ms(), 1500);
+
+        step.key = "2.5".to_string();
+        step.wait_time_unit = "s".to_string();
+        assert_eq!(step.get_break_loop_timeout_ms(), 2500);
+
+        step.key = "1".to_string();
+        step.wait_time_unit = "m".to_string();
+        assert_eq!(step.get_break_loop_timeout_ms(), 60000);
     }
 }

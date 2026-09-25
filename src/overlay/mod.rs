@@ -1564,7 +1564,26 @@ mod windows_overlay {
         pb.finish()
     }
 
+    pub(crate) static BREAK_LOOP_TIMERS: Lazy<Mutex<HashMap<(u32, usize), Instant>>> =
+        Lazy::new(|| Mutex::new(HashMap::new()));
+
+    pub(crate) fn get_break_loop_timer(preset_id: u32, step_index: usize) -> Option<Instant> {
+        BREAK_LOOP_TIMERS.lock().get(&(preset_id, step_index)).copied()
+    }
+
+    pub(crate) fn clear_break_loop_timers_for_preset(preset_id: u32) {
+        BREAK_LOOP_TIMERS.lock().retain(|(p, _), _| *p != preset_id);
+    }
+
+    pub(crate) fn clear_break_loop_timers_for_indices(preset_id: u32, indices: &[usize]) {
+        let mut timers = BREAK_LOOP_TIMERS.lock();
+        for &idx in indices {
+            timers.remove(&(preset_id, idx));
+        }
+    }
+
     pub fn add_active_preset(preset_id: u32) {
+        clear_break_loop_timers_for_preset(preset_id);
         let mut active = ACTIVE_MACRO_PRESETS.lock();
         active.insert(preset_id);
         drop(active);
@@ -1572,6 +1591,7 @@ mod windows_overlay {
     }
 
     pub fn remove_active_preset(preset_id: u32) {
+        clear_break_loop_timers_for_preset(preset_id);
         let mut active = ACTIVE_MACRO_PRESETS.lock();
         active.remove(&preset_id);
         drop(active);
@@ -29352,6 +29372,7 @@ mod windows_overlay {
                             }
                         }
                     }
+                    clear_break_loop_timers_for_indices(preset_id, loop_body_indices);
 
                     index = loop_end + 1;
                     continue;
@@ -29479,6 +29500,21 @@ mod windows_overlay {
                     "StopKey" => {
                         let keys = parse_stop_keys(&step.key);
                         if keys.iter().any(|key| stop_key_triggered(preset_id, key)) {
+                            return finish_macro_run(
+                                MacroRunFlow::BreakLoop,
+                                pending_macro_preset_changes,
+                            );
+                        }
+                    }
+
+                    "Timeout" => {
+                        let timeout_ms = step.get_break_loop_timeout_ms();
+                        let key = (preset_id, absolute_index);
+                        let mut timers = BREAK_LOOP_TIMERS.lock();
+                        let start_time = *timers.entry(key).or_insert_with(Instant::now);
+                        if start_time.elapsed().as_millis() as u64 >= timeout_ms {
+                            timers.remove(&key);
+                            drop(timers);
                             return finish_macro_run(
                                 MacroRunFlow::BreakLoop,
                                 pending_macro_preset_changes,
@@ -30227,6 +30263,7 @@ mod windows_overlay {
                             }
                         }
                     }
+                    clear_break_loop_timers_for_indices(preset_id, loop_body_indices);
 
                     index = loop_end + 1;
                     continue;
@@ -30354,6 +30391,21 @@ mod windows_overlay {
                     "StopKey" => {
                         let keys = parse_stop_keys(&step.key);
                         if keys.iter().any(|key| stop_key_triggered(preset_id, key)) {
+                            return finish_macro_run(
+                                MacroRunFlow::BreakLoop,
+                                pending_macro_preset_changes,
+                            );
+                        }
+                    }
+
+                    "Timeout" => {
+                        let timeout_ms = step.get_break_loop_timeout_ms();
+                        let key = (preset_id, absolute_index);
+                        let mut timers = BREAK_LOOP_TIMERS.lock();
+                        let start_time = *timers.entry(key).or_insert_with(Instant::now);
+                        if start_time.elapsed().as_millis() as u64 >= timeout_ms {
+                            timers.remove(&key);
+                            drop(timers);
                             return finish_macro_run(
                                 MacroRunFlow::BreakLoop,
                                 pending_macro_preset_changes,
