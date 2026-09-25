@@ -1265,10 +1265,10 @@ impl Default for MemoryPanelState {
             scan_copy_on_write: false,
             scan_active_memory_only: true,
             scan_mem_private: true,
-            scan_mem_image: false,
+            scan_mem_image: true,
             scan_mem_mapped: false,
             scan_scope_all: false,
-            scan_custom_snapshot: [true, false, false, true, true, false, false],
+            scan_custom_snapshot: [true, false, false, true, true, true, false],
             fast_scan: true,
             fast_scan_alignment: "4".to_owned(),
             pause_while_scanning: false,
@@ -1402,6 +1402,27 @@ impl MemoryPanelState {
         } else {
             self.candidates.len().max(self.text_candidates.len())
         }
+    }
+
+    pub fn resolve_static_module(&self, address: usize) -> Option<(String, usize)> {
+        for (name, base, size) in &self.scan_modules {
+            if (*base..base.saturating_add(*size)).contains(&address) {
+                return Some((name.clone(), address.wrapping_sub(*base)));
+            }
+        }
+        #[cfg(windows)]
+        if self.scan_modules.is_empty() {
+            if let Some(pid) = self.process_pid {
+                if let Ok(modules) = process_modules(pid) {
+                    for (name, base, size) in &modules {
+                        if (*base..base.saturating_add(*size)).contains(&address) {
+                            return Some((name.clone(), address.wrapping_sub(*base)));
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 }
 
@@ -3389,6 +3410,10 @@ impl CrosshairApp {
         }
     }
 
+    fn resolve_static_module_address(&self, address: usize) -> Option<(String, usize)> {
+        self.memory_panel.resolve_static_module(address)
+    }
+
     fn render_memory_scan_result_item(
         &mut self,
         ui: &mut egui::Ui,
@@ -3473,10 +3498,27 @@ impl CrosshairApp {
         ui.allocate_ui_at_rect(full_row_rect, |ui| {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                Self::memory_table_cell(
+                let static_mod = self.resolve_static_module_address(address_value);
+                let (addr_text, addr_color, addr_tooltip) = match static_mod {
+                    Some((ref mod_name, mod_offset)) => (
+                        format!("{mod_name}+{mod_offset:X}"),
+                        Color32::from_rgb(84, 214, 140),
+                        Some(format!(
+                            "Static module address:\n• {mod_name} + 0x{mod_offset:X}\n• 0x{address_value:08X}"
+                        )),
+                    ),
+                    None => (
+                        format_memory_address(address_value),
+                        ui.visuals().text_color(),
+                        None,
+                    ),
+                };
+                Self::memory_table_cell_with_bg_and_tooltip(
                     ui,
                     pane_width * address_ratio,
-                    RichText::new(format_memory_address(address_value)).monospace(),
+                    RichText::new(addr_text).monospace().color(addr_color),
+                    None,
+                    addr_tooltip.as_deref(),
                 );
                 let (cell_bg, text_color) = if self.memory_panel.highlight_changed_values {
                     let now = Instant::now();
@@ -3788,7 +3830,7 @@ impl CrosshairApp {
 
 
     fn memory_table_cell(ui: &mut egui::Ui, width: f32, text: RichText) {
-        Self::memory_table_cell_with_bg(ui, width, text, None);
+        Self::memory_table_cell_with_bg_and_tooltip(ui, width, text, None, None);
     }
 
     fn memory_table_cell_with_bg(
@@ -3797,7 +3839,17 @@ impl CrosshairApp {
         text: RichText,
         bg_color: Option<Color32>,
     ) {
-        let (rect, cell_response) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
+        Self::memory_table_cell_with_bg_and_tooltip(ui, width, text, bg_color, None);
+    }
+
+    fn memory_table_cell_with_bg_and_tooltip(
+        ui: &mut egui::Ui,
+        width: f32,
+        text: RichText,
+        bg_color: Option<Color32>,
+        tooltip: Option<&str>,
+    ) {
+        let (rect, mut cell_response) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
         if let Some(bg) = bg_color {
             ui.painter().rect_filled(rect.shrink2(vec2(1.0, 1.0)), 2.0, bg);
         }
@@ -3806,9 +3858,12 @@ impl CrosshairApp {
                 .max_rect(rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        cell_response
+        cell_response = cell_response
             .union(cell.add(egui::Label::new(text).selectable(false).truncate()))
             .on_hover_cursor(egui::CursorIcon::Default);
+        if let Some(tip) = tooltip {
+            cell_response.on_hover_text(tip);
+        }
     }
 
     fn memory_label_cell(
@@ -4306,14 +4361,67 @@ impl CrosshairApp {
                                         .clone()
                                         .on_hover_cursor(egui::CursorIcon::Default);
                                     row_hits.push(value_response.clone());
-                                    let address_response = Self::memory_label_cell(
+                                    let (addr_label, addr_color, addr_tooltip) = if let Some(spec) = self.memory_panel.saved[index].pointer.as_ref() {
+                                        if let Some((mod_name, mod_off)) = &spec.module {
+                                            if spec.offsets.is_empty() {
+                                                (
+                                                    format!("{mod_name}+{mod_off:X}"),
+                                                    Color32::from_rgb(84, 214, 140),
+                                                    Some(format!("Static module address: {mod_name} + 0x{mod_off:X} (0x{address:08X})")),
+                                                )
+                                            } else {
+                                                (
+                                                    format!("P->{mod_name}+{mod_off:X}"),
+                                                    Color32::from_rgb(84, 214, 140),
+                                                    Some(format!("Pointer: {mod_name} + 0x{mod_off:X} -> {:X?} (0x{address:08X})", spec.offsets)),
+                                                )
+                                            }
+                                        } else if !spec.offsets.is_empty() {
+                                            (
+                                                format!("P->0x{:X}", spec.base),
+                                                ui.visuals().text_color(),
+                                                Some(format!("Pointer: 0x{:X} -> {:X?} (0x{address:08X})", spec.base, spec.offsets)),
+                                            )
+                                        } else if let Some((mod_name, mod_off)) = self.resolve_static_module_address(address) {
+                                            (
+                                                format!("{mod_name}+{mod_off:X}"),
+                                                Color32::from_rgb(84, 214, 140),
+                                                Some(format!("Static module address: {mod_name} + 0x{mod_off:X} (0x{address:08X})")),
+                                            )
+                                        } else {
+                                            (
+                                                format_memory_address(address),
+                                                ui.visuals().text_color(),
+                                                None,
+                                            )
+                                        }
+                                    } else if let Some((mod_name, mod_off)) = self.resolve_static_module_address(address) {
+                                        (
+                                            format!("{mod_name}+{mod_off:X}"),
+                                            Color32::from_rgb(84, 214, 140),
+                                            Some(format!("Static module address: {mod_name} + 0x{mod_off:X} (0x{address:08X})")),
+                                        )
+                                    } else {
+                                        (
+                                            format_memory_address(address),
+                                            ui.visuals().text_color(),
+                                            None,
+                                        )
+                                    };
+                                    let mut address_response = Self::memory_label_cell(
                                         ui,
                                         column_width,
                                         row_height,
-                                        egui::Label::new(format_memory_address(address))
-                                            .selectable(false)
-                                            .sense(Sense::hover()),
+                                        egui::Label::new(
+                                            RichText::new(addr_label).monospace().color(addr_color),
+                                        )
+                                        .selectable(false)
+                                        .truncate()
+                                        .sense(Sense::hover()),
                                     );
+                                    if let Some(tip) = addr_tooltip {
+                                        address_response = address_response.on_hover_text(tip);
+                                    }
                                     row_hits.push(address_response);
                                     let mut frozen = frozen_val.is_some();
                                     let frozen_response = ui
@@ -17054,6 +17162,33 @@ impl CrosshairApp {
                 })
             }
         } else {
+            let addr_str = dialog.address.trim();
+            let module_spec = addr_str
+                .rsplit_once('+')
+                .filter(|(module, _)| {
+                    let m = module.trim();
+                    m.contains('.') && !m.starts_with("0x") && !m.starts_with("0X")
+                })
+                .and_then(|(module, offset)| {
+                    parse_hex_offset(offset.trim()).map(|off| (module.trim().to_owned(), off))
+                });
+            if let Some((module_name, module_offset)) = module_spec {
+                let pid = self.memory_panel.process_pid;
+                let resolved = pid
+                    .and_then(|p| resolve_module_offset(p, &module_name, module_offset).ok())
+                    .unwrap_or_default();
+                if let Some(saved) = self.memory_panel.saved.get_mut(dialog.index) {
+                    saved.address = resolved;
+                    saved.pointer = Some(PointerSpec {
+                        base: 0,
+                        module: Some((module_name, module_offset)),
+                        offsets: Vec::new(),
+                    });
+                    saved.frozen = None;
+                }
+                self.persist_memory_pointers();
+                return;
+            }
             let Some(base) = parse_address_edit(
                 self.memory_panel.saved.get(dialog.index).map_or(0, |saved| saved.address),
                 dialog.address.trim(),
@@ -17061,10 +17196,14 @@ impl CrosshairApp {
                 self.memory_panel.status = "Invalid address".to_owned();
                 return;
             };
-            // Non-pointer: resolve to the raw address
+            let pointer = self.resolve_static_module_address(base).map(|(mod_name, mod_off)| PointerSpec {
+                base: 0,
+                module: Some((mod_name, mod_off)),
+                offsets: Vec::new(),
+            });
             if let Some(saved) = self.memory_panel.saved.get_mut(dialog.index) {
                 saved.address = base;
-                saved.pointer = None;
+                saved.pointer = pointer;
                 saved.frozen = None;
             }
             self.persist_memory_pointers();
@@ -18088,7 +18227,11 @@ impl CrosshairApp {
                     },
                     group: String::new(),
                     hexadecimal: false,
-                    pointer: None,
+                    pointer: self.resolve_static_module_address(address).map(|(mod_name, mod_off)| PointerSpec {
+                        base: 0,
+                        module: Some((mod_name, mod_off)),
+                        offsets: Vec::new(),
+                    }),
                     frozen: None,
                     saved_to_library: false,
                     aob_sample_1: None,
@@ -18110,6 +18253,11 @@ impl CrosshairApp {
             }) {
                 continue;
             }
+            let pointer = self.resolve_static_module_address(candidate.address).map(|(mod_name, mod_off)| PointerSpec {
+                base: 0,
+                module: Some((mod_name, mod_off)),
+                offsets: Vec::new(),
+            });
             self.memory_panel.saved.push(SavedMemoryAddress {
                 address: candidate.address,
                 value_type: self.memory_panel.value_type,
@@ -18120,7 +18268,7 @@ impl CrosshairApp {
                 description: String::new(),
                 group: String::new(),
                 hexadecimal: self.memory_panel.hex,
-                pointer: None,
+                pointer,
                 frozen: None,
                 saved_to_library: false,
                 aob_sample_1: None,
@@ -18139,23 +18287,41 @@ impl CrosshairApp {
             self.memory_panel.status = "Select a process".to_owned();
             return;
         };
-        let pointer = parse_pointer_expression(&self.memory_panel.manual_address).map(
-            |(module, module_offset, offsets)| PointerSpec {
+        let pointer = parse_pointer_expression(&self.memory_panel.manual_address)
+            .map(|(module, module_offset, offsets)| PointerSpec {
                 base: 0,
                 module: Some((module, module_offset)),
                 offsets,
-            },
-        );
-        let address = if let Some(pointer) = pointer.as_ref() {
-            match resolve_memory_address(pid, pointer.base, Some(pointer)) {
-                Ok(address) => address,
+            })
+            .or_else(|| {
+                let text = self.memory_panel.manual_address.trim();
+                let (module, offset_str) = text.rsplit_once('+')?;
+                let module = module.trim();
+                if module.contains('.') && !module.starts_with("0x") && !module.starts_with("0X") {
+                    parse_hex_offset(offset_str.trim()).map(|offset| PointerSpec {
+                        base: 0,
+                        module: Some((module.to_owned(), offset)),
+                        offsets: Vec::new(),
+                    })
+                } else {
+                    None
+                }
+            });
+        let (address, pointer) = if let Some(pointer) = pointer {
+            match resolve_memory_address(pid, pointer.base, Some(&pointer)) {
+                Ok(address) => (address, Some(pointer)),
                 Err(error) => {
                     self.memory_panel.status = format!("Unable to resolve pointer: {error}");
                     return;
                 }
             }
         } else if let Some(address) = parse_memory_address(&self.memory_panel.manual_address) {
-            address
+            let pointer = self.resolve_static_module_address(address).map(|(mod_name, mod_off)| PointerSpec {
+                base: 0,
+                module: Some((mod_name, mod_off)),
+                offsets: Vec::new(),
+            });
+            (address, pointer)
         } else {
             self.memory_panel.status = "Invalid address or pointer expression".to_owned();
             return;
@@ -23900,5 +24066,23 @@ mod tests {
         assert!(navigated);
         assert_eq!(dialog.address, 0x2000);
         assert!(panel.selected_saved.contains(&1));
+    }
+
+    #[test]
+    fn test_resolve_static_module_address() {
+        let mut panel = MemoryPanelState::default();
+        panel.scan_modules = vec![
+            ("Game.exe".to_string(), 0x7FF700000000, 0x100000),
+            ("UnityPlayer.dll".to_string(), 0x7FF850000000, 0x200000),
+        ];
+
+        let res = panel.resolve_static_module(0x7FF700012340);
+        assert_eq!(res, Some(("Game.exe".to_string(), 0x12340)));
+
+        let res = panel.resolve_static_module(0x7FF850054320);
+        assert_eq!(res, Some(("UnityPlayer.dll".to_string(), 0x54320)));
+
+        let res = panel.resolve_static_module(0x00000286042C9180);
+        assert_eq!(res, None);
     }
 }

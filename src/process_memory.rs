@@ -85,7 +85,7 @@ impl Default for MemoryScanOptions {
             copy_on_write: false,
             active_memory_only: true,
             mem_private: true,
-            mem_image: false,
+            mem_image: true,
             mem_mapped: false,
             alignment: Some(4),
         }
