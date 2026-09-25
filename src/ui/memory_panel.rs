@@ -1928,10 +1928,15 @@ impl CrosshairApp {
         let mut open = true;
         let mut toggle_pin = false;
         if pinned {
+            let inner_size = if id == "memory-code-list-host" {
+                vec2(940.0, 620.0)
+            } else {
+                vec2(860.0, 620.0)
+            };
             let builder = egui::ViewportBuilder::default()
                 .with_title(title)
                 .with_position(egui::pos2(40.0, 40.0))
-                .with_inner_size(vec2(860.0, 620.0))
+                .with_inner_size(inner_size)
                 .with_min_inner_size(vec2(480.0, 280.0))
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
@@ -1962,9 +1967,14 @@ impl CrosshairApp {
                 self.memory_panel.unpinned_memory_popups.insert(id);
             }
         } else {
+            let default_size = if id == "memory-code-list-host" {
+                vec2(940.0, 520.0)
+            } else {
+                vec2(640.0, 440.0)
+            };
             egui::Window::new(title)
                 .id(egui::Id::new(id))
-                .default_size(vec2(640.0, 440.0))
+                .default_size(default_size)
                 .min_size(vec2(380.0, 240.0))
                 .collapsible(false)
                 .open(&mut open)
@@ -6773,6 +6783,7 @@ impl CrosshairApp {
             Compare(bool),
             ToggleShowAddress,
             RegenerateAob(usize),
+            ToggleHighlight(usize),
         }
 
         let mut pending_action = None;
@@ -6903,7 +6914,7 @@ impl CrosshairApp {
                     } else {
                         Self::memory_view_cell(ui, 490.0, "Name / Instruction");
                     }
-                    Self::memory_view_cell(ui, 350.0, "Action / Status");
+                    Self::memory_view_cell(ui, 400.0, "Action / Status");
                 });
                 #[cfg(windows)]
                 if !self.memory_panel.code_relocate_status.is_empty() {
@@ -6913,6 +6924,7 @@ impl CrosshairApp {
                     );
                 }
                 ui.separator();
+                let is_vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
                         let selected = self.memory_panel.selected_code.contains(&index);
@@ -6925,18 +6937,28 @@ impl CrosshairApp {
                             entry.instruction.clone()
                         };
 
+                        let text_color = if entry.highlighted {
+                            Some(Color32::from_rgb(254, 240, 138))
+                        } else {
+                            None
+                        };
+                        let addr_color = if entry.highlighted {
+                            Some(Color32::from_rgb(253, 224, 71))
+                        } else {
+                            None
+                        };
                         let row_res = ui
                             .horizontal(|ui| {
                                 let (address_response, instruction_response) =
                                     if self.memory_panel.show_code_list_address {
                                         (
-                                            Some(Self::memory_view_cell(ui, 190.0, &address_str)),
-                                            Self::memory_view_cell(ui, 300.0, &instruction_text),
+                                            Some(Self::memory_view_cell_colored(ui, 190.0, &address_str, addr_color)),
+                                            Self::memory_view_cell_colored(ui, 300.0, &instruction_text, text_color),
                                         )
                                     } else {
                                         (
                                             None,
-                                            Self::memory_view_cell(ui, 490.0, &instruction_text),
+                                            Self::memory_view_cell_colored(ui, 490.0, &instruction_text, text_color),
                                         )
                                     };
                                 let action_label = if entry.replaced {
@@ -6994,6 +7016,30 @@ impl CrosshairApp {
                                 if rename_response.clicked() {
                                     pending_action = Some(CodeAction::Rename(index));
                                 }
+                                let mark_label = if entry.highlighted {
+                                    RichText::new("Unmark").color(Color32::from_rgb(253, 224, 71))
+                                } else {
+                                    RichText::new("Mark")
+                                };
+                                let mark_tooltip = if entry.highlighted {
+                                    if is_vietnamese {
+                                        "Bỏ đánh dấu vàng"
+                                    } else {
+                                        "Remove yellow highlight"
+                                    }
+                                } else if is_vietnamese {
+                                    "Đánh dấu vàng dòng này (cần làm mới sau update)"
+                                } else {
+                                    "Highlight row in yellow (mark for game updates)"
+                                };
+                                let mark_response = ui.add_sized(
+                                    [46.0, 19.0],
+                                    egui::Button::new(mark_label).small(),
+                                )
+                                .on_hover_text(mark_tooltip);
+                                if mark_response.clicked() {
+                                    pending_action = Some(CodeAction::ToggleHighlight(index));
+                                }
                                 let delete_response = ui.add_sized(
                                     [36.0, 19.0],
                                     egui::Button::new("Del").small(),
@@ -7006,6 +7052,7 @@ impl CrosshairApp {
                                     .union(copy_aob_response)
                                     .union(relocate_response)
                                     .union(rename_response)
+                                    .union(mark_response)
                                     .union(delete_response);
                                 if let Some(addr_resp) = address_response {
                                     combined_res = addr_resp.union(combined_res);
@@ -7015,25 +7062,47 @@ impl CrosshairApp {
                             .inner;
 
                         let is_hovered = ui.rect_contains_pointer(row_res.rect);
-                        if is_hovered || selected {
-                            ui.painter().rect_filled(
-                                row_res.rect,
-                                2.0,
-                                Color32::from_rgba_premultiplied(
-                                    84,
-                                    178,
-                                    222,
-                                    if selected { 58 } else { 32 },
-                                ),
-                            );
-                        }
-                        if selected {
+                        if entry.highlighted {
+                            let yellow_fill = if selected {
+                                Color32::from_rgba_unmultiplied(234, 179, 8, 85)
+                            } else if is_hovered {
+                                Color32::from_rgba_unmultiplied(234, 179, 8, 65)
+                            } else {
+                                Color32::from_rgba_unmultiplied(234, 179, 8, 42)
+                            };
+                            ui.painter().rect_filled(row_res.rect, 2.0, yellow_fill);
+                            let yellow_stroke = if selected {
+                                Color32::from_rgb(250, 204, 21)
+                            } else {
+                                Color32::from_rgba_unmultiplied(234, 179, 8, 160)
+                            };
                             ui.painter().rect_stroke(
                                 row_res.rect,
                                 2.0,
-                                egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
+                                egui::Stroke::new(1.0, yellow_stroke),
                                 egui::StrokeKind::Inside,
                             );
+                        } else {
+                            if is_hovered || selected {
+                                ui.painter().rect_filled(
+                                    row_res.rect,
+                                    2.0,
+                                    Color32::from_rgba_premultiplied(
+                                        84,
+                                        178,
+                                        222,
+                                        if selected { 58 } else { 32 },
+                                    ),
+                                );
+                            }
+                            if selected {
+                                ui.painter().rect_stroke(
+                                    row_res.rect,
+                                    2.0,
+                                    egui::Stroke::new(1.0, Color32::from_rgb(84, 178, 222)),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
                         }
 
                         let mut flash_alpha = 0.0f32;
@@ -7075,7 +7144,6 @@ impl CrosshairApp {
                                 ));
                                 ui.close();
                             }
-                            let is_vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
                             let toggle_addr_label = if self.memory_panel.show_code_list_address {
                                 if is_vietnamese { "Ẩn Address/Module" } else { "Hide Address/Module" }
                             } else {
@@ -7109,6 +7177,22 @@ impl CrosshairApp {
                             };
                             if ui.button(disasm_label).clicked() {
                                 pending_action = Some(CodeAction::OpenDisassembler(index));
+                                ui.close_menu();
+                            }
+
+                            let highlight_label = if entry.highlighted {
+                                if is_vietnamese {
+                                    "Bỏ đánh dấu vàng (Unhighlight)"
+                                } else {
+                                    "Remove yellow highlight"
+                                }
+                            } else if is_vietnamese {
+                                "Đánh dấu vàng (Highlight)"
+                            } else {
+                                "Highlight row in yellow"
+                            };
+                            if ui.button(highlight_label).clicked() {
+                                pending_action = Some(CodeAction::ToggleHighlight(index));
                                 ui.close_menu();
                             }
 
@@ -7277,6 +7361,24 @@ impl CrosshairApp {
             Some(CodeAction::RegenerateAob(index)) => {
                 #[cfg(windows)]
                 self.regenerate_code_entry_aob(index);
+            }
+            Some(CodeAction::ToggleHighlight(index)) => {
+                if let Some(target) = self.state.memory_code_list.get(index) {
+                    let new_state = !target.highlighted;
+                    if self.memory_panel.selected_code.contains(&index)
+                        && self.memory_panel.selected_code.len() > 1
+                    {
+                        for &sel_idx in &self.memory_panel.selected_code {
+                            if let Some(entry) = self.state.memory_code_list.get_mut(sel_idx) {
+                                entry.highlighted = new_state;
+                            }
+                        }
+                    } else if let Some(entry) = self.state.memory_code_list.get_mut(index) {
+                        entry.highlighted = new_state;
+                    }
+                    crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
+                    self.persist();
+                }
             }
             None => {}
         }
@@ -7897,6 +7999,7 @@ impl CrosshairApp {
             writes,
             original_bytes: None,
             replaced: false,
+            highlighted: false,
         });
         crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
         self.memory_panel.code_list_open = true;
@@ -16543,15 +16646,28 @@ impl CrosshairApp {
     }
 
     fn memory_view_cell(ui: &mut egui::Ui, width: f32, text: &str) -> egui::Response {
+        Self::memory_view_cell_colored(ui, width, text, None)
+    }
+
+    fn memory_view_cell_colored(
+        ui: &mut egui::Ui,
+        width: f32,
+        text: &str,
+        color: Option<Color32>,
+    ) -> egui::Response {
         let (rect, _) = ui.allocate_exact_size(vec2(width, 18.0), Sense::hover());
         let mut cell = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
+        let mut rich = RichText::new(text).monospace();
+        if let Some(color) = color {
+            rich = rich.color(color);
+        }
         cell.add_sized(
             rect.size(),
-            egui::Label::new(RichText::new(text).monospace())
+            egui::Label::new(rich)
                 .selectable(false)
                 .sense(Sense::click()),
         )
@@ -23248,6 +23364,27 @@ mod tests {
         });
         let deserialized: MemoryCodeEntry = serde_json::from_value(json).expect("deserialize entry");
         assert_eq!(deserialized.aob_target_offset, 0);
+        assert!(!deserialized.highlighted);
+    }
+
+    #[test]
+    fn test_memory_code_entry_highlighted_default_and_serde() {
+        let code_entry = MemoryCodeEntry::default();
+        assert!(!code_entry.highlighted);
+
+        let json = serde_json::json!({
+            "name": "update_ptr",
+            "module": "client.exe",
+            "offset": 0x1234,
+            "instruction": "mov [rax], rcx",
+            "writes": true,
+            "highlighted": true
+        });
+        let deserialized: MemoryCodeEntry = serde_json::from_value(json).expect("deserialize highlighted entry");
+        assert!(deserialized.highlighted);
+
+        let serialized = serde_json::to_string(&deserialized).expect("serialize");
+        assert!(serialized.contains(r#""highlighted":true"#));
     }
 
     #[test]

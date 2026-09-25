@@ -488,6 +488,8 @@ pub struct MemoryCodeEntry {
     pub original_bytes: Option<Vec<u8>>,
     #[serde(default)]
     pub replaced: bool,
+    #[serde(default)]
+    pub highlighted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
