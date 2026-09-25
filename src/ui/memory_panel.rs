@@ -1913,21 +1913,34 @@ impl CrosshairApp {
         if pinned {
             let scale = self.state.memory_pinned_ui_scale;
             let inner_size = if id == "memory-code-list-host" {
-                vec2(760.0, 520.0)
+                vec2(590.0, 480.0)
             } else {
                 vec2(860.0, 620.0)
+            };
+            let min_inner_size = if id == "memory-code-list-host" {
+                vec2(380.0, 240.0)
+            } else {
+                vec2(480.0, 280.0)
             };
             let builder = egui::ViewportBuilder::default()
                 .with_title(title)
                 .with_position(egui::pos2(40.0, 40.0))
                 .with_inner_size(inner_size * scale)
-                .with_min_inner_size(vec2(480.0, 280.0) * scale)
+                .with_min_inner_size(min_inner_size * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_always_on_top();
             ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
                 Self::sync_pinned_viewport_scale(ctx, id, scale);
+                if id == "memory-code-list-host" {
+                    let compact_key = egui::Id::new((id, "compact_size_v3"));
+                    let applied: bool = ctx.data(|d| d.get_temp(compact_key)).unwrap_or(false);
+                    if !applied {
+                        ctx.data_mut(|d| d.insert_temp(compact_key, true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(inner_size * scale));
+                    }
+                }
                 Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     open = false;
@@ -1954,7 +1967,7 @@ impl CrosshairApp {
             }
         } else {
             let default_size = if id == "memory-code-list-host" {
-                vec2(940.0, 520.0)
+                vec2(590.0, 480.0)
             } else {
                 vec2(640.0, 440.0)
             };
@@ -6692,7 +6705,7 @@ impl CrosshairApp {
                     }
                 }
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let selected_count = self.memory_panel.selected_code.len();
                     ui.label(format!("Selected: {selected_count}"));
                     if ui
@@ -6708,7 +6721,7 @@ impl CrosshairApp {
                     ui.label("Nearby 0x");
                     ui.add(
                         egui::TextEdit::singleline(&mut self.memory_panel.code_compare_gap)
-                            .desired_width(64.0),
+                            .desired_width(40.0),
                     );
                     if ui
                         .add_enabled(
@@ -6720,21 +6733,21 @@ impl CrosshairApp {
                     {
                         pending_action = Some(CodeAction::Compare(true));
                     }
-                    ui.label("Batch seconds");
+                    ui.label("Batch s");
                     ui.add(
                         egui::TextEdit::singleline(
                             &mut self.memory_panel.code_compare_batch_seconds,
                         )
-                        .desired_width(48.0),
+                        .desired_width(32.0),
                     )
                     .on_hover_text(
                         "Listen to four selected instructions for this long, retain their data, then rotate to the next four",
                     );
                     ui.separator();
                     let toggle_addr_label = if self.memory_panel.show_code_list_address {
-                        self.tr("Hide Address/Module", "Ẩn Address/Module")
+                        self.tr("Hide Address", "Ẩn Address")
                     } else {
-                        self.tr("Show Address/Module", "Hiện Address/Module")
+                        self.tr("Show Address", "Hiện Address")
                     };
                     if ui.button(toggle_addr_label).clicked() {
                         self.memory_panel.show_code_list_address = !self.memory_panel.show_code_list_address;
@@ -6765,10 +6778,10 @@ impl CrosshairApp {
                         .unwrap_or(1.0);
                     ui.allocate_exact_size(vec2(22.0 * s, (18.0 * s).round().max(14.0)), Sense::hover());
                     if self.memory_panel.show_code_list_address {
-                        Self::memory_code_list_cell(ui, 140.0, "Address / Module", None);
-                        Self::memory_code_list_cell(ui, 240.0, "Name / Instruction", None);
+                        Self::memory_code_list_cell(ui, 120.0, "Address / Module", None);
+                        Self::memory_code_list_cell(ui, 200.0, "Name / Instruction", None);
                     } else {
-                        Self::memory_code_list_cell(ui, 260.0, "Name / Instruction", None);
+                        Self::memory_code_list_cell(ui, 230.0, "Name / Instruction", None);
                     }
                     Self::memory_code_list_cell(ui, 296.0, "Action / Status", None);
                 });
@@ -6853,13 +6866,13 @@ impl CrosshairApp {
                                 let (address_response, instruction_response) =
                                     if self.memory_panel.show_code_list_address {
                                         (
-                                            Some(Self::memory_code_list_cell(ui, 140.0, &address_str, addr_color)),
-                                            Self::memory_code_list_cell(ui, 240.0, &instruction_text, text_color),
+                                            Some(Self::memory_code_list_cell(ui, 120.0, &address_str, addr_color)),
+                                            Self::memory_code_list_cell(ui, 200.0, &instruction_text, text_color),
                                         )
                                     } else {
                                         (
                                             None,
-                                            Self::memory_code_list_cell(ui, 260.0, &instruction_text, text_color),
+                                            Self::memory_code_list_cell(ui, 230.0, &instruction_text, text_color),
                                         )
                                     };
                                 let action_label = if entry.replaced {

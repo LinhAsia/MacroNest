@@ -1222,7 +1222,7 @@ impl CrosshairApp {
                                         )
                                     }
                                 };
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     ui.spacing_mut().item_spacing.x = 6.0;
                                     ComboBox::from_id_salt(("esp_auto_root_code", preset.id))
                                         .selected_text(selected_code.map_or(
@@ -1410,23 +1410,6 @@ impl CrosshairApp {
                                             "After capturing the required number of entities, remove the entity with the smallest distance to camera (local player) and blacklist it.",
                                             "Sau khi tìm đủ số lượng thực thể yêu cầu, loại bỏ thực thể gần camera nhất (nhân vật bản thân) và đưa vào blacklist.",
                                         ));
-
-                                        if !preset.entity_blacklisted_addresses.is_empty() {
-                                            let is_vi = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
-                                            let text = if is_vi {
-                                                format!("(Chặn: {})", preset.entity_blacklisted_addresses.len())
-                                            } else {
-                                                format!("(Blocked: {})", preset.entity_blacklisted_addresses.len())
-                                            };
-                                            ui.label(text);
-                                            if ui
-                                                .small_button("×")
-                                                .on_hover_text(self.tr("Clear blacklist", "Xóa danh sách chặn"))
-                                                .clicked()
-                                            {
-                                                preset.entity_blacklisted_addresses.clear();
-                                            }
-                                        }
 
                                         ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
                                         if preset.entity_auto_hud_enabled {
