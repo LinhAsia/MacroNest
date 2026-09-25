@@ -1201,7 +1201,6 @@ pub(crate) struct MemoryPanelState {
     deep_pointer_dialog: Option<DeepPointerDialog>,
     camera_matrix_dialog: Option<CameraMatrixDialog>,
     entity_list_dialog: Option<EntityListDialog>,
-    saved_library_open: bool,
     #[cfg(windows)]
     instruction_watch_dialog: Option<InstructionWatchDialog>,
     #[cfg(windows)]
@@ -1347,7 +1346,6 @@ impl Default for MemoryPanelState {
             deep_pointer_dialog: None,
             camera_matrix_dialog: None,
             entity_list_dialog: None,
-            saved_library_open: false,
             #[cfg(windows)]
             instruction_watch_dialog: None,
             #[cfg(windows)]
@@ -1665,12 +1663,6 @@ impl CrosshairApp {
                     self.memory_panel.memory_settings_open = true;
                 }
                 if ui
-                    .button(self.tr("Saved addresses", "Địa chỉ đã lưu"))
-                    .clicked()
-                {
-                    self.memory_panel.saved_library_open = true;
-                }
-                if ui
                     .button(self.tr("Advanced options (Code list)", "Tùy chọn nâng cao (Code list)"))
                     .clicked()
                 {
@@ -1849,15 +1841,6 @@ impl CrosshairApp {
         }
         if !self.render_detached_memory_popup(
             ui.ctx(),
-            "memory-saved-host",
-            "Saved addresses",
-            self.memory_panel.saved_library_open,
-            Self::render_saved_address_library,
-        ) {
-            self.memory_panel.saved_library_open = false;
-        }
-        if !self.render_detached_memory_popup(
-            ui.ctx(),
             "memory-batch-replace-host",
             "Batch update pointer bases",
             self.memory_panel.batch_replace_open,
@@ -1929,7 +1912,7 @@ impl CrosshairApp {
         let mut toggle_pin = false;
         if pinned {
             let inner_size = if id == "memory-code-list-host" {
-                vec2(940.0, 620.0)
+                vec2(760.0, 520.0)
             } else {
                 vec2(860.0, 620.0)
             };
@@ -2055,15 +2038,6 @@ impl CrosshairApp {
             Self::render_memory_code_list,
         ) {
             self.memory_panel.code_list_open = false;
-        }
-        if !self.render_detached_memory_popup(
-            ctx,
-            "memory-saved-host",
-            "Saved addresses",
-            self.memory_panel.saved_library_open,
-            Self::render_saved_address_library,
-        ) {
-            self.memory_panel.saved_library_open = false;
         }
         if !self.render_detached_memory_popup(
             ctx,
@@ -4084,7 +4058,6 @@ impl CrosshairApp {
                             let mut instruction_watch = None;
                             let mut find_stable_pointer = false;
                             let mut deep_pointer_scan = false;
-                            let mut save_to_library = false;
                             let mut persist_pointer_changes = false;
                             let mut open_disassembler = None;
                             let mut open_location_probe = None;
@@ -4395,29 +4368,6 @@ impl CrosshairApp {
                                                 })
                                         },
                                     );
-                                let can_save =
-                                    self.memory_panel
-                                        .selected_saved
-                                        .iter()
-                                        .any(|selected_index| {
-                                            self.memory_panel
-                                                .saved
-                                                .get(*selected_index)
-                                                .is_some_and(|entry| entry.text_encoding.is_none())
-                                        });
-                                if ui
-                                    .add_enabled(
-                                        can_save,
-                                        Button::new(self.tr(
-                                            "Save address to library",
-                                            "Lưu địa chỉ vào thư viện",
-                                        )),
-                                    )
-                                    .clicked()
-                                {
-                                    save_to_library = true;
-                                    ui.close();
-                                }
                                 ui.menu_button(self.tr("Change type", "Đổi kiểu giá trị"), |ui| {
                                     let types = [
                                         (ScanValueType::I8, "Byte"),
@@ -4566,9 +4516,19 @@ impl CrosshairApp {
                                                 .get(*selected_index)
                                                 .is_some_and(|entry| entry.frozen.is_some())
                                         });
+                                let can_freeze = self
+                                    .memory_panel
+                                    .selected_saved
+                                    .iter()
+                                    .any(|selected_index| {
+                                        self.memory_panel
+                                            .saved
+                                            .get(*selected_index)
+                                            .is_some_and(|entry| entry.text_encoding.is_none())
+                                    });
                                 if ui
                                     .add_enabled(
-                                        can_save,
+                                        can_freeze,
                                         Button::new(if all_frozen {
                                             self.tr("Unfreeze selected", "Bỏ đóng băng được chọn")
                                         } else {
@@ -5088,34 +5048,6 @@ impl CrosshairApp {
                             if deep_pointer_scan && let Some(saved) = self.memory_panel.saved.get(index).cloned() {
                                 self.start_or_compare_deep_pointer_scan(&saved);
                                 ui.ctx().request_repaint();
-                            }
-                            if save_to_library {
-                                let indices = self
-                                    .memory_panel
-                                    .selected_saved
-                                    .iter()
-                                    .copied()
-                                    .collect::<Vec<_>>();
-                                let mut saved_count = 0;
-                                for selected_index in indices {
-                                    let Some(entry) =
-                                        self.memory_panel.saved.get_mut(selected_index)
-                                    else {
-                                        continue;
-                                    };
-                                    if entry.text_encoding.is_some() {
-                                        continue;
-                                    }
-                                    entry.saved_to_library = true;
-                                    if entry.description.is_empty() {
-                                        entry.description =
-                                            format_prefixed_memory_address(entry.address);
-                                    }
-                                    saved_count += 1;
-                                }
-                                self.persist_memory_pointers();
-                                self.memory_panel.status =
-                                    format!("{saved_count} address(es) saved to library");
                             }
                             if open_address && let Some(saved) = self.memory_panel.saved.get(index).cloned() {
                                 let (address, offsets, pointer) =
@@ -5836,148 +5768,6 @@ impl CrosshairApp {
             });
 
         self.memory_panel.show_dll_studio = open;
-    }
-
-    fn render_saved_address_library(&mut self, ui: &mut egui::Ui) {
-        if !self.memory_panel.saved_library_open {
-            return;
-        }
-        let mut load = None;
-        let mut delete = None;
-                let mut apps = self
-                    .state
-                    .memory_pointer_list
-                    .iter()
-                    .map(|entry| {
-                        if entry.app_name.is_empty() {
-                            entry.module.clone()
-                        } else {
-                            entry.app_name.clone()
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                apps.sort_by_key(|name| name.to_ascii_lowercase());
-                apps.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for app in apps {
-                        egui::CollapsingHeader::new(&app)
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                for (index, entry) in
-                                    self.state.memory_pointer_list.iter().enumerate()
-                                {
-                                    let entry_app = if entry.app_name.is_empty() {
-                                        &entry.module
-                                    } else {
-                                        &entry.app_name
-                                    };
-                                    if !entry_app.eq_ignore_ascii_case(&app) {
-                                        continue;
-                                    }
-                                    ui.horizontal(|ui| {
-                                        let address = if entry.module.is_empty() {
-                                            if entry.code_module.is_empty() {
-                                                entry.absolute_address.map_or_else(
-                                                    || "Invalid address".to_owned(),
-                                                    format_prefixed_memory_address,
-                                                )
-                                            } else {
-                                                format!(
-                                                    "{}+{:X} @ {:+X}",
-                                                    entry.code_module,
-                                                    entry.code_offset,
-                                                    entry.code_address_offset
-                                                )
-                                            }
-                                        } else {
-                                            format!(
-                                                "{}+{:X} [{}]",
-                                                entry.module,
-                                                entry.module_offset,
-                                                entry
-                                                    .offsets
-                                                    .iter()
-                                                    .map(|offset| format!("{offset:X}"))
-                                                    .collect::<Vec<_>>()
-                                                    .join(" → ")
-                                            )
-                                        };
-                                        ui.label(if entry.name.is_empty() {
-                                            &address
-                                        } else {
-                                            &entry.name
-                                        })
-                                        .on_hover_text(&address);
-                                        if ui.small_button("Load").clicked() {
-                                            load = Some(index);
-                                        }
-                                        if ui.small_button("Delete").clicked() {
-                                            delete = Some(index);
-                                        }
-                                    });
-                                }
-                            });
-                    }
-                });
-                if self.state.memory_pointer_list.is_empty() {
-                    ui.centered_and_justified(|ui| {
-                        ui.label(RichText::new("No saved addresses").weak())
-                    });
-                }
-        if let Some(index) = load
-            && let Some(entry) = self.state.memory_pointer_list.get(index).cloned()
-            && let Some(value_type) = memory_type_from_config(&entry.value_type)
-        {
-            if !entry.code_module.is_empty() && entry.runtime_address.is_none() {
-                self.memory_panel.status = format!(
-                    "{} is unresolved â€” run Find written for {}+{:X}",
-                    entry.name, entry.code_module, entry.code_offset
-                );
-                return;
-            }
-            let mut pointer = (!entry.module.is_empty()).then(|| PointerSpec {
-                base: 0,
-                module: Some((entry.module.clone(), entry.module_offset)),
-                offsets: entry.offsets.clone(),
-            });
-            let mut address = entry
-                .runtime_address
-                .filter(|_| entry.runtime_process_id == self.memory_panel.process_pid)
-                .or(entry.absolute_address)
-                .unwrap_or_default();
-            if let (Some(pid), Some(pointer)) = (self.memory_panel.process_pid, pointer.as_mut())
-                && let Ok(base) = resolve_module_offset(pid, &entry.module, entry.module_offset)
-            {
-                pointer.base = base;
-                address = resolve_memory_address(pid, base, Some(pointer)).unwrap_or_default();
-            }
-            let current = self
-                .memory_panel
-                .process_pid
-                .and_then(|pid| read_scan_value(pid, address, value_type).ok());
-            self.memory_panel.saved.push(SavedMemoryAddress {
-                address,
-                value_type,
-                current,
-                text_encoding: None,
-                text_byte_len: 0,
-                current_text: None,
-                description: entry.name,
-                group: entry.group,
-                hexadecimal: entry.hexadecimal,
-                pointer,
-                frozen: None,
-                saved_to_library: false,
-                aob_sample_1: None,
-                aob_pattern: None,
-            });
-            self.memory_panel.status = "Saved address loaded".to_owned();
-        }
-        if let Some(index) = delete {
-            self.state.memory_pointer_list.remove(index);
-            crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
-            self.persist();
-        }
     }
 
     fn render_batch_replace_dialog(&mut self, ui: &mut egui::Ui) {
@@ -6713,6 +6503,26 @@ impl CrosshairApp {
         count
     }
 
+    fn memory_code_list_cell(
+        ui: &mut egui::Ui,
+        width: f32,
+        text: &str,
+        color: Option<Color32>,
+    ) -> egui::Response {
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 19.0), Sense::click());
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        let mut rich = RichText::new(text).monospace();
+        if let Some(c) = color {
+            rich = rich.color(c);
+        }
+        child.add(egui::Label::new(rich).truncate().selectable(false));
+        response.on_hover_text(text).on_hover_cursor(egui::CursorIcon::Default)
+    }
+
     fn render_memory_code_list(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         if !self.memory_panel.code_list_open {
@@ -6882,39 +6692,16 @@ impl CrosshairApp {
                             pending_action = Some(CodeAction::RelocateAll);
                         }
                     }
-                    ui.separator();
-                    ui.label("AOB:");
-                    let current_dir = self.state.memory_aob_direction;
-                    let dir_text = match current_dir {
-                        MemoryAobDirection::After => self.tr("After", "Phía sau"),
-                        MemoryAobDirection::Before => self.tr("Before", "Phía trước"),
-                        MemoryAobDirection::Both => self.tr("Both sides", "2 bên"),
-                    };
-                    egui::ComboBox::from_id_salt("code-list-aob-direction")
-                        .selected_text(dir_text)
-                        .width(85.0)
-                        .show_ui(ui, |ui| {
-                            let mut selected = self.state.memory_aob_direction;
-                            for (dir, label) in [
-                                (MemoryAobDirection::After, self.tr("After", "Phía sau (Từ địa chỉ trở đi)")),
-                                (MemoryAobDirection::Before, self.tr("Before", "Phía trước (Các lệnh phía trước)")),
-                                (MemoryAobDirection::Both, self.tr("Both sides", "Cả 2 bên (Địa chỉ ở giữa)")),
-                            ] {
-                                if ui.selectable_value(&mut selected, dir, label).changed() {
-                                    self.state.memory_aob_direction = selected;
-                                    self.persist();
-                                }
-                            }
-                        });
                 });
                 ui.horizontal(|ui| {
+                    ui.allocate_exact_size(vec2(22.0, 18.0), Sense::hover());
                     if self.memory_panel.show_code_list_address {
-                        Self::memory_view_cell(ui, 190.0, "Address / Module");
-                        Self::memory_view_cell(ui, 300.0, "Name / Instruction");
+                        Self::memory_code_list_cell(ui, 140.0, "Address / Module", None);
+                        Self::memory_code_list_cell(ui, 240.0, "Name / Instruction", None);
                     } else {
-                        Self::memory_view_cell(ui, 490.0, "Name / Instruction");
+                        Self::memory_code_list_cell(ui, 384.0, "Name / Instruction", None);
                     }
-                    Self::memory_view_cell(ui, 400.0, "Action / Status");
+                    Self::memory_code_list_cell(ui, 296.0, "Action / Status", None);
                 });
                 #[cfg(windows)]
                 if !self.memory_panel.code_relocate_status.is_empty() {
@@ -6947,18 +6734,59 @@ impl CrosshairApp {
                         } else {
                             None
                         };
+                        let mut star_clicked = false;
+                        let mut btn_clicked = false;
                         let row_res = ui
                             .horizontal(|ui| {
+                                let star_icon = if entry.highlighted { 0xe838 } else { 0xe83a };
+                                let star_fill = if entry.highlighted {
+                                    Color32::from_rgb(104, 82, 18)
+                                } else {
+                                    Color32::from_rgba_premultiplied(52, 58, 70, 190)
+                                };
+                                let star_stroke = if entry.highlighted {
+                                    Color32::from_rgb(255, 220, 96)
+                                } else {
+                                    Color32::from_rgb(102, 110, 122)
+                                };
+                                let star_color = if entry.highlighted {
+                                    Color32::from_rgb(255, 224, 110)
+                                } else {
+                                    Color32::from_rgb(208, 214, 224)
+                                };
+                                let star_tooltip = if entry.highlighted {
+                                    if is_vietnamese {
+                                        "Bỏ đánh dấu sao"
+                                    } else {
+                                        "Remove star highlight"
+                                    }
+                                } else if is_vietnamese {
+                                    "Đánh dấu sao dòng này"
+                                } else {
+                                    "Star highlight row"
+                                };
+                                let star_response = ui.add_sized(
+                                    [22.0, 19.0],
+                                    egui::Button::new(Self::material_icon_text(star_icon, 13.0).color(star_color))
+                                        .fill(star_fill)
+                                        .stroke(egui::Stroke::new(1.0, star_stroke)),
+                                )
+                                .on_hover_text(star_tooltip);
+                                if star_response.clicked() {
+                                    star_clicked = true;
+                                    pending_action = Some(CodeAction::ToggleHighlight(index));
+                                }
+
                                 let (address_response, instruction_response) =
                                     if self.memory_panel.show_code_list_address {
                                         (
-                                            Some(Self::memory_view_cell_colored(ui, 190.0, &address_str, addr_color)),
-                                            Self::memory_view_cell_colored(ui, 300.0, &instruction_text, text_color),
+                                            Some(Self::memory_code_list_cell(ui, 140.0, &address_str, addr_color)),
+                                            Self::memory_code_list_cell(ui, 240.0, &instruction_text, text_color),
                                         )
                                     } else {
                                         (
                                             None,
-                                            Self::memory_view_cell_colored(ui, 490.0, &instruction_text, text_color),
+                                            Self::memory_code_list_cell(ui, 384.0, &instruction_text, text_color),
                                         )
                                     };
                                 let action_label = if entry.replaced {
@@ -6969,10 +6797,11 @@ impl CrosshairApp {
                                     "Find accessed"
                                 };
                                 let action_response = ui.add_sized(
-                                    [92.0, 19.0],
+                                    [82.0, 19.0],
                                     egui::Button::new(action_label).small(),
                                 );
                                 if action_response.clicked() {
+                                    btn_clicked = true;
                                     pending_action = Some(CodeAction::StartAccessWatch(index));
                                 }
                                 let copy_aob_enabled = !entry.aob_signature.is_empty();
@@ -6986,10 +6815,11 @@ impl CrosshairApp {
                                 };
                                 let copy_aob_response = ui.add_enabled(
                                     copy_aob_enabled,
-                                    egui::Button::new("Copy AOB").small().min_size(egui::vec2(68.0, 19.0)),
+                                    egui::Button::new("Copy AOB").small().min_size(egui::vec2(60.0, 19.0)),
                                 )
                                 .on_hover_text(copy_aob_tooltip);
                                 if copy_aob_response.clicked() && copy_aob_enabled {
+                                    btn_clicked = true;
                                     ui.ctx().copy_text(entry.aob_signature.clone());
                                     self.memory_panel.code_relocate_status =
                                         format!("Copied AOB for '{}'", entry.name);
@@ -7000,59 +6830,38 @@ impl CrosshairApp {
                                     && self.memory_panel.code_relocate_all_rx.is_none();
                                 let relocate_response = ui.add_enabled(
                                     relocate_enabled,
-                                    egui::Button::new("Relocate").small().min_size(egui::vec2(62.0, 19.0)),
+                                    egui::Button::new("Relocate").small().min_size(egui::vec2(56.0, 19.0)),
                                 )
                                 .on_hover_text(
                                     "Find the saved AOB in this module and update a unique new offset",
                                 );
                                 if relocate_response.clicked() && relocate_enabled {
+                                    btn_clicked = true;
                                     pending_action = Some(CodeAction::Relocate(index));
                                 }
                                 let rename_response = ui.add_sized(
-                                    [58.0, 19.0],
+                                    [50.0, 19.0],
                                     egui::Button::new("Rename").small(),
                                 )
                                 .on_hover_text("Rename this code entry label");
                                 if rename_response.clicked() {
+                                    btn_clicked = true;
                                     pending_action = Some(CodeAction::Rename(index));
                                 }
-                                let mark_label = if entry.highlighted {
-                                    RichText::new("Unmark").color(Color32::from_rgb(253, 224, 71))
-                                } else {
-                                    RichText::new("Mark")
-                                };
-                                let mark_tooltip = if entry.highlighted {
-                                    if is_vietnamese {
-                                        "Bỏ đánh dấu vàng"
-                                    } else {
-                                        "Remove yellow highlight"
-                                    }
-                                } else if is_vietnamese {
-                                    "Đánh dấu vàng dòng này (cần làm mới sau update)"
-                                } else {
-                                    "Highlight row in yellow (mark for game updates)"
-                                };
-                                let mark_response = ui.add_sized(
-                                    [46.0, 19.0],
-                                    egui::Button::new(mark_label).small(),
-                                )
-                                .on_hover_text(mark_tooltip);
-                                if mark_response.clicked() {
-                                    pending_action = Some(CodeAction::ToggleHighlight(index));
-                                }
                                 let delete_response = ui.add_sized(
-                                    [36.0, 19.0],
+                                    [32.0, 19.0],
                                     egui::Button::new("Del").small(),
                                 );
                                 if delete_response.clicked() {
+                                    btn_clicked = true;
                                     pending_action = Some(CodeAction::Delete(index));
                                 }
-                                let mut combined_res = instruction_response
+                                let mut combined_res = star_response
+                                    .union(instruction_response)
                                     .union(action_response)
                                     .union(copy_aob_response)
                                     .union(relocate_response)
                                     .union(rename_response)
-                                    .union(mark_response)
                                     .union(delete_response);
                                 if let Some(addr_resp) = address_response {
                                     combined_res = addr_resp.union(combined_res);
@@ -7182,14 +6991,14 @@ impl CrosshairApp {
 
                             let highlight_label = if entry.highlighted {
                                 if is_vietnamese {
-                                    "Bỏ đánh dấu vàng (Unhighlight)"
+                                    "Bỏ đánh dấu sao (Unhighlight)"
                                 } else {
-                                    "Remove yellow highlight"
+                                    "Remove star highlight"
                                 }
                             } else if is_vietnamese {
-                                "Đánh dấu vàng (Highlight)"
+                                "Đánh dấu sao (Highlight)"
                             } else {
-                                "Highlight row in yellow"
+                                "Highlight with star"
                             };
                             if ui.button(highlight_label).clicked() {
                                 pending_action = Some(CodeAction::ToggleHighlight(index));
@@ -7256,7 +7065,7 @@ impl CrosshairApp {
                                 ui.close_menu();
                             }
                         });
-                        if row_res.clicked() {
+                        if row_res.clicked() && !star_clicked && !btn_clicked {
                             let (shift, additive) = ui.input(|input| {
                                 (
                                     input.modifiers.shift,
@@ -20772,17 +20581,6 @@ fn memory_type_config(value_type: ScanValueType) -> &'static str {
     }
 }
 
-fn memory_type_from_config(value_type: &str) -> Option<ScanValueType> {
-    Some(match value_type {
-        "i8" => ScanValueType::I8,
-        "i16" => ScanValueType::I16,
-        "i32" => ScanValueType::I32,
-        "f32" => ScanValueType::F32,
-        "i64" => ScanValueType::I64,
-        "f64" => ScanValueType::F64,
-        _ => return None,
-    })
-}
 
 fn parse_entity_xyz_offsets(dialog: &EntityListDialog) -> Result<[usize; 3], String> {
     Ok([

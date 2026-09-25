@@ -331,6 +331,7 @@ impl AppPaths {
                 }
             }
         };
+        state.memory_pointer_list.clear();
 
         let disk_profiles = self.load_profiles().unwrap_or_default();
         if state.profiles.is_empty() {
@@ -848,6 +849,7 @@ fn state_snapshot_for_save(state: &AppState) -> AppState {
     let mut state = state.clone();
     state.macro_presets.clear();
     state.window_focus_presets.clear();
+    state.memory_pointer_list.clear();
     for preset in &mut state.master_presets {
         preset.window_focus_presets.clear();
     }
