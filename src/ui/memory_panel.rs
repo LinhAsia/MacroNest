@@ -6768,7 +6768,7 @@ impl CrosshairApp {
                         Self::memory_code_list_cell(ui, 140.0, "Address / Module", None);
                         Self::memory_code_list_cell(ui, 240.0, "Name / Instruction", None);
                     } else {
-                        Self::memory_code_list_cell(ui, 384.0, "Name / Instruction", None);
+                        Self::memory_code_list_cell(ui, 260.0, "Name / Instruction", None);
                     }
                     Self::memory_code_list_cell(ui, 296.0, "Action / Status", None);
                 });
@@ -6859,7 +6859,7 @@ impl CrosshairApp {
                                     } else {
                                         (
                                             None,
-                                            Self::memory_code_list_cell(ui, 384.0, &instruction_text, text_color),
+                                            Self::memory_code_list_cell(ui, 260.0, &instruction_text, text_color),
                                         )
                                     };
                                 let action_label = if entry.replaced {
