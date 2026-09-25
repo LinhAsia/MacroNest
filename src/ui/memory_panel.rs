@@ -2659,6 +2659,32 @@ impl CrosshairApp {
                                             ui.separator();
                                         }
                                     }
+                                    ui.push_id("memory_process_search_scope", |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(self.tr("Search:", "Tìm kiếm:")).strong());
+                                            let search_hint = self.tr("Search PID / Name...", "Tìm PID / Tên...");
+                                            let search_resp = ui.add(
+                                                egui::TextEdit::singleline(&mut self.memory_panel.process_search)
+                                                    .hint_text(search_hint)
+                                                    .desired_width(240.0),
+                                            );
+                                            if !self.memory_panel.process_search.is_empty() {
+                                                if ui.small_button("✖")
+                                                    .on_hover_text(self.tr("Clear search", "Xóa tìm kiếm"))
+                                                    .clicked()
+                                                {
+                                                    self.memory_panel.process_search.clear();
+                                                }
+                                            }
+                                            Self::apply_vietnamese_input_if_changed(
+                                                &search_resp,
+                                                self.state.vietnamese_input_enabled,
+                                                self.state.vietnamese_input_mode,
+                                                &mut self.memory_panel.process_search,
+                                            );
+                                        });
+                                    });
+                                    ui.separator();
                                     let filter = self.memory_panel.process_search.trim().to_lowercase();
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new(self.tr("Window processes (grouped)", "Window processes (grouped)")).strong());
@@ -2688,15 +2714,19 @@ impl CrosshairApp {
                                             })
                                             .map(|(i, _)| i)
                                             .collect();
-                                        if matching_window_indices.is_empty() {
-                                            ui.label(self.tr("No window processes matching search", "Không có cửa sổ nào khớp tìm kiếm"));
+                                        let win_count = matching_window_indices.len();
+                                        let win_height = if win_count == 0 {
+                                            26.0
                                         } else {
-                                            let win_count = matching_window_indices.len();
-                                            let win_height = (win_count as f32 * 26.0).clamp(50.0, 150.0);
-                                            egui::ScrollArea::vertical()
-                                                .id_salt("memory-window-processes-scroll")
-                                                .max_height(win_height)
-                                                .show(ui, |ui| {
+                                            (win_count as f32 * 26.0).clamp(50.0, 150.0)
+                                        };
+                                        egui::ScrollArea::vertical()
+                                            .id_salt("memory-window-processes-scroll")
+                                            .max_height(win_height)
+                                            .show(ui, |ui| {
+                                                if matching_window_indices.is_empty() {
+                                                    ui.label(self.tr("No window processes matching search", "Không có cửa sổ nào khớp tìm kiếm"));
+                                                } else {
                                                     for idx in matching_window_indices {
                                                         let (selected, title_with_pid, process_id, process_path, selector) = {
                                                             let window = &self.open_window_infos[idx];
@@ -2733,8 +2763,8 @@ impl CrosshairApp {
                                                             }
                                                         });
                                                     }
-                                                });
-                                        }
+                                                }
+                                            });
                                     }
                                     #[cfg(windows)]
                                     {
@@ -2750,20 +2780,6 @@ impl CrosshairApp {
                                             if self.memory_panel.process_choices_loading {
                                                 ui.spinner();
                                             }
-                                            let search_hint = self.tr("Search PID / Name...", "Tìm PID / Tên...");
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                let search_resp = ui.add(
-                                                    egui::TextEdit::singleline(&mut self.memory_panel.process_search)
-                                                        .hint_text(search_hint)
-                                                        .desired_width(170.0),
-                                                );
-                                                Self::apply_vietnamese_input_if_changed(
-                                                    &search_resp,
-                                                    self.state.vietnamese_input_enabled,
-                                                    self.state.vietnamese_input_mode,
-                                                    &mut self.memory_panel.process_search,
-                                                );
-                                            });
                                         });
                                         if self.memory_panel.process_choices.is_empty() {
                                             if self.memory_panel.process_choices_loading {
@@ -2791,19 +2807,22 @@ impl CrosshairApp {
                                                     .collect()
                                             };
 
-                                            ui.horizontal(|ui| {
-                                                ui.add_space(24.0);
-                                                ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new(self.tr("Name", "Name")).strong()));
-                                                ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new("PID").strong()));
-                                                ui.label(RichText::new(self.tr("Path", "Path")).strong());
-                                            });
                                             let count = matching_indices.len();
-                                            egui::ScrollArea::vertical()
-                                                .id_salt("memory-all-proc-scroll")
-                                                .auto_shrink([false, false])
-                                                .min_scrolled_height(420.0)
-                                                .max_height(600.0)
-                                                .show_rows(ui, 22.0, count, |ui, rows| {
+                                            if count == 0 {
+                                                ui.label(self.tr("No processes matching search", "Không tìm thấy tiến trình nào khớp tìm kiếm"));
+                                            } else {
+                                                ui.horizontal(|ui| {
+                                                    ui.add_space(24.0);
+                                                    ui.add_sized([190.0, 18.0], egui::Label::new(RichText::new(self.tr("Name", "Name")).strong()));
+                                                    ui.add_sized([70.0, 18.0], egui::Label::new(RichText::new("PID").strong()));
+                                                    ui.label(RichText::new(self.tr("Path", "Path")).strong());
+                                                });
+                                                egui::ScrollArea::vertical()
+                                                    .id_salt("memory-all-proc-scroll")
+                                                    .auto_shrink([false, false])
+                                                    .min_scrolled_height(420.0)
+                                                    .max_height(600.0)
+                                                    .show_rows(ui, 22.0, count, |ui, rows| {
                                                     for row_idx in rows {
                                                         let index = matching_indices[row_idx];
                                                         let (selected, name, pid, path) = {
@@ -2819,6 +2838,7 @@ impl CrosshairApp {
                                                         }
                                                     }
                                                 });
+                                            }
                                         }
                                     }
                                 })
