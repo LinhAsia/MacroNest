@@ -1911,6 +1911,7 @@ impl CrosshairApp {
         let mut open = true;
         let mut toggle_pin = false;
         if pinned {
+            let scale = self.state.memory_pinned_ui_scale;
             let inner_size = if id == "memory-code-list-host" {
                 vec2(760.0, 520.0)
             } else {
@@ -1919,14 +1920,14 @@ impl CrosshairApp {
             let builder = egui::ViewportBuilder::default()
                 .with_title(title)
                 .with_position(egui::pos2(40.0, 40.0))
-                .with_inner_size(inner_size)
-                .with_min_inner_size(vec2(480.0, 280.0))
+                .with_inner_size(inner_size * scale)
+                .with_min_inner_size(vec2(480.0, 280.0) * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_always_on_top();
             ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
-                Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
+                Self::sync_pinned_viewport_scale(ctx, id, scale);
                 Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     open = false;
@@ -1938,10 +1939,12 @@ impl CrosshairApp {
                     true,
                     &mut toggle_pin,
                     &mut open,
+                    scale,
                 );
                 egui::CentralPanel::default()
-                    .frame(Self::memory_popup_frame(ctx))
+                    .frame(Self::memory_popup_frame(ctx, scale))
                     .show(ctx, |ui| {
+                        Self::apply_memory_pinned_ui_scale(ui, scale);
                         render(self, ui);
                     });
                 Self::render_memory_popup_resize_handles(ctx);
@@ -2104,11 +2107,12 @@ impl CrosshairApp {
         self.poll_memory_hotkeys(ctx);
         self.refresh_memory_values();
         self.sync_memory_freeze_targets();
+        let scale = self.state.memory_pinned_ui_scale;
         let builder = egui::ViewportBuilder::default()
             .with_title("MacroNest — Scan results")
             .with_position(egui::pos2(0.0, 0.0))
-            .with_inner_size(vec2(560.0, 430.0))
-            .with_min_inner_size(vec2(400.0, 260.0))
+            .with_inner_size(vec2(560.0, 430.0) * scale)
+            .with_min_inner_size(vec2(400.0, 260.0) * scale)
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
             .with_resizable(true)
@@ -2118,25 +2122,29 @@ impl CrosshairApp {
             egui::ViewportId::from_hash_of("memory-scan-results"),
             builder,
             |ctx, _| {
-                Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
+                Self::sync_pinned_viewport_scale(ctx, "memory-scan-results", scale);
                 Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     unpin = true;
                 }
                 egui::TopBottomPanel::top("memory-pinned-titlebar")
-                    .exact_height(38.0)
+                    .exact_height((38.0 * scale).max(24.0))
                     .frame(
                         Frame::new()
                             .fill(Color32::from_rgb(16, 20, 26))
                             .stroke(egui::Stroke::new(1.0, Color32::from_rgb(34, 42, 56)))
-                            .inner_margin(egui::Margin::symmetric(8, 4)),
+                            .inner_margin(egui::Margin::symmetric(
+                                (8.0 * scale).clamp(2.0, 24.0).round() as i8,
+                                (4.0 * scale).clamp(2.0, 16.0).round() as i8,
+                            )),
                     )
                     .show(ctx, |ui| {
+                        Self::apply_memory_pinned_ui_scale(ui, scale);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
                                 .add_sized(
-                                    [30.0, 26.0],
-                                    Button::new(Self::material_icon_text(0xe5cd, 16.0)),
+                                    [(30.0 * scale).max(18.0), (26.0 * scale).max(16.0)],
+                                    Button::new(Self::material_icon_text(0xe5cd, (16.0 * scale).max(10.0))),
                                 )
                                 .on_hover_text("Unpin")
                                 .clicked()
@@ -2144,7 +2152,7 @@ impl CrosshairApp {
                                 unpin = true;
                             }
                             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                ui.label(Self::material_icon_text(0xe30c, 17.0));
+                                ui.label(Self::material_icon_text(0xe30c, (17.0 * scale).max(11.0)));
                                 ui.label(RichText::new("MacroNest").strong());
                                 let total_count = self.memory_panel.total_result_count();
                                 let title_text = if total_count > 0 {
@@ -2164,8 +2172,9 @@ impl CrosshairApp {
                         });
                     });
                 egui::CentralPanel::default()
-                    .frame(Self::memory_popup_frame(ctx))
+                    .frame(Self::memory_popup_frame(ctx, scale))
                     .show(ctx, |ui| {
+                        Self::apply_memory_pinned_ui_scale(ui, scale);
                         let progress = if self.memory_panel.scanning {
                             let scanned = self.memory_panel.scan_progress.load(Ordering::Relaxed);
                             if scanned > 0 {
@@ -2218,11 +2227,12 @@ impl CrosshairApp {
         }
         self.refresh_memory_values();
         self.sync_memory_freeze_targets();
+        let scale = self.state.memory_pinned_ui_scale;
         let builder = egui::ViewportBuilder::default()
             .with_title("MacroNest — Address list")
             .with_position(egui::pos2(0.0, 0.0))
-            .with_inner_size(vec2(760.0, 430.0))
-            .with_min_inner_size(vec2(520.0, 260.0))
+            .with_inner_size(vec2(760.0, 430.0) * scale)
+            .with_min_inner_size(vec2(520.0, 260.0) * scale)
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
             .with_resizable(true)
@@ -2232,7 +2242,7 @@ impl CrosshairApp {
             egui::ViewportId::from_hash_of("memory-address-list"),
             builder,
             |ctx, _| {
-                Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
+                Self::sync_pinned_viewport_scale(ctx, "memory-address-list", scale);
                 Self::constrain_memory_popup_to_monitor(ctx);
                 if ctx.input(|input| input.viewport().close_requested()) {
                     unpin = true;
@@ -2246,13 +2256,17 @@ impl CrosshairApp {
                     true,
                     &mut unpin,
                     &mut open,
+                    scale,
                 );
                 if !open {
                     unpin = true;
                 }
                 egui::CentralPanel::default()
-                    .frame(Self::memory_popup_frame(ctx))
-                    .show(ctx, |ui| self.render_saved_memory_addresses(ui));
+                    .frame(Self::memory_popup_frame(ctx, scale))
+                    .show(ctx, |ui| {
+                        Self::apply_memory_pinned_ui_scale(ui, scale);
+                        self.render_saved_memory_addresses(ui);
+                    });
                 Self::render_memory_popup_resize_handles(ctx);
                 ctx.request_repaint_after(Duration::from_millis(50));
             },
@@ -2353,22 +2367,57 @@ impl CrosshairApp {
             );
     }
 
-    fn memory_popup_frame(ctx: &egui::Context) -> Frame {
+    fn memory_popup_frame(ctx: &egui::Context, scale: f32) -> Frame {
+        let margin = (7.0 * scale).clamp(2.0, 30.0).round() as i8;
         Frame::new()
             .fill(ctx.style().visuals.panel_fill)
             .stroke(egui::Stroke::new(1.5, Color32::from_rgb(78, 92, 112)))
-            .inner_margin(egui::Margin::same(7))
+            .inner_margin(egui::Margin::same(margin))
     }
 
-    fn apply_memory_pinned_zoom(ctx: &egui::Context, scale: f32) {
-        let zoom = if scale.is_finite() && scale > 0.1 {
+    pub(crate) fn apply_memory_pinned_ui_scale(ui: &mut egui::Ui, scale: f32) {
+        let scale = if scale.is_finite() && scale > 0.1 {
             scale.clamp(0.5, 2.5)
         } else {
             1.0
         };
-        if (ctx.zoom_factor() - zoom).abs() > 0.001 {
-            ctx.set_zoom_factor(zoom);
+        ui.data_mut(|d| d.insert_temp(egui::Id::new("memory_pinned_ui_scale_active"), scale));
+        if (scale - 1.0).abs() < 0.001 {
+            return;
         }
+        let style = ui.style_mut();
+        for font_id in style.text_styles.values_mut() {
+            font_id.size = (font_id.size * scale).max(6.0);
+        }
+        if let Some(font_id) = &mut style.override_font_id {
+            font_id.size = (font_id.size * scale).max(6.0);
+        }
+        style.spacing.item_spacing *= scale;
+        style.spacing.button_padding *= scale;
+        style.spacing.indent *= scale;
+        style.spacing.interact_size *= scale;
+        style.spacing.slider_width *= scale;
+        style.spacing.slider_rail_height *= scale;
+        style.spacing.combo_width *= scale;
+        style.spacing.text_edit_width *= scale;
+        style.spacing.icon_width *= scale;
+        style.spacing.icon_width_inner *= scale;
+        style.spacing.icon_spacing *= scale;
+        style.spacing.scroll.bar_width *= scale;
+    }
+
+    fn sync_pinned_viewport_scale(ctx: &egui::Context, id: &str, scale: f32) {
+        let prev_scale_id = egui::Id::new((id, "applied_ui_scale"));
+        let prev_scale: Option<f32> = ctx.data(|d| d.get_temp(prev_scale_id));
+        if let Some(prev) = prev_scale {
+            if (prev - scale).abs() > 0.001 && prev > 0.01 {
+                let ratio = scale / prev;
+                if let Some(current_size) = ctx.input(|i| i.viewport().inner_rect.map(|r| r.size())) {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(current_size * ratio));
+                }
+            }
+        }
+        ctx.data_mut(|d| d.insert_temp(prev_scale_id, scale));
     }
 
     fn constrain_memory_popup_to_monitor(ctx: &egui::Context) {
@@ -2393,21 +2442,31 @@ impl CrosshairApp {
         pinned: bool,
         toggle_pin: &mut bool,
         open: &mut bool,
+        scale: f32,
     ) {
+        let scale = if scale.is_finite() && scale > 0.1 {
+            scale.clamp(0.5, 2.5)
+        } else {
+            1.0
+        };
         egui::TopBottomPanel::top("memory-tool-pinned-titlebar")
-            .exact_height(38.0)
+            .exact_height((38.0 * scale).max(24.0))
             .frame(
                 Frame::new()
                     .fill(Color32::from_rgb(16, 20, 26))
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(34, 42, 56)))
-                    .inner_margin(egui::Margin::symmetric(8, 4)),
+                    .inner_margin(egui::Margin::symmetric(
+                        (8.0 * scale).clamp(2.0, 24.0).round() as i8,
+                        (4.0 * scale).clamp(2.0, 16.0).round() as i8,
+                    )),
             )
             .show(ctx, |ui| {
+                Self::apply_memory_pinned_ui_scale(ui, scale);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .add_sized(
-                            [30.0, 26.0],
-                            Button::new(Self::material_icon_text(0xe5cd, 16.0)),
+                            [(30.0 * scale).max(18.0), (26.0 * scale).max(16.0)],
+                            Button::new(Self::material_icon_text(0xe5cd, (16.0 * scale).max(10.0))),
                         )
                         .on_hover_text(Self::tr_lang(language, "Close", "Đóng"))
                         .clicked()
@@ -2420,7 +2479,10 @@ impl CrosshairApp {
                         Self::tr_lang(language, "Pin", "Ghim")
                     };
                     if ui
-                        .add_sized([64.0, 26.0], Button::new(pin_label))
+                        .add_sized(
+                            [(64.0 * scale).max(36.0), (26.0 * scale).max(16.0)],
+                            Button::new(pin_label),
+                        )
                         .on_hover_text(if pinned {
                             Self::tr_lang(
                                 language,
@@ -2439,7 +2501,7 @@ impl CrosshairApp {
                         *toggle_pin = true;
                     }
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                        ui.label(Self::material_icon_text(0xe30c, 17.0));
+                        ui.label(Self::material_icon_text(0xe30c, (17.0 * scale).max(11.0)));
                         ui.label(RichText::new("MacroNest").strong());
                         ui.add(egui::Label::new(RichText::new(title).weak().small()).truncate());
                         let drag = ui.allocate_response(
@@ -6509,7 +6571,11 @@ impl CrosshairApp {
         text: &str,
         color: Option<Color32>,
     ) -> egui::Response {
-        let (rect, response) = ui.allocate_exact_size(vec2(width, 19.0), Sense::click());
+        let s = ui
+            .data(|d| d.get_temp::<f32>(egui::Id::new("memory_pinned_ui_scale_active")))
+            .unwrap_or(1.0);
+        let height = (19.0 * s).round().max(14.0);
+        let (rect, response) = ui.allocate_exact_size(vec2(width * s, height), Sense::click());
         let mut child = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(rect)
@@ -6694,7 +6760,10 @@ impl CrosshairApp {
                     }
                 });
                 ui.horizontal(|ui| {
-                    ui.allocate_exact_size(vec2(22.0, 18.0), Sense::hover());
+                    let s = ui
+                        .data(|d| d.get_temp::<f32>(egui::Id::new("memory_pinned_ui_scale_active")))
+                        .unwrap_or(1.0);
+                    ui.allocate_exact_size(vec2(22.0 * s, (18.0 * s).round().max(14.0)), Sense::hover());
                     if self.memory_panel.show_code_list_address {
                         Self::memory_code_list_cell(ui, 140.0, "Address / Module", None);
                         Self::memory_code_list_cell(ui, 240.0, "Name / Instruction", None);
@@ -6738,6 +6807,10 @@ impl CrosshairApp {
                         let mut btn_clicked = false;
                         let row_res = ui
                             .horizontal(|ui| {
+                                let s = ui
+                                    .data(|d| d.get_temp::<f32>(egui::Id::new("memory_pinned_ui_scale_active")))
+                                    .unwrap_or(1.0);
+                                let btn_h = (19.0 * s).round().max(14.0);
                                 let star_icon = if entry.highlighted { 0xe838 } else { 0xe83a };
                                 let star_fill = if entry.highlighted {
                                     Color32::from_rgb(104, 82, 18)
@@ -6766,8 +6839,8 @@ impl CrosshairApp {
                                     "Star highlight row"
                                 };
                                 let star_response = ui.add_sized(
-                                    [22.0, 19.0],
-                                    egui::Button::new(Self::material_icon_text(star_icon, 13.0).color(star_color))
+                                    [22.0 * s, btn_h],
+                                    egui::Button::new(Self::material_icon_text(star_icon, (13.0 * s).max(9.0)).color(star_color))
                                         .fill(star_fill)
                                         .stroke(egui::Stroke::new(1.0, star_stroke)),
                                 )
@@ -6797,7 +6870,7 @@ impl CrosshairApp {
                                     "Find accessed"
                                 };
                                 let action_response = ui.add_sized(
-                                    [82.0, 19.0],
+                                    [82.0 * s, btn_h],
                                     egui::Button::new(action_label).small(),
                                 );
                                 if action_response.clicked() {
@@ -6815,7 +6888,7 @@ impl CrosshairApp {
                                 };
                                 let copy_aob_response = ui.add_enabled(
                                     copy_aob_enabled,
-                                    egui::Button::new("Copy AOB").small().min_size(egui::vec2(60.0, 19.0)),
+                                    egui::Button::new("Copy AOB").small().min_size(egui::vec2(60.0 * s, btn_h)),
                                 )
                                 .on_hover_text(copy_aob_tooltip);
                                 if copy_aob_response.clicked() && copy_aob_enabled {
@@ -6830,7 +6903,7 @@ impl CrosshairApp {
                                     && self.memory_panel.code_relocate_all_rx.is_none();
                                 let relocate_response = ui.add_enabled(
                                     relocate_enabled,
-                                    egui::Button::new("Relocate").small().min_size(egui::vec2(56.0, 19.0)),
+                                    egui::Button::new("Relocate").small().min_size(egui::vec2(56.0 * s, btn_h)),
                                 )
                                 .on_hover_text(
                                     "Find the saved AOB in this module and update a unique new offset",
@@ -6840,7 +6913,7 @@ impl CrosshairApp {
                                     pending_action = Some(CodeAction::Relocate(index));
                                 }
                                 let rename_response = ui.add_sized(
-                                    [50.0, 19.0],
+                                    [50.0 * s, btn_h],
                                     egui::Button::new("Rename").small(),
                                 )
                                 .on_hover_text("Rename this code entry label");
@@ -6849,7 +6922,7 @@ impl CrosshairApp {
                                     pending_action = Some(CodeAction::Rename(index));
                                 }
                                 let delete_response = ui.add_sized(
-                                    [32.0, 19.0],
+                                    [32.0 * s, btn_h],
                                     egui::Button::new("Del").small(),
                                 );
                                 if delete_response.clicked() {
@@ -11614,11 +11687,12 @@ impl CrosshairApp {
         let pinned = !self.memory_panel.unpinned_memory_popups.contains(popup_id);
         let mut toggle_pin = false;
         if pinned {
+            let scale = self.state.memory_pinned_ui_scale;
             let builder = egui::ViewportBuilder::default()
                 .with_title(title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(760.0, 520.0))
-                .with_min_inner_size(vec2(520.0, 300.0))
+                .with_inner_size(vec2(760.0, 520.0) * scale)
+                .with_min_inner_size(vec2(520.0, 300.0) * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
@@ -11627,7 +11701,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of(popup_id),
                 builder,
                 |ctx, _| {
-                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
+                    Self::sync_pinned_viewport_scale(ctx, popup_id, scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -11639,10 +11713,12 @@ impl CrosshairApp {
                         true,
                         &mut toggle_pin,
                         &mut open,
+                        scale,
                     );
                     egui::CentralPanel::default()
-                        .frame(Self::memory_popup_frame(ctx))
+                        .frame(Self::memory_popup_frame(ctx, scale))
                         .show(ctx, |ui| {
+                            Self::apply_memory_pinned_ui_scale(ui, scale);
                             Self::render_pointer_compare_body(
                                 ui,
                                 self.state.vietnamese_input_enabled,
@@ -12835,11 +12911,12 @@ impl CrosshairApp {
         );
         let mut start_requested = false;
         if dialog.pinned {
+            let scale = self.state.memory_pinned_ui_scale;
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(760.0, 560.0))
-                .with_min_inner_size(vec2(520.0, 320.0))
+                .with_inner_size(vec2(760.0, 560.0) * scale)
+                .with_min_inner_size(vec2(520.0, 320.0) * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
@@ -12849,7 +12926,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of(("memory-instruction-watch", dialog.address)),
                 builder,
                 |ctx, _| {
-                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
+                    Self::sync_pinned_viewport_scale(ctx, "memory-instruction-watch", scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -12861,10 +12938,12 @@ impl CrosshairApp {
                         true,
                         &mut unpin,
                         &mut open,
+                        scale,
                     );
                     egui::CentralPanel::default()
-                        .frame(Self::memory_popup_frame(ctx))
+                        .frame(Self::memory_popup_frame(ctx, scale))
                         .show(ctx, |ui| {
+                            Self::apply_memory_pinned_ui_scale(ui, scale);
                             start_requested |= Self::render_instruction_watch_body(ui, &mut dialog);
                         });
                     Self::render_memory_popup_resize_handles(ctx);
@@ -13715,11 +13794,12 @@ impl CrosshairApp {
         let mut open_browse_addr = None;
         let mut open_dissect_addr = None;
         if dialog.pinned {
+            let scale = self.state.memory_pinned_ui_scale;
             let builder = egui::ViewportBuilder::default()
                 .with_title(title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(1100.0, 520.0))
-                .with_min_inner_size(vec2(760.0, 300.0))
+                .with_inner_size(vec2(1100.0, 520.0) * scale)
+                .with_min_inner_size(vec2(760.0, 300.0) * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
@@ -13728,7 +13808,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of("memory-code-compare"),
                 builder,
                 |ctx, _| {
-                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
+                    Self::sync_pinned_viewport_scale(ctx, "memory-code-compare", scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -13740,10 +13820,12 @@ impl CrosshairApp {
                         true,
                         &mut toggle_pin,
                         &mut open,
+                        scale,
                     );
                     egui::CentralPanel::default()
-                        .frame(Self::memory_popup_frame(ctx))
+                        .frame(Self::memory_popup_frame(ctx, scale))
                         .show(ctx, |ui| {
+                            Self::apply_memory_pinned_ui_scale(ui, scale);
                             Self::render_code_compare_body(
                                 ui,
                                 self.state.ui_language,
@@ -14120,11 +14202,12 @@ impl CrosshairApp {
         let mut start_requested = false;
         let mut apply_esp = None;
         if dialog.pinned {
+            let scale = self.state.memory_pinned_ui_scale;
             let builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(620.0, 520.0))
-                .with_min_inner_size(vec2(420.0, 280.0))
+                .with_inner_size(vec2(620.0, 520.0) * scale)
+                .with_min_inner_size(vec2(420.0, 280.0) * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
@@ -14133,7 +14216,7 @@ impl CrosshairApp {
                 egui::ViewportId::from_hash_of(("memory-code-access", dialog.code_index)),
                 builder,
                 |ctx, _| {
-                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
+                    Self::sync_pinned_viewport_scale(ctx, "memory-code-access", scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
                         open = false;
@@ -14145,10 +14228,12 @@ impl CrosshairApp {
                         true,
                         &mut unpin,
                         &mut open,
+                        scale,
                     );
                     egui::CentralPanel::default()
-                        .frame(Self::memory_popup_frame(ctx))
+                        .frame(Self::memory_popup_frame(ctx, scale))
                         .show(ctx, |ui| {
+                            Self::apply_memory_pinned_ui_scale(ui, scale);
                             let result = Self::render_code_access_body(
                                 ui,
                                 &mut dialog,
@@ -15074,24 +15159,25 @@ impl CrosshairApp {
             }
         }
         if dialog.pinned {
+            let scale = self.state.memory_pinned_ui_scale;
             let fit_columns = dialog.fit_memory_columns;
             let mut builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_min_inner_size(vec2(420.0, 360.0))
+                .with_min_inner_size(vec2(420.0, 360.0) * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_always_on_top();
             if fit_columns {
-                builder = builder.with_inner_size(vec2(three_column_width, 820.0));
+                builder = builder.with_inner_size(vec2(three_column_width, 820.0) * scale);
             }
             let mut unpin = false;
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("memory-view-pinned-struct"),
                 builder,
                 |ctx, _| {
-                    Self::apply_memory_pinned_zoom(ctx, self.state.memory_pinned_ui_scale);
+                    Self::sync_pinned_viewport_scale(ctx, "memory-view-pinned-struct", scale);
                     if !ctx.wants_keyboard_input() {
                         if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
                             nav_delta = -1;
@@ -15110,10 +15196,12 @@ impl CrosshairApp {
                         true,
                         &mut unpin,
                         &mut open,
+                        scale,
                     );
                     egui::CentralPanel::default()
-                        .frame(Self::memory_popup_frame(ctx))
+                        .frame(Self::memory_popup_frame(ctx, scale))
                         .show(ctx, |ui| {
+                            Self::apply_memory_pinned_ui_scale(ui, scale);
                             Self::render_memory_view_body(
                                 ui,
                                 self.state.ui_language,

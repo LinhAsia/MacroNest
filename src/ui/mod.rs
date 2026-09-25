@@ -14667,6 +14667,9 @@ impl eframe::App for CrosshairApp {
         [0.0, 0.0, 0.0, 0.0]
     }
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if (ctx.zoom_factor() - 1.0).abs() > 0.001 {
+            ctx.set_zoom_factor(1.0);
+        }
         crate::overlay::UI_WANTS_KEYBOARD_INPUT.store(
             ctx.wants_keyboard_input(),
             std::sync::atomic::Ordering::Relaxed,
