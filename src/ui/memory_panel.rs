@@ -1934,12 +1934,12 @@ impl CrosshairApp {
         if pinned {
             let scale = self.state.memory_pinned_ui_scale;
             let inner_size = if id == "memory-code-list-host" {
-                vec2(590.0, 480.0)
+                vec2(740.0, 520.0)
             } else {
                 vec2(860.0, 620.0)
             };
             let min_inner_size = if id == "memory-code-list-host" {
-                vec2(380.0, 240.0)
+                vec2(580.0, 240.0)
             } else {
                 vec2(480.0, 280.0)
             };
@@ -1955,7 +1955,7 @@ impl CrosshairApp {
             ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
                 Self::sync_pinned_viewport_scale(ctx, id, scale);
                 if id == "memory-code-list-host" {
-                    let compact_key = egui::Id::new((id, "compact_size_v3"));
+                    let compact_key = egui::Id::new((id, "compact_size_v4"));
                     let applied: bool = ctx.data(|d| d.get_temp(compact_key)).unwrap_or(false);
                     if !applied {
                         ctx.data_mut(|d| d.insert_temp(compact_key, true));
@@ -1988,14 +1988,14 @@ impl CrosshairApp {
             }
         } else {
             let default_size = if id == "memory-code-list-host" {
-                vec2(590.0, 480.0)
+                vec2(740.0, 520.0)
             } else {
                 vec2(640.0, 440.0)
             };
             egui::Window::new(title)
                 .id(egui::Id::new(id))
                 .default_size(default_size)
-                .min_size(vec2(380.0, 240.0))
+                .min_size(vec2(580.0, 240.0))
                 .collapsible(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
@@ -6900,19 +6900,6 @@ impl CrosshairApp {
                         }
                     }
                 });
-                ui.horizontal(|ui| {
-                    let s = ui
-                        .data(|d| d.get_temp::<f32>(egui::Id::new("memory_pinned_ui_scale_active")))
-                        .unwrap_or(1.0);
-                    ui.allocate_exact_size(vec2(22.0 * s, (18.0 * s).round().max(14.0)), Sense::hover());
-                    if self.memory_panel.show_code_list_address {
-                        Self::memory_code_list_cell(ui, 120.0, "Address / Module", None);
-                        Self::memory_code_list_cell(ui, 200.0, "Name / Instruction", None);
-                    } else {
-                        Self::memory_code_list_cell(ui, 230.0, "Name / Instruction", None);
-                    }
-                    Self::memory_code_list_cell(ui, 296.0, "Action / Status", None);
-                });
                 #[cfg(windows)]
                 if !self.memory_panel.code_relocate_status.is_empty() {
                     ui.label(
@@ -6920,9 +6907,23 @@ impl CrosshairApp {
                             .color(ui.visuals().weak_text_color()),
                     );
                 }
-                ui.separator();
                 let is_vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+                    let s = ui
+                        .data(|d| d.get_temp::<f32>(egui::Id::new("memory_pinned_ui_scale_active")))
+                        .unwrap_or(1.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0 * s;
+                        ui.allocate_exact_size(vec2(22.0 * s, (18.0 * s).round().max(14.0)), Sense::hover());
+                        if self.memory_panel.show_code_list_address {
+                            Self::memory_code_list_cell(ui, 120.0, "Address / Module", None);
+                            Self::memory_code_list_cell(ui, 200.0, "Name / Instruction", None);
+                        } else {
+                            Self::memory_code_list_cell(ui, 230.0, "Name / Instruction", None);
+                        }
+                        Self::memory_code_list_cell(ui, 326.0, "Action / Status", None);
+                    });
+                    ui.separator();
                     for (index, entry) in self.state.memory_code_list.iter().enumerate() {
                         let selected = self.memory_panel.selected_code.contains(&index);
                         let address_str = format!("{}+{:X}", entry.module, entry.offset);
@@ -6951,6 +6952,7 @@ impl CrosshairApp {
                                 let s = ui
                                     .data(|d| d.get_temp::<f32>(egui::Id::new("memory_pinned_ui_scale_active")))
                                     .unwrap_or(1.0);
+                                ui.spacing_mut().item_spacing.x = 4.0 * s;
                                 let btn_h = (19.0 * s).round().max(14.0);
                                 let star_icon = if entry.highlighted { 0xe838 } else { 0xe83a };
                                 let star_fill = if entry.highlighted {
@@ -7003,6 +7005,13 @@ impl CrosshairApp {
                                             Self::memory_code_list_cell(ui, 230.0, &instruction_text, text_color),
                                         )
                                     };
+
+                                let action_w = 98.0 * s;
+                                let copy_aob_w = 64.0 * s;
+                                let relocate_w = 60.0 * s;
+                                let rename_w = 54.0 * s;
+                                let del_w = 34.0 * s;
+
                                 let action_label = if entry.replaced {
                                     "NOP Active"
                                 } else if entry.writes {
@@ -7011,7 +7020,7 @@ impl CrosshairApp {
                                     "Find accessed"
                                 };
                                 let action_response = ui.add_sized(
-                                    [82.0 * s, btn_h],
+                                    [action_w, btn_h],
                                     egui::Button::new(action_label).small(),
                                 );
                                 if action_response.clicked() {
@@ -7029,7 +7038,7 @@ impl CrosshairApp {
                                 };
                                 let copy_aob_response = ui.add_enabled(
                                     copy_aob_enabled,
-                                    egui::Button::new("Copy AOB").small().min_size(egui::vec2(60.0 * s, btn_h)),
+                                    egui::Button::new("Copy AOB").small().min_size(egui::vec2(copy_aob_w, btn_h)),
                                 )
                                 .on_hover_text(copy_aob_tooltip);
                                 if copy_aob_response.clicked() && copy_aob_enabled {
@@ -7044,7 +7053,7 @@ impl CrosshairApp {
                                     && self.memory_panel.code_relocate_all_rx.is_none();
                                 let relocate_response = ui.add_enabled(
                                     relocate_enabled,
-                                    egui::Button::new("Relocate").small().min_size(egui::vec2(56.0 * s, btn_h)),
+                                    egui::Button::new("Relocate").small().min_size(egui::vec2(relocate_w, btn_h)),
                                 )
                                 .on_hover_text(
                                     "Find the saved AOB in this module and update a unique new offset",
@@ -7054,7 +7063,7 @@ impl CrosshairApp {
                                     pending_action = Some(CodeAction::Relocate(index));
                                 }
                                 let rename_response = ui.add_sized(
-                                    [50.0 * s, btn_h],
+                                    [rename_w, btn_h],
                                     egui::Button::new("Rename").small(),
                                 )
                                 .on_hover_text("Rename this code entry label");
@@ -7063,7 +7072,7 @@ impl CrosshairApp {
                                     pending_action = Some(CodeAction::Rename(index));
                                 }
                                 let delete_response = ui.add_sized(
-                                    [32.0 * s, btn_h],
+                                    [del_w, btn_h],
                                     egui::Button::new("Del").small(),
                                 );
                                 if delete_response.clicked() {
