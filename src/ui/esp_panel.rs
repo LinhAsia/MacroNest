@@ -1467,7 +1467,15 @@ impl CrosshairApp {
                             ui.label("");
                             ui.horizontal(|ui| {
                                 ui.checkbox(&mut preset.entity_aabb_center, "AABB center");
-                                if preset.entity_aabb_center {
+                                ui.checkbox(
+                                    &mut preset.entity_aabb_draw_box,
+                                    self.tr("Box from coords", "Vẽ box theo tọa độ"),
+                                )
+                                .on_hover_text(self.tr(
+                                    "Draw ESP box directly from AABB coordinate bounds, ignoring manual box width/height settings.",
+                                    "Vẽ khung bao theo tọa độ AABB thực tế của đối tượng, bỏ qua kích thước box thủ công.",
+                                ));
+                                if preset.entity_aabb_center || preset.entity_aabb_draw_box {
                                     ui.label("Pair delta");
                                     ui.add(
                                         DragValue::new(&mut preset.entity_aabb_pair_offset)
@@ -2131,10 +2139,14 @@ impl CrosshairApp {
                                                 ui.add(DragValue::new(&mut preset.dot_radius).speed(1.0).range(1.0..=100.0));
                                             }
                                             EspMarkerKind::Box => {
-                                                ui.label("W:");
-                                                ui.add(DragValue::new(&mut preset.box_width).speed(1.0).range(2.0..=1000.0));
-                                                ui.label("H:");
-                                                ui.add(DragValue::new(&mut preset.box_height).speed(1.0).range(2.0..=1000.0));
+                                                if preset.entity_aabb_draw_box {
+                                                    ui.label(self.tr("(Auto from AABB)", "(Tự động theo AABB)"));
+                                                } else {
+                                                    ui.label("W:");
+                                                    ui.add(DragValue::new(&mut preset.box_width).speed(1.0).range(2.0..=1000.0));
+                                                    ui.label("H:");
+                                                    ui.add(DragValue::new(&mut preset.box_height).speed(1.0).range(2.0..=1000.0));
+                                                }
                                             }
                                             EspMarkerKind::None => {}
                                         }
@@ -2491,7 +2503,7 @@ fn find_nearest_entity_index(
 
         let read_comp = |addr: usize| -> Option<f32> {
             let first = read_esp_f32_from_address(pid, addr, preset.value_type)?;
-            if !preset.entity_aabb_center {
+            if !(preset.entity_aabb_center || preset.entity_aabb_draw_box) {
                 return Some(first);
             }
             let second_addr = crate::model::entity_field_address(
@@ -2668,7 +2680,7 @@ fn merge_entity_addresses_by_3d_proximity(
 
         let read_comp = |addr: usize| -> Option<f32> {
             let first = read_esp_f32_from_address(pid, addr, preset.value_type)?;
-            if !preset.entity_aabb_center {
+            if !(preset.entity_aabb_center || preset.entity_aabb_draw_box) {
                 return Some(first);
             }
             let second_addr = crate::model::entity_field_address(

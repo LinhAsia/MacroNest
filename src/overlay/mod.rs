@@ -25714,12 +25714,14 @@ mod windows_overlay {
         failed_addresses: HashMap<usize, Instant>,
         resolved_addresses: HashMap<u32, HashMap<String, EspResolvedAddress>>,
         motionless_trackers: HashMap<(u32, usize), crate::model::MotionlessTrack>,
+        aabb_bounds: HashMap<(u32, usize), ([f32; 3], [f32; 3])>,
     }
 
     impl EspReadFrame {
         fn begin_sample(&mut self) {
             self.values.clear();
             self.memory_blocks.clear();
+            self.aabb_bounds.clear();
             if self.failed_addresses.len() > 1024 {
                 self.failed_addresses
                     .retain(|_, at| at.elapsed() < Duration::from_millis(1000));
@@ -26242,12 +26244,12 @@ mod windows_overlay {
             else {
                 continue;
             };
-            let mut read_component = |address: usize| -> Option<f32> {
+            let mut read_coord = |address: usize| -> Option<(f32, Option<f32>)> {
                 let first = frame
                     .read_numeric_value(target_pid, address, preset.value_type)
                     .ok()?;
-                if !preset.entity_aabb_center {
-                    return Some(first);
+                if !(preset.entity_aabb_center || preset.entity_aabb_draw_box) {
+                    return Some((first, None));
                 }
                 let second_address = crate::model::entity_field_address(
                     address,
@@ -26258,21 +26260,37 @@ mod windows_overlay {
                 let second = frame
                     .read_numeric_value(target_pid, second_address, preset.value_type)
                     .ok()?;
-                Some(crate::model::aabb_center_component(first, second))
+                Some((first, Some(second)))
             };
-            let Some(x) = read_component(x_address) else {
+            let Some((first_x, second_x_opt)) = read_coord(x_address) else {
                 frame.failed_addresses.insert(entity_address, Instant::now());
                 continue;
             };
-            let Some(y) = read_component(y_address) else {
+            let Some((first_y, second_y_opt)) = read_coord(y_address) else {
                 frame.failed_addresses.insert(entity_address, Instant::now());
                 continue;
             };
-            let Some(z) = read_component(z_address) else {
+            let Some((first_z, second_z_opt)) = read_coord(z_address) else {
                 frame.failed_addresses.insert(entity_address, Instant::now());
                 continue;
             };
             frame.failed_addresses.remove(&entity_address);
+            let (x, y, z) = if let (Some(sx), Some(sy), Some(sz)) =
+                (second_x_opt, second_y_opt, second_z_opt)
+            {
+                let min_pt = [first_x.min(sx), first_y.min(sy), first_z.min(sz)];
+                let max_pt = [first_x.max(sx), first_y.max(sy), first_z.max(sz)];
+                frame
+                    .aabb_bounds
+                    .insert((preset.id, entity_index), (min_pt, max_pt));
+                (
+                    crate::model::aabb_center_component(first_x, sx),
+                    crate::model::aabb_center_component(first_y, sy),
+                    crate::model::aabb_center_component(first_z, sz),
+                )
+            } else {
+                (first_x, first_y, first_z)
+            };
             let target = [x, y, z];
             if target.iter().all(|value| value.is_finite())
                 && target.iter().any(|value| value.abs() > f32::EPSILON)
@@ -26438,10 +26456,12 @@ mod windows_overlay {
             ESP_DEBUG_BOX_HITS.lock().clear();
         }
         for (target, entity_address, entity_index) in targets {
+            let aabb_bounds = frame.aabb_bounds.get(&(preset.id, entity_index)).copied();
             let (mut target_shapes, snapshot) = esp_shapes_for_target(
                 preset,
                 marker_asset,
                 target,
+                aabb_bounds,
                 entity_address,
                 entity_index,
                 camera,
@@ -26743,6 +26763,7 @@ mod windows_overlay {
         preset: &crate::model::EspPreset,
         marker_asset: Option<&Arc<str>>,
         target: [f32; 3],
+        aabb_bounds: Option<([f32; 3], [f32; 3])>,
         entity_address: usize,
         entity_index: usize,
         camera: [f32; 3],
@@ -26864,6 +26885,25 @@ mod windows_overlay {
         ];
         let thickness = preset.thickness.round().max(1.0) as i32;
         let marker_scale = crate::model::esp_marker_scale(preset, distance);
+        let aabb_box_coords = if preset.entity_aabb_draw_box {
+            aabb_bounds.and_then(|(min_pt, max_pt)| {
+                crate::model::project_aabb_box(
+                    preset,
+                    min_pt,
+                    max_pt,
+                    camera,
+                    yaw,
+                    pitch,
+                    width as f32 / height as f32,
+                    left,
+                    top,
+                    width,
+                    height,
+                )
+            })
+        } else {
+            None
+        };
         let mut shapes = Vec::new();
         match preset.marker_source {
             crate::model::EspMarkerSource::None => {}
@@ -26935,20 +26975,38 @@ mod windows_overlay {
                     }
                 }
                 crate::model::EspMarkerKind::Box => {
-                    let half_width =
-                        (preset.box_width * marker_scale * 0.5).round().max(1.0) as i32;
-                    let half_height =
-                        (preset.box_height * marker_scale * 0.5).round().max(1.0) as i32;
-                    let points = vec![
-                        (x - half_width, y - half_height),
-                        (x + half_width, y - half_height),
-                        (x + half_width, y + half_height),
-                        (x - half_width, y + half_height),
-                    ];
-                    let box_min_x = x - half_width - thickness;
-                    let box_min_y = y - half_height - thickness;
-                    let box_max_x = x + half_width + thickness;
-                    let box_max_y = y + half_height + thickness;
+                    let (points, box_min_x, box_min_y, box_max_x, box_max_y) =
+                        if let Some((bx1, by1, bx2, by2)) = aabb_box_coords {
+                            (
+                                vec![
+                                    (bx1, by1),
+                                    (bx2, by1),
+                                    (bx2, by2),
+                                    (bx1, by2),
+                                ],
+                                bx1 - thickness,
+                                by1 - thickness,
+                                bx2 + thickness,
+                                by2 + thickness,
+                            )
+                        } else {
+                            let half_width =
+                                (preset.box_width * marker_scale * 0.5).round().max(1.0) as i32;
+                            let half_height =
+                                (preset.box_height * marker_scale * 0.5).round().max(1.0) as i32;
+                            (
+                                vec![
+                                    (x - half_width, y - half_height),
+                                    (x + half_width, y - half_height),
+                                    (x + half_width, y + half_height),
+                                    (x - half_width, y + half_height),
+                                ],
+                                x - half_width - thickness,
+                                y - half_height - thickness,
+                                x + half_width + thickness,
+                                y + half_height + thickness,
+                            )
+                        };
                     shapes.push(GeometryRenderShape {
                         bounds: (box_min_x, box_min_y, box_max_x, box_max_y),
                         draw: GeometryRenderDraw::Polygon {
@@ -27070,6 +27128,28 @@ mod windows_overlay {
                 }
             }
         }
+        if preset.entity_aabb_draw_box && preset.marker != crate::model::EspMarkerKind::Box {
+            if let Some((bx1, by1, bx2, by2)) = aabb_box_coords {
+                let box_min_x = bx1 - thickness;
+                let box_min_y = by1 - thickness;
+                let box_max_x = bx2 + thickness;
+                let box_max_y = by2 + thickness;
+                shapes.push(GeometryRenderShape {
+                    bounds: (box_min_x, box_min_y, box_max_x, box_max_y),
+                    draw: GeometryRenderDraw::Polygon {
+                        points: vec![
+                            (bx1, by1),
+                            (bx2, by1),
+                            (bx2, by2),
+                            (bx1, by2),
+                        ],
+                        stroke: color,
+                        fill: preset.filled.then_some(color),
+                        thickness,
+                    },
+                });
+            }
+        }
         if preset.show_tracer {
             let origin_x = left + width / 2;
             let origin_y = if preset.tracer_from_top {
@@ -27094,10 +27174,14 @@ mod windows_overlay {
                         }
                     }
                     crate::model::EspMarkerKind::Box => {
-                        let half_width =
-                            (preset.box_width * marker_scale * 0.5).round().max(1.0) as i32;
-                        let half_height =
-                            (preset.box_height * marker_scale * 0.5).round().max(1.0) as i32;
+                        let (half_width, half_height) = if let Some((bx1, by1, bx2, by2)) = aabb_box_coords {
+                            (((bx2 - bx1) / 2).max(1), ((by2 - by1) / 2).max(1))
+                        } else {
+                            (
+                                (preset.box_width * marker_scale * 0.5).round().max(1.0) as i32,
+                                (preset.box_height * marker_scale * 0.5).round().max(1.0) as i32,
+                            )
+                        };
                         let dx = (origin_x - x) as f32;
                         let dy = (origin_y - y) as f32;
                         if dy.abs() > 0.001 {

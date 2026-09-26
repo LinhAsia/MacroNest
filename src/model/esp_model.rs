@@ -130,6 +130,8 @@ pub struct EspPreset {
     pub entity_auto_hud_enabled: bool,
     pub entity_auto_hud_preset_id: Option<u32>,
     pub entity_aabb_center: bool,
+    #[serde(default)]
+    pub entity_aabb_draw_box: bool,
     pub entity_aabb_pair_offset: i64,
     #[serde(default)]
     pub custom_entity_colors: HashMap<u32, RgbaColor>,
@@ -261,6 +263,7 @@ impl EspPreset {
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
+            entity_aabb_draw_box: false,
             entity_aabb_pair_offset: 0x0C,
             custom_entity_colors: HashMap::new(),
             camera_x: String::new(),
@@ -1338,6 +1341,67 @@ pub fn filter_motionless_targets(
     });
 }
 
+/// Projects the 8 corners of a 3D AABB bounding box defined by `min_pt` and `max_pt`
+/// to 2D screen coordinates, returning `(min_x, min_y, max_x, max_y)`.
+pub fn project_aabb_box(
+    preset: &EspPreset,
+    min_pt: [f32; 3],
+    max_pt: [f32; 3],
+    camera: [f32; 3],
+    yaw: f32,
+    pitch: f32,
+    aspect: f32,
+    screen_left: i32,
+    screen_top: i32,
+    screen_width: i32,
+    screen_height: i32,
+) -> Option<(i32, i32, i32, i32)> {
+    let corners = [
+        [min_pt[0], min_pt[1], min_pt[2]],
+        [min_pt[0], min_pt[1], max_pt[2]],
+        [min_pt[0], max_pt[1], min_pt[2]],
+        [min_pt[0], max_pt[1], max_pt[2]],
+        [max_pt[0], min_pt[1], min_pt[2]],
+        [max_pt[0], min_pt[1], max_pt[2]],
+        [max_pt[0], max_pt[1], min_pt[2]],
+        [max_pt[0], max_pt[1], max_pt[2]],
+    ];
+
+    let mut min_sx = i32::MAX;
+    let mut max_sx = i32::MIN;
+    let mut min_sy = i32::MAX;
+    let mut max_sy = i32::MIN;
+    let mut valid_count = 0;
+
+    for corner in corners {
+        if let Some(proj) = project_esp(preset, corner, camera, yaw, pitch, aspect) {
+            if proj.in_front {
+                let sx = screen_left
+                    + ((proj.normalized_x + 1.0) * 0.5 * screen_width as f32
+                        + preset.screen_offset_x
+                        + preset.marker_offset_x)
+                        .round() as i32;
+                let sy = screen_top
+                    + ((1.0 - proj.normalized_y) * 0.5 * screen_height as f32
+                        + preset.screen_offset_y
+                        + preset.marker_offset_y)
+                        .round() as i32;
+                min_sx = min_sx.min(sx);
+                max_sx = max_sx.max(sx);
+                min_sy = min_sy.min(sy);
+                max_sy = max_sy.max(sy);
+                valid_count += 1;
+            }
+        }
+    }
+
+    if valid_count > 0 && max_sx >= min_sx && max_sy >= min_sy {
+        Some((min_sx, min_sy, max_sx.max(min_sx + 2), max_sy.max(min_sy + 2)))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1767,6 +1831,7 @@ mod tests {
         assert_eq!(loaded.entity_exclude_near_max_distance, 0.0);
         assert!(!loaded.entity_filter_motionless_enabled);
         assert_eq!(loaded.entity_motionless_timeout_secs, 0.5);
+        assert!(!loaded.entity_aabb_draw_box);
     }
 
     #[test]
@@ -1806,6 +1871,37 @@ mod tests {
         targets.push(([55.0, 60.0, 70.0], 0x2000, 1)); // target 1 moves
         filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t3);
         assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn test_project_aabb_box() {
+        let preset = EspPreset::default();
+        let camera = [0.0, 0.0, 0.0];
+        let yaw = 0.0;
+        let pitch = 0.0;
+        let aspect = 1920.0 / 1080.0;
+
+        let min_pt = [50.0, -2.0, -1.0];
+        let max_pt = [50.0, 2.0, 3.0];
+
+        let result = project_aabb_box(
+            &preset, min_pt, max_pt, camera, yaw, pitch, aspect, 0, 0, 1920, 1080,
+        );
+
+        assert!(result.is_some());
+        let (min_x, min_y, max_x, max_y) = result.unwrap();
+        assert!(min_x < max_x);
+        assert!(min_y < max_y);
+
+        let min_pt_far = [100.0, -2.0, -1.0];
+        let max_pt_far = [100.0, 2.0, 3.0];
+        let (far_min_x, far_min_y, far_max_x, far_max_y) = project_aabb_box(
+            &preset, min_pt_far, max_pt_far, camera, yaw, pitch, aspect, 0, 0, 1920, 1080,
+        )
+        .unwrap();
+
+        assert!(max_x - min_x > far_max_x - far_min_x);
+        assert!(max_y - min_y > far_max_y - far_min_y);
     }
 }
 
