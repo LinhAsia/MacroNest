@@ -1402,6 +1402,42 @@ pub fn project_aabb_box(
     }
 }
 
+/// Calculates the screen position `(x, y)` for the ESP distance label.
+/// When a Box is active (from AABB coordinates or standard box settings),
+/// the distance is positioned cleanly below the bottom edge of the box.
+pub fn esp_distance_screen_position(
+    preset: &EspPreset,
+    aabb_box_coords: Option<(i32, i32, i32, i32)>,
+    x: i32,
+    y: i32,
+    marker_scale: f32,
+    thickness: i32,
+) -> (i32, i32) {
+    if let Some((bx1, by1, bx2, by2)) = aabb_box_coords {
+        let box_bottom = by1.max(by2);
+        let center_x = (bx1 + bx2) / 2;
+        let offset_y = box_bottom + (thickness + 1) / 2 + 12;
+        (center_x, offset_y)
+    } else if preset.marker_source == EspMarkerSource::Geometry {
+        match preset.marker {
+            EspMarkerKind::Box => {
+                let half_height =
+                    (preset.box_height * marker_scale * 0.5).round().max(1.0) as i32;
+                let offset_y = y + half_height + (thickness + 1) / 2 + 12;
+                (x, offset_y)
+            }
+            EspMarkerKind::Dot => {
+                let radius = (preset.dot_radius * marker_scale).round().max(1.0) as i32;
+                let offset_y = y + radius + (thickness + 1) / 2 + 12;
+                (x, offset_y)
+            }
+            EspMarkerKind::None => (x, y + 18),
+        }
+    } else {
+        (x, y + 18)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1902,6 +1938,49 @@ mod tests {
 
         assert!(max_x - min_x > far_max_x - far_min_x);
         assert!(max_y - min_y > far_max_y - far_min_y);
+    }
+
+    #[test]
+    fn test_esp_distance_screen_position_box_and_aabb() {
+        let mut preset = EspPreset::default();
+        preset.marker_source = EspMarkerSource::Geometry;
+        preset.marker = EspMarkerKind::Box;
+        preset.box_width = 40.0;
+        preset.box_height = 60.0;
+        preset.thickness = 2.0;
+
+        // 1. Standard Box: center x=100, y=200, half_height = 30, thickness=2
+        // offset_y = 200 + 30 + 1 + 12 = 243
+        let (dx, dy) = esp_distance_screen_position(&preset, None, 100, 200, 1.0, 2);
+        assert_eq!(dx, 100);
+        assert_eq!(dy, 243);
+
+        // 2. AABB Box: box bounds (80, 150, 140, 310)
+        // center_x = (80 + 140) / 2 = 110, box_bottom = 310
+        // offset_y = 310 + 1 + 12 = 323
+        let (aabb_dx, aabb_dy) = esp_distance_screen_position(
+            &preset,
+            Some((80, 150, 140, 310)),
+            100,
+            200,
+            1.0,
+            2,
+        );
+        assert_eq!(aabb_dx, 110);
+        assert_eq!(aabb_dy, 323);
+
+        // 3. Dot: radius = 10, y=200, thickness=2 -> offset_y = 200 + 10 + 1 + 12 = 223
+        preset.marker = EspMarkerKind::Dot;
+        preset.dot_radius = 10.0;
+        let (dot_dx, dot_dy) = esp_distance_screen_position(&preset, None, 100, 200, 1.0, 2);
+        assert_eq!(dot_dx, 100);
+        assert_eq!(dot_dy, 223);
+
+        // 4. None: default fallback (100, 218)
+        preset.marker = EspMarkerKind::None;
+        let (none_dx, none_dy) = esp_distance_screen_position(&preset, None, 100, 200, 1.0, 2);
+        assert_eq!(none_dx, 100);
+        assert_eq!(none_dy, 218);
     }
 }
 

@@ -27216,12 +27216,20 @@ mod windows_overlay {
             });
         }
         if preset.show_distance {
+            let (dist_x, dist_y) = crate::model::esp_distance_screen_position(
+                preset,
+                aabb_box_coords,
+                x,
+                y,
+                marker_scale,
+                thickness,
+            );
             let text = format!("{distance:.1}");
             shapes.push(GeometryRenderShape {
-                bounds: geometry_label_bounds(x, y + 18, 14, &text, 0.0),
+                bounds: geometry_label_bounds(dist_x, dist_y, 14, &text, 0.0),
                 draw: GeometryRenderDraw::Label(GeometryRenderText {
-                    x,
-                    y: y + 18,
+                    x: dist_x,
+                    y: dist_y,
                     font_size: 14,
                     color,
                     rotation_deg: 0.0,
