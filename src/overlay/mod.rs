@@ -25917,12 +25917,62 @@ mod windows_overlay {
         frame.read_value(pid, expression, value_type).ok()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn evaluate_esp_expression_address(
         pid: u32,
         expression: &str,
     ) -> Option<usize> {
         let mut frame = EspReadFrame::default();
         frame.resolve_address(pid, expression, false).map(|(_, addr)| addr)
+    }
+
+    pub(crate) fn evaluate_esp_preset_entity_addresses(
+        pid: u32,
+        preset: &crate::model::EspPreset,
+    ) -> Vec<usize> {
+        let mut frame = EspReadFrame::default();
+        let root_expression = preset.entity_root.trim();
+        if root_expression.is_empty() {
+            return Vec::new();
+        }
+        let count = preset.entity_count.clamp(1, 512);
+        let stride = preset.entity_stride.max(1);
+
+        if let Some(open) = root_expression.rfind('[')
+            && root_expression.ends_with(']')
+            && let Some((base_offsets, user_varying_idx)) = parse_pointer_offsets_with_varying(&root_expression[open + 1..root_expression.len() - 1])
+            && !base_offsets.is_empty()
+        {
+            let root_prefix = root_expression[..open].trim();
+            let varying_idx = user_varying_idx.unwrap_or(0).min(base_offsets.len().saturating_sub(1));
+            let mut addrs = Vec::with_capacity(count as usize);
+
+            for index in 0..count {
+                let mut offsets = base_offsets.clone();
+                offsets[varying_idx] = offsets[varying_idx].saturating_add((index as usize).saturating_mul(stride as usize));
+                let expr = format!("{} [{}]", root_prefix, offsets.iter().map(|o| format!("{:X}", o)).collect::<Vec<_>>().join(", "));
+                if let Some((_, addr)) = frame.resolve_address(pid, &expr, false) {
+                    if addr >= 0x10000 && addr < 0x7FFF_FFFF_0000 && !preset.entity_blacklisted_addresses.contains(&addr) {
+                        addrs.push(addr);
+                    }
+                }
+            }
+            addrs
+        } else if let Some((_, root)) = frame.resolve_address(pid, root_expression, false) {
+            if root < 0x10000 || root >= 0x7FFF_FFFF_0000 {
+                return Vec::new();
+            }
+            (0..count)
+                .map(|index| root + (index as usize) * (stride as usize))
+                .filter(|addr| {
+                    *addr >= 0x10000
+                        && *addr < 0x7FFF_FFFF_0000
+                        && !preset.entity_blacklisted_addresses.contains(addr)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     fn esp_value_type_tag(value_type: crate::model::MemoryValueType) -> u8 {
@@ -26078,23 +26128,52 @@ mod windows_overlay {
             if root_expression.is_empty() {
                 return Err("Entity root is empty".to_owned());
             }
-            let (target_pid, root) = frame
-                .resolve_address(pid, root_expression, false)
-                .ok_or_else(|| "Entity root could not be resolved".to_owned())?;
-            if root < 0x10000 || root >= 0x7FFF_FFFF_0000 {
-                return Err("Entity root points to NULL or invalid address".to_owned());
+
+            if let Some(open) = root_expression.rfind('[')
+                && root_expression.ends_with(']')
+                && let Some((base_offsets, user_varying_idx)) = parse_pointer_offsets_with_varying(&root_expression[open + 1..root_expression.len() - 1])
+                && !base_offsets.is_empty()
+            {
+                let root_prefix = root_expression[..open].trim();
+                let varying_idx = user_varying_idx.unwrap_or(0).min(base_offsets.len().saturating_sub(1));
+                let mut addrs = Vec::with_capacity(count as usize);
+                let mut target_pid = pid;
+
+                for index in 0..count {
+                    let mut offsets = base_offsets.clone();
+                    offsets[varying_idx] = offsets[varying_idx].saturating_add((index as usize).saturating_mul(stride as usize));
+                    let expr = format!("{} [{}]", root_prefix, offsets.iter().map(|o| format!("{:X}", o)).collect::<Vec<_>>().join(", "));
+                    if let Some((t_pid, addr)) = frame.resolve_address(pid, &expr, false) {
+                        target_pid = t_pid;
+                        if addr >= 0x10000 && addr < 0x7FFF_FFFF_0000 && !preset.entity_blacklisted_addresses.contains(&addr) {
+                            addrs.push(addr);
+                        }
+                    }
+                }
+
+                if addrs.is_empty() {
+                    return Err("Entity root points to NULL or invalid address".to_owned());
+                }
+                (target_pid, addrs)
+            } else {
+                let (target_pid, root) = frame
+                    .resolve_address(pid, root_expression, false)
+                    .ok_or_else(|| "Entity root could not be resolved".to_owned())?;
+                if root < 0x10000 || root >= 0x7FFF_FFFF_0000 {
+                    return Err("Entity root points to NULL or invalid address".to_owned());
+                }
+                (
+                    target_pid,
+                    (0..count)
+                        .map(|index| root + (index as usize) * (stride as usize))
+                        .filter(|addr| {
+                            *addr >= 0x10000
+                                && *addr < 0x7FFF_FFFF_0000
+                                && !preset.entity_blacklisted_addresses.contains(addr)
+                        })
+                        .collect::<Vec<_>>(),
+                )
             }
-            (
-                target_pid,
-                (0..count)
-                    .map(|index| root + (index as usize) * (stride as usize))
-                    .filter(|addr| {
-                        *addr >= 0x10000
-                            && *addr < 0x7FFF_FFFF_0000
-                            && !preset.entity_blacklisted_addresses.contains(addr)
-                    })
-                    .collect::<Vec<_>>(),
-            )
         };
         let mut targets = Vec::with_capacity(count.min(64) as usize);
         for (entity_index, entity_address) in entity_addresses.into_iter().enumerate() {
@@ -31800,20 +31879,35 @@ mod windows_overlay {
         Some(address)
     }
 
+    fn parse_pointer_offsets_with_varying(text: &str) -> Option<(Vec<usize>, Option<usize>)> {
+        let mut offsets = Vec::new();
+        let mut varying_idx = None;
+        let cleaned = text.replace("->", ",").replace('→', ",");
+        for part in cleaned.split([',', ';', ' ']).filter(|part| !part.trim().is_empty()) {
+            let part_str = part.trim();
+            let (is_varying, clean) = if let Some(stripped) = part_str.strip_suffix('*').or_else(|| part_str.strip_prefix('*')) {
+                (true, stripped.trim())
+            } else {
+                (false, part_str)
+            };
+            let digits = clean
+                .strip_prefix("0x")
+                .or_else(|| clean.strip_prefix("0X"))
+                .unwrap_or(clean);
+            let val = usize::from_str_radix(digits, 16).ok()?;
+            if is_varying && varying_idx.is_none() {
+                varying_idx = Some(offsets.len());
+            }
+            offsets.push(val);
+        }
+        if offsets.is_empty() {
+            return None;
+        }
+        Some((offsets, varying_idx))
+    }
+
     fn parse_pointer_offsets(text: &str) -> Option<Vec<usize>> {
-        text.replace("->", ",")
-            .replace('→', ",")
-            .split([',', ';', ' '])
-            .filter(|part| !part.trim().is_empty())
-            .map(|part| {
-                let digits = part
-                    .trim()
-                    .strip_prefix("0x")
-                    .or_else(|| part.trim().strip_prefix("0X"))
-                    .unwrap_or(part.trim());
-                usize::from_str_radix(digits, 16).ok()
-            })
-            .collect()
+        parse_pointer_offsets_with_varying(text).map(|(offsets, _)| offsets)
     }
 
     fn tracked_field_matches(
@@ -32940,6 +33034,26 @@ mod windows_overlay {
                 Some(vec![0x494, 0x140])
             );
             assert_eq!(parse_pointer_offsets("0x20, 8"), Some(vec![0x20, 0x8]));
+        }
+
+        #[test]
+        fn parses_pointer_offsets_with_varying_marker() {
+            assert_eq!(
+                parse_pointer_offsets_with_varying("0, 28, 274"),
+                Some((vec![0, 0x28, 0x274], None))
+            );
+            assert_eq!(
+                parse_pointer_offsets_with_varying("0*, 28, 274"),
+                Some((vec![0, 0x28, 0x274], Some(0)))
+            );
+            assert_eq!(
+                parse_pointer_offsets_with_varying("10, 0*, 274"),
+                Some((vec![0x10, 0, 0x274], Some(1)))
+            );
+            assert_eq!(
+                parse_pointer_offsets_with_varying("0x50, 0x28*, 0x274"),
+                Some((vec![0x50, 0x28, 0x274], Some(1)))
+            );
         }
 
         #[test]

@@ -2530,13 +2530,7 @@ fn find_nearest_entity_to_preset(
                 .take(other_preset.entity_count.clamp(1, 64) as usize)
                 .collect()
         } else if !other_preset.entity_root.trim().is_empty() {
-            if let Some(root) = crate::overlay::evaluate_esp_expression_address(pid, &other_preset.entity_root) {
-                let stride = other_preset.entity_stride.max(1) as usize;
-                let count = other_preset.entity_count.clamp(1, 64) as usize;
-                (0..count).map(|i| root.saturating_add(i * stride)).collect()
-            } else {
-                Vec::new()
-            }
+            crate::overlay::evaluate_esp_preset_entity_addresses(pid, other_preset)
         } else {
             Vec::new()
         };
