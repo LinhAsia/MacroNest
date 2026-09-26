@@ -9733,17 +9733,8 @@ impl CrosshairApp {
         };
         #[cfg(windows)]
         {
-            let address = if let Some((module, module_offset, offsets)) =
-                parse_pointer_expression(expression)
-            {
-                let base = resolve_module_offset(pid, &module, module_offset)
-                    .map_err(|error| error.to_string())?;
-                let pointer = PointerSpec {
-                    base,
-                    module: Some((module, module_offset)),
-                    offsets,
-                };
-                resolve_memory_address(pid, base, Some(&pointer)).map_err(|error| error.to_string())?
+            let address = if let Some(pointer) = parse_pointer_spec(expression) {
+                resolve_memory_address(pid, pointer.base, Some(&pointer)).map_err(|error| error.to_string())?
             } else {
                 parse_memory_address(expression)
                     .ok_or_else(|| "Use a number (e.g. -201.68), address, or pointer expression".to_owned())?
@@ -10164,24 +10155,11 @@ impl CrosshairApp {
         if input.is_empty() {
             return;
         }
-        let address = if let Some((module, module_offset, offsets)) = parse_pointer_expression(input) {
-            match resolve_module_offset(pid, &module, module_offset) {
-                Ok(base) => {
-                    let pointer = PointerSpec {
-                        base,
-                        module: Some((module, module_offset)),
-                        offsets,
-                    };
-                    match resolve_memory_address(pid, base, Some(&pointer)) {
-                        Ok(addr) => addr,
-                        Err(e) => {
-                            dialog.status = format!("Failed to resolve pointer: {e}");
-                            return;
-                        }
-                    }
-                }
+        let address = if let Some(pointer) = parse_pointer_spec(input) {
+            match resolve_memory_address(pid, pointer.base, Some(&pointer)) {
+                Ok(addr) => addr,
                 Err(e) => {
-                    dialog.status = format!("Failed to resolve module: {e}");
+                    dialog.status = format!("Failed to resolve pointer: {e}");
                     return;
                 }
             }
@@ -17135,13 +17113,13 @@ impl CrosshairApp {
             // Try to parse as "module+offset" (e.g. "neox_engine.dll+8AEEFA0")
             let addr_str = dialog.address.trim();
             let module_spec = addr_str
-                .rsplit_once('+')
+                .split_once('+')
                 .filter(|(module, _)| {
                     let m = module.trim();
                     m.contains('.') && !m.starts_with("0x") && !m.starts_with("0X")
                 })
                 .and_then(|(module, offset)| {
-                    parse_hex_offset(offset.trim()).map(|off| (module.trim().to_owned(), off))
+                    parse_hex_offset_expr(offset).map(|off| (module.trim().to_owned(), off))
                 });
 
             if let Some((module_name, module_offset)) = module_spec {
@@ -17164,13 +17142,13 @@ impl CrosshairApp {
         } else {
             let addr_str = dialog.address.trim();
             let module_spec = addr_str
-                .rsplit_once('+')
+                .split_once('+')
                 .filter(|(module, _)| {
                     let m = module.trim();
                     m.contains('.') && !m.starts_with("0x") && !m.starts_with("0X")
                 })
                 .and_then(|(module, offset)| {
-                    parse_hex_offset(offset.trim()).map(|off| (module.trim().to_owned(), off))
+                    parse_hex_offset_expr(offset).map(|off| (module.trim().to_owned(), off))
                 });
             if let Some((module_name, module_offset)) = module_spec {
                 let pid = self.memory_panel.process_pid;
@@ -18287,26 +18265,7 @@ impl CrosshairApp {
             self.memory_panel.status = "Select a process".to_owned();
             return;
         };
-        let pointer = parse_pointer_expression(&self.memory_panel.manual_address)
-            .map(|(module, module_offset, offsets)| PointerSpec {
-                base: 0,
-                module: Some((module, module_offset)),
-                offsets,
-            })
-            .or_else(|| {
-                let text = self.memory_panel.manual_address.trim();
-                let (module, offset_str) = text.rsplit_once('+')?;
-                let module = module.trim();
-                if module.contains('.') && !module.starts_with("0x") && !module.starts_with("0X") {
-                    parse_hex_offset(offset_str.trim()).map(|offset| PointerSpec {
-                        base: 0,
-                        module: Some((module.to_owned(), offset)),
-                        offsets: Vec::new(),
-                    })
-                } else {
-                    None
-                }
-            });
+        let pointer = parse_pointer_spec(&self.memory_panel.manual_address);
         let (address, pointer) = if let Some(pointer) = pointer {
             match resolve_memory_address(pid, pointer.base, Some(&pointer)) {
                 Ok(address) => (address, Some(pointer)),
@@ -20908,16 +20867,28 @@ fn resolve_entity_expression(
 ) -> Result<usize, String> {
     let expression = expression.trim();
     let (root, offsets) = if let Some(open) = expression.rfind('[') {
-        let offsets = expression
-            .get(open + 1..)
-            .and_then(|text| text.strip_suffix(']'))
-            .ok_or_else(|| "pointer chain must end with ]".to_owned())?
+        let close_rel = expression[open + 1..]
+            .find(']')
+            .ok_or_else(|| "pointer chain missing ]".to_owned())?;
+        let close = open + 1 + close_rel;
+        let trailing = expression[close + 1..].trim();
+        let cleaned = expression[open + 1..close].replace("->", ",").replace('→', ",");
+        let mut offsets = cleaned
             .split([',', ';'])
             .filter(|offset| !offset.trim().is_empty())
             .map(|offset| {
-                parse_hex_offset(offset).ok_or_else(|| format!("invalid pointer offset: {offset}"))
+                parse_hex_offset_expr(offset).ok_or_else(|| format!("invalid pointer offset: {offset}"))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if !trailing.is_empty() {
+            let compact = trailing.replace([' ', '_'], "");
+            if !compact.starts_with(['+', '-']) {
+                return Err("invalid trailing offset math".to_owned());
+            }
+            let last = offsets.last_mut().ok_or_else(|| "empty pointer offsets".to_owned())?;
+            *last = apply_memory_address_offsets(*last, &compact, 0)
+                .ok_or_else(|| "failed to apply trailing offset math".to_owned())?;
+        }
         (expression[..open].trim(), offsets)
     } else {
         (expression, Vec::new())
@@ -20925,10 +20896,10 @@ fn resolve_entity_expression(
     let mut address = if let Some(address) = parse_memory_address(root) {
         address
     } else {
-        let (module, offset) = root
-            .rsplit_once('+')
+        let (module, offset_expr) = root
+            .split_once('+')
             .ok_or_else(|| "use raw, module+offset, or root [offsets]".to_owned())?;
-        let offset = parse_hex_offset(offset).ok_or_else(|| "invalid module offset".to_owned())?;
+        let offset = parse_hex_offset_expr(offset_expr).ok_or_else(|| "invalid module offset".to_owned())?;
         resolve_module_offset(pid, module.trim(), offset).map_err(|error| error.to_string())?
     };
     for offset in offsets {
@@ -22002,23 +21973,97 @@ fn parse_address_edit(current: usize, text: &str) -> Option<usize> {
     parse_memory_address(trimmed)
 }
 
-fn parse_pointer_expression(text: &str) -> Option<(String, usize, Vec<usize>)> {
+fn parse_hex_offset_expr(text: &str) -> Option<usize> {
+    let trimmed = text.trim();
+    let compact: std::borrow::Cow<'_, str> =
+        if trimmed.as_bytes().iter().any(|&b| b == b' ' || b == b'_') {
+            std::borrow::Cow::Owned(trimmed.replace([' ', '_'], ""))
+        } else {
+            std::borrow::Cow::Borrowed(trimmed)
+        };
+    let operator_pos = compact
+        .char_indices()
+        .skip(1)
+        .find(|(_, c)| matches!(c, '+' | '-'))
+        .map(|(p, _)| p);
+    let base_str = match operator_pos {
+        Some(pos) => &compact[..pos],
+        None => &compact,
+    };
+    let base = parse_hex_offset(base_str)?;
+    match operator_pos {
+        Some(pos) => apply_memory_address_offsets(base, &compact, pos),
+        None => Some(base),
+    }
+}
+
+fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
     let text = text.trim();
-    let offsets_start = text.rfind('[')?;
-    let offsets_text = text.get(offsets_start + 1..)?.strip_suffix(']')?;
-    let (module, module_offset) = text[..offsets_start].trim().rsplit_once('+')?;
-    let module = module.trim();
-    if module.is_empty() {
+    if let Some(offsets_start) = text.rfind('[') {
+        let offsets_close = text[offsets_start + 1..].find(']')? + offsets_start + 1;
+        let offsets_text = &text[offsets_start + 1..offsets_close];
+        let trailing_math = text[offsets_close + 1..].trim();
+
+        let cleaned_offsets = offsets_text.replace("->", ",").replace('→', ",");
+        let mut offsets = cleaned_offsets
+            .split([',', ';'])
+            .filter(|part| !part.trim().is_empty())
+            .map(parse_hex_offset_expr)
+            .collect::<Option<Vec<_>>>()?;
+        if offsets.is_empty() {
+            return None;
+        }
+        if !trailing_math.is_empty() {
+            let compact = trailing_math.replace([' ', '_'], "");
+            if !compact.starts_with(['+', '-']) {
+                return None;
+            }
+            let last = offsets.last_mut()?;
+            *last = apply_memory_address_offsets(*last, &compact, 0)?;
+        }
+
+        let root = text[..offsets_start].trim();
+        let (module_spec, base) = if let Some((module, module_offset_expr)) = root.split_once('+') {
+            let module = module.trim();
+            if module.contains('.') && !module.starts_with("0x") && !module.starts_with("0X") {
+                let module_offset = parse_hex_offset_expr(module_offset_expr)?;
+                (Some((module.to_owned(), module_offset)), 0)
+            } else {
+                (None, parse_memory_address(root)?)
+            }
+        } else if root.contains('.') && !root.starts_with("0x") && !root.starts_with("0X") {
+            (Some((root.to_owned(), 0)), 0)
+        } else {
+            (None, parse_memory_address(root)?)
+        };
+        Some(PointerSpec {
+            base,
+            module: module_spec,
+            offsets,
+        })
+    } else {
+        let (module, offset_expr) = text.split_once('+')?;
+        let module = module.trim();
+        if module.contains('.') && !module.starts_with("0x") && !module.starts_with("0X") {
+            let offset = parse_hex_offset_expr(offset_expr)?;
+            Some(PointerSpec {
+                base: 0,
+                module: Some((module.to_owned(), offset)),
+                offsets: Vec::new(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+fn parse_pointer_expression(text: &str) -> Option<(String, usize, Vec<usize>)> {
+    let spec = parse_pointer_spec(text)?;
+    let (module, offset) = spec.module?;
+    if spec.offsets.is_empty() {
         return None;
     }
-    let offsets = offsets_text
-        .split([',', ';'])
-        .map(parse_hex_offset)
-        .collect::<Option<Vec<_>>>()?;
-    if offsets.is_empty() {
-        return None;
-    }
-    Some((module.to_owned(), parse_hex_offset(module_offset)?, offsets))
+    Some((module, offset, spec.offsets))
 }
 
 fn parse_memory_address_term(text: &str) -> Option<usize> {
@@ -23232,6 +23277,37 @@ mod tests {
                 vec![0x258, 0x180, 0x354],
             ))
         );
+        assert_eq!(
+            parse_pointer_expression("neox_engine.dll+87BAB10 [0, 28, 274] + 50"),
+            Some((
+                "neox_engine.dll".to_owned(),
+                0x87BAB10,
+                vec![0x0, 0x28, 0x2C4],
+            ))
+        );
+        assert_eq!(
+            parse_pointer_expression("neox_engine.dll+87BAB10 [0, 28, 274] - 20"),
+            Some((
+                "neox_engine.dll".to_owned(),
+                0x87BAB10,
+                vec![0x0, 0x28, 0x254],
+            ))
+        );
+        assert_eq!(
+            parse_pointer_expression("neox_engine.dll+87BAB10 [0 + 50, 28, 274] + 4"),
+            Some((
+                "neox_engine.dll".to_owned(),
+                0x87BAB10,
+                vec![0x50, 0x28, 0x278],
+            ))
+        );
+        let spec_mod = parse_pointer_spec("neox_engine.dll+87BAB10 + 50").unwrap();
+        assert_eq!(spec_mod.module, Some(("neox_engine.dll".to_owned(), 0x87BAB60)));
+        assert!(spec_mod.offsets.is_empty());
+
+        let spec_addr = parse_pointer_spec("0x1753DD5F874 [0, 28, 274] + 50").unwrap();
+        assert_eq!(spec_addr.base, 0x1753DD5F874);
+        assert_eq!(spec_addr.offsets, vec![0, 0x28, 0x2C4]);
     }
 
     #[test]

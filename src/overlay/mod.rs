@@ -25939,10 +25939,22 @@ mod windows_overlay {
         let stride = preset.entity_stride.max(1);
 
         if let Some(open) = root_expression.rfind('[')
-            && root_expression.ends_with(']')
-            && let Some((base_offsets, user_varying_idx)) = parse_pointer_offsets_with_varying(&root_expression[open + 1..root_expression.len() - 1])
+            && let Some(close_rel) = root_expression[open + 1..].find(']')
+            && let close = open + 1 + close_rel
+            && let Some((mut base_offsets, user_varying_idx)) = parse_pointer_offsets_with_varying(&root_expression[open + 1..close])
             && !base_offsets.is_empty()
         {
+            let trailing = root_expression[close + 1..].trim();
+            if !trailing.is_empty() {
+                let compact = trailing.replace([' ', '_'], "");
+                if compact.starts_with(['+', '-']) {
+                    if let Some(last) = base_offsets.last_mut() {
+                        if let Some(adj) = apply_offset_math(*last, &compact) {
+                            *last = adj;
+                        }
+                    }
+                }
+            }
             let root_prefix = root_expression[..open].trim();
             let varying_idx = user_varying_idx.unwrap_or(0).min(base_offsets.len().saturating_sub(1));
             let mut addrs = Vec::with_capacity(count as usize);
@@ -26130,10 +26142,22 @@ mod windows_overlay {
             }
 
             if let Some(open) = root_expression.rfind('[')
-                && root_expression.ends_with(']')
-                && let Some((base_offsets, user_varying_idx)) = parse_pointer_offsets_with_varying(&root_expression[open + 1..root_expression.len() - 1])
+                && let Some(close_rel) = root_expression[open + 1..].find(']')
+                && let close = open + 1 + close_rel
+                && let Some((mut base_offsets, user_varying_idx)) = parse_pointer_offsets_with_varying(&root_expression[open + 1..close])
                 && !base_offsets.is_empty()
             {
+                let trailing = root_expression[close + 1..].trim();
+                if !trailing.is_empty() {
+                    let compact = trailing.replace([' ', '_'], "");
+                    if compact.starts_with(['+', '-']) {
+                        if let Some(last) = base_offsets.last_mut() {
+                            if let Some(adj) = apply_offset_math(*last, &compact) {
+                                *last = adj;
+                            }
+                        }
+                    }
+                }
                 let root_prefix = root_expression[..open].trim();
                 let varying_idx = user_varying_idx.unwrap_or(0).min(base_offsets.len().saturating_sub(1));
                 let mut addrs = Vec::with_capacity(count as usize);
@@ -31661,6 +31685,30 @@ mod windows_overlay {
         None
     }
 
+    fn apply_offset_math(mut addr: usize, compact: &str) -> Option<usize> {
+        let mut pos = 0;
+        while pos < compact.len() {
+            let op = compact.as_bytes()[pos];
+            let start = pos + 1;
+            pos = compact[start..]
+                .char_indices()
+                .find(|(_, c)| matches!(c, '+' | '-'))
+                .map_or(compact.len(), |(n, _)| start + n);
+            let off_str = &compact[start..pos];
+            let off_hex = off_str
+                .strip_prefix("0x")
+                .or_else(|| off_str.strip_prefix("0X"))
+                .unwrap_or(off_str);
+            let off = usize::from_str_radix(off_hex, 16).ok()?;
+            addr = if op == b'+' {
+                addr.checked_add(off)?
+            } else {
+                addr.checked_sub(off)?
+            };
+        }
+        Some(addr)
+    }
+
     fn parse_memory_address(text: &str) -> Option<usize> {
         let address_text = interpolate_variables(text);
         let address_text = address_text
@@ -31704,44 +31752,8 @@ mod windows_overlay {
                         .or_else(|| base_str.strip_prefix("0X"))
                         .and_then(|h| usize::from_str_radix(h, 16).ok())
                         .or_else(|| usize::from_str_radix(base_str, 16).ok());
-                    if let Some(mut addr) = base {
-                        let mut pos = position;
-                        let mut ok = true;
-                        while pos < compact.len() {
-                            let op = compact.as_bytes()[pos];
-                            let start = pos + 1;
-                            pos = compact[start..]
-                                .char_indices()
-                                .find(|(_, c)| matches!(c, '+' | '-'))
-                                .map_or(compact.len(), |(n, _)| start + n);
-                            let off_str = &compact[start..pos];
-                            let off_hex = off_str
-                                .strip_prefix("0x")
-                                .or_else(|| off_str.strip_prefix("0X"))
-                                .unwrap_or(off_str);
-                            let off = usize::from_str_radix(off_hex, 16).ok();
-                            if let Some(off) = off {
-                                if op == b'+' {
-                                    if let Some(next) = addr.checked_add(off) {
-                                        addr = next;
-                                    } else {
-                                        ok = false;
-                                        break;
-                                    }
-                                } else if let Some(next) = addr.checked_sub(off) {
-                                    addr = next;
-                                } else {
-                                    ok = false;
-                                    break;
-                                }
-                            } else {
-                                ok = false;
-                                break;
-                            }
-                        }
-                        if ok {
-                            return Some(addr);
-                        }
+                    if let Some(addr) = base {
+                        return apply_offset_math(addr, &compact[position..]);
                     }
                 }
                 let value = evaluate_math_expression_f64(&address_text);
@@ -32433,35 +32445,44 @@ mod windows_overlay {
         }
         let pid = pid?;
         if let Some(open) = text.rfind('[')
-            && text.ends_with(']')
+            && let Some(close_rel) = text[open + 1..].find(']')
         {
+            let close = open + 1 + close_rel;
             let root = text[..open].trim();
-            let (module, module_offset) = root.rsplit_once('+')?;
-            let module_offset = usize::from_str_radix(
-                module_offset
-                    .trim()
-                    .strip_prefix("0x")
-                    .or_else(|| module_offset.trim().strip_prefix("0X"))
-                    .unwrap_or(module_offset.trim()),
-                16,
-            )
-            .ok()?;
-            let offsets = parse_pointer_offsets(&text[open + 1..text.len() - 1])?;
+            let (module, module_offset_str) = root.split_once('+')?;
+            let module_offset = parse_memory_address(module_offset_str.trim())
+                .or_else(|| usize::from_str_radix(
+                    module_offset_str
+                        .trim()
+                        .strip_prefix("0x")
+                        .or_else(|| module_offset_str.trim().strip_prefix("0X"))
+                        .unwrap_or(module_offset_str.trim()),
+                    16,
+                ).ok())?;
+            let mut offsets = parse_pointer_offsets(&text[open + 1..close])?;
+            let trailing = text[close + 1..].trim();
+            if !trailing.is_empty() {
+                let compact = trailing.replace([' ', '_'], "");
+                if !compact.starts_with(['+', '-']) {
+                    return None;
+                }
+                let last = offsets.last_mut()?;
+                *last = apply_offset_math(*last, &compact)?;
+            }
             return resolve_memory_pointer_entry(pid, module.trim(), module_offset, &offsets)
                 .map(|address| (pid, address));
         }
-        if let Some((module, module_offset)) = text.rsplit_once('+') {
+        if let Some((module, rest)) = text.split_once('+') {
             let module = module.trim();
-            if !module.is_empty() {
-                let offset_str = module_offset.trim();
-                let offset = usize::from_str_radix(
-                    offset_str
-                        .strip_prefix("0x")
-                        .or_else(|| offset_str.strip_prefix("0X"))
-                        .unwrap_or(offset_str),
-                    16,
-                )
-                .ok();
+            if module.contains('.') && !module.starts_with("0x") && !module.starts_with("0X") {
+                let offset = parse_memory_address(rest.trim())
+                    .or_else(|| usize::from_str_radix(
+                        rest.trim()
+                            .strip_prefix("0x")
+                            .or_else(|| rest.trim().strip_prefix("0X"))
+                            .unwrap_or(rest.trim()),
+                        16,
+                    ).ok());
                 if let Some(offset) = offset {
                     if let Some(address) = resolve_memory_pointer_entry(pid, module, offset, &[]) {
                         return Some((pid, address));
@@ -33054,6 +33075,9 @@ mod windows_overlay {
                 parse_pointer_offsets_with_varying("0x50, 0x28*, 0x274"),
                 Some((vec![0x50, 0x28, 0x274], Some(1)))
             );
+            assert_eq!(apply_offset_math(0x274, "+50"), Some(0x2C4));
+            assert_eq!(apply_offset_math(0x274, "+50-10"), Some(0x2B4));
+            assert_eq!(parse_memory_address("0x1753DD5F874 + 50"), Some(0x1753DD5F8C4));
         }
 
         #[test]
