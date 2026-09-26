@@ -66,6 +66,10 @@ fn default_entity_auto_continuous_interval_secs() -> f32 {
     1.0
 }
 
+fn default_entity_motionless_timeout_secs() -> f32 {
+    0.5
+}
+
 fn default_selected_permutation() -> usize {
     1
 }
@@ -119,6 +123,10 @@ pub struct EspPreset {
     pub entity_exclude_near_preset_id: Option<u32>,
     #[serde(default)]
     pub entity_exclude_near_max_distance: f32,
+    #[serde(default)]
+    pub entity_filter_motionless_enabled: bool,
+    #[serde(default = "default_entity_motionless_timeout_secs")]
+    pub entity_motionless_timeout_secs: f32,
     pub entity_auto_hud_enabled: bool,
     pub entity_auto_hud_preset_id: Option<u32>,
     pub entity_aabb_center: bool,
@@ -248,6 +256,8 @@ impl EspPreset {
             entity_exclude_near_preset_enabled: false,
             entity_exclude_near_preset_id: None,
             entity_exclude_near_max_distance: 0.0,
+            entity_filter_motionless_enabled: false,
+            entity_motionless_timeout_secs: 0.5,
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
@@ -1281,6 +1291,53 @@ pub fn filter_exclude_near_targets(
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct MotionlessTrack {
+    pub last_pos: [f32; 3],
+    pub last_moved_at: std::time::Instant,
+    pub last_address: usize,
+}
+
+/// Filters out entities that have remained motionless (all coordinates change <= 0.001)
+/// for longer than `timeout`.
+pub fn filter_motionless_targets(
+    preset_id: u32,
+    targets: &mut Vec<([f32; 3], usize, usize)>,
+    trackers: &mut std::collections::HashMap<(u32, usize), MotionlessTrack>,
+    timeout: std::time::Duration,
+    now: std::time::Instant,
+) {
+    targets.retain(|&(pos, addr, idx)| {
+        let key = (preset_id, idx);
+        let track = trackers.entry(key).or_insert_with(|| MotionlessTrack {
+            last_pos: pos,
+            last_moved_at: now,
+            last_address: addr,
+        });
+
+        if track.last_address != addr {
+            track.last_address = addr;
+            track.last_pos = pos;
+            track.last_moved_at = now;
+            return true;
+        }
+
+        let dx = (pos[0] - track.last_pos[0]).abs();
+        let dy = (pos[1] - track.last_pos[1]).abs();
+        let dz = (pos[2] - track.last_pos[2]).abs();
+
+        if dx > 0.001 || dy > 0.001 || dz > 0.001 {
+            track.last_pos = pos;
+            track.last_moved_at = now;
+            true
+        } else {
+            now.checked_duration_since(track.last_moved_at)
+                .unwrap_or(std::time::Duration::ZERO)
+                < timeout
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1708,6 +1765,47 @@ mod tests {
         assert!(!loaded.entity_exclude_near_preset_enabled);
         assert_eq!(loaded.entity_exclude_near_preset_id, None);
         assert_eq!(loaded.entity_exclude_near_max_distance, 0.0);
+        assert!(!loaded.entity_filter_motionless_enabled);
+        assert_eq!(loaded.entity_motionless_timeout_secs, 0.5);
+    }
+
+    #[test]
+    fn test_filter_motionless_targets() {
+        use std::time::{Duration, Instant};
+        let mut trackers = HashMap::new();
+        let t0 = Instant::now();
+        let timeout = Duration::from_millis(500);
+
+        let mut targets = vec![
+            ([10.0, 20.0, 30.0], 0x1000, 0),
+            ([50.0, 60.0, 70.0], 0x2000, 1),
+        ];
+
+        // Frame 1: at t0, both targets should be kept.
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t0);
+        assert_eq!(targets.len(), 2);
+
+        // Frame 2: at t0 + 200ms, target 0 moved, target 1 stayed still.
+        // Both still within timeout (200ms < 500ms).
+        let t1 = t0 + Duration::from_millis(200);
+        targets[0].0 = [10.05, 20.0, 30.0]; // moved
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t1);
+        assert_eq!(targets.len(), 2);
+
+        // Frame 3: at t0 + 600ms.
+        // Target 0 moved again.
+        // Target 1 has NOT moved since t0 (600ms >= 500ms timeout) -> Should be dropped!
+        let t2 = t0 + Duration::from_millis(600);
+        targets[0].0 = [10.10, 20.0, 30.0]; // moved
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t2);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].1, 0x1000);
+
+        // Frame 4: at t0 + 700ms, target 1 starts moving again!
+        let t3 = t0 + Duration::from_millis(700);
+        targets.push(([55.0, 60.0, 70.0], 0x2000, 1)); // target 1 moves
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t3);
+        assert_eq!(targets.len(), 2);
     }
 }
 

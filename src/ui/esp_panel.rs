@@ -1520,6 +1520,27 @@ impl CrosshairApp {
                                 }
                             });
                             ui.end_row();
+                            ui.label("");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(
+                                    &mut preset.entity_filter_motionless_enabled,
+                                    self.tr("Filter motionless", "Lọc đối tượng đứng yên"),
+                                )
+                                .on_hover_text(self.tr(
+                                    "Hide entities that have not moved for a set duration (removes static objects / eliminated players).",
+                                    "Ẩn thực thể không cử động/đứng im quá thời gian cài đặt (loại bỏ vật thể tĩnh hoặc người chơi đã bị loại).",
+                                ));
+                                if preset.entity_filter_motionless_enabled {
+                                    ui.label(self.tr("Timeout", "Thời gian"));
+                                    ui.add(
+                                        DragValue::new(&mut preset.entity_motionless_timeout_secs)
+                                            .range(0.1..=10.0)
+                                            .speed(0.05)
+                                            .suffix("s"),
+                                    );
+                                }
+                            });
+                            ui.end_row();
                             ui.label("Entity colors");
                             ui.horizontal_wrapped(|ui| {
                                 ui.label("Entity #");

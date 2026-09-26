@@ -25473,6 +25473,18 @@ mod windows_overlay {
                                 }
                             }
                         }
+                        if preset.entity_filter_motionless_enabled {
+                            let timeout = Duration::from_secs_f32(
+                                preset.entity_motionless_timeout_secs.max(0.05),
+                            );
+                            crate::model::filter_motionless_targets(
+                                preset.id,
+                                &mut targets,
+                                &mut read_frame.motionless_trackers,
+                                timeout,
+                                Instant::now(),
+                            );
+                        }
                         let (shapes, snapshot) = esp_shapes_for_preset(
                             preset,
                             sample.marker_asset.as_ref(),
@@ -25701,6 +25713,7 @@ mod windows_overlay {
         memory_blocks: HashMap<(u32, usize), Option<Vec<u8>>>,
         failed_addresses: HashMap<usize, Instant>,
         resolved_addresses: HashMap<u32, HashMap<String, EspResolvedAddress>>,
+        motionless_trackers: HashMap<(u32, usize), crate::model::MotionlessTrack>,
     }
 
     impl EspReadFrame {
@@ -25710,6 +25723,14 @@ mod windows_overlay {
             if self.failed_addresses.len() > 1024 {
                 self.failed_addresses
                     .retain(|_, at| at.elapsed() < Duration::from_millis(1000));
+            }
+            if self.motionless_trackers.len() > 1024 {
+                let now = Instant::now();
+                self.motionless_trackers.retain(|_, track| {
+                    now.checked_duration_since(track.last_moved_at)
+                        .unwrap_or_default()
+                        < Duration::from_secs(10)
+                });
             }
         }
 
