@@ -15385,7 +15385,7 @@ impl CrosshairApp {
         }
         egui::Window::new(&title)
             .id(egui::Id::new("memory-view-main"))
-            .default_size(vec2(580.0, 440.0))
+            .default_size(vec2(680.0, 440.0))
             .min_size(vec2(380.0, 240.0))
             .collapsible(false)
             .open(&mut open)
@@ -15527,7 +15527,7 @@ impl CrosshairApp {
             }
             let step = parse_hex_offset(&dialog.structure_forward_step);
             let mut next_address = None;
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Address:").small().strong());
                 ui.label(
                     RichText::new(format_prefixed_memory_address(dialog.address)).monospace(),

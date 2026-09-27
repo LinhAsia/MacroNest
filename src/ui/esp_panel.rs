@@ -973,9 +973,7 @@ impl CrosshairApp {
             #[cfg(not(windows))]
             let entity_capture_active = false;
             Self::show_preset_card(ui, false, |ui| {
-                let visible_width = (ui.clip_rect().right() - ui.cursor().left() - 6.0).max(160.0);
-                let card_width = ui.available_width().min(visible_width);
-                ui.set_max_width(card_width);
+                let card_width = ui.available_width();
                 ui.horizontal(|ui| {
                     let name_width = Self::preset_header_name_width(ui).min((card_width - 340.0).max(60.0));
                     ui.add_sized(

@@ -30,6 +30,7 @@ impl CrosshairApp {
         egui::Frame::group(ui.style())
             .fill(fill)
             .stroke(egui::Stroke::new(1.0, stroke_color))
+            .inner_margin(egui::Margin::symmetric(8, 6))
     }
 
     pub(crate) fn folder_frame(ui: &egui::Ui, active: bool, hovered: bool) -> egui::Frame {
@@ -51,6 +52,7 @@ impl CrosshairApp {
         egui::Frame::group(ui.style())
             .fill(fill)
             .stroke(egui::Stroke::new(1.0, stroke_color))
+            .inner_margin(egui::Margin::symmetric(8, 6))
     }
 
     pub(crate) fn show_folder_card<R>(
@@ -60,8 +62,14 @@ impl CrosshairApp {
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> (R, egui::Response) {
         let dark_mode = ui.visuals().dark_mode;
-        let res = Self::folder_frame(ui, active, hovered).show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
+        let frame = Self::folder_frame(ui, active, hovered);
+        let margin_x = (frame.inner_margin.left + frame.inner_margin.right) as f32;
+        let visible_w = (ui.clip_rect().right() - ui.cursor().left() - 4.0).max(160.0);
+        let card_w = ui.available_width().min(visible_w);
+        let inner_w = (card_w - margin_x).max(60.0);
+        let res = frame.show(ui, |ui| {
+            ui.set_min_width(inner_w);
+            ui.set_max_width(inner_w);
             let previous = ui.visuals().override_text_color;
             if dark_mode {
                 ui.visuals_mut().override_text_color = Some(Color32::from_rgb(255, 240, 220));
@@ -92,11 +100,14 @@ impl CrosshairApp {
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
         let dark_mode = ui.visuals().dark_mode;
+        let frame = Self::preset_frame(ui, enabled);
+        let margin_x = (frame.inner_margin.left + frame.inner_margin.right) as f32;
         let visible_w = (ui.clip_rect().right() - ui.cursor().left() - 4.0).max(160.0);
         let card_w = ui.available_width().min(visible_w);
-        let res = Self::preset_frame(ui, enabled).show(ui, |ui| {
-            ui.set_min_width(card_w);
-            ui.set_max_width(card_w);
+        let inner_w = (card_w - margin_x).max(60.0);
+        let res = frame.show(ui, |ui| {
+            ui.set_min_width(inner_w);
+            ui.set_max_width(inner_w);
             let previous = ui.visuals().override_text_color;
             if dark_mode {
                 ui.visuals_mut().override_text_color =
@@ -221,20 +232,26 @@ impl CrosshairApp {
                 },
             )
         };
-        let res = egui::Frame::group(ui.style())
+        let frame = egui::Frame::group(ui.style())
             .fill(fill)
             .stroke(egui::Stroke::new(1.0, stroke_color))
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                let previous = ui.visuals().override_text_color;
-                if dark_mode {
-                    ui.visuals_mut().override_text_color =
-                        Some(Self::preset_body_text_color(dark_mode, preset_enabled));
-                }
-                let output = add_contents(ui);
-                ui.visuals_mut().override_text_color = previous;
-                output
-            });
+            .inner_margin(egui::Margin::symmetric(8, 6));
+        let margin_x = (frame.inner_margin.left + frame.inner_margin.right) as f32;
+        let visible_w = (ui.clip_rect().right() - ui.cursor().left() - 4.0).max(160.0);
+        let card_w = ui.available_width().min(visible_w);
+        let inner_w = (card_w - margin_x).max(60.0);
+        let res = frame.show(ui, |ui| {
+            ui.set_min_width(inner_w);
+            ui.set_max_width(inner_w);
+            let previous = ui.visuals().override_text_color;
+            if dark_mode {
+                ui.visuals_mut().override_text_color =
+                    Some(Self::preset_body_text_color(dark_mode, preset_enabled));
+            }
+            let output = add_contents(ui);
+            ui.visuals_mut().override_text_color = previous;
+            output
+        });
 
         Self::paint_card_hover(ui, &res.response, dark_mode);
         res.inner
