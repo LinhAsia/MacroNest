@@ -1699,19 +1699,7 @@ impl CrosshairApp {
                                     ("Camera Y", &mut preset.camera_y),
                                     ("Camera Z", &mut preset.camera_z),
                                 ] {
-                                    ui.label(label);
-                                    let text_w = (ui.available_width() - 8.0).clamp(60.0, 320.0);
-                                    ui.add(
-                                        TextEdit::singleline(value)
-                                            .desired_width(text_w)
-                                            .hint_text(
-                                                RichText::new(
-                                                    "address / module+offset [offsets] / @alias",
-                                                )
-                                                .color(ui.visuals().weak_text_color()),
-                                            ),
-                                    );
-                                    ui.end_row();
+                                    memory_expression_row(ui, label, value);
                                 }
                             });
                     });
@@ -1723,7 +1711,7 @@ impl CrosshairApp {
                             .spacing([8.0, 4.0])
                             .show(ui, |ui| {
                                 ui.label("Orientation source");
-                                let combo_w = (ui.available_width() - 8.0).clamp(100.0, 240.0);
+                                let combo_w = (ui.available_width() - 8.0).clamp(100.0, 420.0);
                                 ComboBox::from_id_salt(("esp_orientation_source", preset.id))
                                     .selected_text(match preset.orientation_source {
                                         EspOrientationSource::Angles => "Yaw + pitch angles",
@@ -1746,25 +1734,13 @@ impl CrosshairApp {
                                     });
                                 ui.end_row();
 
-                                let text_w = (ui.available_width() - 8.0).clamp(60.0, 320.0);
                                 match preset.orientation_source {
                                     EspOrientationSource::Angles => {
                                         for (label, value) in [
                                             ("Camera yaw", &mut preset.camera_yaw),
                                             ("Camera pitch", &mut preset.camera_pitch),
                                         ] {
-                                            ui.label(label);
-                                            ui.add(
-                                                TextEdit::singleline(value)
-                                                    .desired_width(text_w)
-                                                    .hint_text(
-                                                        RichText::new(
-                                                            "address / module+offset [offsets] / @alias",
-                                                        )
-                                                        .color(ui.visuals().weak_text_color()),
-                                                    ),
-                                            );
-                                            ui.end_row();
+                                            memory_expression_row(ui, label, value);
                                         }
                                     }
                                     EspOrientationSource::DirectionPairPitch => {
@@ -1773,18 +1749,7 @@ impl CrosshairApp {
                                             ("Camera pitch", &mut preset.camera_pitch),
                                             ("Camera direction B", &mut preset.camera_direction_b),
                                         ] {
-                                            ui.label(label);
-                                            ui.add(
-                                                TextEdit::singleline(value)
-                                                    .desired_width(text_w)
-                                                    .hint_text(
-                                                        RichText::new(
-                                                            "address / module+offset [offsets] / @alias",
-                                                        )
-                                                        .color(ui.visuals().weak_text_color()),
-                                                    ),
-                                            );
-                                            ui.end_row();
+                                            memory_expression_row(ui, label, value);
                                         }
                                     }
                                 }
