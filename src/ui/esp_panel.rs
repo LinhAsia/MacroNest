@@ -973,9 +973,12 @@ impl CrosshairApp {
             #[cfg(not(windows))]
             let entity_capture_active = false;
             Self::show_preset_card(ui, false, |ui| {
+                let card_width = ui.available_width();
+                ui.set_max_width(card_width);
                 ui.horizontal(|ui| {
+                    let name_width = Self::preset_header_name_width(ui).min((card_width - 340.0).max(60.0));
                     ui.add_sized(
-                        [Self::preset_header_name_width(ui), 21.0],
+                        [name_width, 21.0],
                         TextEdit::singleline(&mut preset.name),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1019,9 +1022,11 @@ impl CrosshairApp {
                 }
 
                 ui.separator();
+                let col1_max_width = (card_width - 120.0).max(120.0);
                 Grid::new(("esp_addresses", preset.id))
                     .num_columns(2)
                     .spacing([8.0, 4.0])
+                    .max_col_width(col1_max_width)
                     .show(ui, |ui| {
                         ui.label(self.tr("Target window", "Cửa sổ mục tiêu"));
                         let matched_window = windows
@@ -1070,7 +1075,7 @@ impl CrosshairApp {
                             });
                         ComboBox::from_id_salt(("esp_window", preset.id))
                             .selected_text(target_label)
-                            .width(320.0)
+                            .width(col1_max_width.min(320.0))
                             .show_ui(ui, |ui| {
                                 if !preset.target_window.is_empty() {
                                     let clear_label =
@@ -1090,17 +1095,20 @@ impl CrosshairApp {
                             });
                         ui.end_row();
                         ui.label("Target source");
-                        ui.horizontal(|ui| {
-                            ui.selectable_value(
-                                &mut preset.entity_list_enabled,
-                                false,
-                                "Single target",
-                            );
-                            ui.selectable_value(
-                                &mut preset.entity_list_enabled,
-                                true,
-                                "Entity list",
-                            );
+                        ui.scope(|ui| {
+                            ui.set_max_width(col1_max_width);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.selectable_value(
+                                    &mut preset.entity_list_enabled,
+                                    false,
+                                    "Single target",
+                                );
+                                ui.selectable_value(
+                                    &mut preset.entity_list_enabled,
+                                    true,
+                                    "Entity list",
+                                );
+                            });
                         });
                         ui.end_row();
                         if preset.entity_list_enabled {
@@ -1110,10 +1118,12 @@ impl CrosshairApp {
                             let root_step_multiplier = preset.entity_root_step_multiplier.max(1);
                             let navigation_step = root_step.saturating_mul(root_step_multiplier);
                             ui.label("Entity root");
-                            ui.horizontal(|ui| {
-                                ui.add(
-                                    TextEdit::singleline(&mut preset.entity_root)
-                                        .desired_width(280.0)
+                            ui.scope(|ui| {
+                                ui.set_max_width(col1_max_width);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.add(
+                                        TextEdit::singleline(&mut preset.entity_root)
+                                            .desired_width(col1_max_width.min(280.0))
                                         .hint_text(
                                             RichText::new(
                                                 "stable pointer to first entity X / @alias",
@@ -1177,9 +1187,12 @@ impl CrosshairApp {
                                     "Decimal multiplier. Each arrow moves Entity root by Step x this value.",
                                 );
                             });
-                            ui.end_row();
-                            ui.label("Entity layout");
-                            ui.horizontal(|ui| {
+                        });
+                        ui.end_row();
+                        ui.label("Entity layout");
+                        ui.scope(|ui| {
+                            ui.set_max_width(col1_max_width);
+                            ui.horizontal_wrapped(|ui| {
                                 ui.label("X");
                                 ui.add(DragValue::new(&mut preset.entity_x_offset));
                                 ui.label("Y");
@@ -1197,9 +1210,11 @@ impl CrosshairApp {
                                     DragValue::new(&mut preset.entity_count).range(1..=512),
                                 );
                             });
-                            ui.end_row();
+                        });
+                        ui.end_row();
                             ui.label("Auto root");
                             ui.vertical(|ui| {
+                                ui.set_max_width(col1_max_width);
                                 let selected_code = self
                                     .state
                                     .memory_code_list
@@ -1229,7 +1244,7 @@ impl CrosshairApp {
                                             "Select instruction".to_owned(),
                                             format_code_label,
                                         ))
-                                            .width(260.0)
+                                            .width(col1_max_width.min(260.0))
                                             .show_ui(ui, |ui| {
                                                 for code in &self.state.memory_code_list {
                                                     let selected = code.module.eq_ignore_ascii_case(
@@ -1438,7 +1453,7 @@ impl CrosshairApp {
                                     });
 
                                     ui.add_space(4.0);
-                                    ui.horizontal(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
                                         ui.spacing_mut().item_spacing.x = 8.0;
                                         if entity_capture_active {
                                             if ui.button("Stop").clicked() {
@@ -1465,92 +1480,103 @@ impl CrosshairApp {
                             );
                             ui.end_row();
                             ui.label("");
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut preset.entity_aabb_center, "AABB center");
-                                ui.checkbox(
-                                    &mut preset.entity_aabb_draw_box,
-                                    self.tr("Box from coords", "Vẽ box theo tọa độ"),
-                                )
-                                .on_hover_text(self.tr(
-                                    "Draw ESP box directly from AABB coordinate bounds, ignoring manual box width/height settings.",
-                                    "Vẽ khung bao theo tọa độ AABB thực tế của đối tượng, bỏ qua kích thước box thủ công.",
-                                ));
-                                if preset.entity_aabb_center || preset.entity_aabb_draw_box {
-                                    ui.label("Pair delta");
-                                    ui.add(
-                                        DragValue::new(&mut preset.entity_aabb_pair_offset)
-                                            .range(-0x10000..=0x10000),
-                                    );
-                                    ui.label("bytes");
-                                }
+                            ui.scope(|ui| {
+                                ui.set_max_width(col1_max_width);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(&mut preset.entity_aabb_center, "AABB center");
+                                    ui.checkbox(
+                                        &mut preset.entity_aabb_draw_box,
+                                        self.tr("Box from coords", "Vẽ box theo tọa độ"),
+                                    )
+                                    .on_hover_text(self.tr(
+                                        "Draw ESP box directly from AABB coordinate bounds, ignoring manual box width/height settings.",
+                                        "Vẽ khung bao theo tọa độ AABB thực tế của đối tượng, bỏ qua kích thước box thủ công.",
+                                    ));
+                                    if preset.entity_aabb_center || preset.entity_aabb_draw_box {
+                                        ui.label("Pair delta");
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_aabb_pair_offset)
+                                                .range(-0x10000..=0x10000),
+                                        );
+                                        ui.label("bytes");
+                                    }
+                                });
                             });
                             ui.end_row();
                             ui.label("");
-                            ui.horizontal(|ui| {
-                                ui.checkbox(
-                                    &mut preset.entity_exclude_near_preset_enabled,
-                                    self.tr("Drop near preset", "Bỏ box gần preset"),
-                                )
-                                .on_hover_text(self.tr(
-                                    "Hide entities that match or are closest to entities in another active ESP preset (avoids duplicate overlapping boxes).",
-                                    "Ẩn các thực thể trùng hoặc gần nhất với thực thể trong một preset ESP khác đang bật (tránh bị 2 box đè nhau).",
-                                ));
+                            ui.scope(|ui| {
+                                ui.set_max_width(col1_max_width);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(
+                                        &mut preset.entity_exclude_near_preset_enabled,
+                                        self.tr("Drop near preset", "Bỏ box gần preset"),
+                                    )
+                                    .on_hover_text(self.tr(
+                                        "Hide entities that match or are closest to entities in another active ESP preset (avoids duplicate overlapping boxes).",
+                                        "Ẩn các thực thể trùng hoặc gần nhất với thực thể trong một preset ESP khác đang bật (tránh bị 2 box đè nhau).",
+                                    ));
 
-                                if preset.entity_exclude_near_preset_enabled {
-                                    let other_name = preset
-                                        .entity_exclude_near_preset_id
-                                        .and_then(|id| {
-                                            self.state
-                                                .esp_presets
-                                                .iter()
-                                                .find(|p| p.id == id)
-                                        })
-                                        .map_or(self.tr("Select preset", "Chọn preset"), |p| p.name.as_str());
-                                    ComboBox::from_id_salt(("esp_exclude_near_preset", preset.id))
-                                        .selected_text(other_name)
-                                        .width(130.0)
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut preset.entity_exclude_near_preset_id,
-                                                None,
-                                                self.tr("-- None --", "-- Không --"),
-                                            );
-                                             for other in &self.state.esp_presets {
-                                                if other.id != preset.id {
-                                                    ui.selectable_value(
-                                                        &mut preset.entity_exclude_near_preset_id,
-                                                        Some(other.id),
-                                                        &other.name,
-                                                    );
+                                    if preset.entity_exclude_near_preset_enabled {
+                                        let other_name = preset
+                                            .entity_exclude_near_preset_id
+                                            .and_then(|id| {
+                                                self.state
+                                                    .esp_presets
+                                                    .iter()
+                                                    .find(|p| p.id == id)
+                                            })
+                                            .map_or(self.tr("Select preset", "Chọn preset"), |p| p.name.as_str());
+                                        ComboBox::from_id_salt(("esp_exclude_near_preset", preset.id))
+                                            .selected_text(other_name)
+                                            .width(col1_max_width.min(130.0))
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(
+                                                    &mut preset.entity_exclude_near_preset_id,
+                                                    None,
+                                                    self.tr("-- None --", "-- Không --"),
+                                                );
+                                                for other in &self.state.esp_presets {
+                                                    if other.id != preset.id {
+                                                        ui.selectable_value(
+                                                            &mut preset.entity_exclude_near_preset_id,
+                                                            Some(other.id),
+                                                            &other.name,
+                                                        );
+                                                    }
                                                 }
-                                            }
-                                        });
-                                }
+                                            });
+                                    }
+                                });
                             });
                             ui.end_row();
                             ui.label("");
-                            ui.horizontal(|ui| {
-                                ui.checkbox(
-                                    &mut preset.entity_filter_motionless_enabled,
-                                    self.tr("Filter motionless", "Lọc đối tượng đứng yên"),
-                                )
-                                .on_hover_text(self.tr(
-                                    "Hide entities that have not moved for a set duration (removes static objects / eliminated players).",
-                                    "Ẩn thực thể không cử động/đứng im quá thời gian cài đặt (loại bỏ vật thể tĩnh hoặc người chơi đã bị loại).",
-                                ));
-                                if preset.entity_filter_motionless_enabled {
-                                    ui.label(self.tr("Timeout", "Thời gian"));
-                                    ui.add(
-                                        DragValue::new(&mut preset.entity_motionless_timeout_secs)
-                                            .range(0.1..=10.0)
-                                            .speed(0.05)
-                                            .suffix("s"),
-                                    );
-                                }
+                            ui.scope(|ui| {
+                                ui.set_max_width(col1_max_width);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(
+                                        &mut preset.entity_filter_motionless_enabled,
+                                        self.tr("Filter motionless", "Lọc đối tượng đứng yên"),
+                                    )
+                                    .on_hover_text(self.tr(
+                                        "Hide entities that have not moved for a set duration (removes static objects / eliminated players).",
+                                        "Ẩn thực thể không cử động/đứng im quá thời gian cài đặt (loại bỏ vật thể tĩnh hoặc người chơi đã bị loại).",
+                                    ));
+                                    if preset.entity_filter_motionless_enabled {
+                                        ui.label(self.tr("Timeout", "Thời gian"));
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_motionless_timeout_secs)
+                                                .range(0.1..=10.0)
+                                                .speed(0.05)
+                                                .suffix("s"),
+                                        );
+                                    }
+                                });
                             });
                             ui.end_row();
                             ui.label("Entity colors");
-                            ui.horizontal_wrapped(|ui| {
+                            ui.scope(|ui| {
+                                ui.set_max_width(col1_max_width);
+                                ui.horizontal_wrapped(|ui| {
                                 ui.label("Entity #");
                                 let mut target_idx: u32 = ui.data_mut(|d| {
                                     *d.get_temp_mut_or(
@@ -1633,7 +1659,8 @@ impl CrosshairApp {
                                     }
                                 }
                             });
-                            ui.end_row();
+                        });
+                        ui.end_row();
                         } else {
                             for (label, value) in [
                                 ("Target X", &mut preset.target_x),
@@ -1954,7 +1981,7 @@ impl CrosshairApp {
                                 ui.add_space(2.0);
 
                                 // Row 7: Screen offset
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     ui.label("Screen offset:");
                                     ui.label("X");
                                     ui.add(DragValue::new(&mut preset.screen_offset_x).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
@@ -2446,8 +2473,9 @@ fn memory_type_name(value_type: MemoryValueType) -> &'static str {
 
 fn memory_expression_row(ui: &mut egui::Ui, label: &str, value: &mut String) {
     ui.label(label);
+    let max_w = (ui.available_width() - 8.0).max(80.0);
     ui.add(
-        TextEdit::singleline(value).desired_width(420.0).hint_text(
+        TextEdit::singleline(value).desired_width(max_w.min(420.0)).hint_text(
             RichText::new("address / module+offset [offsets] / @alias")
                 .color(ui.visuals().weak_text_color()),
         ),
