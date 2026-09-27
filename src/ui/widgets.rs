@@ -92,8 +92,11 @@ impl CrosshairApp {
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
         let dark_mode = ui.visuals().dark_mode;
+        let visible_w = (ui.clip_rect().right() - ui.cursor().left() - 4.0).max(160.0);
+        let card_w = ui.available_width().min(visible_w);
         let res = Self::preset_frame(ui, enabled).show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
+            ui.set_min_width(card_w);
+            ui.set_max_width(card_w);
             let previous = ui.visuals().override_text_color;
             if dark_mode {
                 ui.visuals_mut().override_text_color =
