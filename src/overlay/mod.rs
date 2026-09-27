@@ -31959,15 +31959,17 @@ mod windows_overlay {
         let Some(selector) = selector else {
             return window_list::process_id_for_window(None);
         };
+        let is_dynamic = crate::window_list::has_position_rule_suffix(selector);
         MACRO_MEMORY_TARGET_PID.with(|cached| {
             let mut cached = cached.borrow_mut();
             if let Some((cached_selector, cached_at, pid)) = cached.as_ref()
                 && cached_selector == selector
             {
-                if cached_at.elapsed() < Duration::from_millis(250) {
+                if cached_at.elapsed() < Duration::from_millis(if is_dynamic { 100 } else { 250 }) {
                     return *pid;
                 }
-                if let Some(p) = *pid {
+                // Only skip re-query for static window selectors whose target PID does not shift on tab focus
+                if !is_dynamic && let Some(p) = *pid {
                     if crate::process_memory::is_process_alive(p) {
                         *cached = Some((selector.to_owned(), Instant::now(), Some(p)));
                         return Some(p);
