@@ -6377,11 +6377,17 @@ impl CrosshairApp {
                 self.show_share_buttons = !self.show_share_buttons;
                 self.refresh_macro_share_clipboard_kind(true);
             }
-            if self.show_share_buttons {
-                self.refresh_macro_share_clipboard_kind(false);
+            self.refresh_macro_share_clipboard_kind(false);
+            if self.show_share_buttons
+                || self.macro_share_clipboard_kind != crate::ui::MacroShareCodeKind::None
+            {
                 ui.ctx().request_repaint_after(Duration::from_millis(250));
+            } else {
+                ui.ctx().request_repaint_after(Duration::from_millis(500));
             }
-            if self.show_share_buttons {
+            let show_group_import = self.show_share_buttons
+                || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
+            if show_group_import {
                 let import_enabled =
                     self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
                 let import_button = ui.add_enabled(
@@ -6393,7 +6399,7 @@ impl CrosshairApp {
                     .on_hover_text(Self::tr_lang(
                         language,
                         "Import macro group from clipboard",
-                        "Import macro group from clipboard",
+                        "Nhập nhóm macro từ bộ nhớ tạm",
                     ))
                     .clicked()
                 {
@@ -7838,12 +7844,9 @@ impl CrosshairApp {
                                         });
                                         live_sync = true;
                                     }
-                                    if self.show_share_buttons {
-                                        let group_export_feedback =
-                                            self.macro_group_export_feedback_target == Some(group.id)
-                                                && Self::is_copy_feedback_active(
-                                                    self.macro_group_export_feedback_until,
-                                                );
+                                    let show_group_import = self.show_share_buttons
+                                        || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
+                                    if show_group_import {
                                         if ui
                                             .add_enabled(
                                                 self.macro_share_clipboard_kind
@@ -7860,6 +7863,13 @@ impl CrosshairApp {
                                         {
                                             import_group_after = Some(group.id);
                                         }
+                                    }
+                                    if self.show_share_buttons {
+                                        let group_export_feedback =
+                                            self.macro_group_export_feedback_target == Some(group.id)
+                                                && Self::is_copy_feedback_active(
+                                                    self.macro_group_export_feedback_until,
+                                                );
                                         let group_export_label = if group_export_feedback {
                                             Self::tr_lang(language, "Copied", "Copied")
                                         } else {
@@ -7981,6 +7991,22 @@ impl CrosshairApp {
                                         .clicked()
                                         {
                                             add_preset_to_group = Some(group.id);
+                                        }
+                                        if self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset {
+                                            if ui
+                                                .add_sized(
+                                                    [46.0, 22.0],
+                                                    Button::new(Self::tr_lang(language, "Imp", "Imp")),
+                                                )
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    "Import preset from clipboard into this group",
+                                                    "Nhập preset từ bộ nhớ tạm vào nhóm này",
+                                                ))
+                                                .clicked()
+                                            {
+                                                import_preset_to_group = Some((group.id, None));
+                                            }
                                         }
                                         ui.add_space(4.0);
                                          live_sync |= Self::render_multi_window_targets_with_duplicate_mode(
@@ -8537,18 +8563,22 @@ impl CrosshairApp {
                                               {
                                                   export_preset = Some(preset.id);
                                               }
-                                             if ui
-                                                 .add_enabled(
-                                                     self.macro_share_clipboard_kind
-                                                         == crate::ui::MacroShareCodeKind::Preset,
-                                                     Button::new(Self::tr_lang(language, "Imp", "Imp"))
-                                                         .min_size(egui::vec2(46.0, 24.0)),
-                                                 )
-                                                 .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
-                                                 .clicked()
-                                             {
-                                                 import_preset_to_group = Some((group.id, Some(preset.id)));
                                              }
+                                             let show_preset_import = self.show_share_buttons
+                                                 || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset;
+                                             if show_preset_import {
+                                                 if ui
+                                                     .add_enabled(
+                                                         self.macro_share_clipboard_kind
+                                                             == crate::ui::MacroShareCodeKind::Preset,
+                                                         Button::new(Self::tr_lang(language, "Imp", "Imp"))
+                                                             .min_size(egui::vec2(46.0, 24.0)),
+                                                     )
+                                                     .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
+                                                     .clicked()
+                                                 {
+                                                     import_preset_to_group = Some((group.id, Some(preset.id)));
+                                                 }
                                              }
                                             if preset.trigger_mode != MacroTriggerMode::WindowFocus {
                                                 let capture_target = CaptureRequest::MacroPresetHotkey(
@@ -17315,6 +17345,22 @@ if supports_move_mouse || show_detection_tuning {
                                                     copy_single_step =
                                                         Some((group.id, preset.id, step_index));
                                                 }
+                                                let show_step_import = self.show_share_buttons
+                                                    || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Step;
+                                                if show_step_import {
+                                                    if ui
+                                                        .add_enabled(
+                                                            self.macro_share_clipboard_kind
+                                                                == crate::ui::MacroShareCodeKind::Step,
+                                                            Button::new(Self::tr_lang(language, "Imp", "Imp"))
+                                                                .min_size(vec2(50.0, 18.0)),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(language, "Import step from clipboard below this step.", "Import step from clipboard below this step."))
+                                                        .clicked()
+                                                    {
+                                                        import_step_to = Some((group.id, preset.id, Some(step_index)));
+                                                    }
+                                                }
                                                 if self.show_share_buttons {
                                                   let step_export_feedback =
                                                       self.macro_step_export_feedback_target
@@ -17322,18 +17368,6 @@ if supports_move_mouse || show_detection_tuning {
                                                           && Self::is_copy_feedback_active(
                                                               self.macro_step_export_feedback_until,
                                                           );
-                                                  if ui
-                                                      .add_enabled(
-                                                          self.macro_share_clipboard_kind
-                                                              == crate::ui::MacroShareCodeKind::Step,
-                                                          Button::new(Self::tr_lang(language, "Imp", "Imp"))
-                                                              .min_size(vec2(50.0, 18.0)),
-                                                      )
-                                                      .on_hover_text(Self::tr_lang(language, "Import step from clipboard below this step.", "Import step from clipboard below this step."))
-                                                      .clicked()
-                                                  {
-                                                      import_step_to = Some((group.id, preset.id, Some(step_index)));
-                                                  }
                                                   if ui
                                                       .add(
                                                           Button::new(if step_export_feedback {

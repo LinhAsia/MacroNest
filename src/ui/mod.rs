@@ -10466,12 +10466,14 @@ impl CrosshairApp {
         {
             MacroShareCodeKind::Step
         } else if payload.starts_with("MN5_PRESET:")
+            || payload.starts_with("MN4_PRESET:")
             || payload.starts_with("MN3_PRESET:")
             || payload.starts_with("MN2_PRESET:")
             || payload.starts_with("MN_PRESET:")
         {
             MacroShareCodeKind::Preset
         } else if payload.starts_with("MN5_GROUP:")
+            || payload.starts_with("MN4_GROUP:")
             || payload.starts_with("MN3_GROUP:")
             || payload.starts_with("MN2_GROUP:")
             || payload.starts_with("MN_GROUP:")
@@ -10483,12 +10485,6 @@ impl CrosshairApp {
     }
 
     fn refresh_macro_share_clipboard_kind(&mut self, force: bool) {
-        if !self.show_share_buttons {
-            self.macro_share_clipboard_kind = MacroShareCodeKind::None;
-            self.macro_share_clipboard_checked_at = None;
-            return;
-        }
-
         if !force
             && self
                 .macro_share_clipboard_checked_at
