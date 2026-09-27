@@ -13834,7 +13834,7 @@ impl CrosshairApp {
         keys
     }
 
-    fn persist_macro_presets(&mut self) {
+    pub(crate) fn persist_macro_presets(&mut self) {
         self.persist_after_syncs([Self::sync_macro_presets, Self::sync_macro_master_enabled]);
     }
 

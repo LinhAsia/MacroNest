@@ -25816,7 +25816,38 @@ mod windows_overlay {
                 }
             }
 
-            // 3. Simple math operators: +, -, *, / outside bracket scope ']'
+            // 3. If the expression is address-like (contains variables like {a} + 8, pointers, or module offsets),
+            // resolve it directly as a memory address rather than splitting on math operators.
+            let is_address_like = expr.starts_with('@')
+                || expr.contains('{')
+                || expr.contains('[')
+                || expr.to_lowercase().contains(".dll")
+                || expr.to_lowercase().contains(".exe")
+                || expr.trim_start().to_ascii_lowercase().starts_with("0x");
+
+            if is_address_like {
+                if let Some((target_pid, address)) = self.resolve_address(pid, expr, false) {
+                    let tag = esp_value_type_tag(value_type);
+                    if let Some(value) = self.values.get(&(target_pid, address, tag)) {
+                        return Ok(*value);
+                    }
+                    let val = match self.read_numeric_value(target_pid, address, value_type) {
+                        Ok(val) => val,
+                        Err(_) => {
+                            if let Some((t_pid, addr)) = self.resolve_address(pid, expr, true) {
+                                self.read_numeric_value(t_pid, addr, value_type)
+                                    .map_err(|err| err.to_string())?
+                            } else {
+                                return Err("could not be resolved".to_owned());
+                            }
+                        }
+                    };
+                    self.values.insert((target_pid, address, tag), val);
+                    return Ok(val);
+                }
+            }
+
+            // 4. Simple math operators: +, -, *, / outside bracket scope ']'
             let mut op_idx = None;
             let mut chosen_op = None;
             let mut bracket_depth = 0;
@@ -32494,7 +32525,7 @@ mod windows_overlay {
         });
     }
 
-    fn resolve_memory_action_target(
+    pub(crate) fn resolve_memory_action_target(
         pid: Option<u32>,
         text: &str,
         allow_tracked_rebind: bool,
@@ -36561,6 +36592,9 @@ mod windows_overlay {
             let mut last_key_repeat = Instant::now();
 
             while !thread_stop.load(Ordering::SeqCst) {
+                if is_ui_in_foreground() {
+                    break;
+                }
                 // If this session is owned by a Hold macro, stop immediately if the hold key was released
                 if let Some(pid) = owner_preset_id {
                     if is_hold {
@@ -40481,6 +40515,23 @@ mod tests {
         assert_eq!(RUNTIME_VARIABLES.lock().get("test_var_multi_2").copied(), Some(0x2000 as f64));
         assert_eq!(RUNTIME_VARIABLES.lock().get("test_var_multi_count").copied(), Some(2.0));
         assert!(TEXT_VARIABLES.lock().get("test_var_multi_count").is_some());
+    }
+
+    #[test]
+    fn test_resolve_memory_action_target_variable_with_offset() {
+        use super::windows_overlay::resolve_memory_action_target;
+        use crate::overlay::set_text_variable_value;
+
+        set_text_variable_value("test_base_addr", "0x2813B5CC920");
+
+        let res_x = resolve_memory_action_target(Some(1234), "{test_base_addr}", false);
+        assert_eq!(res_x, Some((1234, 0x2813B5CC920)));
+
+        let res_y = resolve_memory_action_target(Some(1234), "{test_base_addr} + 8", false);
+        assert_eq!(res_y, Some((1234, 0x2813B5CC928)));
+
+        let res_z = resolve_memory_action_target(Some(1234), "{test_base_addr} + 4", false);
+        assert_eq!(res_z, Some((1234, 0x2813B5CC924)));
     }
 }
 

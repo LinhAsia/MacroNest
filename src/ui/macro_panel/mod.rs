@@ -923,7 +923,7 @@ impl CrosshairApp {
         changed: &mut bool,
     ) {
         let id = ui.make_persistent_id(id_source);
-        let resp = Self::render_expandable_text_edit(
+        let resp = Self::render_interpolated_text_edit(
             ui,
             text,
             id,

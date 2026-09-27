@@ -1933,13 +1933,18 @@ impl CrosshairApp {
         let mut toggle_pin = false;
         if pinned {
             let scale = self.state.memory_pinned_ui_scale;
+            let inner_width = if self.memory_panel.show_code_list_address {
+                702.0
+            } else {
+                612.0
+            };
             let inner_size = if id == "memory-code-list-host" {
-                vec2(740.0, 520.0)
+                vec2(inner_width, 520.0)
             } else {
                 vec2(860.0, 620.0)
             };
             let min_inner_size = if id == "memory-code-list-host" {
-                vec2(580.0, 240.0)
+                vec2(inner_width, 240.0)
             } else {
                 vec2(480.0, 280.0)
             };
@@ -1955,7 +1960,7 @@ impl CrosshairApp {
             ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ctx, _| {
                 Self::sync_pinned_viewport_scale(ctx, id, scale);
                 if id == "memory-code-list-host" {
-                    let compact_key = egui::Id::new((id, "compact_size_v4"));
+                    let compact_key = egui::Id::new((id, "compact_size_v5", self.memory_panel.show_code_list_address));
                     let applied: bool = ctx.data(|d| d.get_temp(compact_key)).unwrap_or(false);
                     if !applied {
                         ctx.data_mut(|d| d.insert_temp(compact_key, true));
@@ -1987,15 +1992,20 @@ impl CrosshairApp {
                 self.memory_panel.unpinned_memory_popups.insert(id);
             }
         } else {
+            let inner_width = if self.memory_panel.show_code_list_address {
+                702.0
+            } else {
+                612.0
+            };
             let default_size = if id == "memory-code-list-host" {
-                vec2(740.0, 520.0)
+                vec2(inner_width, 520.0)
             } else {
                 vec2(640.0, 440.0)
             };
             egui::Window::new(title)
                 .id(egui::Id::new(id))
                 .default_size(default_size)
-                .min_size(vec2(580.0, 240.0))
+                .min_size(vec2(inner_width, 240.0))
                 .collapsible(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
@@ -6673,6 +6683,8 @@ impl CrosshairApp {
         }
 
         if count > 0 {
+            self.persist_macro_presets();
+            self.persist_esp_presets();
             self.persist();
             crate::overlay::set_memory_pointer_entries(&self.state.memory_pointer_list);
         }
@@ -6879,6 +6891,15 @@ impl CrosshairApp {
                     };
                     if ui.button(toggle_addr_label).clicked() {
                         self.memory_panel.show_code_list_address = !self.memory_panel.show_code_list_address;
+                        let new_w = if self.memory_panel.show_code_list_address {
+                            702.0
+                        } else {
+                            612.0
+                        };
+                        let s = ui
+                            .data(|d| d.get_temp::<f32>(egui::Id::new("memory_pinned_ui_scale_active")))
+                            .unwrap_or(1.0);
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(new_w * s, 520.0 * s)));
                     }
                     #[cfg(windows)]
                     {
