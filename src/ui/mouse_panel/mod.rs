@@ -119,6 +119,8 @@ impl CrosshairApp {
         let mut mouse_sensitivity_live_sync = false;
         let mut copy_sensitivity_preset = None;
         let mut paste_sensitivity_after = None;
+        let mut export_sensitivity_share_index = None;
+        let mut paste_sensitivity_share_after = None;
 
         let mut remove_id = None;
         let mut next_capture_target = None;
@@ -589,6 +591,15 @@ impl CrosshairApp {
                         self.add_mouse_sensitivity_preset();
                         self.persist_mouse_sensitivity_presets();
                     }
+                    if Self::render_share_panel_import_button(
+                        ui,
+                        self.state.ui_language,
+                        self.show_share_buttons,
+                        self.macro_share_clipboard_kind,
+                        crate::ui::MacroShareCodeKind::MouseSensitivity,
+                    ) {
+                        self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::MouseSensitivity, None);
+                    }
 
                     if ui
                         .button(self.tr("+ Add path preset", "+ Add path preset"))
@@ -832,6 +843,20 @@ impl CrosshairApp {
                                         preset.enabled = false;
                                         disabled_by_button = true;
                                         mouse_sensitivity_live_sync = true;
+                                    }
+
+                                    let (imp, exp) = Self::render_share_preset_buttons(
+                                        ui,
+                                        self.state.ui_language,
+                                        self.show_share_buttons,
+                                        self.macro_share_clipboard_kind,
+                                        crate::ui::MacroShareCodeKind::MouseSensitivity,
+                                    );
+                                    if imp {
+                                        paste_sensitivity_share_after = Some(index);
+                                    }
+                                    if exp {
+                                        export_sensitivity_share_index = Some(index);
                                     }
 
                                     if ui
@@ -1130,6 +1155,14 @@ impl CrosshairApp {
                 .mouse_sensitivity_presets
                 .insert(index + 1, preset);
             mouse_sensitivity_live_sync = true;
+        }
+        if let Some(idx) = export_sensitivity_share_index {
+            if let Some(p) = self.state.mouse_sensitivity_presets.get(idx).cloned() {
+                self.export_mouse_preset(&p);
+            }
+        }
+        if let Some(index) = paste_sensitivity_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::MouseSensitivity, Some(index));
         }
 
         if let Some(preset) = copy_mouse_path_preset {

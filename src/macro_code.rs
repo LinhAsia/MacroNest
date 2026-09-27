@@ -28,6 +28,20 @@ const PREFIX_STEP_V5: &str = "MN5_STEP:";
 const PREFIX_PRESET_V5: &str = "MN5_PRESET:";
 const PREFIX_GROUP_V5: &str = "MN5_GROUP:";
 
+pub const PREFIX_ESP: &str = "MN_ESP:";
+pub const PREFIX_CMD: &str = "MN_CMD:";
+pub const PREFIX_CROSSHAIR: &str = "MN_CROSSHAIR:";
+pub const PREFIX_WIN_PRESET: &str = "MN_WINPRESET:";
+pub const PREFIX_WIN_LAYOUT: &str = "MN_WINLAYOUT:";
+pub const PREFIX_PIN: &str = "MN_PIN:";
+pub const PREFIX_MOUSE: &str = "MN_MOUSE:";
+pub const PREFIX_VISION: &str = "MN_VISION:";
+pub const PREFIX_AUDIOSENSE: &str = "MN_AUDIO:";
+pub const PREFIX_OCR: &str = "MN_OCR:";
+pub const PREFIX_GEOMETRY: &str = "MN_GEOM:";
+pub const PREFIX_HUD: &str = "MN_HUD:";
+pub const PREFIX_TIMER: &str = "MN_TIMER:";
+
 const Z85_ALPHABET: &[u8; 85] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#";
 
@@ -694,6 +708,180 @@ pub fn decode_shared_group(code: &str) -> Result<SharedMacroGroup> {
     })
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct SharedEspPreset {
+    pub preset: EspPreset,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hud_preset: Option<HudPreset>,
+}
+
+pub fn encode_esp_preset(preset: &EspPreset, hud_presets: &[HudPreset]) -> Result<String> {
+    let hud_preset = preset
+        .entity_auto_hud_preset_id
+        .and_then(|id| hud_presets.iter().find(|h| h.id == id).cloned());
+    encode_v2(
+        &SharedEspPreset {
+            preset: preset.clone(),
+            hud_preset,
+        },
+        PREFIX_ESP,
+        "ESP preset",
+    )
+}
+
+pub fn decode_esp_preset(code: &str) -> Result<SharedEspPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_ESP)
+        .ok_or_else(|| anyhow::anyhow!("Invalid ESP preset code"))?;
+    decode_v2(encoded, "ESP preset")
+}
+
+pub fn encode_crosshair_profile(profile: &ProfileRecord) -> Result<String> {
+    encode_v2(profile, PREFIX_CROSSHAIR, "crosshair profile")
+}
+
+pub fn decode_crosshair_profile(code: &str) -> Result<ProfileRecord> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_CROSSHAIR)
+        .ok_or_else(|| anyhow::anyhow!("Invalid crosshair profile code"))?;
+    decode_v2(encoded, "crosshair profile")
+}
+
+pub fn encode_window_preset(preset: &WindowPreset) -> Result<String> {
+    encode_v2(preset, PREFIX_WIN_PRESET, "window preset")
+}
+
+pub fn decode_window_preset(code: &str) -> Result<WindowPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_WIN_PRESET)
+        .ok_or_else(|| anyhow::anyhow!("Invalid window preset code"))?;
+    decode_v2(encoded, "window preset")
+}
+
+pub fn encode_window_layout(layout: &WindowLayout) -> Result<String> {
+    encode_v2(layout, PREFIX_WIN_LAYOUT, "window layout")
+}
+
+pub fn decode_window_layout(code: &str) -> Result<WindowLayout> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_WIN_LAYOUT)
+        .ok_or_else(|| anyhow::anyhow!("Invalid window layout code"))?;
+    decode_v2(encoded, "window layout")
+}
+
+pub fn encode_command_preset(preset: &CommandPreset) -> Result<String> {
+    encode_v2(preset, PREFIX_CMD, "command preset")
+}
+
+pub fn decode_command_preset(code: &str) -> Result<CommandPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_CMD)
+        .ok_or_else(|| anyhow::anyhow!("Invalid command preset code"))?;
+    decode_v2(encoded, "command preset")
+}
+
+pub fn encode_pin_preset(preset: &PinPreset) -> Result<String> {
+    encode_v2(preset, PREFIX_PIN, "pin preset")
+}
+
+pub fn decode_pin_preset(code: &str) -> Result<PinPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_PIN)
+        .ok_or_else(|| anyhow::anyhow!("Invalid pin preset code"))?;
+    decode_v2(encoded, "pin preset")
+}
+
+pub fn encode_mouse_preset(preset: &MouseSensitivityPreset) -> Result<String> {
+    encode_v2(preset, PREFIX_MOUSE, "mouse preset")
+}
+
+pub fn decode_mouse_preset(code: &str) -> Result<MouseSensitivityPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_MOUSE)
+        .ok_or_else(|| anyhow::anyhow!("Invalid mouse preset code"))?;
+    decode_v2(encoded, "mouse preset")
+}
+
+pub fn encode_vision_preset(shared: &SharedVisionPreset) -> Result<String> {
+    encode_v2(shared, PREFIX_VISION, "vision preset")
+}
+
+pub fn decode_vision_preset(code: &str) -> Result<SharedVisionPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_VISION)
+        .ok_or_else(|| anyhow::anyhow!("Invalid vision preset code"))?;
+    decode_v2(encoded, "vision preset")
+}
+
+pub fn encode_audio_sense_preset(preset: &AudioSensePreset) -> Result<String> {
+    encode_v2(preset, PREFIX_AUDIOSENSE, "audio sense preset")
+}
+
+pub fn decode_audio_sense_preset(code: &str) -> Result<AudioSensePreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_AUDIOSENSE)
+        .ok_or_else(|| anyhow::anyhow!("Invalid audio sense preset code"))?;
+    decode_v2(encoded, "audio sense preset")
+}
+
+pub fn encode_ocr_preset(preset: &OcrPreset) -> Result<String> {
+    encode_v2(preset, PREFIX_OCR, "OCR preset")
+}
+
+pub fn decode_ocr_preset(code: &str) -> Result<OcrPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_OCR)
+        .ok_or_else(|| anyhow::anyhow!("Invalid OCR preset code"))?;
+    decode_v2(encoded, "OCR preset")
+}
+
+pub fn encode_geometry_preset(preset: &GeometryPreset) -> Result<String> {
+    encode_v2(preset, PREFIX_GEOMETRY, "geometry preset")
+}
+
+pub fn decode_geometry_preset(code: &str) -> Result<GeometryPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_GEOMETRY)
+        .ok_or_else(|| anyhow::anyhow!("Invalid geometry preset code"))?;
+    decode_v2(encoded, "geometry preset")
+}
+
+pub fn encode_hud_preset(preset: &HudPreset) -> Result<String> {
+    encode_v2(preset, PREFIX_HUD, "HUD preset")
+}
+
+pub fn decode_hud_preset(code: &str) -> Result<HudPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_HUD)
+        .ok_or_else(|| anyhow::anyhow!("Invalid HUD preset code"))?;
+    decode_v2(encoded, "HUD preset")
+}
+
+pub fn encode_timer_preset(preset: &TimerPreset) -> Result<String> {
+    encode_v2(preset, PREFIX_TIMER, "timer preset")
+}
+
+pub fn decode_timer_preset(code: &str) -> Result<TimerPreset> {
+    let payload = code.trim();
+    let encoded = payload
+        .strip_prefix(PREFIX_TIMER)
+        .ok_or_else(|| anyhow::anyhow!("Invalid timer preset code"))?;
+    decode_v2(encoded, "timer preset")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,5 +1097,88 @@ mod tests {
 
         res.memory_code_list.push(MemoryCodeEntry::default());
         assert!(!res.is_empty());
+    }
+
+    #[test]
+    fn standalone_presets_round_trip() {
+        let esp = EspPreset::new(42);
+        let hud = HudPreset {
+            id: 99,
+            name: "Auto Hud".to_string(),
+            ..Default::default()
+        };
+        let mut esp_with_hud = esp.clone();
+        esp_with_hud.entity_auto_hud_preset_id = Some(99);
+        let encoded_esp = encode_esp_preset(&esp_with_hud, &[hud.clone()]).expect("encode esp");
+        assert!(encoded_esp.starts_with(PREFIX_ESP));
+        let decoded_esp = decode_esp_preset(&encoded_esp).expect("decode esp");
+        assert_eq!(decoded_esp.preset, esp_with_hud);
+        assert_eq!(decoded_esp.hud_preset, Some(hud));
+
+        let crosshair = ProfileRecord {
+            name: "Test Crosshair".to_string(),
+            ..Default::default()
+        };
+        let enc = encode_crosshair_profile(&crosshair).expect("encode crosshair");
+        assert!(enc.starts_with(PREFIX_CROSSHAIR));
+        assert_eq!(decode_crosshair_profile(&enc).expect("decode crosshair"), crosshair);
+
+        let win = WindowPreset { id: 7, name: "Win7".to_string(), ..Default::default() };
+        let enc = encode_window_preset(&win).expect("encode win");
+        assert!(enc.starts_with(PREFIX_WIN_PRESET));
+        assert_eq!(decode_window_preset(&enc).expect("decode win"), win);
+
+        let layout = WindowLayout { id: 8, name: "Layout".to_string(), ..Default::default() };
+        let enc = encode_window_layout(&layout).expect("encode layout");
+        assert!(enc.starts_with(PREFIX_WIN_LAYOUT));
+        assert_eq!(decode_window_layout(&enc).expect("decode layout"), layout);
+
+        let cmd = CommandPreset { id: 9, name: "Cmd".to_string(), ..Default::default() };
+        let enc = encode_command_preset(&cmd).expect("encode cmd");
+        assert!(enc.starts_with(PREFIX_CMD));
+        assert_eq!(decode_command_preset(&enc).expect("decode cmd"), cmd);
+
+        let pin = PinPreset { id: 10, name: "Pin".to_string(), ..Default::default() };
+        let enc = encode_pin_preset(&pin).expect("encode pin");
+        assert!(enc.starts_with(PREFIX_PIN));
+        assert_eq!(decode_pin_preset(&enc).expect("decode pin"), pin);
+
+        let mouse = MouseSensitivityPreset { id: 11, name: "Mouse".to_string(), ..Default::default() };
+        let enc = encode_mouse_preset(&mouse).expect("encode mouse");
+        assert!(enc.starts_with(PREFIX_MOUSE));
+        assert_eq!(decode_mouse_preset(&enc).expect("decode mouse"), mouse);
+
+        let vision = SharedVisionPreset {
+            preset: VisionPreset { id: 12, name: "Vision".to_string(), ..Default::default() },
+            template_png: Some(vec![10, 20, 30]),
+        };
+        let enc = encode_vision_preset(&vision).expect("encode vision");
+        assert!(enc.starts_with(PREFIX_VISION));
+        assert_eq!(decode_vision_preset(&enc).expect("decode vision"), vision);
+
+        let audio = AudioSensePreset { id: 13, name: "Audio".to_string(), ..Default::default() };
+        let enc = encode_audio_sense_preset(&audio).expect("encode audio");
+        assert!(enc.starts_with(PREFIX_AUDIOSENSE));
+        assert_eq!(decode_audio_sense_preset(&enc).expect("decode audio"), audio);
+
+        let ocr = OcrPreset { id: 14, name: "OCR".to_string(), ..Default::default() };
+        let enc = encode_ocr_preset(&ocr).expect("encode ocr");
+        assert!(enc.starts_with(PREFIX_OCR));
+        assert_eq!(decode_ocr_preset(&enc).expect("decode ocr"), ocr);
+
+        let geom = GeometryPreset { id: 15, name: "Geom".to_string(), ..Default::default() };
+        let enc = encode_geometry_preset(&geom).expect("encode geom");
+        assert!(enc.starts_with(PREFIX_GEOMETRY));
+        assert_eq!(decode_geometry_preset(&enc).expect("decode geom"), geom);
+
+        let hud = HudPreset { id: 16, name: "Hud".to_string(), ..Default::default() };
+        let enc = encode_hud_preset(&hud).expect("encode hud");
+        assert!(enc.starts_with(PREFIX_HUD));
+        assert_eq!(decode_hud_preset(&enc).expect("decode hud"), hud);
+
+        let timer = TimerPreset { id: 17, name: "Timer".to_string(), ..Default::default() };
+        let enc = encode_timer_preset(&timer).expect("encode timer");
+        assert!(enc.starts_with(PREFIX_TIMER));
+        assert_eq!(decode_timer_preset(&enc).expect("decode timer"), timer);
     }
 }

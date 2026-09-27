@@ -6348,43 +6348,7 @@ impl CrosshairApp {
                 }
                 self.persist();
             }
-            let share_icon = 0xe80d; // Material icon for share
-            let share_fill = if self.show_share_buttons {
-                Color32::from_rgba_premultiplied(0, 191, 255, 30)
-            } else {
-                ui.visuals().faint_bg_color
-            };
-            let share_stroke = if self.show_share_buttons {
-                Color32::from_rgb(0, 191, 255)
-            } else {
-                ui.visuals().widgets.noninteractive.bg_stroke.color
-            };
-            if Self::with_emphasized_button_hover(ui, |ui| {
-                ui.add_sized(
-                    [28.0, 28.0],
-                    Button::new(Self::material_icon_text(share_icon, 18.0))
-                        .fill(share_fill)
-                        .stroke(egui::Stroke::new(1.0, share_stroke)),
-                )
-            })
-            .on_hover_text(Self::tr_lang(
-                language,
-                "Toggle Import/Export buttons",
-                "Toggle Import/Export buttons",
-            ))
-            .clicked()
-            {
-                self.show_share_buttons = !self.show_share_buttons;
-                self.refresh_macro_share_clipboard_kind(true);
-            }
-            self.refresh_macro_share_clipboard_kind(false);
-            if self.show_share_buttons
-                || self.macro_share_clipboard_kind != crate::ui::MacroShareCodeKind::None
-            {
-                ui.ctx().request_repaint_after(Duration::from_millis(250));
-            } else {
-                ui.ctx().request_repaint_after(Duration::from_millis(500));
-            }
+
             let show_group_import = self.show_share_buttons
                 || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
             if show_group_import {

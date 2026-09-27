@@ -58,6 +58,15 @@ impl CrosshairApp {
                 self.state.ocr_presets.push(preset);
                 self.persist_ocr_presets();
             }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::Ocr,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Ocr, None);
+            }
         });
 
         ui.add_space(8.0);
@@ -70,6 +79,8 @@ impl CrosshairApp {
         let mut start_ocr_download = false;
         let mut copy_ocr_preset = None;
         let mut paste_ocr_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste_ocr = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Ocr(_))
@@ -110,6 +121,20 @@ impl CrosshairApp {
                                 run_test_preset_id = Some(preset.id);
                             }
                         }
+                        let (imp, exp) = Self::render_share_preset_buttons(
+                            ui,
+                            self.state.ui_language,
+                            self.show_share_buttons,
+                            self.macro_share_clipboard_kind,
+                            crate::ui::MacroShareCodeKind::Ocr,
+                        );
+                        if imp {
+                            paste_share_after = Some(index);
+                        }
+                        if exp {
+                            export_share_index = Some(index);
+                        }
+
                         if ui
                             .add_enabled(
                                 can_paste_ocr,
@@ -465,6 +490,14 @@ impl CrosshairApp {
             preset.name = format!("{} (Copy)", preset.name);
             self.state.ocr_presets.insert(index + 1, preset);
             live_sync = true;
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.ocr_presets.get(idx).cloned() {
+                self.export_ocr_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Ocr, Some(index));
         }
 
         if let Some(id) = remove_id {

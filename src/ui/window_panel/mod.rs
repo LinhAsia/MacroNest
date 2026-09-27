@@ -93,6 +93,24 @@ impl CrosshairApp {
             {
                 self.add_window_layout();
             }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::WindowPreset,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::WindowPreset, None);
+            }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::WindowLayout,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::WindowLayout, None);
+            }
         });
 
         ui.add_space(16.0);
@@ -101,6 +119,8 @@ impl CrosshairApp {
         let mut live_sync = false;
         let mut copy_preset = None;
         let mut paste_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Window(_))
@@ -169,6 +189,19 @@ impl CrosshairApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
+                                    let (imp, exp) = Self::render_share_preset_buttons(
+                                        ui,
+                                        self.state.ui_language,
+                                        self.show_share_buttons,
+                                        self.macro_share_clipboard_kind,
+                                        crate::ui::MacroShareCodeKind::WindowPreset,
+                                    );
+                                    if imp {
+                                        paste_share_after = Some(index);
+                                    }
+                                    if exp {
+                                        export_share_index = Some(index);
+                                    }
                                     if ui
                                         .add_enabled(
                                             can_paste,
@@ -530,6 +563,14 @@ impl CrosshairApp {
             self.state.window_presets.insert(index + 1, preset);
             self.persist_window_presets();
         }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.window_presets.get(idx).cloned() {
+                self.export_window_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::WindowPreset, Some(index));
+        }
         if let Some(id) = remove_id {
             self.state.window_presets.retain(|preset| preset.id != id);
             self.persist_window_presets();
@@ -552,6 +593,15 @@ impl CrosshairApp {
             {
                 self.add_pin_preset();
                 self.persist_window_presets();
+            }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::Pin,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Pin, None);
             }
 
             ui.add_space(16.0);
@@ -585,6 +635,8 @@ impl CrosshairApp {
         let mut live_sync = false;
         let mut copy_preset = None;
         let mut paste_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Pin(_))
@@ -651,6 +703,19 @@ impl CrosshairApp {
                         preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (imp, exp) = Self::render_share_preset_buttons(
+                            ui,
+                            self.state.ui_language,
+                            self.show_share_buttons,
+                            self.macro_share_clipboard_kind,
+                            crate::ui::MacroShareCodeKind::Pin,
+                        );
+                        if imp {
+                            paste_share_after = Some(index);
+                        }
+                        if exp {
+                            export_share_index = Some(index);
+                        }
                         if ui
                             .add_enabled(can_paste, Button::new("Paste").min_size(vec2(84.0, 24.0)))
                             .clicked()
@@ -1351,6 +1416,14 @@ impl CrosshairApp {
             preset.collapsed = true;
             self.state.pin_presets.insert(index + 1, preset);
             live_sync = true;
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.pin_presets.get(idx).cloned() {
+                self.export_pin_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Pin, Some(index));
         }
         if let Some(id) = remove_id {
             self.state.pin_presets.retain(|preset| preset.id != id);
@@ -3307,6 +3380,8 @@ impl CrosshairApp {
 
         let mut copy_layout_preset = None;
         let mut paste_layout_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste_layout = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::WindowLayout(_))
@@ -3472,6 +3547,20 @@ impl CrosshairApp {
                             ));
                             if run_response.clicked() {
                                 run_layout_now = true;
+                            }
+
+                            let (imp, exp) = Self::render_share_preset_buttons(
+                                ui,
+                                self.state.ui_language,
+                                self.show_share_buttons,
+                                self.macro_share_clipboard_kind,
+                                crate::ui::MacroShareCodeKind::WindowLayout,
+                            );
+                            if imp {
+                                paste_share_after = Some(index);
+                            }
+                            if exp {
+                                export_share_index = Some(index);
                             }
 
                             if ui
@@ -4966,6 +5055,14 @@ impl CrosshairApp {
             self.state.window_layouts.insert(index + 1, preset);
             self.persist_window_layouts();
             live_sync = true;
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(l) = self.state.window_layouts.get(idx).cloned() {
+                self.export_window_layout(&l);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::WindowLayout, Some(index));
         }
 
         if live_sync {

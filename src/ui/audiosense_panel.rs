@@ -32,6 +32,15 @@ impl CrosshairApp {
                 self.state.audio_sense_presets.push(preset);
                 self.persist_audio_sense_presets();
             }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::AudioSense,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::AudioSense, None);
+            }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let button_label = if self.audio_sense_test_active {
@@ -183,6 +192,8 @@ impl CrosshairApp {
         let mut changed = false;
         let mut copy_audiosense_preset = None;
         let mut paste_audiosense_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste_audiosense = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::AudioSense(_))
@@ -219,6 +230,20 @@ impl CrosshairApp {
                     changed |= response.changed();
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (imp, exp) = Self::render_share_preset_buttons(
+                            ui,
+                            self.state.ui_language,
+                            self.show_share_buttons,
+                            self.macro_share_clipboard_kind,
+                            crate::ui::MacroShareCodeKind::AudioSense,
+                        );
+                        if imp {
+                            paste_share_after = Some(preset_index);
+                        }
+                        if exp {
+                            export_share_index = Some(preset_index);
+                        }
+
                         if ui
                             .add_enabled(
                                 can_paste_audiosense,
@@ -404,6 +429,14 @@ impl CrosshairApp {
             preset.name = format!("{} (Copy)", preset.name);
             self.state.audio_sense_presets.insert(index + 1, preset);
             changed = true;
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.audio_sense_presets.get(idx).cloned() {
+                self.export_audio_sense_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::AudioSense, Some(index));
         }
 
         if changed {

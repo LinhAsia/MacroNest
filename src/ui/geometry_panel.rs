@@ -114,12 +114,23 @@ impl CrosshairApp {
                 self.state.geometry_presets.push(new_preset);
                 changed = true;
             }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::Geometry,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Geometry, None);
+            }
         });
 
         ui.add_space(8.0);
 
         let mut copy_geometry_preset = None;
         let mut paste_geometry_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste_geometry = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Geometry(_))
@@ -147,6 +158,20 @@ impl CrosshairApp {
                     );
                     changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (imp, exp) = Self::render_share_preset_buttons(
+                            ui,
+                            self.state.ui_language,
+                            self.show_share_buttons,
+                            self.macro_share_clipboard_kind,
+                            crate::ui::MacroShareCodeKind::Geometry,
+                        );
+                        if imp {
+                            paste_share_after = Some(preset_index);
+                        }
+                        if exp {
+                            export_share_index = Some(preset_index);
+                        }
+
                         if ui
                             .add_enabled(
                                 can_paste_geometry,
@@ -320,6 +345,14 @@ impl CrosshairApp {
             preset.name = format!("{} (Copy)", preset.name);
             self.state.geometry_presets.insert(index + 1, preset);
             changed = true;
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.geometry_presets.get(idx).cloned() {
+                self.export_geometry_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Geometry, Some(index));
         }
 
         if changed {

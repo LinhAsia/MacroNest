@@ -391,6 +391,15 @@ impl CrosshairApp {
             {
                 self.add_profile();
             }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::Crosshair,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Crosshair, None);
+            }
         });
 
         ui.add_space(8.0);
@@ -408,6 +417,8 @@ impl CrosshairApp {
 
         let mut copy_crosshair_profile = None;
         let mut paste_crosshair_profile_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let mut pending_crosshair_draw_request: Option<(String, Option<String>, f32)> = None;
         let mut refresh_crosshair_profiles = false;
         let can_paste_crosshair = self.crosshair_profile_clipboard.is_some();
@@ -453,6 +464,19 @@ impl CrosshairApp {
                         }
                         ui.add_space(6.0);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let (imp, exp) = Self::render_share_preset_buttons(
+                                ui,
+                                self.state.ui_language,
+                                self.show_share_buttons,
+                                self.macro_share_clipboard_kind,
+                                crate::ui::MacroShareCodeKind::Crosshair,
+                            );
+                            if imp {
+                                paste_share_after = Some(index);
+                            }
+                            if exp {
+                                export_share_index = Some(index);
+                            }
                             if ui
                                 .add_enabled(
                                     can_paste_crosshair,
@@ -603,6 +627,14 @@ impl CrosshairApp {
         }
         if let Some(index) = paste_crosshair_profile_after {
             self.paste_crosshair_profile_after(index);
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.profiles.get(idx).cloned() {
+                self.export_crosshair_profile(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Crosshair, Some(index));
         }
         if let Some(target) = pending_color_pick_target {
             self.begin_color_pick_capture(ui.ctx(), target);

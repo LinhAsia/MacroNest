@@ -110,6 +110,15 @@ impl CrosshairApp {
                 self.state.vision_presets.push(preset);
                 self.persist_vision_presets();
             }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::Vision,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Vision, None);
+            }
         });
 
         ui.add_space(8.0);
@@ -139,6 +148,8 @@ impl CrosshairApp {
 
         let mut copy_vision_preset = None;
         let mut paste_vision_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste_vision = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Vision(_))
@@ -311,6 +322,20 @@ impl CrosshairApp {
                                 preset.trigger_keys.clear();
                                 preset.enabled = false;
                                 live_sync = true;
+                            }
+
+                            let (imp, exp) = Self::render_share_preset_buttons(
+                                ui,
+                                self.state.ui_language,
+                                self.show_share_buttons,
+                                self.macro_share_clipboard_kind,
+                                crate::ui::MacroShareCodeKind::Vision,
+                            );
+                            if imp {
+                                paste_share_after = Some(index);
+                            }
+                            if exp {
+                                export_share_index = Some(index);
                             }
 
                             if ui
@@ -966,6 +991,14 @@ impl CrosshairApp {
             }
             self.state.vision_presets.insert(index + 1, preset);
             live_sync = true;
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.vision_presets.get(idx).cloned() {
+                self.export_vision_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Vision, Some(index));
         }
 
         if live_sync {

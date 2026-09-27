@@ -251,13 +251,26 @@ pub(crate) enum MacroGroupFavoriteFilter {
     Star,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub(crate) enum MacroShareCodeKind {
     #[default]
     None,
     Step,
     Preset,
     Group,
+    Esp,
+    Command,
+    Crosshair,
+    WindowPreset,
+    WindowLayout,
+    Pin,
+    MouseSensitivity,
+    Vision,
+    AudioSense,
+    Ocr,
+    Geometry,
+    Hud,
+    Timer,
 }
 
 #[derive(Default)]
@@ -10458,7 +10471,33 @@ impl CrosshairApp {
 
     fn macro_share_code_kind_from_text(text: &str) -> MacroShareCodeKind {
         let payload = text.trim();
-        if payload.starts_with("MN5_STEP:")
+        if payload.starts_with(crate::macro_code::PREFIX_ESP) {
+            MacroShareCodeKind::Esp
+        } else if payload.starts_with(crate::macro_code::PREFIX_CMD) {
+            MacroShareCodeKind::Command
+        } else if payload.starts_with(crate::macro_code::PREFIX_CROSSHAIR) {
+            MacroShareCodeKind::Crosshair
+        } else if payload.starts_with(crate::macro_code::PREFIX_WIN_PRESET) {
+            MacroShareCodeKind::WindowPreset
+        } else if payload.starts_with(crate::macro_code::PREFIX_WIN_LAYOUT) {
+            MacroShareCodeKind::WindowLayout
+        } else if payload.starts_with(crate::macro_code::PREFIX_PIN) {
+            MacroShareCodeKind::Pin
+        } else if payload.starts_with(crate::macro_code::PREFIX_MOUSE) {
+            MacroShareCodeKind::MouseSensitivity
+        } else if payload.starts_with(crate::macro_code::PREFIX_VISION) {
+            MacroShareCodeKind::Vision
+        } else if payload.starts_with(crate::macro_code::PREFIX_AUDIOSENSE) {
+            MacroShareCodeKind::AudioSense
+        } else if payload.starts_with(crate::macro_code::PREFIX_OCR) {
+            MacroShareCodeKind::Ocr
+        } else if payload.starts_with(crate::macro_code::PREFIX_GEOMETRY) {
+            MacroShareCodeKind::Geometry
+        } else if payload.starts_with(crate::macro_code::PREFIX_HUD) {
+            MacroShareCodeKind::Hud
+        } else if payload.starts_with(crate::macro_code::PREFIX_TIMER) {
+            MacroShareCodeKind::Timer
+        } else if payload.starts_with("MN5_STEP:")
             || payload.starts_with("MN4_STEP:")
             || payload.starts_with("MN3_STEP:")
             || payload.starts_with("MN2_STEP:")
@@ -10544,6 +10583,744 @@ impl CrosshairApp {
         self.macro_share_clipboard_checked_at = Some(Instant::now());
         if let Ok(mut clipboard) = Clipboard::new() {
             let _ = clipboard.set_text(code);
+        }
+    }
+
+    pub(crate) fn copy_share_code_to_clipboard(
+        &mut self,
+        code: String,
+        msg_en: &'static str,
+        msg_vi: &'static str,
+        kind: MacroShareCodeKind,
+    ) {
+        self.status = Self::tr_lang(self.state.ui_language, msg_en, msg_vi).to_owned();
+        self.macro_share_clipboard_kind = kind;
+        self.macro_share_clipboard_checked_at = Some(Instant::now());
+        if let Ok(mut clipboard) = Clipboard::new() {
+            let _ = clipboard.set_text(code);
+        }
+    }
+
+    pub(crate) fn export_esp_preset(&mut self, preset: &crate::model::EspPreset) {
+        match crate::macro_code::encode_esp_preset(preset, &self.state.hud_presets) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "ESP preset code copied to clipboard.",
+                "Đã sao chép mã preset ESP vào bộ nhớ tạm.",
+                MacroShareCodeKind::Esp,
+            ),
+            Err(e) => self.status = format!("Failed to export ESP preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_crosshair_profile(&mut self, profile: &crate::model::ProfileRecord) {
+        match crate::macro_code::encode_crosshair_profile(profile) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Crosshair profile code copied to clipboard.",
+                "Đã sao chép mã profile tâm ngắm vào bộ nhớ tạm.",
+                MacroShareCodeKind::Crosshair,
+            ),
+            Err(e) => self.status = format!("Failed to export crosshair profile: {e}"),
+        }
+    }
+
+    pub(crate) fn export_window_preset(&mut self, preset: &crate::model::WindowPreset) {
+        match crate::macro_code::encode_window_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Window preset code copied to clipboard.",
+                "Đã sao chép mã preset cửa sổ vào bộ nhớ tạm.",
+                MacroShareCodeKind::WindowPreset,
+            ),
+            Err(e) => self.status = format!("Failed to export window preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_window_layout(&mut self, layout: &crate::model::WindowLayout) {
+        match crate::macro_code::encode_window_layout(layout) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Window layout code copied to clipboard.",
+                "Đã sao chép mã bố cục cửa sổ vào bộ nhớ tạm.",
+                MacroShareCodeKind::WindowLayout,
+            ),
+            Err(e) => self.status = format!("Failed to export window layout: {e}"),
+        }
+    }
+
+    pub(crate) fn export_command_preset(&mut self, preset: &crate::model::CommandPreset) {
+        match crate::macro_code::encode_command_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Command preset code copied to clipboard.",
+                "Đã sao chép mã preset lệnh vào bộ nhớ tạm.",
+                MacroShareCodeKind::Command,
+            ),
+            Err(e) => self.status = format!("Failed to export command preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_pin_preset(&mut self, preset: &crate::model::PinPreset) {
+        match crate::macro_code::encode_pin_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Pin preset code copied to clipboard.",
+                "Đã sao chép mã preset ghim vào bộ nhớ tạm.",
+                MacroShareCodeKind::Pin,
+            ),
+            Err(e) => self.status = format!("Failed to export pin preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_mouse_preset(&mut self, preset: &crate::model::MouseSensitivityPreset) {
+        match crate::macro_code::encode_mouse_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Mouse preset code copied to clipboard.",
+                "Đã sao chép mã preset chuột vào bộ nhớ tạm.",
+                MacroShareCodeKind::MouseSensitivity,
+            ),
+            Err(e) => self.status = format!("Failed to export mouse preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_vision_preset(&mut self, preset: &crate::model::VisionPreset) {
+        let template_png = std::fs::read(self.vision_template_file_for_preset(preset.id)).ok();
+        let shared = crate::macro_code::SharedVisionPreset {
+            preset: preset.clone(),
+            template_png,
+        };
+        match crate::macro_code::encode_vision_preset(&shared) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Vision preset code copied to clipboard.",
+                "Đã sao chép mã preset hình ảnh vào bộ nhớ tạm.",
+                MacroShareCodeKind::Vision,
+            ),
+            Err(e) => self.status = format!("Failed to export vision preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_audio_sense_preset(&mut self, preset: &crate::model::AudioSensePreset) {
+        match crate::macro_code::encode_audio_sense_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "AudioSense preset code copied to clipboard.",
+                "Đã sao chép mã preset âm thanh vào bộ nhớ tạm.",
+                MacroShareCodeKind::AudioSense,
+            ),
+            Err(e) => self.status = format!("Failed to export AudioSense preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_ocr_preset(&mut self, preset: &crate::model::OcrPreset) {
+        match crate::macro_code::encode_ocr_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "OCR preset code copied to clipboard.",
+                "Đã sao chép mã preset OCR vào bộ nhớ tạm.",
+                MacroShareCodeKind::Ocr,
+            ),
+            Err(e) => self.status = format!("Failed to export OCR preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_geometry_preset(&mut self, preset: &crate::model::GeometryPreset) {
+        match crate::macro_code::encode_geometry_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Geometry preset code copied to clipboard.",
+                "Đã sao chép mã preset hình vẽ vào bộ nhớ tạm.",
+                MacroShareCodeKind::Geometry,
+            ),
+            Err(e) => self.status = format!("Failed to export geometry preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_hud_preset(&mut self, preset: &crate::model::HudPreset) {
+        match crate::macro_code::encode_hud_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "HUD preset code copied to clipboard.",
+                "Đã sao chép mã preset HUD vào bộ nhớ tạm.",
+                MacroShareCodeKind::Hud,
+            ),
+            Err(e) => self.status = format!("Failed to export HUD preset: {e}"),
+        }
+    }
+
+    pub(crate) fn export_timer_preset(&mut self, preset: &crate::model::TimerPreset) {
+        match crate::macro_code::encode_timer_preset(preset) {
+            Ok(code) => self.copy_share_code_to_clipboard(
+                code,
+                "Timer preset code copied to clipboard.",
+                "Đã sao chép mã preset bộ đếm vào bộ nhớ tạm.",
+                MacroShareCodeKind::Timer,
+            ),
+            Err(e) => self.status = format!("Failed to export timer preset: {e}"),
+        }
+    }
+
+    pub(crate) fn import_share_code_from_clipboard(
+        &mut self,
+        kind: MacroShareCodeKind,
+        insert_after: Option<usize>,
+    ) {
+        let Some(code) = self.read_clipboard_text() else {
+            return;
+        };
+        match kind {
+            MacroShareCodeKind::Esp => match crate::macro_code::decode_esp_preset(&code) {
+                Ok(shared) => {
+                    let mut preset = shared.preset;
+                    if let Some(mut hud) = shared.hud_preset {
+                        hud.id = Self::allocate_next_id(
+                            &self.state.hud_presets,
+                            &mut self.state.next_hud_preset_id,
+                            |h| h.id,
+                        );
+                        preset.entity_auto_hud_preset_id = Some(hud.id);
+                        self.state.hud_presets.push(hud);
+                        self.sync_hud_presets();
+                    }
+                    preset.id = Self::allocate_next_id(
+                        &self.state.esp_presets,
+                        &mut self.state.next_esp_preset_id,
+                        |p| p.id,
+                    );
+                    preset.collapsed = false;
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.esp_presets.len() {
+                            self.state.esp_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.esp_presets.push(preset);
+                        }
+                    } else {
+                        self.state.esp_presets.push(preset);
+                    }
+                    self.sync_esp_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Esp;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "ESP preset imported successfully.",
+                        "Đã nhập preset ESP thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("ESP import failed: {e}"),
+            },
+            MacroShareCodeKind::Command => match crate::macro_code::decode_command_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.command_presets,
+                        &mut self.state.next_command_preset_id,
+                        |c| c.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.command_presets.len() {
+                            self.state.command_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.command_presets.push(preset);
+                        }
+                    } else {
+                        self.state.command_presets.push(preset);
+                    }
+                    self.persist_command_presets();
+                    self.state.active_panel = AppPanel::Commands;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Command preset imported successfully.",
+                        "Đã nhập preset lệnh thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Command import failed: {e}"),
+            },
+            MacroShareCodeKind::Crosshair => match crate::macro_code::decode_crosshair_profile(&code) {
+                Ok(mut profile) => {
+                    profile.name = self.unique_profile_name(&profile.name);
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.profiles.len() {
+                            self.state.profiles.insert(idx + 1, profile);
+                        } else {
+                            self.state.profiles.push(profile);
+                        }
+                    } else {
+                        self.state.profiles.push(profile);
+                    }
+                    self.sync_profiles();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Crosshair;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Crosshair profile imported successfully.",
+                        "Đã nhập cấu hình tâm ngắm thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Crosshair import failed: {e}"),
+            },
+            MacroShareCodeKind::WindowPreset => match crate::macro_code::decode_window_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.window_presets,
+                        &mut self.state.next_preset_id,
+                        |p| p.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.window_presets.len() {
+                            self.state.window_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.window_presets.push(preset);
+                        }
+                    } else {
+                        self.state.window_presets.push(preset);
+                    }
+                    self.sync_window_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::WindowPresets;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Window preset imported successfully.",
+                        "Đã nhập preset cửa sổ thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Window preset import failed: {e}"),
+            },
+            MacroShareCodeKind::WindowLayout => match crate::macro_code::decode_window_layout(&code) {
+                Ok(mut layout) => {
+                    layout.id = Self::allocate_next_id(
+                        &self.state.window_layouts,
+                        &mut self.state.next_window_layout_id,
+                        |l| l.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.window_layouts.len() {
+                            self.state.window_layouts.insert(idx + 1, layout);
+                        } else {
+                            self.state.window_layouts.push(layout);
+                        }
+                    } else {
+                        self.state.window_layouts.push(layout);
+                    }
+                    self.sync_window_layouts();
+                    self.persist();
+                    self.state.active_panel = AppPanel::WindowPresets;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Window layout imported successfully.",
+                        "Đã nhập bố cục cửa sổ thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Window layout import failed: {e}"),
+            },
+            MacroShareCodeKind::Pin => match crate::macro_code::decode_pin_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.pin_presets,
+                        &mut self.state.next_pin_preset_id,
+                        |p| p.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.pin_presets.len() {
+                            self.state.pin_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.pin_presets.push(preset);
+                        }
+                    } else {
+                        self.state.pin_presets.push(preset);
+                    }
+                    self.sync_window_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Pin;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Pin preset imported successfully.",
+                        "Đã nhập preset ghim thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Pin import failed: {e}"),
+            },
+            MacroShareCodeKind::MouseSensitivity => match crate::macro_code::decode_mouse_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.mouse_sensitivity_presets,
+                        &mut self.state.next_mouse_sensitivity_preset_id,
+                        |p| p.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.mouse_sensitivity_presets.len() {
+                            self.state.mouse_sensitivity_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.mouse_sensitivity_presets.push(preset);
+                        }
+                    } else {
+                        self.state.mouse_sensitivity_presets.push(preset);
+                    }
+                    self.sync_mouse_sensitivity_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Mouse;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Mouse preset imported successfully.",
+                        "Đã nhập preset chuột thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Mouse import failed: {e}"),
+            },
+            MacroShareCodeKind::Vision => match crate::macro_code::decode_vision_preset(&code) {
+                Ok(shared) => {
+                    let mut preset = shared.preset;
+                    preset.id = Self::allocate_next_id(
+                        &self.state.vision_presets,
+                        &mut self.state.next_vision_preset_id,
+                        |v| v.id,
+                    );
+                    if let Some(bytes) = shared.template_png {
+                        let _ = std::fs::write(self.vision_template_file_for_preset(preset.id), bytes);
+                    }
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.vision_presets.len() {
+                            self.state.vision_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.vision_presets.push(preset);
+                        }
+                    } else {
+                        self.state.vision_presets.push(preset);
+                    }
+                    self.sync_vision_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Vision;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Vision preset imported successfully.",
+                        "Đã nhập preset hình ảnh thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Vision import failed: {e}"),
+            },
+            MacroShareCodeKind::AudioSense => match crate::macro_code::decode_audio_sense_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.audio_sense_presets,
+                        &mut self.state.next_audio_sense_preset_id,
+                        |a| a.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.audio_sense_presets.len() {
+                            self.state.audio_sense_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.audio_sense_presets.push(preset);
+                        }
+                    } else {
+                        self.state.audio_sense_presets.push(preset);
+                    }
+                    self.sync_audio_sense_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::AudioSense;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "AudioSense preset imported successfully.",
+                        "Đã nhập preset âm thanh thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("AudioSense import failed: {e}"),
+            },
+            MacroShareCodeKind::Ocr => match crate::macro_code::decode_ocr_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.ocr_presets,
+                        &mut self.state.next_ocr_preset_id,
+                        |o| o.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.ocr_presets.len() {
+                            self.state.ocr_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.ocr_presets.push(preset);
+                        }
+                    } else {
+                        self.state.ocr_presets.push(preset);
+                    }
+                    self.sync_ocr_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Ocr;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "OCR preset imported successfully.",
+                        "Đã nhập preset OCR thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("OCR import failed: {e}"),
+            },
+            MacroShareCodeKind::Geometry => match crate::macro_code::decode_geometry_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.geometry_presets,
+                        &mut self.state.next_geometry_preset_id,
+                        |g| g.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.geometry_presets.len() {
+                            self.state.geometry_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.geometry_presets.push(preset);
+                        }
+                    } else {
+                        self.state.geometry_presets.push(preset);
+                    }
+                    self.sync_geometry_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Geometry;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Geometry preset imported successfully.",
+                        "Đã nhập preset hình vẽ thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Geometry import failed: {e}"),
+            },
+            MacroShareCodeKind::Hud => match crate::macro_code::decode_hud_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.hud_presets,
+                        &mut self.state.next_hud_preset_id,
+                        |h| h.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.hud_presets.len() {
+                            self.state.hud_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.hud_presets.push(preset);
+                        }
+                    } else {
+                        self.state.hud_presets.push(preset);
+                    }
+                    self.sync_hud_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Hud;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "HUD preset imported successfully.",
+                        "Đã nhập preset HUD thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("HUD import failed: {e}"),
+            },
+            MacroShareCodeKind::Timer => match crate::macro_code::decode_timer_preset(&code) {
+                Ok(mut preset) => {
+                    preset.id = Self::allocate_next_id(
+                        &self.state.timer_presets,
+                        &mut self.state.next_timer_preset_id,
+                        |t| t.id,
+                    );
+                    if let Some(idx) = insert_after {
+                        if idx < self.state.timer_presets.len() {
+                            self.state.timer_presets.insert(idx + 1, preset);
+                        } else {
+                            self.state.timer_presets.push(preset);
+                        }
+                    } else {
+                        self.state.timer_presets.push(preset);
+                    }
+                    self.sync_timer_presets();
+                    self.persist();
+                    self.state.active_panel = AppPanel::Timer;
+                    self.status = Self::tr_lang(
+                        self.state.ui_language,
+                        "Timer preset imported successfully.",
+                        "Đã nhập preset bộ đếm thành công.",
+                    )
+                    .to_owned();
+                }
+                Err(e) => self.status = format!("Timer import failed: {e}"),
+            },
+            MacroShareCodeKind::Group => {
+                self.import_macro_group_from_clipboard(None, None);
+                self.state.active_panel = AppPanel::Macros;
+            }
+            MacroShareCodeKind::Preset => {
+                let group_id = self.state.macro_groups.first().map(|g| g.id).unwrap_or_else(|| {
+                    let id = Self::allocate_next_id(
+                        &self.state.macro_groups,
+                        &mut self.state.next_macro_group_id,
+                        |g| g.id,
+                    );
+                    let mut group = crate::model::MacroGroup::new(id);
+                    group.name = "Imported Group".to_owned();
+                    self.state.macro_groups.push(group);
+                    id
+                });
+                self.import_macro_preset_from_clipboard(group_id, None);
+                self.state.active_panel = AppPanel::Macros;
+            }
+            MacroShareCodeKind::Step => {
+                if let Some(group) = self.state.macro_groups.first() {
+                    if let Some(preset) = group.presets.first() {
+                        self.import_macro_step_from_clipboard(group.id, preset.id, None);
+                        self.state.active_panel = AppPanel::Macros;
+                    }
+                }
+            }
+            MacroShareCodeKind::None => {}
+        }
+    }
+
+    pub(crate) fn macro_share_kind_titlebar_label(
+        &self,
+        kind: MacroShareCodeKind,
+    ) -> (&'static str, String) {
+        let lang = self.state.ui_language;
+        match kind {
+            MacroShareCodeKind::Esp => (
+                Self::tr_lang(lang, "Import ESP", "Nhập ESP"),
+                Self::tr_lang(lang, "Import ESP preset from clipboard", "Nhập preset ESP từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Command => (
+                Self::tr_lang(lang, "Import Command", "Nhập Lệnh"),
+                Self::tr_lang(lang, "Import Command preset from clipboard", "Nhập preset lệnh từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Crosshair => (
+                Self::tr_lang(lang, "Import Crosshair", "Nhập Crosshair"),
+                Self::tr_lang(lang, "Import Crosshair profile from clipboard", "Nhập profile tâm ngắm từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::WindowPreset => (
+                Self::tr_lang(lang, "Import Win Preset", "Nhập Preset Cửa sổ"),
+                Self::tr_lang(lang, "Import Window preset from clipboard", "Nhập preset cửa sổ từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::WindowLayout => (
+                Self::tr_lang(lang, "Import Win Layout", "Nhập Bố cục"),
+                Self::tr_lang(lang, "Import Window layout from clipboard", "Nhập bố cục cửa sổ từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Pin => (
+                Self::tr_lang(lang, "Import Pin", "Nhập Ghim"),
+                Self::tr_lang(lang, "Import Pin preset from clipboard", "Nhập preset ghim từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::MouseSensitivity => (
+                Self::tr_lang(lang, "Import Mouse", "Nhập Chuột"),
+                Self::tr_lang(lang, "Import Mouse preset from clipboard", "Nhập preset chuột từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Vision => (
+                Self::tr_lang(lang, "Import Vision", "Nhập Vision"),
+                Self::tr_lang(lang, "Import Vision preset from clipboard", "Nhập preset hình ảnh từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::AudioSense => (
+                Self::tr_lang(lang, "Import Audio", "Nhập Âm thanh"),
+                Self::tr_lang(lang, "Import AudioSense preset from clipboard", "Nhập preset âm thanh từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Ocr => (
+                Self::tr_lang(lang, "Import OCR", "Nhập OCR"),
+                Self::tr_lang(lang, "Import OCR preset from clipboard", "Nhập preset OCR từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Geometry => (
+                Self::tr_lang(lang, "Import Geometry", "Nhập Hình vẽ"),
+                Self::tr_lang(lang, "Import Geometry preset from clipboard", "Nhập preset hình vẽ từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Hud => (
+                Self::tr_lang(lang, "Import HUD", "Nhập HUD"),
+                Self::tr_lang(lang, "Import HUD preset from clipboard", "Nhập preset HUD từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Timer => (
+                Self::tr_lang(lang, "Import Timer", "Nhập Bộ đếm"),
+                Self::tr_lang(lang, "Import Timer preset from clipboard", "Nhập preset hẹn giờ từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Group => (
+                Self::tr_lang(lang, "Import Group", "Nhập Nhóm"),
+                Self::tr_lang(lang, "Import Macro group from clipboard", "Nhập nhóm macro từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Preset => (
+                Self::tr_lang(lang, "Import Preset", "Nhập Preset"),
+                Self::tr_lang(lang, "Import Macro preset from clipboard", "Nhập preset macro từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::Step => (
+                Self::tr_lang(lang, "Import Step", "Nhập Bước"),
+                Self::tr_lang(lang, "Import Macro step from clipboard", "Nhập bước macro từ bộ nhớ tạm").to_string(),
+            ),
+            MacroShareCodeKind::None => ("", String::new()),
+        }
+    }
+
+    pub(crate) fn render_share_preset_buttons(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        show_share_buttons: bool,
+        clipboard_kind: MacroShareCodeKind,
+        target_kind: MacroShareCodeKind,
+    ) -> (bool, bool) {
+        let mut import_clicked = false;
+        let mut export_clicked = false;
+
+        let show_import = show_share_buttons || clipboard_kind == target_kind;
+        if show_import {
+            let import_enabled = clipboard_kind == target_kind;
+            if ui
+                .add_enabled(
+                    import_enabled,
+                    Button::new(Self::tr_lang(language, "Imp", "Imp"))
+                        .min_size(egui::vec2(46.0, 24.0)),
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Import preset from clipboard",
+                    "Nhập preset từ bộ nhớ tạm",
+                ))
+                .clicked()
+            {
+                import_clicked = true;
+            }
+        }
+        if show_share_buttons {
+            if ui
+                .add_sized(
+                    [46.0, 24.0],
+                    Button::new(Self::tr_lang(language, "Exp", "Exp")),
+                )
+                .on_hover_text(Self::tr_lang(
+                    language,
+                    "Export preset to clipboard",
+                    "Xuất preset vào bộ nhớ tạm",
+                ))
+                .clicked()
+            {
+                export_clicked = true;
+            }
+        }
+        (import_clicked, export_clicked)
+    }
+
+    pub(crate) fn render_share_panel_import_button(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        show_share_buttons: bool,
+        clipboard_kind: MacroShareCodeKind,
+        target_kind: MacroShareCodeKind,
+    ) -> bool {
+        let show_import = show_share_buttons || clipboard_kind == target_kind;
+        if show_import {
+            let import_enabled = clipboard_kind == target_kind;
+            ui.add_enabled(
+                import_enabled,
+                Button::new(Self::tr_lang(language, "Import", "Nhập")),
+            )
+            .on_hover_text(Self::tr_lang(
+                language,
+                "Import preset from clipboard",
+                "Nhập preset từ bộ nhớ tạm",
+            ))
+            .clicked()
+        } else {
+            false
         }
     }
 
@@ -14683,6 +15460,14 @@ impl eframe::App for CrosshairApp {
             self.startup_shell_frames_remaining -= 1;
             ctx.request_repaint();
         }
+        self.refresh_macro_share_clipboard_kind(false);
+        if self.show_share_buttons
+            || self.macro_share_clipboard_kind != MacroShareCodeKind::None
+        {
+            ctx.request_repaint_after(Duration::from_millis(250));
+        } else {
+            ctx.request_repaint_after(Duration::from_millis(500));
+        }
         if self.state.active_panel == AppPanel::Zoom {
             self.state.active_panel = AppPanel::Pin;
         } else if self.state.active_panel == AppPanel::Modes {
@@ -16561,6 +17346,47 @@ impl eframe::App for CrosshairApp {
                         }
                         if settings_response.clicked() {
                             self.settings_popup_open = !self.settings_popup_open;
+                        }
+
+                        let share_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(
+                                    Self::material_icon_text(0xe80d, 18.0),
+                                    self.show_share_buttons,
+                                    false,
+                                ),
+                            ),
+                            show_icon_tooltips,
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Toggle Import/Export buttons",
+                                "Bật/tắt nút Nhập/Xuất",
+                            ),
+                        );
+                        if share_response.clicked() {
+                            self.show_share_buttons = !self.show_share_buttons;
+                            self.refresh_macro_share_clipboard_kind(true);
+                        }
+
+                        if self.macro_share_clipboard_kind != MacroShareCodeKind::None {
+                            let (label, tooltip) = self.macro_share_kind_titlebar_label(self.macro_share_clipboard_kind);
+                            if !label.is_empty() {
+                                let import_btn = Button::new(
+                                    RichText::new(format!("📥 {label}"))
+                                        .size(12.0)
+                                        .strong()
+                                        .color(Color32::WHITE),
+                                )
+                                .fill(Color32::from_rgb(34, 150, 90))
+                                .corner_radius(6.0);
+                                let resp = ui.add_sized([100.0, 26.0], import_btn).on_hover_text(tooltip);
+                                if resp.clicked() {
+                                    self.import_share_code_from_clipboard(self.macro_share_clipboard_kind, None);
+                                }
+                            }
                         }
 
                         ui.add_space(4.0);

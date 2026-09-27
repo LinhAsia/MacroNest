@@ -935,21 +935,34 @@ impl CrosshairApp {
 
     pub(crate) fn render_esp_panel(&mut self, ui: &mut egui::Ui) {
         let mut dirty = false;
-        if ui.button("+ Add ESP preset").clicked() {
-            let id = Self::allocate_next_id(
-                &self.state.esp_presets,
-                &mut self.state.next_esp_preset_id,
-                |preset| preset.id,
-            );
-            self.state.esp_presets.push(EspPreset::new(id));
-            dirty = true;
-        }
+        ui.horizontal(|ui| {
+            if ui.button("+ Add ESP preset").clicked() {
+                let id = Self::allocate_next_id(
+                    &self.state.esp_presets,
+                    &mut self.state.next_esp_preset_id,
+                    |preset| preset.id,
+                );
+                self.state.esp_presets.push(EspPreset::new(id));
+                dirty = true;
+            }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::Esp,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Esp, None);
+            }
+        });
         ui.add_space(6.0);
 
         let windows = crate::window_list::list_open_windows();
         let mut remove = None;
         let mut copy_preset_index = None;
         let mut paste_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let mut auto_capture_start = None;
         let mut auto_capture_stop = None;
         let can_paste = matches!(
@@ -981,6 +994,19 @@ impl CrosshairApp {
                         TextEdit::singleline(&mut preset.name),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (imp, exp) = Self::render_share_preset_buttons(
+                            ui,
+                            self.state.ui_language,
+                            self.show_share_buttons,
+                            self.macro_share_clipboard_kind,
+                            crate::ui::MacroShareCodeKind::Esp,
+                        );
+                        if imp {
+                            paste_share_after = Some(index);
+                        }
+                        if exp {
+                            export_share_index = Some(index);
+                        }
                         if ui
                             .add_enabled(
                                 can_paste,
@@ -2434,6 +2460,14 @@ impl CrosshairApp {
             preset.name = format!("{} (Copy)", preset.name);
             self.state.esp_presets.insert(index + 1, preset);
             dirty = true;
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.esp_presets.get(idx).cloned() {
+                self.export_esp_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Esp, Some(index));
         }
         if dirty {
             self.persist_esp_presets();

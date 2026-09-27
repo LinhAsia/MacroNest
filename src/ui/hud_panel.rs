@@ -14,6 +14,15 @@ impl CrosshairApp {
                 self.add_hud_preset();
                 self.persist_hud_presets();
             }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::Hud,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Hud, None);
+            }
         });
 
         ui.add_space(16.0);
@@ -30,6 +39,8 @@ impl CrosshairApp {
         let mut begin_hud_picker_preset_id = None;
         let mut copy_hud_preset = None;
         let mut paste_hud_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste_hud = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Hud(_))
@@ -70,6 +81,20 @@ impl CrosshairApp {
                             }
                             changed = true;
                         }
+                        let (imp, exp) = Self::render_share_preset_buttons(
+                            ui,
+                            self.state.ui_language,
+                            self.show_share_buttons,
+                            self.macro_share_clipboard_kind,
+                            crate::ui::MacroShareCodeKind::Hud,
+                        );
+                        if imp {
+                            paste_share_after = Some(index);
+                        }
+                        if exp {
+                            export_share_index = Some(index);
+                        }
+
                         if ui
                             .add_enabled(
                                 can_paste_hud,
@@ -244,6 +269,14 @@ impl CrosshairApp {
             self.state.hud_presets.insert(index + 1, preset);
             changed = true;
         }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.hud_presets.get(idx).cloned() {
+                self.export_hud_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Hud, Some(index));
+        }
 
         if let Some(id) = remove_id {
             self.state.hud_presets.retain(|preset| preset.id != id);
@@ -299,6 +332,15 @@ impl CrosshairApp {
                 self.state.timer_presets.push(new_preset);
                 timer_changed = true;
             }
+            if Self::render_share_panel_import_button(
+                ui,
+                self.state.ui_language,
+                self.show_share_buttons,
+                self.macro_share_clipboard_kind,
+                crate::ui::MacroShareCodeKind::Timer,
+            ) {
+                self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Timer, None);
+            }
         });
 
         ui.add_space(16.0);
@@ -311,6 +353,8 @@ impl CrosshairApp {
 
         let mut copy_timer_preset = None;
         let mut paste_timer_after = None;
+        let mut export_share_index = None;
+        let mut paste_share_after = None;
         let can_paste_timer = matches!(
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Timer(_))
@@ -339,6 +383,20 @@ impl CrosshairApp {
                     );
                     timer_changed |= response.changed();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (imp, exp) = Self::render_share_preset_buttons(
+                            ui,
+                            self.state.ui_language,
+                            self.show_share_buttons,
+                            self.macro_share_clipboard_kind,
+                            crate::ui::MacroShareCodeKind::Timer,
+                        );
+                        if imp {
+                            paste_share_after = Some(index);
+                        }
+                        if exp {
+                            export_share_index = Some(index);
+                        }
+
                         if ui
                             .add_enabled(
                                 can_paste_timer,
@@ -590,6 +648,14 @@ impl CrosshairApp {
             preset.name = format!("{} (Copy)", preset.name);
             self.state.timer_presets.insert(index + 1, preset);
             timer_changed = true;
+        }
+        if let Some(idx) = export_share_index {
+            if let Some(p) = self.state.timer_presets.get(idx).cloned() {
+                self.export_timer_preset(&p);
+            }
+        }
+        if let Some(index) = paste_share_after {
+            self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Timer, Some(index));
         }
 
         if let Some(id) = remove_timer_id {
