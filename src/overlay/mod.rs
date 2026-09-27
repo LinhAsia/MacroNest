@@ -31960,16 +31960,18 @@ mod windows_overlay {
             return window_list::process_id_for_window(None);
         };
         let is_dynamic = crate::window_list::has_position_rule_suffix(selector);
+        if is_dynamic {
+            return window_list::process_id_for_window(Some(selector));
+        }
         MACRO_MEMORY_TARGET_PID.with(|cached| {
             let mut cached = cached.borrow_mut();
             if let Some((cached_selector, cached_at, pid)) = cached.as_ref()
                 && cached_selector == selector
             {
-                if cached_at.elapsed() < Duration::from_millis(if is_dynamic { 100 } else { 250 }) {
+                if cached_at.elapsed() < Duration::from_millis(250) {
                     return *pid;
                 }
-                // Only skip re-query for static window selectors whose target PID does not shift on tab focus
-                if !is_dynamic && let Some(p) = *pid {
+                if let Some(p) = *pid {
                     if crate::process_memory::is_process_alive(p) {
                         *cached = Some((selector.to_owned(), Instant::now(), Some(p)));
                         return Some(p);
@@ -36457,7 +36459,10 @@ mod windows_overlay {
         follower_hwnd: HWND,
     ) -> HWND {
         if let Some(selector) = spec.input_window.as_deref().filter(|s| !s.trim().is_empty()) {
-            if Some(selector) == spec.follower_window.as_deref() {
+            let (_, rule) = crate::window_list::parse_window_match_rule(selector);
+            if matches!(rule, Some(crate::window_list::WindowMatchRule::Unfocused))
+                || Some(selector) == spec.follower_window.as_deref()
+            {
                 return follower_hwnd;
             }
             let res = crate::window_list::find_window_handle(Some(selector)).unwrap_or(follower_hwnd);
@@ -40490,6 +40495,13 @@ mod tests {
 
         // When input_window is empty, resolves to follower_hwnd:
         spec.input_window = Some("   ".to_string());
+        assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
+
+        // When input_window specifies unfocused rule, resolves to follower_hwnd:
+        spec.input_window = Some("IdentityV [The Unfocused One]".to_string());
+        assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
+
+        spec.input_window = Some("IdentityV [Unfocused]".to_string());
         assert_eq!(resolve_follow_3d_input_window(&spec, fake_hwnd), fake_hwnd);
     }
 
