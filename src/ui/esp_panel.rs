@@ -391,6 +391,13 @@ impl CrosshairApp {
         timeout_ms: Option<u64>,
         session_id: u64,
     ) {
+        let effective_session_id = if session_id > 0 {
+            session_id
+        } else {
+            static AUTO_SESSION_COUNTER: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(1_000_000);
+            AUTO_SESSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        };
         let notify_failure = |session_id: u64| {
             if session_id > 0 {
                 crate::overlay::LAST_COMPLETED_ESP_SCAN_SESSION
@@ -412,7 +419,7 @@ impl CrosshairApp {
             .find(|preset| preset.id == preset_id)
             .cloned()
         else {
-            notify_failure(session_id);
+            notify_failure(effective_session_id);
             return;
         };
         let Some(code) = self
@@ -428,13 +435,13 @@ impl CrosshairApp {
         else {
             self.esp_entity_capture_feedback
                 .insert(preset_id, "Select an instruction first".to_owned());
-            notify_failure(session_id);
+            notify_failure(effective_session_id);
             return;
         };
         let Some(pid) = crate::window_list::process_id_for_window(Some(&preset.target_window)) else {
             self.esp_entity_capture_feedback
                 .insert(preset_id, "Target window is not running".to_owned());
-            notify_failure(session_id);
+            notify_failure(effective_session_id);
             return;
         };
         let instruction_address = match resolve_module_offset(pid, &code.module, code.offset) {
@@ -442,7 +449,7 @@ impl CrosshairApp {
             Err(error) => {
                 self.esp_entity_capture_feedback
                     .insert(preset_id, format!("Instruction unavailable: {error}"));
-                notify_failure(session_id);
+                notify_failure(effective_session_id);
                 return;
             }
         };
@@ -538,9 +545,9 @@ impl CrosshairApp {
         let self_dropped = false;
         match started {
             Ok(active) => {
-                if session_id > 0 {
+                if effective_session_id > 0 {
                     crate::overlay::ACTIVE_ESP_SCAN_SESSION
-                        .store(session_id, std::sync::atomic::Ordering::Release);
+                        .store(effective_session_id, std::sync::atomic::Ordering::Release);
                     crate::overlay::ACTIVE_ESP_SCAN_PRESET_ID
                         .store(preset_id, std::sync::atomic::Ordering::Release);
                 }
@@ -558,7 +565,7 @@ impl CrosshairApp {
                     Vec::with_capacity(128)
                 };
                 self.esp_entity_root_capture = Some(EspEntityRootCapture {
-                    session_id,
+                    session_id: effective_session_id,
                     preset_id,
                     pid,
                     target_count,
@@ -1602,7 +1609,7 @@ impl CrosshairApp {
                                         ui.label(self.tr("Timeout", "Thời gian"));
                                         ui.add(
                                             DragValue::new(&mut preset.entity_motionless_timeout_secs)
-                                                .range(0.1..=10.0)
+                                                .range(0.1..=30.0)
                                                 .speed(0.05)
                                                 .suffix("s"),
                                         );

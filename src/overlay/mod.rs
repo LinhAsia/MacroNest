@@ -25442,13 +25442,42 @@ mod windows_overlay {
                     let mut all_preset_targets: HashMap<u32, Vec<([f32; 3], usize, usize)>> =
                         HashMap::with_capacity(presets.len());
                     for sample in &presets {
+                        let mut has_valid_targets = false;
                         if let Ok((pid, _, _, _, _)) =
                             read_esp_view_inputs(&sample.preset, &mut read_frame)
                         {
                             if let Ok(targets) =
                                 read_esp_targets(&sample.preset, &mut read_frame, pid)
                             {
-                                all_preset_targets.insert(sample.preset.id, targets);
+                                if !targets.is_empty() {
+                                    has_valid_targets = true;
+                                    all_preset_targets.insert(sample.preset.id, targets);
+                                }
+                            }
+                        }
+                        if has_valid_targets {
+                            read_frame.last_zero_targets_at.remove(&sample.preset.id);
+                        } else {
+                            let zero_since = *read_frame
+                                .last_zero_targets_at
+                                .entry(sample.preset.id)
+                                .or_insert_with(Instant::now);
+                            if zero_since.elapsed() >= Duration::from_millis(1500)
+                                && sample.preset.entity_auto_code_offset > 0
+                                && ACTIVE_ESP_SCAN_SESSION.load(Ordering::Acquire) == 0
+                                && read_frame
+                                    .last_auto_scan_request
+                                    .get(&sample.preset.id)
+                                    .is_none_or(|at| at.elapsed() >= Duration::from_secs(4))
+                            {
+                                read_frame
+                                    .last_auto_scan_request
+                                    .insert(sample.preset.id, Instant::now());
+                                send_ui_command(UiCommand::StartEspScan {
+                                    preset_id: sample.preset.id,
+                                    timeout_ms: None,
+                                    session_id: 0,
+                                });
                             }
                         }
                     }
@@ -25715,6 +25744,8 @@ mod windows_overlay {
         resolved_addresses: HashMap<u32, HashMap<String, EspResolvedAddress>>,
         motionless_trackers: HashMap<(u32, usize), crate::model::MotionlessTrack>,
         aabb_bounds: HashMap<(u32, usize), ([f32; 3], [f32; 3])>,
+        last_zero_targets_at: HashMap<u32, Instant>,
+        last_auto_scan_request: HashMap<u32, Instant>,
     }
 
     impl EspReadFrame {
@@ -25733,6 +25764,14 @@ mod windows_overlay {
                         .unwrap_or_default()
                         < Duration::from_secs(10)
                 });
+            }
+            if self.last_zero_targets_at.len() > 256 {
+                let now = Instant::now();
+                self.last_zero_targets_at.retain(|_, at| now.duration_since(*at) < Duration::from_secs(60));
+            }
+            if self.last_auto_scan_request.len() > 256 {
+                let now = Instant::now();
+                self.last_auto_scan_request.retain(|_, at| now.duration_since(*at) < Duration::from_secs(60));
             }
         }
 
@@ -40040,6 +40079,14 @@ mod windows_overlay {
         };
         if !enabled {
             ESP_TARGET_SNAPSHOTS.lock().remove(&preset_id);
+            if let Some(render_tx) = GPU_OVERLAY_RENDER_SENDER.lock().as_ref() {
+                let _ = render_tx.try_send(Vec::new());
+            }
+        }
+        ESP_PRESET_REVISION.fetch_add(1, Ordering::Release);
+        ensure_esp_worker();
+        if let Some(worker) = ESP_SAMPLER_THREAD.lock().as_ref() {
+            worker.unpark();
         }
         if let Some(tx) = ui_tx {
             let _ = tx.send(UiCommand::EspPresetEnabled { preset_id, enabled });

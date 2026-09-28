@@ -67,7 +67,7 @@ fn default_entity_auto_continuous_interval_secs() -> f32 {
 }
 
 fn default_entity_motionless_timeout_secs() -> f32 {
-    0.5
+    3.0
 }
 
 fn default_selected_permutation() -> usize {
@@ -259,7 +259,7 @@ impl EspPreset {
             entity_exclude_near_preset_id: None,
             entity_exclude_near_max_distance: 0.0,
             entity_filter_motionless_enabled: false,
-            entity_motionless_timeout_secs: 0.5,
+            entity_motionless_timeout_secs: 3.0,
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
@@ -1866,7 +1866,7 @@ mod tests {
         assert_eq!(loaded.entity_exclude_near_preset_id, None);
         assert_eq!(loaded.entity_exclude_near_max_distance, 0.0);
         assert!(!loaded.entity_filter_motionless_enabled);
-        assert_eq!(loaded.entity_motionless_timeout_secs, 0.5);
+        assert_eq!(loaded.entity_motionless_timeout_secs, 3.0);
         assert!(!loaded.entity_aabb_draw_box);
     }
 
@@ -1907,6 +1907,31 @@ mod tests {
         targets.push(([55.0, 60.0, 70.0], 0x2000, 1)); // target 1 moves
         filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t3);
         assert_eq!(targets.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_motionless_targets_default_timeout() {
+        use std::time::{Duration, Instant};
+        let mut trackers = HashMap::new();
+        let t0 = Instant::now();
+        let timeout = Duration::from_secs_f32(default_entity_motionless_timeout_secs());
+        assert_eq!(timeout, Duration::from_secs(3));
+
+        let mut targets = vec![([10.0, 20.0, 30.0], 0x1000, 0)];
+
+        // Initial appearance at t0: target is tracked
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t0);
+        assert_eq!(targets.len(), 1);
+
+        // Standing still for 1s: kept (1s < 3s)
+        let t1 = t0 + Duration::from_secs(1);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t1);
+        assert_eq!(targets.len(), 1);
+
+        // Motionless for 3.1s: dropped (3.1s >= 3.0s timeout)
+        let t2 = t0 + Duration::from_millis(3100);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t2);
+        assert_eq!(targets.len(), 0);
     }
 
     #[test]

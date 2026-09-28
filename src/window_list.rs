@@ -435,6 +435,17 @@ mod windows_impl {
     ) -> Option<HWND> {
         find_window_by_candidate_exact(title_or_selector)
             .or_else(|| find_window_by_candidate(title_or_selector, match_duplicate_window_titles))
+            .or_else(|| {
+                // If the exact HWND selector no longer exists (e.g. process restarted or title changed),
+                // fall back to matching by base window title so reconnection works seamlessly.
+                if looks_like_window_selector(title_or_selector) {
+                    let base = selector_base_title(title_or_selector);
+                    if !base.is_empty() {
+                        return find_window_by_candidate(base, true);
+                    }
+                }
+                None
+            })
     }
 
     fn capture_window_preview_with_candidates_impl(
