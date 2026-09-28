@@ -245,6 +245,8 @@ struct StablePointerDialog {
     validation_rounds: usize,
     strict_multi_scan: bool,
     exhaustive_scan: bool,
+    sort_level_ascending: Option<bool>,
+    exact_search: bool,
 }
 
 enum DeepPointerJobResult {
@@ -298,6 +300,9 @@ struct DeepPointerDialog {
     strict_multi_scan: bool,
     target_b_addresses: Vec<usize>,
     candidate_targets: HashMap<usize, usize>,
+    sort_level_ascending: Option<bool>,
+    exact_search: bool,
+    filter_value: String,
 }
 
 fn expand_entity_slot_targets(
@@ -3891,6 +3896,29 @@ impl CrosshairApp {
         cell_response
             .union(cell.add(label.selectable(false)))
             .on_hover_cursor(egui::CursorIcon::Default)
+    }
+
+    fn memory_clickable_header_cell(
+        ui: &mut egui::Ui,
+        width: f32,
+        height: f32,
+        text: RichText,
+    ) -> egui::Response {
+        let (rect, cell_response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+        if cell_response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                2.0,
+                ui.visuals().widgets.hovered.bg_fill.gamma_multiply(0.4),
+            );
+        }
+        let mut cell = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        cell.add(egui::Label::new(text).selectable(false).truncate());
+        cell_response.on_hover_cursor(egui::CursorIcon::PointingHand)
     }
 
     fn select_memory_result(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
@@ -8341,6 +8369,8 @@ impl CrosshairApp {
                 validation_rounds: 0,
                 strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
                 exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
+                sort_level_ascending: None,
+                exact_search: false,
             });
             return;
         };
@@ -8479,6 +8509,8 @@ impl CrosshairApp {
                     validation_rounds: 0,
                     strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
                     exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
+                    sort_level_ascending: None,
+                    exact_search: false,
                 });
                 return;
             }
@@ -8559,6 +8591,8 @@ impl CrosshairApp {
             validation_rounds: 0,
             strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
             exhaustive_scan: self.state.memory_pointer_exhaustive_scan,
+            sort_level_ascending: None,
+            exact_search: false,
         });
     }
 
@@ -8620,6 +8654,9 @@ impl CrosshairApp {
                         strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
                         target_b_addresses: Vec::new(),
                         candidate_targets: HashMap::new(),
+                        sort_level_ascending: None,
+                        exact_search: false,
+                        filter_value: String::new(),
                     });
                 }
                 return;
@@ -8765,6 +8802,9 @@ impl CrosshairApp {
                 strict_multi_scan: self.state.memory_pointer_strict_multi_scan,
                 target_b_addresses: Vec::new(),
                 candidate_targets: HashMap::new(),
+                sort_level_ascending: None,
+                exact_search: false,
+                filter_value: String::new(),
             });
         }
     }
@@ -11118,6 +11158,7 @@ impl CrosshairApp {
                 self.tr("Validate", "Xác thực")
             };
 
+            let is_vietnamese = self.state.ui_language == UiLanguage::Vietnamese;
             ui.horizontal(|ui| {
                 let btn = ui
                     .add_enabled(
@@ -11269,12 +11310,22 @@ impl CrosshairApp {
                         });
                     ui.checkbox(&mut dialog.exe_only, "EXE only");
                     ui.checkbox(&mut dialog.show_resolved, "Show resolved");
+                    ui.checkbox(
+                        &mut dialog.exact_search,
+                        if is_vietnamese { "Khớp chính xác" } else { "Exact match" },
+                    )
+                    .on_hover_text(if is_vietnamese {
+                        "Khớp chính xác giá trị, địa chỉ, module (ví dụ tìm 12 sẽ không hiện 123123)"
+                    } else {
+                        "Exact match for value, address, module (e.g. searching 12 won't match 123123)"
+                    });
                 });
                 ui.separator();
                 const TARGET_WIDTH: f32 = 145.0;
                 const STATUS_WIDTH: f32 = 108.0;
                 const ROOT_WIDTH: f32 = 195.0;
                 const OFFSETS_WIDTH: f32 = 170.0;
+                const LEVEL_WIDTH: f32 = 60.0;
                 const ADDRESS_WIDTH: f32 = 145.0;
                 const VALUE_WIDTH: f32 = 92.0;
                 const CURRENT_WIDTH: f32 = 92.0;
@@ -11322,6 +11373,29 @@ impl CrosshairApp {
                         20.0,
                         egui::Label::new(RichText::new("Offsets").strong()).truncate(),
                     );
+                    let level_title = match dialog.sort_level_ascending {
+                        Some(true) => "Level ▲",
+                        Some(false) => "Level ▼",
+                        None => "Level",
+                    };
+                    let level_resp = Self::memory_clickable_header_cell(
+                        ui,
+                        LEVEL_WIDTH,
+                        20.0,
+                        RichText::new(level_title).strong(),
+                    )
+                    .on_hover_text(if is_vietnamese {
+                        "Nhấn để sắp xếp level (số lượng offset) từ nhỏ đến lớn hoặc ngược lại"
+                    } else {
+                        "Click to sort by level (offset count) ascending / descending"
+                    });
+                    if level_resp.clicked() {
+                        dialog.sort_level_ascending = match dialog.sort_level_ascending {
+                            None => Some(true),
+                            Some(true) => Some(false),
+                            Some(false) => None,
+                        };
+                    }
                     if dialog.show_resolved {
                         Self::memory_label_cell(
                             ui,
@@ -11348,11 +11422,12 @@ impl CrosshairApp {
                 ui.separator();
                 let filter = dialog.filter.trim().to_ascii_lowercase();
                 let filter_val = dialog.filter_value.trim().to_ascii_lowercase();
+                let exact = dialog.exact_search;
                 let is_filtering = !filter.is_empty()
                     || !filter_val.is_empty()
                     || !matches!(dialog.filter_status, StablePointerStatusFilter::All)
                     || dialog.exe_only;
-                let visible_indices: Vec<usize> = if !is_filtering {
+                let mut visible_indices: Vec<usize> = if !is_filtering {
                     (0..dialog.candidates.len()).collect()
                 } else {
                     dialog
@@ -11386,18 +11461,48 @@ impl CrosshairApp {
                             }
 
                             if !filter.is_empty() {
-                                let module_match = module.contains(&filter);
-                                let root_match = format!("{}+{:x}", module, candidate.path.module_offset).contains(&filter);
+                                let module_match = if exact {
+                                    module == filter
+                                        || module == format!("{filter}.dll")
+                                        || module == format!("{filter}.exe")
+                                } else {
+                                    module.contains(&filter)
+                                };
+                                let root_match = if exact {
+                                    let clean = filter.strip_prefix("0x").unwrap_or(&filter);
+                                    format!("{module}+{:x}", candidate.path.module_offset) == filter
+                                        || format!("{module}+0x{:x}", candidate.path.module_offset) == filter
+                                        || format!("{module}+{clean}") == filter
+                                } else {
+                                    format!("{module}+{:x}", candidate.path.module_offset).contains(&filter)
+                                };
                                 let offsets_match = candidate
                                     .path
                                     .offsets
                                     .iter()
-                                    .any(|offset| format!("{offset:x}").contains(&filter));
+                                    .any(|&offset| {
+                                        if exact {
+                                            let clean = filter.strip_prefix("0x").unwrap_or(&filter);
+                                            format!("{offset:x}") == clean || format!("{offset}") == filter
+                                        } else {
+                                            format!("{offset:x}").contains(&filter)
+                                        }
+                                    });
                                 let address_match = candidate.resolved_address.is_some_and(|addr| {
-                                    format!("{addr:x}").contains(&filter) || format!("0x{addr:x}").contains(&filter)
+                                    if exact {
+                                        let clean = filter.strip_prefix("0x").unwrap_or(&filter);
+                                        format!("{addr:x}") == clean || format!("{addr}") == filter
+                                    } else {
+                                        format!("{addr:x}").contains(&filter) || format!("0x{addr:x}").contains(&filter)
+                                    }
                                 });
-                                let target_match = format!("{:x}", candidate.source_address).contains(&filter)
-                                    || format!("0x{:x}", candidate.source_address).contains(&filter);
+                                let target_match = if exact {
+                                    let clean = filter.strip_prefix("0x").unwrap_or(&filter);
+                                    format!("{:x}", candidate.source_address) == clean || format!("{}", candidate.source_address) == filter
+                                } else {
+                                    format!("{:x}", candidate.source_address).contains(&filter)
+                                        || format!("0x{:x}", candidate.source_address).contains(&filter)
+                                };
                                 if !(module_match || root_match || offsets_match || address_match || target_match) {
                                     return None;
                                 }
@@ -11406,36 +11511,27 @@ impl CrosshairApp {
                             if !filter_val.is_empty() {
                                 if let Some(_enc) = dialog.text_encoding {
                                     let observed_match = candidate.observed_text.as_deref().is_some_and(|t| {
-                                        t.to_ascii_lowercase().contains(&filter_val)
+                                        scan_text_matches_filter(t, &filter_val, exact)
                                     });
                                     let live_match = candidate.live_text.as_deref().is_some_and(|t| {
-                                        t.to_ascii_lowercase().contains(&filter_val)
+                                        scan_text_matches_filter(t, &filter_val, exact)
                                     });
                                     let has_evaluated = candidate.observed_text.is_some() || candidate.live_text.is_some();
                                     let expected_match = !has_evaluated && candidate.expected_text.as_deref().is_some_and(|t| {
-                                        t.to_ascii_lowercase().contains(&filter_val)
+                                        scan_text_matches_filter(t, &filter_val, exact)
                                     });
                                     if !(observed_match || live_match || expected_match) {
                                         return None;
                                     }
                                 } else {
                                     let observed_match = candidate.observed_value.is_some_and(|v| {
-                                        editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
-                                            || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
+                                        scan_value_matches_filter(v, &filter_val, exact)
                                     });
                                     let live_match = candidate.live_value.is_some_and(|v| {
-                                        editable_scan_value(v, false).to_ascii_lowercase().contains(&filter_val)
-                                            || format_scan_value(v, true).to_ascii_lowercase().contains(&filter_val)
+                                        scan_value_matches_filter(v, &filter_val, exact)
                                     });
                                     let has_evaluated = candidate.observed_value.is_some() || candidate.live_value.is_some();
-                                    let expected_match = !has_evaluated && (
-                                        editable_scan_value(candidate.expected_value, false)
-                                            .to_ascii_lowercase()
-                                            .contains(&filter_val)
-                                        || format_scan_value(candidate.expected_value, true)
-                                            .to_ascii_lowercase()
-                                            .contains(&filter_val)
-                                    );
+                                    let expected_match = !has_evaluated && scan_value_matches_filter(candidate.expected_value, &filter_val, exact);
                                     if !(observed_match || live_match || expected_match) {
                                         return None;
                                     }
@@ -11446,6 +11542,17 @@ impl CrosshairApp {
                         })
                         .collect()
                 };
+                if let Some(ascending) = dialog.sort_level_ascending {
+                    visible_indices.sort_by(|&a, &b| {
+                        let len_a = dialog.candidates[a].path.offsets.len();
+                        let len_b = dialog.candidates[b].path.offsets.len();
+                        if ascending {
+                            len_a.cmp(&len_b)
+                        } else {
+                            len_b.cmp(&len_a)
+                        }
+                    });
+                }
                 if ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A)) {
                     dialog.selected = visible_indices.iter().copied().collect();
                 }
@@ -11501,6 +11608,7 @@ impl CrosshairApp {
                             + STATUS_WIDTH
                             + ROOT_WIDTH
                             + OFFSETS_WIDTH
+                            + LEVEL_WIDTH
                             + if dialog.show_resolved { ADDRESS_WIDTH } else { 0.0 }
                             + VALUE_WIDTH
                             + CURRENT_WIDTH,
@@ -11589,6 +11697,14 @@ impl CrosshairApp {
                                         egui::Label::new(text).truncate().selectable(false),
                                     );
                                 }
+                                Self::memory_label_cell(
+                                    ui,
+                                    LEVEL_WIDTH,
+                                    24.0,
+                                    egui::Label::new(format!("{}", candidate.path.offsets.len()))
+                                        .truncate()
+                                        .selectable(false),
+                                );
                                 if dialog.show_resolved {
                                     Self::memory_label_cell(
                                         ui,
@@ -12174,8 +12290,12 @@ impl CrosshairApp {
             }
             let filter_resp = ui.add(
                 egui::TextEdit::singleline(&mut dialog.filter)
-                    .desired_width(150.0)
-                    .hint_text(RichText::new("Search module...").weak()),
+                    .desired_width(130.0)
+                    .hint_text(RichText::new(if language == UiLanguage::Vietnamese {
+                        "Lọc module, path..."
+                    } else {
+                        "Filter module, path..."
+                    }).weak()),
             );
             Self::apply_vietnamese_input_if_changed(
                 &filter_resp,
@@ -12183,7 +12303,31 @@ impl CrosshairApp {
                 vietnamese_input_mode,
                 &mut dialog.filter,
             );
+            let val_filter_resp = ui.add(
+                egui::TextEdit::singleline(&mut dialog.filter_value)
+                    .desired_width(105.0)
+                    .hint_text(RichText::new(if language == UiLanguage::Vietnamese {
+                        "Tìm giá trị..."
+                    } else {
+                        "Search value..."
+                    }).weak()),
+            );
+            Self::apply_vietnamese_input_if_changed(
+                &val_filter_resp,
+                vietnamese_input_enabled,
+                vietnamese_input_mode,
+                &mut dialog.filter_value,
+            );
             ui.checkbox(&mut dialog.exe_only, "EXE only");
+            ui.checkbox(
+                &mut dialog.exact_search,
+                if language == UiLanguage::Vietnamese { "Khớp chính xác" } else { "Exact match" },
+            )
+            .on_hover_text(if language == UiLanguage::Vietnamese {
+                "Khớp chính xác giá trị, địa chỉ hoặc module (ví dụ tìm 12 sẽ không hiện 123123)"
+            } else {
+                "Exact match for value, address, or module (e.g. searching 12 won't match 123123)"
+            });
         });
         ui.group(|ui| {
             render_must_end_with_controls(
@@ -12248,6 +12392,7 @@ impl CrosshairApp {
         const TARGET_WIDTH: f32 = 120.0;
         const ROOT_WIDTH: f32 = 250.0;
         const OFFSETS_WIDTH: f32 = 180.0;
+        const LEVEL_WIDTH: f32 = 60.0;
         const ADDRESS_WIDTH: f32 = 150.0;
         const VALUE_WIDTH: f32 = 130.0;
         ui.horizontal(|ui| {
@@ -12272,6 +12417,29 @@ impl CrosshairApp {
                 22.0,
                 egui::Label::new(RichText::new("Offsets").strong()),
             );
+            let level_title = match dialog.sort_level_ascending {
+                Some(true) => "Level ▲",
+                Some(false) => "Level ▼",
+                None => "Level",
+            };
+            let level_header_resp = Self::memory_clickable_header_cell(
+                ui,
+                LEVEL_WIDTH,
+                22.0,
+                RichText::new(level_title).strong(),
+            )
+            .on_hover_text(if language == UiLanguage::Vietnamese {
+                "Nhấn để sắp xếp level (số lượng offset) từ nhỏ đến lớn hoặc ngược lại"
+            } else {
+                "Click to sort by level (offset count) ascending / descending"
+            });
+            if level_header_resp.clicked() {
+                dialog.sort_level_ascending = match dialog.sort_level_ascending {
+                    None => Some(true),
+                    Some(true) => Some(false),
+                    Some(false) => None,
+                };
+            }
             Self::memory_label_cell(
                 ui,
                 ADDRESS_WIDTH,
@@ -12287,46 +12455,147 @@ impl CrosshairApp {
         });
         ui.separator();
         let filter = dialog.filter.trim().to_ascii_lowercase();
-        if ui.input(|input| {
-            input.modifiers.command && input.key_pressed(egui::Key::A)
-        }) {
-            dialog.selected = dialog
-                .candidates
-                .iter()
-                .enumerate()
-                .filter(|(_, path)| {
-                    let module = path.module.to_ascii_lowercase();
-                    (!dialog.exe_only || module.ends_with(".exe"))
-                        && (filter.is_empty() || module.contains(&filter))
-                })
-                .map(|(index, _)| index)
-                .collect();
+        let filter_val = dialog.filter_value.trim().to_ascii_lowercase();
+        let exact = dialog.exact_search;
+        if !filter_val.is_empty() {
+            if let Some(pid) = process_pid {
+                let mut module_cache = HashMap::<String, usize>::new();
+                for (index, path) in dialog.candidates.iter().enumerate() {
+                    if dialog.resolved_rows.contains_key(&index) {
+                        continue;
+                    }
+                    let base = match module_cache.get(&path.module) {
+                        Some(&b) => b,
+                        None => {
+                            let b = resolve_module_offset(pid, &path.module, path.module_offset).unwrap_or(0);
+                            module_cache.insert(path.module.clone(), b);
+                            b
+                        }
+                    };
+                    let resolved = if base != 0 {
+                        let pointer = PointerSpec {
+                            base,
+                            module: Some((path.module.clone(), path.module_offset)),
+                            offsets: path.offsets.clone(),
+                        };
+                        resolve_memory_address(pid, base, Some(&pointer)).ok()
+                    } else {
+                        None
+                    };
+                    let (value, text_value) = if let Some(address) = resolved {
+                        if let Some(enc) = dialog.text_encoding {
+                            (None, read_text_memory(pid, address, dialog.text_byte_len.max(1), enc).ok())
+                        } else {
+                            (read_scan_value(pid, address, dialog.display_type).ok(), None)
+                        }
+                    } else {
+                        (None, None)
+                    };
+                    dialog.resolved_rows.insert(
+                        index,
+                        DeepPointerResolvedRow {
+                            address: resolved,
+                            value,
+                            text_value,
+                            updated_at: Instant::now(),
+                        },
+                    );
+                }
+            }
         }
-        let visible_indices: Vec<usize> = dialog
+        let mut visible_indices: Vec<usize> = dialog
             .candidates
             .iter()
             .enumerate()
             .filter_map(|(index, path)| {
                 let module_lower = path.module.to_ascii_lowercase();
-                let matches_target = if show_target_col && !filter.is_empty() {
-                    dialog.candidate_targets.get(&index).copied().is_some_and(|t| {
-                        format!("{t:x}").contains(&filter) || format!("0x{t:x}").contains(&filter)
-                    })
-                } else {
-                    false
-                };
-                if (dialog.exe_only && !module_lower.ends_with(".exe"))
-                    || (!filter.is_empty() && !module_lower.contains(&filter) && !matches_target)
-                {
-                    None
-                } else {
-                    Some(index)
+                if dialog.exe_only && !module_lower.ends_with(".exe") {
+                    return None;
                 }
+                if !filter.is_empty() {
+                    let matches_target = if show_target_col {
+                        dialog.candidate_targets.get(&index).copied().is_some_and(|t| {
+                            if exact {
+                                let clean = filter.strip_prefix("0x").unwrap_or(&filter);
+                                format!("{t:x}") == clean || format!("{t}") == filter
+                            } else {
+                                format!("{t:x}").contains(&filter) || format!("0x{t:x}").contains(&filter)
+                            }
+                        })
+                    } else {
+                        false
+                    };
+                    let matches_module = if exact {
+                        module_lower == filter
+                            || module_lower == format!("{filter}.dll")
+                            || module_lower == format!("{filter}.exe")
+                    } else {
+                        module_lower.contains(&filter)
+                    };
+                    let matches_root = if exact {
+                        let clean = filter.strip_prefix("0x").unwrap_or(&filter);
+                        format!("{module_lower}+{:x}", path.module_offset) == filter
+                            || format!("{module_lower}+0x{:x}", path.module_offset) == filter
+                            || format!("{module_lower}+{clean}") == filter
+                    } else {
+                        format!("{module_lower}+{:x}", path.module_offset).contains(&filter)
+                    };
+                    let matches_offsets = path.offsets.iter().any(|&offset| {
+                        if exact {
+                            let clean = filter.strip_prefix("0x").unwrap_or(&filter);
+                            format!("{offset:x}") == clean || format!("{offset}") == filter
+                        } else {
+                            format!("{offset:x}").contains(&filter)
+                        }
+                    });
+                    let matches_address = dialog.resolved_rows.get(&index).and_then(|r| r.address).is_some_and(|addr| {
+                        if exact {
+                            let clean = filter.strip_prefix("0x").unwrap_or(&filter);
+                            format!("{addr:x}") == clean || format!("{addr}") == filter
+                        } else {
+                            format!("{addr:x}").contains(&filter) || format!("0x{addr:x}").contains(&filter)
+                        }
+                    });
+                    if !(matches_module || matches_root || matches_offsets || matches_address || matches_target) {
+                        return None;
+                    }
+                }
+                if !filter_val.is_empty() {
+                    let matches_val = if let Some(_enc) = dialog.text_encoding {
+                        let text = dialog.resolved_rows.get(&index).and_then(|r| r.text_value.as_deref()).unwrap_or("");
+                        scan_text_matches_filter(text, &filter_val, exact)
+                    } else if let Some(val) = dialog.resolved_rows.get(&index).and_then(|r| r.value) {
+                        scan_value_matches_filter(val, &filter_val, exact)
+                    } else {
+                        false
+                    };
+                    if !matches_val {
+                        return None;
+                    }
+                }
+                Some(index)
             })
             .collect();
+        if let Some(ascending) = dialog.sort_level_ascending {
+            visible_indices.sort_by(|&a, &b| {
+                let len_a = dialog.candidates[a].offsets.len();
+                let len_b = dialog.candidates[b].offsets.len();
+                if ascending {
+                    len_a.cmp(&len_b)
+                } else {
+                    len_b.cmp(&len_a)
+                }
+            });
+        }
+        if ui.input(|input| {
+            input.modifiers.command && input.key_pressed(egui::Key::A)
+        }) {
+            dialog.selected = visible_indices.iter().copied().collect();
+        }
         let total_row_width = (if show_target_col { TARGET_WIDTH } else { 0.0 }
             + ROOT_WIDTH
             + OFFSETS_WIDTH
+            + LEVEL_WIDTH
             + ADDRESS_WIDTH
             + VALUE_WIDTH)
             .max(ui.available_width());
@@ -12450,6 +12719,12 @@ impl CrosshairApp {
                             OFFSETS_WIDTH,
                             24.0,
                             egui::Label::new(offsets).truncate(),
+                        );
+                        Self::memory_label_cell(
+                            ui,
+                            LEVEL_WIDTH,
+                            24.0,
+                            egui::Label::new(format!("{}", path.offsets.len())).truncate(),
                         );
                         Self::memory_label_cell(
                             ui,
@@ -21797,6 +22072,64 @@ fn editable_scan_value(value: ScanValue, hex: bool) -> String {
         .to_owned()
 }
 
+fn scan_value_matches_filter(value: ScanValue, filter_val: &str, exact: bool) -> bool {
+    let filter = filter_val.trim();
+    if filter.is_empty() {
+        return true;
+    }
+    if !exact {
+        let lower = filter.to_ascii_lowercase();
+        return editable_scan_value(value, false).to_ascii_lowercase().contains(&lower)
+            || format_scan_value(value, true).to_ascii_lowercase().contains(&lower);
+    }
+    let lower = filter.to_ascii_lowercase();
+    let dec = editable_scan_value(value, false).to_ascii_lowercase();
+    if dec == lower {
+        return true;
+    }
+    let clean_hex = lower.strip_prefix("0x").unwrap_or(&lower);
+    let hex = editable_scan_value(value, true).to_ascii_lowercase();
+    if hex == clean_hex {
+        return true;
+    }
+    if let Some(int_v) = value.as_i128() {
+        if let Ok(parsed_dec) = lower.parse::<i128>() {
+            if int_v == parsed_dec {
+                return true;
+            }
+        }
+        if let Ok(parsed_hex) = i128::from_str_radix(clean_hex, 16) {
+            if int_v == parsed_hex {
+                return true;
+            }
+        }
+    }
+    if let Some(flt_v) = match value {
+        ScanValue::F32(f) => Some(f as f64),
+        ScanValue::F64(f) => Some(f),
+        _ => None,
+    } {
+        if let Ok(parsed_flt) = lower.parse::<f64>() {
+            if (flt_v - parsed_flt).abs() < 1e-5 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn scan_text_matches_filter(text: &str, filter_val: &str, exact: bool) -> bool {
+    let filter = filter_val.trim();
+    if filter.is_empty() {
+        return true;
+    }
+    if exact {
+        text.trim().eq_ignore_ascii_case(filter)
+    } else {
+        text.to_ascii_lowercase().contains(&filter.to_ascii_lowercase())
+    }
+}
+
 fn decode_f32_matrix(bytes: &[u8]) -> Option<[f32; 16]> {
     if bytes.len() < 64 {
         return None;
@@ -24190,5 +24523,41 @@ mod tests {
 
         let res = panel.resolve_static_module(0x00000286042C9180);
         assert_eq!(res, None);
+    }
+
+    #[test]
+    fn test_pointer_scan_exact_filter_and_level_sort() {
+        // 1. Numeric value matching: "12" must NOT match "123123" when exact = true
+        let val_12 = ScanValue::I32(12);
+        let val_123123 = ScanValue::I32(123123);
+        let val_112 = ScanValue::I32(112);
+
+        // Substring / Non-exact: "12" matches both 12 and 123123
+        assert!(scan_value_matches_filter(val_12, "12", false));
+        assert!(scan_value_matches_filter(val_123123, "12", false));
+        assert!(scan_value_matches_filter(val_112, "12", false));
+
+        // Exact match: "12" matches ONLY 12, NOT 123123 or 112
+        assert!(scan_value_matches_filter(val_12, "12", true));
+        assert!(!scan_value_matches_filter(val_123123, "12", true));
+        assert!(!scan_value_matches_filter(val_112, "12", true));
+
+        // Exact hex match: "0xC" or "C" matches 12
+        assert!(scan_value_matches_filter(val_12, "0xC", true));
+        assert!(scan_value_matches_filter(val_12, "c", true));
+        assert!(!scan_value_matches_filter(val_123123, "0xC", true));
+
+        // 2. Text matching
+        assert!(scan_text_matches_filter("Hero", "Hero", true));
+        assert!(!scan_text_matches_filter("Hero_123", "Hero", true));
+        assert!(scan_text_matches_filter("Hero_123", "Hero", false));
+
+        // 3. Level sorting check
+        let mut lengths = vec![3usize, 1, 4, 2];
+        lengths.sort_by(|a, b| a.cmp(b));
+        assert_eq!(lengths, vec![1, 2, 3, 4]);
+
+        lengths.sort_by(|a, b| b.cmp(a));
+        assert_eq!(lengths, vec![4, 3, 2, 1]);
     }
 }
