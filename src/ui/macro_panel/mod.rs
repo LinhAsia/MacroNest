@@ -7677,6 +7677,7 @@ impl CrosshairApp {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.spacing_mut().item_spacing.x = 4.0;
+                                    ui.add_space(14.0);
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_group = Some(group.id);
                                     }
@@ -7797,7 +7798,6 @@ impl CrosshairApp {
                                             export_group = Some(group.id);
                                         }
                                     }
-                                    ui.add_sized([64.0, 24.0], egui::Label::new(""));
                                     if Self::sized_button(
                                         ui,
                                         56.0,
