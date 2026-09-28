@@ -7677,18 +7677,23 @@ impl CrosshairApp {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.spacing_mut().item_spacing.x = 4.0;
-                                    // Inset 8.0px so group header right edge perfectly aligns with preset card inner margin (8px)
-                                    ui.add_space(8.0);
+                                    // Inset 7.0px so group header right edge perfectly aligns with preset card inner margin (8px inner margin + stroke - 1px egui stroke rounding)
+                                    ui.add_space(7.0);
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_group = Some(group.id);
                                     }
-                                    if Self::with_emphasized_button_hover(ui, |ui| {
-                                        ui.add_enabled(
-                                            !self.macro_group_clipboard.is_empty(),
-                                            Button::new(Self::material_icon_text(0xe14f, 15.0))
-                                                .min_size(egui::vec2(28.0, 22.0)),
-                                        )
-                                    })
+                                    if ui.add_enabled_ui(
+                                        !self.macro_group_clipboard.is_empty(),
+                                        |ui| {
+                                            Self::with_emphasized_button_hover(ui, |ui| {
+                                                ui.add_sized(
+                                                    [28.0, 24.0],
+                                                    Button::new(Self::material_icon_text(0xe14f, 15.0)),
+                                                )
+                                            })
+                                        },
+                                    )
+                                    .inner
                                     .on_hover_text(Self::tr_lang(
                                         language,
                                         "Paste macro group after this one",
@@ -7715,7 +7720,7 @@ impl CrosshairApp {
                                     };
                                     if Self::with_emphasized_button_hover(ui, |ui| {
                                         ui.add_sized(
-                                            [28.0, 22.0],
+                                            [28.0, 24.0],
                                             Button::new(Self::material_icon_text(0xe14d, 15.0))
                                                 .fill(copy_fill)
                                                 .stroke(egui::Stroke::new(1.0, copy_stroke)),
@@ -7742,16 +7747,21 @@ impl CrosshairApp {
                                         || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
                                     if show_group_import {
                                         if ui
-                                            .add_enabled(
+                                            .add_enabled_ui(
                                                 self.macro_share_clipboard_kind
                                                     == crate::ui::MacroShareCodeKind::Group,
-                                                Button::new(Self::tr_lang(
-                                                    language,
-                                                    "Import",
-                                                    "Import",
-                                                ))
-                                                .min_size(egui::vec2(60.0, 24.0)),
+                                                |ui| {
+                                                    ui.add_sized(
+                                                        [60.0, 24.0],
+                                                        Button::new(Self::tr_lang(
+                                                            language,
+                                                            "Import",
+                                                            "Import",
+                                                        )),
+                                                    )
+                                                },
                                             )
+                                            .inner
                                             .on_hover_text(Self::tr_lang(language, "Import Group Code", "Import Group Code"))
                                             .clicked()
                                         {
@@ -8103,9 +8113,11 @@ impl CrosshairApp {
                                 |ui| {
                                 ui.horizontal_top(|ui| {
                                     let available_width = ui.available_width();
-                                    let right_width = 540.0;
+                                    let right_width = 268.0
+                                        + if self.show_share_buttons || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset { 64.0 } else { 0.0 }
+                                        + if self.show_share_buttons { 64.0 } else { 0.0 };
                                     let left_width =
-                                        (available_width - right_width - 8.0).max(260.0);
+                                        (available_width - right_width - 8.0).max(200.0);
                                     let trigger_label_width = ui
                                         .painter()
                                         .layout_no_wrap(
@@ -8437,24 +8449,25 @@ impl CrosshairApp {
                                             );
                                         },
                                     );
-                                    let right_spacer =
-                                        (ui.available_width() - right_width).max(0.0);
-                                    if right_spacer > 0.0 {
-                                        ui.add_space(right_spacer);
-                                    }
-                                    ui.allocate_ui_with_layout(
-                                        vec2(right_width, 0.0),
+                                    ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
                                             if Self::sound_style_remove_button(ui).clicked() {
                                                 remove_preset = Some(preset.id);
                                             }
-                                            let paste_btn = ui.add_enabled(
+                                            let paste_btn = ui.add_enabled_ui(
                                                 self.macro_preset_clipboard.is_some(),
-                                                Button::new(Self::material_icon_text(0xe14f, 15.0))
-                                                    .min_size(egui::vec2(28.0, 22.0)),
+                                                |ui| {
+                                                    Self::with_emphasized_button_hover(ui, |ui| {
+                                                        ui.add_sized(
+                                                            [28.0, 24.0],
+                                                            Button::new(Self::material_icon_text(0xe14f, 15.0)),
+                                                        )
+                                                    })
+                                                },
                                             )
+                                            .inner
                                             .on_hover_text(Self::tr_lang(
                                                 language,
                                                 "Paste preset from clipboard into this group",
@@ -8480,12 +8493,14 @@ impl CrosshairApp {
                                                 ui.visuals().widgets.inactive.bg_stroke.color
                                             };
 
-                                            let copy_btn = ui.add(
-                                                Button::new(Self::material_icon_text(0xe14d, 15.0))
-                                                    .min_size(egui::vec2(28.0, 22.0))
-                                                    .fill(copy_fill)
-                                                    .stroke(egui::Stroke::new(1.0, copy_stroke)),
-                                            )
+                                            let copy_btn = Self::with_emphasized_button_hover(ui, |ui| {
+                                                ui.add_sized(
+                                                    [28.0, 24.0],
+                                                    Button::new(Self::material_icon_text(0xe14d, 15.0))
+                                                        .fill(copy_fill)
+                                                        .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                                )
+                                            })
                                             .on_hover_text(Self::tr_lang(
                                                 language,
                                                 if preset_copy_feedback_active {
@@ -8515,12 +8530,17 @@ impl CrosshairApp {
                                                 || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset;
                                             if show_preset_import {
                                                 if ui
-                                                    .add_enabled(
+                                                    .add_enabled_ui(
                                                         self.macro_share_clipboard_kind
                                                             == crate::ui::MacroShareCodeKind::Preset,
-                                                        Button::new(Self::tr_lang(language, "Import", "Import"))
-                                                            .min_size(egui::vec2(60.0, 24.0)),
+                                                        |ui| {
+                                                            ui.add_sized(
+                                                                [60.0, 24.0],
+                                                                Button::new(Self::tr_lang(language, "Import", "Import")),
+                                                            )
+                                                        },
                                                     )
+                                                    .inner
                                                     .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
                                                     .clicked()
                                                 {
@@ -24092,6 +24112,135 @@ mod tests {
         let preset_cluster_width = 36.0 + spacing + 28.0 + spacing + 28.0 + spacing + preset_col4_width + spacing + 56.0 + spacing + 36.0;
         assert_eq!(group_cluster_width, preset_cluster_width, "Total cluster widths must match");
         assert_eq!(group_cluster_width, 268.0);
+    }
+
+    #[test]
+    fn test_egui_actual_rendered_rects() {
+        use eframe::egui::{self, vec2, Button};
+        let ctx = egui::Context::default();
+        crate::ui::theme::configure_fonts(&ctx, false);
+
+        for test_width in [550.0, 650.0, 750.0, 900.0, 1200.0] {
+            let mut raw_input = egui::RawInput::default();
+            raw_input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(test_width, 600.0)));
+            let _ = ctx.run(raw_input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut group_rects = Vec::new();
+                    let mut preset_rects = Vec::new();
+
+                    crate::ui::CrosshairApp::show_preset_card(ui, true, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label("Group Name");
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                        ui.add_space(7.0);
+                                        // Col 1: Trash
+                                        let r1 = crate::ui::CrosshairApp::sound_style_remove_button(ui);
+                                        group_rects.push(("Trash", r1.rect));
+                                        // Col 2: Paste
+                                        let r2 = ui.add_enabled_ui(true, |ui| {
+                                            ui.add_sized(
+                                                [28.0, 24.0],
+                                                Button::new(crate::ui::CrosshairApp::material_icon_text(0xe14f, 15.0)),
+                                            )
+                                        }).inner;
+                                        group_rects.push(("Paste", r2.rect));
+                                        // Col 3: Copy
+                                        let r3 = ui.add_sized(
+                                            [28.0, 24.0],
+                                            Button::new(crate::ui::CrosshairApp::material_icon_text(0xe14d, 15.0)),
+                                        );
+                                        group_rects.push(("Copy", r3.rect));
+                                        // Col 4: Folder (30x24) + Add (30x24)
+                                        let r4_1 = ui.add_sized(
+                                            [30.0, 24.0],
+                                            Button::new(crate::ui::CrosshairApp::folder_icon_text(false, 16.0)),
+                                        );
+                                        let r4_2 = ui.add_sized(
+                                            [30.0, 24.0],
+                                            Button::new(crate::ui::CrosshairApp::material_icon_text(0xe145, 16.0)),
+                                        );
+                                        group_rects.push(("Col4", r4_1.rect.union(r4_2.rect)));
+                                        // Col 5: Show/Hide (56x24)
+                                        let r5 = crate::ui::CrosshairApp::sized_button(ui, 56.0, "Hide");
+                                        group_rects.push(("Hide", r5.rect));
+                                        // Col 6: Checkbox (36x24)
+                                        let r6 = ui.add_sized(
+                                            [36.0, 24.0],
+                                            Button::new(crate::ui::CrosshairApp::material_icon_text(0xe5ca, 18.0)),
+                                        );
+                                        group_rects.push(("Check", r6.rect));
+                                    });
+                                });
+
+                                crate::ui::CrosshairApp::show_macro_preset_card(ui, true, true, false, |ui| {
+                                    ui.horizontal_top(|ui| {
+                                        let available_width = ui.available_width();
+                                        let right_width = 268.0;
+                                        let left_width = (available_width - right_width - 8.0).max(200.0);
+                                        ui.allocate_ui_with_layout(
+                                            vec2(left_width, 0.0),
+                                            egui::Layout::left_to_right(egui::Align::TOP),
+                                            |ui| {
+                                                ui.label("Trigger Space");
+                                            },
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.spacing_mut().item_spacing.x = 4.0;
+                                                // Col 1: Trash
+                                                let r1 = crate::ui::CrosshairApp::sound_style_remove_button(ui);
+                                                preset_rects.push(("Trash", r1.rect));
+                                                // Col 2: Paste
+                                                let r2 = ui.add_enabled_ui(true, |ui| {
+                                                    ui.add_sized(
+                                                        [28.0, 24.0],
+                                                        Button::new(crate::ui::CrosshairApp::material_icon_text(0xe14f, 15.0)),
+                                                    )
+                                                }).inner;
+                                                preset_rects.push(("Paste", r2.rect));
+                                                // Col 3: Copy
+                                                let r3 = ui.add_sized(
+                                                    [28.0, 24.0],
+                                                    Button::new(crate::ui::CrosshairApp::material_icon_text(0xe14d, 15.0)),
+                                                );
+                                                preset_rects.push(("Copy", r3.rect));
+                                                // Col 4: Capture (64x24)
+                                                let r4 = ui.add_sized([64.0, 24.0], Button::new("Capture"));
+                                                preset_rects.push(("Col4", r4.rect));
+                                                // Col 5: Show/Hide (56x24)
+                                                let r5 = crate::ui::CrosshairApp::sized_button(ui, 56.0, "Show");
+                                                preset_rects.push(("Hide", r5.rect));
+                                                // Col 6: Checkbox (36x24)
+                                                let r6 = ui.add_sized(
+                                                    [36.0, 24.0],
+                                                    Button::new(crate::ui::CrosshairApp::material_icon_text(0xe5ca, 18.0)),
+                                                );
+                                                preset_rects.push(("Check", r6.rect));
+                                            },
+                                        );
+                                    });
+                                });
+                            });
+                        });
+                    });
+
+                    for (name, gr) in &group_rects {
+                        let pr = preset_rects.iter().find(|(pn, _)| pn == name).unwrap().1;
+                        let diff_min = (gr.min.x - pr.min.x).abs();
+                        let diff_max = (gr.max.x - pr.max.x).abs();
+                        assert!(
+                            diff_min < 0.01 && diff_max < 0.01,
+                            "Width {}: Col {} misaligned! Group: [{:.1}, {:.1}], Preset: [{:.1}, {:.1}]",
+                            test_width, name, gr.min.x, gr.max.x, pr.min.x, pr.max.x
+                        );
+                    }
+                });
+            });
+        }
     }
 }
 
