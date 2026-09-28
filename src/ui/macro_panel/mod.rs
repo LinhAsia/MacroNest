@@ -7959,8 +7959,8 @@ impl CrosshairApp {
                                         if self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset {
                                             if ui
                                                 .add_sized(
-                                                    [46.0, 22.0],
-                                                    Button::new(Self::tr_lang(language, "Imp", "Imp")),
+                                                    [60.0, 22.0],
+                                                    Button::new(Self::tr_lang(language, "Import", "Import")),
                                                 )
                                                 .on_hover_text(Self::tr_lang(
                                                     language,
@@ -8493,6 +8493,22 @@ impl CrosshairApp {
                                                 )
                                                 .to_owned();
                                             }
+                                            let show_preset_import = self.show_share_buttons
+                                                || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset;
+                                            if show_preset_import {
+                                                if ui
+                                                    .add_enabled(
+                                                        self.macro_share_clipboard_kind
+                                                            == crate::ui::MacroShareCodeKind::Preset,
+                                                        Button::new(Self::tr_lang(language, "Import", "Import"))
+                                                            .min_size(egui::vec2(60.0, 24.0)),
+                                                    )
+                                                    .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
+                                                    .clicked()
+                                                {
+                                                    import_preset_to_group = Some((group.id, Some(preset.id)));
+                                                }
+                                            }
                                             if self.show_share_buttons {
                                                 let preset_export_feedback =
                                                     self.macro_preset_export_feedback_target
@@ -8503,47 +8519,31 @@ impl CrosshairApp {
                                                 let preset_export_label = if preset_export_feedback {
                                                     Self::tr_lang(language, "Copied", "Copied")
                                                 } else {
-                                                    Self::tr_lang(language, "Exp", "Exp")
+                                                    Self::tr_lang(language, "Export", "Export")
                                                 };
-                                              let preset_export_button = ui.add_sized(
-                                                  [60.0, 24.0],
-                                                  Button::new(preset_export_label).fill(if preset_export_feedback {
-                                                      Color32::from_rgba_premultiplied(72, 156, 116, 140)
-                                                  } else {
-                                                      ui.visuals().widgets.inactive.bg_fill
-                                                  })
-                                                  .stroke(egui::Stroke::new(
-                                                      1.0,
-                                                      if preset_export_feedback {
-                                                          Color32::from_rgb(126, 224, 182)
-                                                      } else {
-                                                          ui.visuals().widgets.inactive.bg_stroke.color
-                                                      },
-                                                  )),
-                                              );
-                                              if preset_export_button
-                                                  .on_hover_text(Self::tr_lang(language, "Export Preset Code", "Export Preset Code"))
-                                                  .clicked()
-                                              {
-                                                  export_preset = Some(preset.id);
-                                              }
-                                             }
-                                             let show_preset_import = self.show_share_buttons
-                                                 || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset;
-                                             if show_preset_import {
-                                                 if ui
-                                                     .add_enabled(
-                                                         self.macro_share_clipboard_kind
-                                                             == crate::ui::MacroShareCodeKind::Preset,
-                                                         Button::new(Self::tr_lang(language, "Imp", "Imp"))
-                                                             .min_size(egui::vec2(46.0, 24.0)),
-                                                     )
-                                                     .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
-                                                     .clicked()
-                                                 {
-                                                     import_preset_to_group = Some((group.id, Some(preset.id)));
-                                                 }
-                                             }
+                                                let preset_export_button = ui.add_sized(
+                                                    [60.0, 24.0],
+                                                    Button::new(preset_export_label).fill(if preset_export_feedback {
+                                                        Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                                    } else {
+                                                        ui.visuals().widgets.inactive.bg_fill
+                                                    })
+                                                    .stroke(egui::Stroke::new(
+                                                        1.0,
+                                                        if preset_export_feedback {
+                                                            Color32::from_rgb(126, 224, 182)
+                                                        } else {
+                                                            ui.visuals().widgets.inactive.bg_stroke.color
+                                                        },
+                                                    )),
+                                                );
+                                                if preset_export_button
+                                                    .on_hover_text(Self::tr_lang(language, "Export Preset Code", "Export Preset Code"))
+                                                    .clicked()
+                                                {
+                                                    export_preset = Some(preset.id);
+                                                }
+                                            }
                                             if preset.trigger_mode != MacroTriggerMode::WindowFocus {
                                                 let capture_target = CaptureRequest::MacroPresetHotkey(
                                                     group.id, preset.id,
@@ -13621,6 +13621,26 @@ if supports_move_mouse || show_detection_tuning {
                                                 );
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
+                                            let show_step_import = self.show_share_buttons
+                                                || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Step;
+                                            if show_step_import {
+                                                if ui
+                                                    .add_enabled(
+                                                        self.macro_share_clipboard_kind
+                                                            == crate::ui::MacroShareCodeKind::Step,
+                                                        Button::new(Self::tr_lang(language, "Import", "Import"))
+                                                            .min_size(egui::vec2(60.0, 22.0)),
+                                                    )
+                                                    .on_hover_text(Self::tr_lang(
+                                                        language,
+                                                        "Import step from clipboard at the start of this preset.",
+                                                        "Nhập bước từ bộ nhớ tạm vào đầu preset này.",
+                                                    ))
+                                                    .clicked()
+                                                {
+                                                    import_step_to = Some((group.id, preset.id, None));
+                                                }
+                                            }
                                             let has_meaningful_steps = !preset.steps.is_empty()
                                                 && !(preset.steps.len() == 1
                                                     && preset.steps[0].action == MacroAction::KeyPress
@@ -17256,6 +17276,16 @@ if supports_move_mouse || show_detection_tuning {
                                             }
                                             let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                ui.spacing_mut().item_spacing.x = 4.0;
+                                                let remove_btn = Button::new(Self::material_icon_text(0xe872, 15.0))
+                                                    .min_size(vec2(28.0, 22.0));
+                                                if ui
+                                                    .add(remove_btn)
+                                                    .on_hover_text(Self::tr_lang(language, "Remove this step", "Xóa bước này"))
+                                                    .clicked()
+                                                {
+                                                    remove_step = Some((preset.id, step_index));
+                                                }
                                                 let paste_btn = ui.add_enabled(
                                                     !self.macro_step_clipboard.is_empty(),
                                                     Button::new(Self::material_icon_text(0xe14f, 15.0))
@@ -17264,7 +17294,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 .on_hover_text(Self::tr_lang(
                                                     language,
                                                     "Paste copied step(s) below this step.",
-                                                    "D\u{00e1}n b\u{01b0}\u{01a1}c \u{0111}\u{00e3} sao ch\u{00e9}p b\u{00ea}n d\u{01b0}\u{1edb}i b\u{01b0}\u{01a1}c n\u{00e0}y.",
+                                                    "Dán bước đã sao chép bên dưới bước này.",
                                                 ));
                                                 if paste_btn.clicked() {
                                                     paste_step_after =
@@ -17300,9 +17330,9 @@ if supports_move_mouse || show_detection_tuning {
                                                         "Copy this step"
                                                     },
                                                     if copy_feedback_active {
-                                                        "\u{0110}\u{00e3} copy!"
+                                                        "Đã copy!"
                                                     } else {
-                                                        "Sao ch\u{00e9}p b\u{01b0}\u{01a1}c n\u{00e0}y"
+                                                        "Sao chép bước này"
                                                     },
                                                 ));
                                                 if copy_btn.clicked() {
@@ -17316,8 +17346,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         .add_enabled(
                                                             self.macro_share_clipboard_kind
                                                                 == crate::ui::MacroShareCodeKind::Step,
-                                                            Button::new(Self::tr_lang(language, "Imp", "Imp"))
-                                                                .min_size(vec2(50.0, 18.0)),
+                                                            Button::new(Self::tr_lang(language, "Import", "Import"))
+                                                                .min_size(vec2(60.0, 18.0)),
                                                         )
                                                         .on_hover_text(Self::tr_lang(language, "Import step from clipboard below this step.", "Import step from clipboard below this step."))
                                                         .clicked()
@@ -17337,9 +17367,9 @@ if supports_move_mouse || show_detection_tuning {
                                                           Button::new(if step_export_feedback {
                                                               Self::tr_lang(language, "Copied", "Copied")
                                                           } else {
-                                                              Self::tr_lang(language, "Exp", "Exp")
+                                                              Self::tr_lang(language, "Export", "Export")
                                                           })
-                                                          .min_size(vec2(50.0, 18.0)),
+                                                          .min_size(vec2(60.0, 18.0)),
                                                       )
                                                       .on_hover_text(Self::tr_lang(language, "Copy step code to clipboard.", "Copy step code to clipboard."))
                                                       .clicked()

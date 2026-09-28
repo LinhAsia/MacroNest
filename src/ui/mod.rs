@@ -11267,8 +11267,8 @@ impl CrosshairApp {
             if ui
                 .add_enabled(
                     import_enabled,
-                    Button::new(Self::tr_lang(language, "Imp", "Imp"))
-                        .min_size(egui::vec2(46.0, 24.0)),
+                    Button::new(Self::tr_lang(language, "Import", "Import"))
+                        .min_size(egui::vec2(60.0, 24.0)),
                 )
                 .on_hover_text(Self::tr_lang(
                     language,
@@ -11283,8 +11283,8 @@ impl CrosshairApp {
         if show_share_buttons {
             if ui
                 .add_sized(
-                    [46.0, 24.0],
-                    Button::new(Self::tr_lang(language, "Exp", "Exp")),
+                    [60.0, 24.0],
+                    Button::new(Self::tr_lang(language, "Export", "Export")),
                 )
                 .on_hover_text(Self::tr_lang(
                     language,
@@ -11311,7 +11311,7 @@ impl CrosshairApp {
             let import_enabled = clipboard_kind == target_kind;
             ui.add_enabled(
                 import_enabled,
-                Button::new(Self::tr_lang(language, "Import", "Nhập")),
+                Button::new(Self::tr_lang(language, "Import", "Import")),
             )
             .on_hover_text(Self::tr_lang(
                 language,
