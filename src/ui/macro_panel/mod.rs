@@ -7677,7 +7677,8 @@ impl CrosshairApp {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.add_space(14.0);
+                                    // Inset 8.0px so group header right edge perfectly aligns with preset card inner margin (8px)
+                                    ui.add_space(8.0);
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_group = Some(group.id);
                                     }
@@ -7798,6 +7799,103 @@ impl CrosshairApp {
                                             export_group = Some(group.id);
                                         }
                                     }
+                                    // Column 4 (64px: Folder button 30px + Add Preset button 30px with 4px gap, aligning with Preset Capture button 64px)
+                                    let folder_popup_id =
+                                        ui.make_persistent_id((group.id, "macro-group-folder-popup"));
+                                    let mut folder_popup_open = ui
+                                        .ctx()
+                                        .data(|data| data.get_temp::<bool>(folder_popup_id))
+                                        .unwrap_or(false);
+                                    let folder_button = Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_sized(
+                                            [30.0, 24.0],
+                                            Button::new(
+                                                Self::folder_icon_text(group.folder_id.is_some(), 16.0).color(
+                                                    if group.folder_id.is_some() {
+                                                        Color32::from_rgb(248, 214, 102)
+                                                    } else {
+                                                        ui.visuals().widgets.inactive.fg_stroke.color
+                                                    },
+                                                ),
+                                            ),
+                                        )
+                                    });
+                                    if folder_button.clicked() {
+                                        folder_popup_open = true;
+                                    }
+                                    let mut selected_folder_after_popup: Option<Option<u32>> = None;
+                                    let popup_response = egui::Popup::from_response(&folder_button)
+                                        .id(folder_popup_id)
+                                        .open_bool(&mut folder_popup_open)
+                                        .align(egui::RectAlign::BOTTOM_END)
+                                        .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                                        .width(220.0)
+                                        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                                        .show(|ui| {
+                                            ui.set_min_width(220.0);
+                                            ui.label(Self::tr_lang(language, "Folder", "Folder"));
+                                            ui.separator();
+                                            egui::ScrollArea::vertical()
+                                                .id_salt((group.id, "macro-group-folder-popup-scroll"))
+                                                .max_height(180.0)
+                                                .show(ui, |ui| {
+                                                    if ui
+                                                        .selectable_label(
+                                                            group.folder_id.is_none(),
+                                                            Self::tr_lang(language, "No folder", "No folder"),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        selected_folder_after_popup = Some(None);
+                                                    }
+                                                    for folder in &self.state.macro_folders {
+                                                        if ui
+                                                            .selectable_label(
+                                                                group.folder_id == Some(folder.id),
+                                                                &folder.name,
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            selected_folder_after_popup = Some(Some(folder.id));
+                                                        }
+                                                    }
+                                                });
+                                        });
+                                    if let Some(selected_folder) = selected_folder_after_popup {
+                                        group.folder_id = selected_folder;
+                                        live_sync = true;
+                                        folder_popup_open = false;
+                                    }
+                                    if folder_popup_open
+                                        && let Some(pointer_pos) = ui.ctx().pointer_hover_pos()
+                                    {
+                                        let mut keep_open_rect = folder_button.rect.expand(10.0);
+                                        if let Some(popup) = &popup_response {
+                                            keep_open_rect =
+                                                keep_open_rect.union(popup.response.rect.expand(10.0));
+                                        }
+                                        if !keep_open_rect.contains(pointer_pos) {
+                                            folder_popup_open = false;
+                                        }
+                                    }
+                                    ui.ctx().data_mut(|data| {
+                                        data.insert_temp(folder_popup_id, folder_popup_open)
+                                    });
+
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_sized(
+                                            [30.0, 24.0],
+                                            Button::new(Self::material_icon_text(0xe145, 16.0)),
+                                        )
+                                    })
+                                    .on_hover_text(Self::tr_lang(language, "Add Preset", "Thêm Preset"))
+                                    .clicked()
+                                    {
+                                        add_preset_to_group = Some(group.id);
+                                        group.collapsed = false;
+                                    }
+
+                                    // Column 5: Show / Hide (56px)
                                     if Self::sized_button(
                                         ui,
                                         56.0,
@@ -7839,6 +7937,8 @@ impl CrosshairApp {
                                         });
                                         live_sync = true;
                                     }
+
+                                    // Column 6: Enable / disable Checkbox (36px)
                                     let is_active = group.enabled && folder_enabled;
                                     let enabled_icon = if is_active { 0xe5ca } else { 0xe835 };
                                     let enabled_fill = if is_active {
@@ -7871,93 +7971,9 @@ impl CrosshairApp {
                                         group.enabled = !group.enabled;
                                         live_sync = true;
                                     }
+
+                                    // Left of column 6: Import preset & Window targets (when expanded)
                                     if !group.collapsed {
-                                        let folder_popup_id =
-                                            ui.make_persistent_id((group.id, "macro-group-folder-popup"));
-                                        let mut folder_popup_open = ui
-                                            .ctx()
-                                            .data(|data| data.get_temp::<bool>(folder_popup_id))
-                                            .unwrap_or(false);
-                                        let folder_button = Self::sound_style_icon_button(
-                                            ui,
-                                            Self::folder_icon_text(group.folder_id.is_some(), 18.0).color(
-                                                if group.folder_id.is_some() {
-                                                    Color32::from_rgb(248, 214, 102)
-                                                } else {
-                                                    ui.visuals().widgets.inactive.fg_stroke.color
-                                                },
-                                            ),
-                                        );
-                                        if folder_button.clicked() {
-                                            folder_popup_open = true;
-                                        }
-                                        let mut selected_folder_after_popup: Option<Option<u32>> = None;
-                                        let popup_response = egui::Popup::from_response(&folder_button)
-                                            .id(folder_popup_id)
-                                            .open_bool(&mut folder_popup_open)
-                                            .align(egui::RectAlign::BOTTOM_END)
-                                            .layout(egui::Layout::top_down_justified(egui::Align::Min))
-                                            .width(220.0)
-                                            .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                                            .show(|ui| {
-                                                ui.set_min_width(220.0);
-                                                ui.label(Self::tr_lang(language, "Folder", "Folder"));
-                                                ui.separator();
-                                                egui::ScrollArea::vertical()
-                                                    .id_salt((group.id, "macro-group-folder-popup-scroll"))
-                                                    .max_height(180.0)
-                                                    .show(ui, |ui| {
-                                                        if ui
-                                                            .selectable_label(
-                                                                group.folder_id.is_none(),
-                                                                Self::tr_lang(language, "No folder", "No folder"),
-                                                            )
-                                                            .clicked()
-                                                        {
-                                                            selected_folder_after_popup = Some(None);
-                                                        }
-                                                        for folder in &self.state.macro_folders {
-                                                            if ui
-                                                                .selectable_label(
-                                                                    group.folder_id == Some(folder.id),
-                                                                    &folder.name,
-                                                                )
-                                                                .clicked()
-                                                            {
-                                                                selected_folder_after_popup = Some(Some(folder.id));
-                                                            }
-                                                        }
-                                                    });
-                                            });
-                                        if let Some(selected_folder) = selected_folder_after_popup {
-                                            group.folder_id = selected_folder;
-                                            live_sync = true;
-                                            folder_popup_open = false;
-                                        }
-                                        if folder_popup_open
-                                            && let Some(pointer_pos) = ui.ctx().pointer_hover_pos()
-                                        {
-                                            let mut keep_open_rect = folder_button.rect.expand(10.0);
-                                            if let Some(popup) = &popup_response {
-                                                keep_open_rect =
-                                                    keep_open_rect.union(popup.response.rect.expand(10.0));
-                                            }
-                                            if !keep_open_rect.contains(pointer_pos) {
-                                                folder_popup_open = false;
-                                            }
-                                        }
-                                        ui.ctx().data_mut(|data| {
-                                            data.insert_temp(folder_popup_id, folder_popup_open)
-                                        });
-                                        if Self::sound_style_icon_button(
-                                            ui,
-                                            Self::material_icon_text(0xe145, 18.0),
-                                        )
-                                        .on_hover_text(Self::tr_lang(language, "Add Preset", "Add Preset"))
-                                        .clicked()
-                                        {
-                                            add_preset_to_group = Some(group.id);
-                                        }
                                         if self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset {
                                             if ui
                                                 .add_sized(
@@ -7975,16 +7991,16 @@ impl CrosshairApp {
                                             }
                                         }
                                         ui.add_space(4.0);
-                                         live_sync |= Self::render_multi_window_targets_with_duplicate_mode(
-                                             ui,
-                                             language,
-                                             (group.id, "macro-group-window-target"),
-                                             Self::tr_lang(language, "Any focused window", ""),
-                                             &mut group.target_window_title,
-                                             &mut group.extra_target_window_titles,
-                                             &mut group.match_duplicate_window_titles,
-                                             &self.open_window_infos,
-                                         );
+                                        live_sync |= Self::render_multi_window_targets_with_duplicate_mode(
+                                            ui,
+                                            language,
+                                            (group.id, "macro-group-window-target"),
+                                            Self::tr_lang(language, "Any focused window", ""),
+                                            &mut group.target_window_title,
+                                            &mut group.extra_target_window_titles,
+                                            &mut group.match_duplicate_window_titles,
+                                            &self.open_window_infos,
+                                        );
                                     }
                                 },
                             );
@@ -24050,6 +24066,32 @@ mod tests {
             }
             assert_eq!(is_inside_loop[step_index], inside, "Mismatch at step {}", step_index);
         }
+    }
+
+    #[test]
+    fn test_macro_group_and_preset_header_columns_aligned() {
+        // Group Header right controls (right-to-left):
+        // inset: 8.0px (matches preset card frame inner margin)
+        // Col 1: Trash (36.0)
+        // spacing: 4.0
+        // Col 2: Paste (28.0)
+        // spacing: 4.0
+        // Col 3: Copy (28.0)
+        // spacing: 4.0
+        // Col 4: Folder (30.0) + spacing (4.0) + Add Preset (30.0) = 64.0
+        // spacing: 4.0
+        // Col 5: Show/Hide (56.0)
+        // spacing: 4.0
+        // Col 6: Checkbox (36.0)
+        let group_col4_width = 30.0 + 4.0 + 30.0;
+        let preset_col4_width = 64.0;
+        assert_eq!(group_col4_width, preset_col4_width, "Column 4 widths must match");
+
+        let spacing = 4.0;
+        let group_cluster_width = 36.0 + spacing + 28.0 + spacing + 28.0 + spacing + group_col4_width + spacing + 56.0 + spacing + 36.0;
+        let preset_cluster_width = 36.0 + spacing + 28.0 + spacing + 28.0 + spacing + preset_col4_width + spacing + 56.0 + spacing + 36.0;
+        assert_eq!(group_cluster_width, preset_cluster_width, "Total cluster widths must match");
+        assert_eq!(group_cluster_width, 268.0);
     }
 }
 
