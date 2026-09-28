@@ -7676,39 +7676,7 @@ impl CrosshairApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.spacing_mut().item_spacing.x = 6.0;
-                                    let is_active = group.enabled && folder_enabled;
-                                    let enabled_icon = if is_active { 0xe5ca } else { 0xe835 };
-                                    let enabled_fill = if is_active {
-                                        Color32::from_rgba_premultiplied(72, 156, 116, 120)
-                                    } else {
-                                        ui.visuals().faint_bg_color
-                                    };
-                                    let enabled_stroke = if is_active {
-                                        Color32::from_rgb(126, 224, 182)
-                                    } else {
-                                        ui.visuals().widgets.noninteractive.bg_stroke.color
-                                    };
-                                    if Self::with_emphasized_button_hover(ui, |ui| {
-                                        ui.add_sized(
-                                            [36.0, 24.0],
-                                            Button::new(Self::material_icon_text(
-                                                enabled_icon,
-                                                18.0,
-                                            ))
-                                            .fill(enabled_fill)
-                                            .stroke(egui::Stroke::new(1.0, enabled_stroke)),
-                                        )
-                                    })
-                                        .on_hover_text(Self::tr_lang(
-                                            language,
-                                            if folder_enabled { "Enable / disable group" } else { "Folder containing this group is disabled" }, "",
-                                        ))
-                                        .clicked()
-                                    {
-                                        group.enabled = !group.enabled;
-                                        live_sync = true;
-                                    }
+                                    ui.spacing_mut().item_spacing.x = 4.0;
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_group = Some(group.id);
                                     }
@@ -7733,43 +7701,106 @@ impl CrosshairApp {
                                             self.macro_group_clipboard_feedback_until,
                                         ) && self.macro_group_clipboard_feedback
                                             == Some(super::MacroGroupClipboardFeedback::Copy);
-                                     let copy_fill = if copy_group_feedback_active {
-                                         Color32::from_rgba_premultiplied(72, 156, 116, 140)
-                                     } else {
-                                         ui.visuals().widgets.inactive.bg_fill
-                                     };
-                                     let copy_stroke = if copy_group_feedback_active {
-                                         Color32::from_rgb(126, 224, 182)
-                                     } else {
-                                         ui.visuals().widgets.inactive.bg_stroke.color
-                                     };
-                                     if Self::with_emphasized_button_hover(ui, |ui| {
-                                         ui.add_sized(
-                                             [28.0, 22.0],
-                                             Button::new(Self::material_icon_text(0xe14d, 15.0))
-                                                 .fill(copy_fill)
-                                                 .stroke(egui::Stroke::new(1.0, copy_stroke)),
-                                         )
-                                     })
-                                     .on_hover_text(Self::tr_lang(
-                                         language,
-                                         if copy_group_feedback_active { "Copied!" } else { "Copy this macro group" },
-                                         if copy_group_feedback_active { "Đã copy!" } else { "Sao chép nhóm macro này" },
-                                     ))
-                                     .clicked()
-                                     {
-                                         copy_group_to_clipboard = Some(group.id);
-                                         self.macro_group_clipboard_feedback = Some(super::MacroGroupClipboardFeedback::Copy);
-                                         self.macro_group_clipboard_feedback_until =
-                                             Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
-                                         self.status = Self::tr_lang(
-                                             language,
-                                             "Copied macro group to clipboard.",
-                                             "Đã sao chép nhóm macro vào bộ nhớ tạm.",
-                                         ).to_owned();
-                                     }
-                                    if Self::sound_style_toggle_button(
+                                    let copy_fill = if copy_group_feedback_active {
+                                        Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                    } else {
+                                        ui.visuals().widgets.inactive.bg_fill
+                                    };
+                                    let copy_stroke = if copy_group_feedback_active {
+                                        Color32::from_rgb(126, 224, 182)
+                                    } else {
+                                        ui.visuals().widgets.inactive.bg_stroke.color
+                                    };
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_sized(
+                                            [28.0, 22.0],
+                                            Button::new(Self::material_icon_text(0xe14d, 15.0))
+                                                .fill(copy_fill)
+                                                .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                        )
+                                    })
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        if copy_group_feedback_active { "Copied!" } else { "Copy this macro group" },
+                                        if copy_group_feedback_active { "Đã copy!" } else { "Sao chép nhóm macro này" },
+                                    ))
+                                    .clicked()
+                                    {
+                                        copy_group_to_clipboard = Some(group.id);
+                                        self.macro_group_clipboard_feedback = Some(super::MacroGroupClipboardFeedback::Copy);
+                                        self.macro_group_clipboard_feedback_until =
+                                            Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
+                                        self.status = Self::tr_lang(
+                                            language,
+                                            "Copied macro group to clipboard.",
+                                            "Đã sao chép nhóm macro vào bộ nhớ tạm.",
+                                        ).to_owned();
+                                    }
+                                    let show_group_import = self.show_share_buttons
+                                        || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
+                                    if show_group_import {
+                                        if ui
+                                            .add_enabled(
+                                                self.macro_share_clipboard_kind
+                                                    == crate::ui::MacroShareCodeKind::Group,
+                                                Button::new(Self::tr_lang(
+                                                    language,
+                                                    "Import",
+                                                    "Import",
+                                                ))
+                                                .min_size(egui::vec2(60.0, 24.0)),
+                                            )
+                                            .on_hover_text(Self::tr_lang(language, "Import Group Code", "Import Group Code"))
+                                            .clicked()
+                                        {
+                                            import_group_after = Some(group.id);
+                                        }
+                                    }
+                                    if self.show_share_buttons {
+                                        let group_export_feedback =
+                                            self.macro_group_export_feedback_target == Some(group.id)
+                                                && Self::is_copy_feedback_active(
+                                                    self.macro_group_export_feedback_until,
+                                                );
+                                        let group_export_label = if group_export_feedback {
+                                            Self::tr_lang(language, "Copied", "Copied")
+                                        } else {
+                                            Self::tr_lang(language, "Export", "Export")
+                                        };
+                                        if ui
+                                            .add_sized(
+                                                [60.0, 24.0],
+                                                Button::new(group_export_label)
+                                                    .fill(if group_export_feedback {
+                                                        Color32::from_rgba_premultiplied(
+                                                            72, 156, 116, 140,
+                                                        )
+                                                    } else {
+                                                        ui.visuals().widgets.inactive.bg_fill
+                                                    })
+                                                    .stroke(egui::Stroke::new(
+                                                        1.0,
+                                                        if group_export_feedback {
+                                                            Color32::from_rgb(126, 224, 182)
+                                                        } else {
+                                                            ui.visuals()
+                                                                .widgets
+                                                                .inactive
+                                                                .bg_stroke
+                                                                .color
+                                                        },
+                                                    )),
+                                            )
+                                            .on_hover_text(Self::tr_lang(language, "Copy Group Code", "Copy Group Code"))
+                                            .clicked()
+                                        {
+                                            export_group = Some(group.id);
+                                        }
+                                    }
+                                    ui.add_sized([64.0, 24.0], egui::Label::new(""));
+                                    if Self::sized_button(
                                         ui,
+                                        56.0,
                                         if group.collapsed {
                                             Self::tr_lang(language, "Show", "Show")
                                         } else {
@@ -7808,66 +7839,37 @@ impl CrosshairApp {
                                         });
                                         live_sync = true;
                                     }
-                                    let show_group_import = self.show_share_buttons
-                                        || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
-                                    if show_group_import {
-                                        if ui
-                                            .add_enabled(
-                                                self.macro_share_clipboard_kind
-                                                    == crate::ui::MacroShareCodeKind::Group,
-                                                Button::new(Self::tr_lang(
-                                                    language,
-                                                    "Import",
-                                                    "Import",
-                                                ))
-                                                .min_size(egui::vec2(72.0, 24.0)),
-                                            )
-                                            .on_hover_text(Self::tr_lang(language, "Import Group Code", "Import Group Code"))
-                                            .clicked()
-                                        {
-                                            import_group_after = Some(group.id);
-                                        }
-                                    }
-                                    if self.show_share_buttons {
-                                        let group_export_feedback =
-                                            self.macro_group_export_feedback_target == Some(group.id)
-                                                && Self::is_copy_feedback_active(
-                                                    self.macro_group_export_feedback_until,
-                                                );
-                                        let group_export_label = if group_export_feedback {
-                                            Self::tr_lang(language, "Copied", "Copied")
-                                        } else {
-                                            Self::tr_lang(language, "Export", "Export")
-                                        };
-                                        if ui
-                                            .add_sized(
-                                                [72.0, 24.0],
-                                                Button::new(group_export_label)
-                                                    .fill(if group_export_feedback {
-                                                        Color32::from_rgba_premultiplied(
-                                                            72, 156, 116, 140,
-                                                        )
-                                                    } else {
-                                                        ui.visuals().widgets.inactive.bg_fill
-                                                    })
-                                                    .stroke(egui::Stroke::new(
-                                                        1.0,
-                                                        if group_export_feedback {
-                                                            Color32::from_rgb(126, 224, 182)
-                                                        } else {
-                                                            ui.visuals()
-                                                                .widgets
-                                                                .inactive
-                                                                .bg_stroke
-                                                                .color
-                                                        },
-                                                    )),
-                                            )
-                                            .on_hover_text(Self::tr_lang(language, "Copy Group Code", "Copy Group Code"))
-                                            .clicked()
-                                        {
-                                            export_group = Some(group.id);
-                                        }
+                                    let is_active = group.enabled && folder_enabled;
+                                    let enabled_icon = if is_active { 0xe5ca } else { 0xe835 };
+                                    let enabled_fill = if is_active {
+                                        Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                                    } else {
+                                        ui.visuals().faint_bg_color
+                                    };
+                                    let enabled_stroke = if is_active {
+                                        Color32::from_rgb(126, 224, 182)
+                                    } else {
+                                        ui.visuals().widgets.noninteractive.bg_stroke.color
+                                    };
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_sized(
+                                            [36.0, 24.0],
+                                            Button::new(Self::material_icon_text(
+                                                enabled_icon,
+                                                18.0,
+                                            ))
+                                            .fill(enabled_fill)
+                                            .stroke(egui::Stroke::new(1.0, enabled_stroke)),
+                                        )
+                                    })
+                                        .on_hover_text(Self::tr_lang(
+                                            language,
+                                            if folder_enabled { "Enable / disable group" } else { "Folder containing this group is disabled" }, "",
+                                        ))
+                                        .clicked()
+                                    {
+                                        group.enabled = !group.enabled;
+                                        live_sync = true;
                                     }
                                     if !group.collapsed {
                                         let folder_popup_id =
@@ -13621,44 +13623,6 @@ if supports_move_mouse || show_detection_tuning {
                                                 );
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
-                                            let show_step_import = self.show_share_buttons
-                                                || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Step;
-                                            if show_step_import {
-                                                if ui
-                                                    .add_enabled(
-                                                        self.macro_share_clipboard_kind
-                                                            == crate::ui::MacroShareCodeKind::Step,
-                                                        Button::new(Self::tr_lang(language, "Import", "Import"))
-                                                            .min_size(egui::vec2(60.0, 22.0)),
-                                                    )
-                                                    .on_hover_text(Self::tr_lang(
-                                                        language,
-                                                        "Import step from clipboard at the start of this preset.",
-                                                        "Nhập bước từ bộ nhớ tạm vào đầu preset này.",
-                                                    ))
-                                                    .clicked()
-                                                {
-                                                    import_step_to = Some((group.id, preset.id, None));
-                                                }
-                                            }
-                                            let has_meaningful_steps = !preset.steps.is_empty()
-                                                && !(preset.steps.len() == 1
-                                                    && preset.steps[0].action == MacroAction::KeyPress
-                                                    && preset.steps[0].key.is_empty()
-                                                    && preset.steps[0].delay_ms == 100);
-                                            let delete_all_btn = Button::new(Self::material_icon_text(0xe92b, 15.0))
-                                                .min_size(egui::vec2(28.0, 22.0));
-                                            if ui
-                                                .add_enabled(has_meaningful_steps, delete_all_btn)
-                                                .on_hover_text(Self::tr_lang(
-                                                    language,
-                                                    "Delete all steps in this preset.",
-                                                    "Delete all steps in this preset.",
-                                                ))
-                                                .clicked()
-                                            {
-                                                delete_all_steps = Some((group.id, preset.id));
-                                            }
                                             if has_selected_steps {
                                                 let delete_btn = Button::new(Self::material_icon_text(0xe872, 15.0))
                                                     .min_size(egui::vec2(28.0, 22.0));
@@ -13668,6 +13632,25 @@ if supports_move_mouse || show_detection_tuning {
                                                     .clicked()
                                                 {
                                                     delete_selected_steps = Some((group.id, preset.id));
+                                                }
+                                            } else {
+                                                let has_meaningful_steps = !preset.steps.is_empty()
+                                                    && !(preset.steps.len() == 1
+                                                        && preset.steps[0].action == MacroAction::KeyPress
+                                                        && preset.steps[0].key.is_empty()
+                                                        && preset.steps[0].delay_ms == 100);
+                                                let delete_all_btn = Button::new(Self::material_icon_text(0xe92b, 15.0))
+                                                    .min_size(egui::vec2(28.0, 22.0));
+                                                if ui
+                                                    .add_enabled(has_meaningful_steps, delete_all_btn)
+                                                    .on_hover_text(Self::tr_lang(
+                                                        language,
+                                                        "Delete all steps in this preset.",
+                                                        "Delete all steps in this preset.",
+                                                    ))
+                                                    .clicked()
+                                                {
+                                                    delete_all_steps = Some((group.id, preset.id));
                                                 }
                                             }
                                             let paste_btn = Button::new(Self::material_icon_text(0xe14f, 15.0))
@@ -13704,6 +13687,31 @@ if supports_move_mouse || show_detection_tuning {
                                                         copy_selected_steps = Some((group.id, preset.id));
                                                     }
                                                 }
+                                            } else {
+                                                ui.add_sized([28.0, 22.0], egui::Label::new(""));
+                                            }
+                                            let show_step_import = self.show_share_buttons
+                                                || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Step;
+                                            if show_step_import {
+                                                if ui
+                                                    .add_enabled(
+                                                        self.macro_share_clipboard_kind
+                                                            == crate::ui::MacroShareCodeKind::Step,
+                                                        Button::new(Self::tr_lang(language, "Import", "Import"))
+                                                            .min_size(egui::vec2(60.0, 22.0)),
+                                                    )
+                                                    .on_hover_text(Self::tr_lang(
+                                                        language,
+                                                        "Import step from clipboard at the start of this preset.",
+                                                        "Nhập bước từ bộ nhớ tạm vào đầu preset này.",
+                                                    ))
+                                                    .clicked()
+                                                {
+                                                    import_step_to = Some((group.id, preset.id, None));
+                                                }
+                                            }
+                                            if self.show_share_buttons {
+                                                ui.add_sized([60.0, 22.0], egui::Label::new(""));
                                             }
                                         });
                                     });
