@@ -7676,24 +7676,49 @@ impl CrosshairApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    // Inset 7.0px so group header right edge perfectly aligns with preset card inner margin (8px inner margin + stroke - 1px egui stroke rounding)
-                                    ui.add_space(7.0);
+                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                    let is_active = group.enabled && folder_enabled;
+                                    let enabled_icon = if is_active { 0xe5ca } else { 0xe835 };
+                                    let enabled_fill = if is_active {
+                                        Color32::from_rgba_premultiplied(72, 156, 116, 120)
+                                    } else {
+                                        ui.visuals().faint_bg_color
+                                    };
+                                    let enabled_stroke = if is_active {
+                                        Color32::from_rgb(126, 224, 182)
+                                    } else {
+                                        ui.visuals().widgets.noninteractive.bg_stroke.color
+                                    };
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_sized(
+                                            [36.0, 24.0],
+                                            Button::new(Self::material_icon_text(
+                                                enabled_icon,
+                                                18.0,
+                                            ))
+                                            .fill(enabled_fill)
+                                            .stroke(egui::Stroke::new(1.0, enabled_stroke)),
+                                        )
+                                    })
+                                        .on_hover_text(Self::tr_lang(
+                                            language,
+                                            if folder_enabled { "Enable / disable group" } else { "Folder containing this group is disabled" }, "",
+                                        ))
+                                        .clicked()
+                                    {
+                                        group.enabled = !group.enabled;
+                                        live_sync = true;
+                                    }
                                     if Self::sound_style_remove_button(ui).clicked() {
                                         remove_group = Some(group.id);
                                     }
-                                    if ui.add_enabled_ui(
-                                        !self.macro_group_clipboard.is_empty(),
-                                        |ui| {
-                                            Self::with_emphasized_button_hover(ui, |ui| {
-                                                ui.add_sized(
-                                                    [28.0, 24.0],
-                                                    Button::new(Self::material_icon_text(0xe14f, 15.0)),
-                                                )
-                                            })
-                                        },
-                                    )
-                                    .inner
+                                    if Self::with_emphasized_button_hover(ui, |ui| {
+                                        ui.add_enabled(
+                                            !self.macro_group_clipboard.is_empty(),
+                                            Button::new(Self::material_icon_text(0xe14f, 15.0))
+                                                .min_size(egui::vec2(28.0, 22.0)),
+                                        )
+                                    })
                                     .on_hover_text(Self::tr_lang(
                                         language,
                                         "Paste macro group after this one",
@@ -7708,207 +7733,43 @@ impl CrosshairApp {
                                             self.macro_group_clipboard_feedback_until,
                                         ) && self.macro_group_clipboard_feedback
                                             == Some(super::MacroGroupClipboardFeedback::Copy);
-                                    let copy_fill = if copy_group_feedback_active {
-                                        Color32::from_rgba_premultiplied(72, 156, 116, 140)
-                                    } else {
-                                        ui.visuals().widgets.inactive.bg_fill
-                                    };
-                                    let copy_stroke = if copy_group_feedback_active {
-                                        Color32::from_rgb(126, 224, 182)
-                                    } else {
-                                        ui.visuals().widgets.inactive.bg_stroke.color
-                                    };
-                                    if Self::with_emphasized_button_hover(ui, |ui| {
-                                        ui.add_sized(
-                                            [28.0, 24.0],
-                                            Button::new(Self::material_icon_text(0xe14d, 15.0))
-                                                .fill(copy_fill)
-                                                .stroke(egui::Stroke::new(1.0, copy_stroke)),
-                                        )
-                                    })
-                                    .on_hover_text(Self::tr_lang(
-                                        language,
-                                        if copy_group_feedback_active { "Copied!" } else { "Copy this macro group" },
-                                        if copy_group_feedback_active { "Đã copy!" } else { "Sao chép nhóm macro này" },
-                                    ))
-                                    .clicked()
-                                    {
-                                        copy_group_to_clipboard = Some(group.id);
-                                        self.macro_group_clipboard_feedback = Some(super::MacroGroupClipboardFeedback::Copy);
-                                        self.macro_group_clipboard_feedback_until =
-                                            Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
-                                        self.status = Self::tr_lang(
-                                            language,
-                                            "Copied macro group to clipboard.",
-                                            "Đã sao chép nhóm macro vào bộ nhớ tạm.",
-                                        ).to_owned();
-                                    }
-                                    let show_group_import = self.show_share_buttons
-                                        || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
-                                    if show_group_import {
-                                        if ui
-                                            .add_enabled_ui(
-                                                self.macro_share_clipboard_kind
-                                                    == crate::ui::MacroShareCodeKind::Group,
-                                                |ui| {
-                                                    ui.add_sized(
-                                                        [60.0, 24.0],
-                                                        Button::new(Self::tr_lang(
-                                                            language,
-                                                            "Import",
-                                                            "Import",
-                                                        )),
-                                                    )
-                                                },
-                                            )
-                                            .inner
-                                            .on_hover_text(Self::tr_lang(language, "Import Group Code", "Import Group Code"))
-                                            .clicked()
-                                        {
-                                            import_group_after = Some(group.id);
-                                        }
-                                    }
-                                    if self.show_share_buttons {
-                                        let group_export_feedback =
-                                            self.macro_group_export_feedback_target == Some(group.id)
-                                                && Self::is_copy_feedback_active(
-                                                    self.macro_group_export_feedback_until,
-                                                );
-                                        let group_export_label = if group_export_feedback {
-                                            Self::tr_lang(language, "Copied", "Copied")
-                                        } else {
-                                            Self::tr_lang(language, "Export", "Export")
-                                        };
-                                        if ui
-                                            .add_sized(
-                                                [60.0, 24.0],
-                                                Button::new(group_export_label)
-                                                    .fill(if group_export_feedback {
-                                                        Color32::from_rgba_premultiplied(
-                                                            72, 156, 116, 140,
-                                                        )
-                                                    } else {
-                                                        ui.visuals().widgets.inactive.bg_fill
-                                                    })
-                                                    .stroke(egui::Stroke::new(
-                                                        1.0,
-                                                        if group_export_feedback {
-                                                            Color32::from_rgb(126, 224, 182)
-                                                        } else {
-                                                            ui.visuals()
-                                                                .widgets
-                                                                .inactive
-                                                                .bg_stroke
-                                                                .color
-                                                        },
-                                                    )),
-                                            )
-                                            .on_hover_text(Self::tr_lang(language, "Copy Group Code", "Copy Group Code"))
-                                            .clicked()
-                                        {
-                                            export_group = Some(group.id);
-                                        }
-                                    }
-                                    // Column 4 (64px: Folder button 30px + Add Preset button 30px with 4px gap, aligning with Preset Capture button 64px)
-                                    let folder_popup_id =
-                                        ui.make_persistent_id((group.id, "macro-group-folder-popup"));
-                                    let mut folder_popup_open = ui
-                                        .ctx()
-                                        .data(|data| data.get_temp::<bool>(folder_popup_id))
-                                        .unwrap_or(false);
-                                    let folder_button = Self::with_emphasized_button_hover(ui, |ui| {
-                                        ui.add_sized(
-                                            [30.0, 24.0],
-                                            Button::new(
-                                                Self::folder_icon_text(group.folder_id.is_some(), 16.0).color(
-                                                    if group.folder_id.is_some() {
-                                                        Color32::from_rgb(248, 214, 102)
-                                                    } else {
-                                                        ui.visuals().widgets.inactive.fg_stroke.color
-                                                    },
-                                                ),
-                                            ),
-                                        )
-                                    });
-                                    if folder_button.clicked() {
-                                        folder_popup_open = true;
-                                    }
-                                    let mut selected_folder_after_popup: Option<Option<u32>> = None;
-                                    let popup_response = egui::Popup::from_response(&folder_button)
-                                        .id(folder_popup_id)
-                                        .open_bool(&mut folder_popup_open)
-                                        .align(egui::RectAlign::BOTTOM_END)
-                                        .layout(egui::Layout::top_down_justified(egui::Align::Min))
-                                        .width(220.0)
-                                        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                                        .show(|ui| {
-                                            ui.set_min_width(220.0);
-                                            ui.label(Self::tr_lang(language, "Folder", "Folder"));
-                                            ui.separator();
-                                            egui::ScrollArea::vertical()
-                                                .id_salt((group.id, "macro-group-folder-popup-scroll"))
-                                                .max_height(180.0)
-                                                .show(ui, |ui| {
-                                                    if ui
-                                                        .selectable_label(
-                                                            group.folder_id.is_none(),
-                                                            Self::tr_lang(language, "No folder", "No folder"),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        selected_folder_after_popup = Some(None);
-                                                    }
-                                                    for folder in &self.state.macro_folders {
-                                                        if ui
-                                                            .selectable_label(
-                                                                group.folder_id == Some(folder.id),
-                                                                &folder.name,
-                                                            )
-                                                            .clicked()
-                                                        {
-                                                            selected_folder_after_popup = Some(Some(folder.id));
-                                                        }
-                                                    }
-                                                });
-                                        });
-                                    if let Some(selected_folder) = selected_folder_after_popup {
-                                        group.folder_id = selected_folder;
-                                        live_sync = true;
-                                        folder_popup_open = false;
-                                    }
-                                    if folder_popup_open
-                                        && let Some(pointer_pos) = ui.ctx().pointer_hover_pos()
-                                    {
-                                        let mut keep_open_rect = folder_button.rect.expand(10.0);
-                                        if let Some(popup) = &popup_response {
-                                            keep_open_rect =
-                                                keep_open_rect.union(popup.response.rect.expand(10.0));
-                                        }
-                                        if !keep_open_rect.contains(pointer_pos) {
-                                            folder_popup_open = false;
-                                        }
-                                    }
-                                    ui.ctx().data_mut(|data| {
-                                        data.insert_temp(folder_popup_id, folder_popup_open)
-                                    });
-
-                                    if Self::with_emphasized_button_hover(ui, |ui| {
-                                        ui.add_sized(
-                                            [30.0, 24.0],
-                                            Button::new(Self::material_icon_text(0xe145, 16.0)),
-                                        )
-                                    })
-                                    .on_hover_text(Self::tr_lang(language, "Add Preset", "Thêm Preset"))
-                                    .clicked()
-                                    {
-                                        add_preset_to_group = Some(group.id);
-                                        group.collapsed = false;
-                                    }
-
-                                    // Column 5: Show / Hide (56px)
-                                    if Self::sized_button(
+                                     let copy_fill = if copy_group_feedback_active {
+                                         Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                     } else {
+                                         ui.visuals().widgets.inactive.bg_fill
+                                     };
+                                     let copy_stroke = if copy_group_feedback_active {
+                                         Color32::from_rgb(126, 224, 182)
+                                     } else {
+                                         ui.visuals().widgets.inactive.bg_stroke.color
+                                     };
+                                     if Self::with_emphasized_button_hover(ui, |ui| {
+                                         ui.add_sized(
+                                             [28.0, 22.0],
+                                             Button::new(Self::material_icon_text(0xe14d, 15.0))
+                                                 .fill(copy_fill)
+                                                 .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                         )
+                                     })
+                                     .on_hover_text(Self::tr_lang(
+                                         language,
+                                         if copy_group_feedback_active { "Copied!" } else { "Copy this macro group" },
+                                         if copy_group_feedback_active { "Đã copy!" } else { "Sao chép nhóm macro này" },
+                                     ))
+                                     .clicked()
+                                     {
+                                         copy_group_to_clipboard = Some(group.id);
+                                         self.macro_group_clipboard_feedback = Some(super::MacroGroupClipboardFeedback::Copy);
+                                         self.macro_group_clipboard_feedback_until =
+                                             Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
+                                         self.status = Self::tr_lang(
+                                             language,
+                                             "Copied macro group to clipboard.",
+                                             "Đã sao chép nhóm macro vào bộ nhớ tạm.",
+                                         ).to_owned();
+                                     }
+                                    if Self::sound_style_toggle_button(
                                         ui,
-                                        56.0,
                                         if group.collapsed {
                                             Self::tr_lang(language, "Show", "Show")
                                         } else {
@@ -7947,48 +7808,159 @@ impl CrosshairApp {
                                         });
                                         live_sync = true;
                                     }
-
-                                    // Column 6: Enable / disable Checkbox (36px)
-                                    let is_active = group.enabled && folder_enabled;
-                                    let enabled_icon = if is_active { 0xe5ca } else { 0xe835 };
-                                    let enabled_fill = if is_active {
-                                        Color32::from_rgba_premultiplied(72, 156, 116, 120)
-                                    } else {
-                                        ui.visuals().faint_bg_color
-                                    };
-                                    let enabled_stroke = if is_active {
-                                        Color32::from_rgb(126, 224, 182)
-                                    } else {
-                                        ui.visuals().widgets.noninteractive.bg_stroke.color
-                                    };
-                                    if Self::with_emphasized_button_hover(ui, |ui| {
-                                        ui.add_sized(
-                                            [36.0, 24.0],
-                                            Button::new(Self::material_icon_text(
-                                                enabled_icon,
-                                                18.0,
-                                            ))
-                                            .fill(enabled_fill)
-                                            .stroke(egui::Stroke::new(1.0, enabled_stroke)),
-                                        )
-                                    })
-                                        .on_hover_text(Self::tr_lang(
-                                            language,
-                                            if folder_enabled { "Enable / disable group" } else { "Folder containing this group is disabled" }, "",
-                                        ))
-                                        .clicked()
-                                    {
-                                        group.enabled = !group.enabled;
-                                        live_sync = true;
+                                    let show_group_import = self.show_share_buttons
+                                        || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Group;
+                                    if show_group_import {
+                                        if ui
+                                            .add_enabled(
+                                                self.macro_share_clipboard_kind
+                                                    == crate::ui::MacroShareCodeKind::Group,
+                                                Button::new(Self::tr_lang(
+                                                    language,
+                                                    "Import",
+                                                    "Import",
+                                                ))
+                                                .min_size(egui::vec2(72.0, 24.0)),
+                                            )
+                                            .on_hover_text(Self::tr_lang(language, "Import Group Code", "Import Group Code"))
+                                            .clicked()
+                                        {
+                                            import_group_after = Some(group.id);
+                                        }
                                     }
-
-                                    // Left of column 6: Import preset & Window targets (when expanded)
+                                    if self.show_share_buttons {
+                                        let group_export_feedback =
+                                            self.macro_group_export_feedback_target == Some(group.id)
+                                                && Self::is_copy_feedback_active(
+                                                    self.macro_group_export_feedback_until,
+                                                );
+                                        let group_export_label = if group_export_feedback {
+                                            Self::tr_lang(language, "Copied", "Copied")
+                                        } else {
+                                            Self::tr_lang(language, "Export", "Export")
+                                        };
+                                        if ui
+                                            .add_sized(
+                                                [72.0, 24.0],
+                                                Button::new(group_export_label)
+                                                    .fill(if group_export_feedback {
+                                                        Color32::from_rgba_premultiplied(
+                                                            72, 156, 116, 140,
+                                                        )
+                                                    } else {
+                                                        ui.visuals().widgets.inactive.bg_fill
+                                                    })
+                                                    .stroke(egui::Stroke::new(
+                                                        1.0,
+                                                        if group_export_feedback {
+                                                            Color32::from_rgb(126, 224, 182)
+                                                        } else {
+                                                            ui.visuals()
+                                                                .widgets
+                                                                .inactive
+                                                                .bg_stroke
+                                                                .color
+                                                        },
+                                                    )),
+                                            )
+                                            .on_hover_text(Self::tr_lang(language, "Copy Group Code", "Copy Group Code"))
+                                            .clicked()
+                                        {
+                                            export_group = Some(group.id);
+                                        }
+                                    }
                                     if !group.collapsed {
+                                        let folder_popup_id =
+                                            ui.make_persistent_id((group.id, "macro-group-folder-popup"));
+                                        let mut folder_popup_open = ui
+                                            .ctx()
+                                            .data(|data| data.get_temp::<bool>(folder_popup_id))
+                                            .unwrap_or(false);
+                                        let folder_button = Self::sound_style_icon_button(
+                                            ui,
+                                            Self::folder_icon_text(group.folder_id.is_some(), 18.0).color(
+                                                if group.folder_id.is_some() {
+                                                    Color32::from_rgb(248, 214, 102)
+                                                } else {
+                                                    ui.visuals().widgets.inactive.fg_stroke.color
+                                                },
+                                            ),
+                                        );
+                                        if folder_button.clicked() {
+                                            folder_popup_open = true;
+                                        }
+                                        let mut selected_folder_after_popup: Option<Option<u32>> = None;
+                                        let popup_response = egui::Popup::from_response(&folder_button)
+                                            .id(folder_popup_id)
+                                            .open_bool(&mut folder_popup_open)
+                                            .align(egui::RectAlign::BOTTOM_END)
+                                            .layout(egui::Layout::top_down_justified(egui::Align::Min))
+                                            .width(220.0)
+                                            .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                                            .show(|ui| {
+                                                ui.set_min_width(220.0);
+                                                ui.label(Self::tr_lang(language, "Folder", "Folder"));
+                                                ui.separator();
+                                                egui::ScrollArea::vertical()
+                                                    .id_salt((group.id, "macro-group-folder-popup-scroll"))
+                                                    .max_height(180.0)
+                                                    .show(ui, |ui| {
+                                                        if ui
+                                                            .selectable_label(
+                                                                group.folder_id.is_none(),
+                                                                Self::tr_lang(language, "No folder", "No folder"),
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            selected_folder_after_popup = Some(None);
+                                                        }
+                                                        for folder in &self.state.macro_folders {
+                                                            if ui
+                                                                .selectable_label(
+                                                                    group.folder_id == Some(folder.id),
+                                                                    &folder.name,
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                selected_folder_after_popup = Some(Some(folder.id));
+                                                            }
+                                                        }
+                                                    });
+                                            });
+                                        if let Some(selected_folder) = selected_folder_after_popup {
+                                            group.folder_id = selected_folder;
+                                            live_sync = true;
+                                            folder_popup_open = false;
+                                        }
+                                        if folder_popup_open
+                                            && let Some(pointer_pos) = ui.ctx().pointer_hover_pos()
+                                        {
+                                            let mut keep_open_rect = folder_button.rect.expand(10.0);
+                                            if let Some(popup) = &popup_response {
+                                                keep_open_rect =
+                                                    keep_open_rect.union(popup.response.rect.expand(10.0));
+                                            }
+                                            if !keep_open_rect.contains(pointer_pos) {
+                                                folder_popup_open = false;
+                                            }
+                                        }
+                                        ui.ctx().data_mut(|data| {
+                                            data.insert_temp(folder_popup_id, folder_popup_open)
+                                        });
+                                        if Self::sound_style_icon_button(
+                                            ui,
+                                            Self::material_icon_text(0xe145, 18.0),
+                                        )
+                                        .on_hover_text(Self::tr_lang(language, "Add Preset", "Add Preset"))
+                                        .clicked()
+                                        {
+                                            add_preset_to_group = Some(group.id);
+                                        }
                                         if self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset {
                                             if ui
                                                 .add_sized(
-                                                    [60.0, 22.0],
-                                                    Button::new(Self::tr_lang(language, "Import", "Import")),
+                                                    [46.0, 22.0],
+                                                    Button::new(Self::tr_lang(language, "Imp", "Imp")),
                                                 )
                                                 .on_hover_text(Self::tr_lang(
                                                     language,
@@ -8001,16 +7973,16 @@ impl CrosshairApp {
                                             }
                                         }
                                         ui.add_space(4.0);
-                                        live_sync |= Self::render_multi_window_targets_with_duplicate_mode(
-                                            ui,
-                                            language,
-                                            (group.id, "macro-group-window-target"),
-                                            Self::tr_lang(language, "Any focused window", ""),
-                                            &mut group.target_window_title,
-                                            &mut group.extra_target_window_titles,
-                                            &mut group.match_duplicate_window_titles,
-                                            &self.open_window_infos,
-                                        );
+                                         live_sync |= Self::render_multi_window_targets_with_duplicate_mode(
+                                             ui,
+                                             language,
+                                             (group.id, "macro-group-window-target"),
+                                             Self::tr_lang(language, "Any focused window", ""),
+                                             &mut group.target_window_title,
+                                             &mut group.extra_target_window_titles,
+                                             &mut group.match_duplicate_window_titles,
+                                             &self.open_window_infos,
+                                         );
                                     }
                                 },
                             );
@@ -8113,11 +8085,9 @@ impl CrosshairApp {
                                 |ui| {
                                 ui.horizontal_top(|ui| {
                                     let available_width = ui.available_width();
-                                    let right_width = 268.0
-                                        + if self.show_share_buttons || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset { 64.0 } else { 0.0 }
-                                        + if self.show_share_buttons { 64.0 } else { 0.0 };
+                                    let right_width = 540.0;
                                     let left_width =
-                                        (available_width - right_width - 8.0).max(200.0);
+                                        (available_width - right_width - 8.0).max(260.0);
                                     let trigger_label_width = ui
                                         .painter()
                                         .layout_no_wrap(
@@ -8449,25 +8419,24 @@ impl CrosshairApp {
                                             );
                                         },
                                     );
-                                    ui.with_layout(
+                                    let right_spacer =
+                                        (ui.available_width() - right_width).max(0.0);
+                                    if right_spacer > 0.0 {
+                                        ui.add_space(right_spacer);
+                                    }
+                                    ui.allocate_ui_with_layout(
+                                        vec2(right_width, 0.0),
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
                                             if Self::sound_style_remove_button(ui).clicked() {
                                                 remove_preset = Some(preset.id);
                                             }
-                                            let paste_btn = ui.add_enabled_ui(
+                                            let paste_btn = ui.add_enabled(
                                                 self.macro_preset_clipboard.is_some(),
-                                                |ui| {
-                                                    Self::with_emphasized_button_hover(ui, |ui| {
-                                                        ui.add_sized(
-                                                            [28.0, 24.0],
-                                                            Button::new(Self::material_icon_text(0xe14f, 15.0)),
-                                                        )
-                                                    })
-                                                },
+                                                Button::new(Self::material_icon_text(0xe14f, 15.0))
+                                                    .min_size(egui::vec2(28.0, 22.0)),
                                             )
-                                            .inner
                                             .on_hover_text(Self::tr_lang(
                                                 language,
                                                 "Paste preset from clipboard into this group",
@@ -8493,14 +8462,12 @@ impl CrosshairApp {
                                                 ui.visuals().widgets.inactive.bg_stroke.color
                                             };
 
-                                            let copy_btn = Self::with_emphasized_button_hover(ui, |ui| {
-                                                ui.add_sized(
-                                                    [28.0, 24.0],
-                                                    Button::new(Self::material_icon_text(0xe14d, 15.0))
-                                                        .fill(copy_fill)
-                                                        .stroke(egui::Stroke::new(1.0, copy_stroke)),
-                                                )
-                                            })
+                                            let copy_btn = ui.add(
+                                                Button::new(Self::material_icon_text(0xe14d, 15.0))
+                                                    .min_size(egui::vec2(28.0, 22.0))
+                                                    .fill(copy_fill)
+                                                    .stroke(egui::Stroke::new(1.0, copy_stroke)),
+                                            )
                                             .on_hover_text(Self::tr_lang(
                                                 language,
                                                 if preset_copy_feedback_active {
@@ -8526,27 +8493,6 @@ impl CrosshairApp {
                                                 )
                                                 .to_owned();
                                             }
-                                            let show_preset_import = self.show_share_buttons
-                                                || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset;
-                                            if show_preset_import {
-                                                if ui
-                                                    .add_enabled_ui(
-                                                        self.macro_share_clipboard_kind
-                                                            == crate::ui::MacroShareCodeKind::Preset,
-                                                        |ui| {
-                                                            ui.add_sized(
-                                                                [60.0, 24.0],
-                                                                Button::new(Self::tr_lang(language, "Import", "Import")),
-                                                            )
-                                                        },
-                                                    )
-                                                    .inner
-                                                    .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
-                                                    .clicked()
-                                                {
-                                                    import_preset_to_group = Some((group.id, Some(preset.id)));
-                                                }
-                                            }
                                             if self.show_share_buttons {
                                                 let preset_export_feedback =
                                                     self.macro_preset_export_feedback_target
@@ -8557,31 +8503,47 @@ impl CrosshairApp {
                                                 let preset_export_label = if preset_export_feedback {
                                                     Self::tr_lang(language, "Copied", "Copied")
                                                 } else {
-                                                    Self::tr_lang(language, "Export", "Export")
+                                                    Self::tr_lang(language, "Exp", "Exp")
                                                 };
-                                                let preset_export_button = ui.add_sized(
-                                                    [60.0, 24.0],
-                                                    Button::new(preset_export_label).fill(if preset_export_feedback {
-                                                        Color32::from_rgba_premultiplied(72, 156, 116, 140)
-                                                    } else {
-                                                        ui.visuals().widgets.inactive.bg_fill
-                                                    })
-                                                    .stroke(egui::Stroke::new(
-                                                        1.0,
-                                                        if preset_export_feedback {
-                                                            Color32::from_rgb(126, 224, 182)
-                                                        } else {
-                                                            ui.visuals().widgets.inactive.bg_stroke.color
-                                                        },
-                                                    )),
-                                                );
-                                                if preset_export_button
-                                                    .on_hover_text(Self::tr_lang(language, "Export Preset Code", "Export Preset Code"))
-                                                    .clicked()
-                                                {
-                                                    export_preset = Some(preset.id);
-                                                }
-                                            }
+                                              let preset_export_button = ui.add_sized(
+                                                  [60.0, 24.0],
+                                                  Button::new(preset_export_label).fill(if preset_export_feedback {
+                                                      Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                                  } else {
+                                                      ui.visuals().widgets.inactive.bg_fill
+                                                  })
+                                                  .stroke(egui::Stroke::new(
+                                                      1.0,
+                                                      if preset_export_feedback {
+                                                          Color32::from_rgb(126, 224, 182)
+                                                      } else {
+                                                          ui.visuals().widgets.inactive.bg_stroke.color
+                                                      },
+                                                  )),
+                                              );
+                                              if preset_export_button
+                                                  .on_hover_text(Self::tr_lang(language, "Export Preset Code", "Export Preset Code"))
+                                                  .clicked()
+                                              {
+                                                  export_preset = Some(preset.id);
+                                              }
+                                             }
+                                             let show_preset_import = self.show_share_buttons
+                                                 || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset;
+                                             if show_preset_import {
+                                                 if ui
+                                                     .add_enabled(
+                                                         self.macro_share_clipboard_kind
+                                                             == crate::ui::MacroShareCodeKind::Preset,
+                                                         Button::new(Self::tr_lang(language, "Imp", "Imp"))
+                                                             .min_size(egui::vec2(46.0, 24.0)),
+                                                     )
+                                                     .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
+                                                     .clicked()
+                                                 {
+                                                     import_preset_to_group = Some((group.id, Some(preset.id)));
+                                                 }
+                                             }
                                             if preset.trigger_mode != MacroTriggerMode::WindowFocus {
                                                 let capture_target = CaptureRequest::MacroPresetHotkey(
                                                     group.id, preset.id,
@@ -13659,6 +13621,24 @@ if supports_move_mouse || show_detection_tuning {
                                                 );
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             ui.spacing_mut().item_spacing.x = 4.0;
+                                            let has_meaningful_steps = !preset.steps.is_empty()
+                                                && !(preset.steps.len() == 1
+                                                    && preset.steps[0].action == MacroAction::KeyPress
+                                                    && preset.steps[0].key.is_empty()
+                                                    && preset.steps[0].delay_ms == 100);
+                                            let delete_all_btn = Button::new(Self::material_icon_text(0xe92b, 15.0))
+                                                .min_size(egui::vec2(28.0, 22.0));
+                                            if ui
+                                                .add_enabled(has_meaningful_steps, delete_all_btn)
+                                                .on_hover_text(Self::tr_lang(
+                                                    language,
+                                                    "Delete all steps in this preset.",
+                                                    "Delete all steps in this preset.",
+                                                ))
+                                                .clicked()
+                                            {
+                                                delete_all_steps = Some((group.id, preset.id));
+                                            }
                                             if has_selected_steps {
                                                 let delete_btn = Button::new(Self::material_icon_text(0xe872, 15.0))
                                                     .min_size(egui::vec2(28.0, 22.0));
@@ -13668,25 +13648,6 @@ if supports_move_mouse || show_detection_tuning {
                                                     .clicked()
                                                 {
                                                     delete_selected_steps = Some((group.id, preset.id));
-                                                }
-                                            } else {
-                                                let has_meaningful_steps = !preset.steps.is_empty()
-                                                    && !(preset.steps.len() == 1
-                                                        && preset.steps[0].action == MacroAction::KeyPress
-                                                        && preset.steps[0].key.is_empty()
-                                                        && preset.steps[0].delay_ms == 100);
-                                                let delete_all_btn = Button::new(Self::material_icon_text(0xe92b, 15.0))
-                                                    .min_size(egui::vec2(28.0, 22.0));
-                                                if ui
-                                                    .add_enabled(has_meaningful_steps, delete_all_btn)
-                                                    .on_hover_text(Self::tr_lang(
-                                                        language,
-                                                        "Delete all steps in this preset.",
-                                                        "Delete all steps in this preset.",
-                                                    ))
-                                                    .clicked()
-                                                {
-                                                    delete_all_steps = Some((group.id, preset.id));
                                                 }
                                             }
                                             let paste_btn = Button::new(Self::material_icon_text(0xe14f, 15.0))
@@ -13723,31 +13684,6 @@ if supports_move_mouse || show_detection_tuning {
                                                         copy_selected_steps = Some((group.id, preset.id));
                                                     }
                                                 }
-                                            } else {
-                                                ui.add_sized([28.0, 22.0], egui::Label::new(""));
-                                            }
-                                            let show_step_import = self.show_share_buttons
-                                                || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Step;
-                                            if show_step_import {
-                                                if ui
-                                                    .add_enabled(
-                                                        self.macro_share_clipboard_kind
-                                                            == crate::ui::MacroShareCodeKind::Step,
-                                                        Button::new(Self::tr_lang(language, "Import", "Import"))
-                                                            .min_size(egui::vec2(60.0, 22.0)),
-                                                    )
-                                                    .on_hover_text(Self::tr_lang(
-                                                        language,
-                                                        "Import step from clipboard at the start of this preset.",
-                                                        "Nhập bước từ bộ nhớ tạm vào đầu preset này.",
-                                                    ))
-                                                    .clicked()
-                                                {
-                                                    import_step_to = Some((group.id, preset.id, None));
-                                                }
-                                            }
-                                            if self.show_share_buttons {
-                                                ui.add_sized([60.0, 22.0], egui::Label::new(""));
                                             }
                                         });
                                     });
@@ -17320,16 +17256,6 @@ if supports_move_mouse || show_detection_tuning {
                                             }
                                             let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                ui.spacing_mut().item_spacing.x = 4.0;
-                                                let remove_btn = Button::new(Self::material_icon_text(0xe872, 15.0))
-                                                    .min_size(vec2(28.0, 22.0));
-                                                if ui
-                                                    .add(remove_btn)
-                                                    .on_hover_text(Self::tr_lang(language, "Remove this step", "Xóa bước này"))
-                                                    .clicked()
-                                                {
-                                                    remove_step = Some((preset.id, step_index));
-                                                }
                                                 let paste_btn = ui.add_enabled(
                                                     !self.macro_step_clipboard.is_empty(),
                                                     Button::new(Self::material_icon_text(0xe14f, 15.0))
@@ -17338,7 +17264,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 .on_hover_text(Self::tr_lang(
                                                     language,
                                                     "Paste copied step(s) below this step.",
-                                                    "Dán bước đã sao chép bên dưới bước này.",
+                                                    "D\u{00e1}n b\u{01b0}\u{01a1}c \u{0111}\u{00e3} sao ch\u{00e9}p b\u{00ea}n d\u{01b0}\u{1edb}i b\u{01b0}\u{01a1}c n\u{00e0}y.",
                                                 ));
                                                 if paste_btn.clicked() {
                                                     paste_step_after =
@@ -17374,9 +17300,9 @@ if supports_move_mouse || show_detection_tuning {
                                                         "Copy this step"
                                                     },
                                                     if copy_feedback_active {
-                                                        "Đã copy!"
+                                                        "\u{0110}\u{00e3} copy!"
                                                     } else {
-                                                        "Sao chép bước này"
+                                                        "Sao ch\u{00e9}p b\u{01b0}\u{01a1}c n\u{00e0}y"
                                                     },
                                                 ));
                                                 if copy_btn.clicked() {
@@ -17390,8 +17316,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         .add_enabled(
                                                             self.macro_share_clipboard_kind
                                                                 == crate::ui::MacroShareCodeKind::Step,
-                                                            Button::new(Self::tr_lang(language, "Import", "Import"))
-                                                                .min_size(vec2(60.0, 18.0)),
+                                                            Button::new(Self::tr_lang(language, "Imp", "Imp"))
+                                                                .min_size(vec2(50.0, 18.0)),
                                                         )
                                                         .on_hover_text(Self::tr_lang(language, "Import step from clipboard below this step.", "Import step from clipboard below this step."))
                                                         .clicked()
@@ -17411,9 +17337,9 @@ if supports_move_mouse || show_detection_tuning {
                                                           Button::new(if step_export_feedback {
                                                               Self::tr_lang(language, "Copied", "Copied")
                                                           } else {
-                                                              Self::tr_lang(language, "Export", "Export")
+                                                              Self::tr_lang(language, "Exp", "Exp")
                                                           })
-                                                          .min_size(vec2(60.0, 18.0)),
+                                                          .min_size(vec2(50.0, 18.0)),
                                                       )
                                                       .on_hover_text(Self::tr_lang(language, "Copy step code to clipboard.", "Copy step code to clipboard."))
                                                       .clicked()
@@ -24085,161 +24011,6 @@ mod tests {
                 }
             }
             assert_eq!(is_inside_loop[step_index], inside, "Mismatch at step {}", step_index);
-        }
-    }
-
-    #[test]
-    fn test_macro_group_and_preset_header_columns_aligned() {
-        // Group Header right controls (right-to-left):
-        // inset: 8.0px (matches preset card frame inner margin)
-        // Col 1: Trash (36.0)
-        // spacing: 4.0
-        // Col 2: Paste (28.0)
-        // spacing: 4.0
-        // Col 3: Copy (28.0)
-        // spacing: 4.0
-        // Col 4: Folder (30.0) + spacing (4.0) + Add Preset (30.0) = 64.0
-        // spacing: 4.0
-        // Col 5: Show/Hide (56.0)
-        // spacing: 4.0
-        // Col 6: Checkbox (36.0)
-        let group_col4_width = 30.0 + 4.0 + 30.0;
-        let preset_col4_width = 64.0;
-        assert_eq!(group_col4_width, preset_col4_width, "Column 4 widths must match");
-
-        let spacing = 4.0;
-        let group_cluster_width = 36.0 + spacing + 28.0 + spacing + 28.0 + spacing + group_col4_width + spacing + 56.0 + spacing + 36.0;
-        let preset_cluster_width = 36.0 + spacing + 28.0 + spacing + 28.0 + spacing + preset_col4_width + spacing + 56.0 + spacing + 36.0;
-        assert_eq!(group_cluster_width, preset_cluster_width, "Total cluster widths must match");
-        assert_eq!(group_cluster_width, 268.0);
-    }
-
-    #[test]
-    fn test_egui_actual_rendered_rects() {
-        use eframe::egui::{self, vec2, Button};
-        let ctx = egui::Context::default();
-        crate::ui::theme::configure_fonts(&ctx, false);
-
-        for test_width in [550.0, 650.0, 750.0, 900.0, 1200.0] {
-            let mut raw_input = egui::RawInput::default();
-            raw_input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(test_width, 600.0)));
-            let _ = ctx.run(raw_input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    let mut group_rects = Vec::new();
-                    let mut preset_rects = Vec::new();
-
-                    crate::ui::CrosshairApp::show_preset_card(ui, true, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("Group Name");
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.spacing_mut().item_spacing.x = 4.0;
-                                        ui.add_space(7.0);
-                                        // Col 1: Trash
-                                        let r1 = crate::ui::CrosshairApp::sound_style_remove_button(ui);
-                                        group_rects.push(("Trash", r1.rect));
-                                        // Col 2: Paste
-                                        let r2 = ui.add_enabled_ui(true, |ui| {
-                                            ui.add_sized(
-                                                [28.0, 24.0],
-                                                Button::new(crate::ui::CrosshairApp::material_icon_text(0xe14f, 15.0)),
-                                            )
-                                        }).inner;
-                                        group_rects.push(("Paste", r2.rect));
-                                        // Col 3: Copy
-                                        let r3 = ui.add_sized(
-                                            [28.0, 24.0],
-                                            Button::new(crate::ui::CrosshairApp::material_icon_text(0xe14d, 15.0)),
-                                        );
-                                        group_rects.push(("Copy", r3.rect));
-                                        // Col 4: Folder (30x24) + Add (30x24)
-                                        let r4_1 = ui.add_sized(
-                                            [30.0, 24.0],
-                                            Button::new(crate::ui::CrosshairApp::folder_icon_text(false, 16.0)),
-                                        );
-                                        let r4_2 = ui.add_sized(
-                                            [30.0, 24.0],
-                                            Button::new(crate::ui::CrosshairApp::material_icon_text(0xe145, 16.0)),
-                                        );
-                                        group_rects.push(("Col4", r4_1.rect.union(r4_2.rect)));
-                                        // Col 5: Show/Hide (56x24)
-                                        let r5 = crate::ui::CrosshairApp::sized_button(ui, 56.0, "Hide");
-                                        group_rects.push(("Hide", r5.rect));
-                                        // Col 6: Checkbox (36x24)
-                                        let r6 = ui.add_sized(
-                                            [36.0, 24.0],
-                                            Button::new(crate::ui::CrosshairApp::material_icon_text(0xe5ca, 18.0)),
-                                        );
-                                        group_rects.push(("Check", r6.rect));
-                                    });
-                                });
-
-                                crate::ui::CrosshairApp::show_macro_preset_card(ui, true, true, false, |ui| {
-                                    ui.horizontal_top(|ui| {
-                                        let available_width = ui.available_width();
-                                        let right_width = 268.0;
-                                        let left_width = (available_width - right_width - 8.0).max(200.0);
-                                        ui.allocate_ui_with_layout(
-                                            vec2(left_width, 0.0),
-                                            egui::Layout::left_to_right(egui::Align::TOP),
-                                            |ui| {
-                                                ui.label("Trigger Space");
-                                            },
-                                        );
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                ui.spacing_mut().item_spacing.x = 4.0;
-                                                // Col 1: Trash
-                                                let r1 = crate::ui::CrosshairApp::sound_style_remove_button(ui);
-                                                preset_rects.push(("Trash", r1.rect));
-                                                // Col 2: Paste
-                                                let r2 = ui.add_enabled_ui(true, |ui| {
-                                                    ui.add_sized(
-                                                        [28.0, 24.0],
-                                                        Button::new(crate::ui::CrosshairApp::material_icon_text(0xe14f, 15.0)),
-                                                    )
-                                                }).inner;
-                                                preset_rects.push(("Paste", r2.rect));
-                                                // Col 3: Copy
-                                                let r3 = ui.add_sized(
-                                                    [28.0, 24.0],
-                                                    Button::new(crate::ui::CrosshairApp::material_icon_text(0xe14d, 15.0)),
-                                                );
-                                                preset_rects.push(("Copy", r3.rect));
-                                                // Col 4: Capture (64x24)
-                                                let r4 = ui.add_sized([64.0, 24.0], Button::new("Capture"));
-                                                preset_rects.push(("Col4", r4.rect));
-                                                // Col 5: Show/Hide (56x24)
-                                                let r5 = crate::ui::CrosshairApp::sized_button(ui, 56.0, "Show");
-                                                preset_rects.push(("Hide", r5.rect));
-                                                // Col 6: Checkbox (36x24)
-                                                let r6 = ui.add_sized(
-                                                    [36.0, 24.0],
-                                                    Button::new(crate::ui::CrosshairApp::material_icon_text(0xe5ca, 18.0)),
-                                                );
-                                                preset_rects.push(("Check", r6.rect));
-                                            },
-                                        );
-                                    });
-                                });
-                            });
-                        });
-                    });
-
-                    for (name, gr) in &group_rects {
-                        let pr = preset_rects.iter().find(|(pn, _)| pn == name).unwrap().1;
-                        let diff_min = (gr.min.x - pr.min.x).abs();
-                        let diff_max = (gr.max.x - pr.max.x).abs();
-                        assert!(
-                            diff_min < 0.01 && diff_max < 0.01,
-                            "Width {}: Col {} misaligned! Group: [{:.1}, {:.1}], Preset: [{:.1}, {:.1}]",
-                            test_width, name, gr.min.x, gr.max.x, pr.min.x, pr.max.x
-                        );
-                    }
-                });
-            });
         }
     }
 }
