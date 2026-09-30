@@ -524,7 +524,7 @@ pub struct MemoryPointerEntry {
     pub app_name: String,
     pub module: String,
     pub module_offset: usize,
-    pub offsets: Vec<usize>,
+    pub offsets: Vec<isize>,
     pub value_type: String,
     #[serde(default)]
     pub absolute_address: Option<usize>,

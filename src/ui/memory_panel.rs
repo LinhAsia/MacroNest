@@ -164,7 +164,7 @@ struct SavedMemoryAddress {
 struct PointerSpec {
     base: usize,
     module: Option<(String, usize)>,
-    offsets: Vec<usize>,
+    offsets: Vec<isize>,
 }
 
 #[derive(Clone)]
@@ -9384,7 +9384,7 @@ impl CrosshairApp {
             .map(|path| PointerSpec {
                 base: 0,
                 module: Some((path.module.clone(), path.module_offset)),
-                offsets: path.offsets.clone(),
+                offsets: path.offsets.iter().map(|&o| o as isize).collect(),
             });
         let address = pointer
             .as_ref()
@@ -11694,7 +11694,7 @@ impl CrosshairApp {
                                         let pointer = PointerSpec {
                                             base,
                                             module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
-                                            offsets: candidate.path.offsets.clone(),
+                                            offsets: candidate.path.offsets.iter().map(|&o| o as isize).collect(),
                                         };
                                         candidate.resolved_address = resolve_memory_address(pid, base, Some(&pointer)).ok();
                                     } else {
@@ -12189,7 +12189,7 @@ impl CrosshairApp {
                 let pointer = PointerSpec {
                     base,
                     module: Some((path.module.clone(), path.module_offset)),
-                    offsets: path.offsets,
+                    offsets: path.offsets.into_iter().map(|o| o as isize).collect(),
                 };
                 if let Ok(address) = resolve_memory_address(pid, base, Some(&pointer)) {
                     let orig_target = dialog.candidate_targets.get(&index).copied();
@@ -12590,7 +12590,7 @@ impl CrosshairApp {
                         let pointer = PointerSpec {
                             base,
                             module: Some((path.module.clone(), path.module_offset)),
-                            offsets: path.offsets.clone(),
+                            offsets: path.offsets.iter().map(|&o| o as isize).collect(),
                         };
                         resolve_memory_address(pid, base, Some(&pointer)).ok()
                     } else {
@@ -12746,7 +12746,7 @@ impl CrosshairApp {
                             let pointer = PointerSpec {
                                 base,
                                 module: Some((path.module.clone(), path.module_offset)),
-                                offsets: path.offsets.clone(),
+                                offsets: path.offsets.iter().map(|&o| o as isize).collect(),
                             };
                             resolve_memory_address(pid, base, Some(&pointer)).ok()
                         }),
@@ -12888,7 +12888,7 @@ impl CrosshairApp {
                                     path.module.clone(),
                                     path.module_offset,
                                 )),
-                                offsets: path.offsets.clone(),
+                                offsets: path.offsets.iter().map(|&o| o as isize).collect(),
                             },
                         ));
                         ui.close();
@@ -13216,7 +13216,7 @@ impl CrosshairApp {
             let pointer = PointerSpec {
                 base,
                 module: Some((candidate.path.module.clone(), candidate.path.module_offset)),
-                offsets: candidate.path.offsets.clone(),
+                offsets: candidate.path.offsets.iter().map(|&o| o as isize).collect(),
             };
             let address = candidate
                 .resolved_address
@@ -17523,7 +17523,7 @@ impl CrosshairApp {
                 .offsets
                 .split([',', ';', ' '])
                 .filter(|part| !part.trim().is_empty())
-                .map(parse_hex_offset)
+                .map(parse_signed_hex_offset_expr)
                 .collect::<Option<Vec<_>>>();
             let Some(offsets) = offsets else {
                 self.memory_panel.status = "Invalid pointer offsets".to_owned();
@@ -21689,7 +21689,7 @@ fn resolved_entity_candidate_address(pid: u32, dialog: &EntityListDialog) -> Res
         let pointer = PointerSpec {
             base: 0,
             module: Some((path.module.clone(), path.module_offset)),
-            offsets: path.offsets.clone(),
+            offsets: path.offsets.iter().map(|&o| o as isize).collect(),
         };
         return resolve_memory_address(pid, 0, Some(&pointer)).map_err(|error| error.to_string());
     }
@@ -21714,16 +21714,16 @@ fn resolve_entity_expression(
             .split([',', ';'])
             .filter(|offset| !offset.trim().is_empty())
             .map(|offset| {
-                parse_hex_offset_expr(offset).ok_or_else(|| format!("invalid pointer offset: {offset}"))
+                parse_signed_hex_offset_expr(offset).ok_or_else(|| format!("invalid pointer offset: {offset}"))
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<isize>, _>>()?;
         if !trailing.is_empty() {
             let compact = trailing.replace([' ', '_'], "");
             if !compact.starts_with(['+', '-']) {
                 return Err("invalid trailing offset math".to_owned());
             }
             let last = offsets.last_mut().ok_or_else(|| "empty pointer offsets".to_owned())?;
-            *last = apply_memory_address_offsets(*last, &compact, 0)
+            *last = apply_signed_memory_address_offsets(*last, &compact, 0)
                 .ok_or_else(|| "failed to apply trailing offset math".to_owned())?;
         }
         (expression[..open].trim(), offsets)
@@ -21752,7 +21752,7 @@ fn resolve_entity_expression(
             _ => return Err("unsupported pointer width".to_owned()),
         };
         address = pointer
-            .checked_add(offset)
+            .checked_add_signed(offset)
             .ok_or_else(|| "pointer chain overflow".to_owned())?;
     }
     Ok(address)
@@ -21815,14 +21815,23 @@ fn entity_root_priority(module: &str) -> u8 {
 }
 
 fn format_hex_offsets(out: &mut String, offsets: &[usize]) {
+    let signed: Vec<isize> = offsets.iter().map(|&o| o as isize).collect();
+    format_hex_offsets_signed(out, &signed);
+}
+
+fn format_hex_offsets_signed(out: &mut String, offsets: &[isize]) {
     if !offsets.is_empty() {
         use std::fmt::Write;
         out.push_str(" [");
-        for (i, offset) in offsets.iter().enumerate() {
+        for (i, &offset) in offsets.iter().enumerate() {
             if i > 0 {
                 out.push_str(", ");
             }
-            let _ = write!(out, "{offset:X}");
+            if offset < 0 {
+                let _ = write!(out, "-{:X}", -offset);
+            } else {
+                let _ = write!(out, "{offset:X}");
+            }
         }
         out.push(']');
     }
@@ -21974,7 +21983,7 @@ fn format_pointer_expression(pointer: &PointerSpec) -> String {
         || format_prefixed_memory_address(pointer.base),
         |(module, offset)| format!("{module}+{offset:X}"),
     );
-    format_hex_offsets(&mut root, &pointer.offsets);
+    format_hex_offsets_signed(&mut root, &pointer.offsets);
     root
 }
 
@@ -22943,6 +22952,52 @@ fn parse_hex_offset_expr(text: &str) -> Option<usize> {
     }
 }
 
+fn apply_signed_memory_address_offsets(
+    mut address: isize,
+    compact: &str,
+    mut position: usize,
+) -> Option<isize> {
+    while position < compact.len() {
+        let operation = compact.as_bytes()[position];
+        let start = position + 1;
+        position = compact[start..]
+            .char_indices()
+            .find(|(_, character)| matches!(character, '+' | '-'))
+            .map_or(compact.len(), |(next, _)| start + next);
+        let offset = parse_hex_offset(&compact[start..position])? as isize;
+        address = if operation == b'+' {
+            address.checked_add(offset)?
+        } else {
+            address.checked_sub(offset)?
+        };
+    }
+    Some(address)
+}
+
+fn parse_signed_hex_offset_expr(text: &str) -> Option<isize> {
+    let trimmed = text.trim();
+    let compact: std::borrow::Cow<'_, str> =
+        if trimmed.as_bytes().iter().any(|&b| b == b' ' || b == b'_') {
+            std::borrow::Cow::Owned(trimmed.replace([' ', '_'], ""))
+        } else {
+            std::borrow::Cow::Borrowed(trimmed)
+        };
+    let operator_pos = compact
+        .char_indices()
+        .skip(1)
+        .find(|(_, c)| matches!(c, '+' | '-'))
+        .map(|(p, _)| p);
+    let base_str = match operator_pos {
+        Some(pos) => &compact[..pos],
+        None => &compact,
+    };
+    let base = parse_signed_hex_offset(base_str)?;
+    match operator_pos {
+        Some(pos) => apply_signed_memory_address_offsets(base, &compact, pos),
+        None => Some(base),
+    }
+}
+
 fn extract_memory_address_entries(text: &str) -> Vec<String> {
     let mut entries = Vec::new();
     let chars: Vec<char> = text.chars().collect();
@@ -23048,7 +23103,7 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
         let mut offsets = cleaned_offsets
             .split(delimiter)
             .filter(|part| !part.trim().is_empty())
-            .map(parse_hex_offset_expr)
+            .map(parse_signed_hex_offset_expr)
             .collect::<Option<Vec<_>>>()?;
         if offsets.is_empty() {
             return None;
@@ -23059,7 +23114,7 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
                 return None;
             }
             let last = offsets.last_mut()?;
-            *last = apply_memory_address_offsets(*last, &compact, 0)?;
+            *last = apply_signed_memory_address_offsets(*last, &compact, 0)?;
         }
 
         let root = text[..offsets_start].trim();
@@ -23099,7 +23154,7 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
     }
 }
 
-fn parse_pointer_expression(text: &str) -> Option<(String, usize, Vec<usize>)> {
+fn parse_pointer_expression(text: &str) -> Option<(String, usize, Vec<isize>)> {
     let spec = parse_pointer_spec(text)?;
     let (module, offset) = spec.module?;
     if spec.offsets.is_empty() {
@@ -23151,9 +23206,13 @@ fn parse_hex_offset(text: &str) -> Option<usize> {
 
 fn parse_signed_hex_offset(text: &str) -> Option<isize> {
     let text = text.trim();
-    let (negative, digits) = text
-        .strip_prefix('-')
-        .map_or((false, text), |digits| (true, digits));
+    let (negative, digits) = if let Some(stripped) = text.strip_prefix('-') {
+        (true, stripped)
+    } else if let Some(stripped) = text.strip_prefix('+') {
+        (false, stripped)
+    } else {
+        (false, text)
+    };
     let digits = digits
         .strip_prefix("0x")
         .or_else(|| digits.strip_prefix("0X"))
@@ -23704,7 +23763,7 @@ fn resolve_memory_address(
                 "null pointer in chain",
             ));
         }
-        address = next.wrapping_add(*offset);
+        address = next.wrapping_add_signed(*offset);
     }
     Ok(address)
 }
@@ -24354,6 +24413,24 @@ mod tests {
         // Space-separated offsets within brackets
         let spec_space = parse_pointer_spec("neox_engine.dll+87BAB10 [50 21D0 1034]").unwrap();
         assert_eq!(spec_space.offsets, vec![0x50, 0x21D0, 0x1034]);
+
+        // Signed / negative offsets
+        assert_eq!(
+            parse_pointer_expression("neox_engine.dll+9E9CD50 [18, -1720]"),
+            Some((
+                "neox_engine.dll".to_owned(),
+                0x9E9CD50,
+                vec![0x18, -0x1720],
+            ))
+        );
+        assert_eq!(
+            parse_pointer_expression("neox_engine.dll+9E9CD50 [18, -0x1720]"),
+            Some((
+                "neox_engine.dll".to_owned(),
+                0x9E9CD50,
+                vec![0x18, -0x1720],
+            ))
+        );
     }
 
     #[test]

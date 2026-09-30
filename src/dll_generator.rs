@@ -50,7 +50,7 @@ pub struct DllMemoryEntry {
     pub enabled: bool,
     pub name: String,
     pub address: String, // Hex string "0x1428ABC10" or "game.exe+0x1234"
-    pub offsets: Vec<usize>,
+    pub offsets: Vec<isize>,
     pub value_type: DllValueType,
     pub value_to_write: String,
     pub mode: DllPatchMode,
@@ -105,7 +105,7 @@ pub fn generate_c_source(config: &DllProjectConfig) -> String {
 
     source.push_str("// Helper: Resolve pointer chain inside target process memory space\n");
     source.push_str(
-        "uintptr_t ResolvePointer(uintptr_t base_addr, const std::vector<size_t>& offsets) {\n",
+        "uintptr_t ResolvePointer(uintptr_t base_addr, const std::vector<ptrdiff_t>& offsets) {\n",
     );
     source.push_str("    uintptr_t addr = base_addr;\n");
     source.push_str("    for (size_t i = 0; i < offsets.size(); ++i) {\n");
@@ -200,7 +200,11 @@ pub fn generate_c_source(config: &DllProjectConfig) -> String {
                 if oi > 0 {
                     let _ = write!(source, ", ");
                 }
-                let _ = write!(source, "0x{o:X}");
+                if *o < 0 {
+                    let _ = write!(source, "-0x{:X}", -*o);
+                } else {
+                    let _ = write!(source, "0x{o:X}");
+                }
             }
             let _ = writeln!(source, "}});");
         }

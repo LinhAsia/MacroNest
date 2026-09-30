@@ -32683,12 +32683,11 @@ mod windows_overlay {
             if let Some(address) = entry.absolute_address {
                 return Some((pid, address));
             }
-            let offsets: Vec<isize> = entry.offsets.iter().map(|&o| o as isize).collect();
             return resolve_memory_pointer_entry(
                 pid,
                 &entry.module,
                 entry.module_offset,
-                &offsets,
+                &entry.offsets,
             )
             .map(|address| (pid, address));
         }
