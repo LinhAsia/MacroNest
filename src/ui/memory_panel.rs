@@ -239,6 +239,7 @@ struct StablePointerDialog {
     filter_value: String,
     filter_status: StablePointerStatusFilter,
     exe_only: bool,
+    show_target_address: bool,
     show_resolved: bool,
     last_live_refresh: Instant,
     validation_rx: Option<Receiver<StablePointerValidationResult>>,
@@ -1937,6 +1938,15 @@ impl CrosshairApp {
         let pinned = !self.memory_panel.unpinned_memory_popups.contains(id);
         let mut open = true;
         let mut toggle_pin = false;
+        let (show_target, show_resolved) = if let Some(dialog) = &self.memory_panel.stable_pointer_dialog {
+            (dialog.show_target_address, dialog.show_resolved)
+        } else {
+            (false, false)
+        };
+        let stable_pointer_width = 717.0
+            + (if show_target { 145.0 } else { 0.0 })
+            + (if show_resolved { 145.0 } else { 0.0 })
+            + 26.0;
         if pinned {
             let scale = self.state.memory_pinned_ui_scale;
             let inner_width = if self.memory_panel.show_code_list_address {
@@ -1946,11 +1956,15 @@ impl CrosshairApp {
             };
             let inner_size = if id == "memory-code-list-host" {
                 vec2(inner_width, 520.0)
+            } else if id == "memory-stable-pointer-host" {
+                vec2(stable_pointer_width, 620.0)
             } else {
                 vec2(860.0, 620.0)
             };
             let min_inner_size = if id == "memory-code-list-host" {
                 vec2(inner_width, 240.0)
+            } else if id == "memory-stable-pointer-host" {
+                vec2(stable_pointer_width, 280.0)
             } else {
                 vec2(480.0, 280.0)
             };
@@ -1970,6 +1984,14 @@ impl CrosshairApp {
                     let applied: bool = ctx.data(|d| d.get_temp(compact_key)).unwrap_or(false);
                     if !applied {
                         ctx.data_mut(|d| d.insert_temp(compact_key, true));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(inner_size * scale));
+                    }
+                }
+                if id == "memory-stable-pointer-host" {
+                    let stable_key = egui::Id::new((id, "stable_size_v3", show_target, show_resolved));
+                    let applied: bool = ctx.data(|d| d.get_temp(stable_key)).unwrap_or(false);
+                    if !applied {
+                        ctx.data_mut(|d| d.insert_temp(stable_key, true));
                         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(inner_size * scale));
                     }
                 }
@@ -2003,18 +2025,28 @@ impl CrosshairApp {
             } else {
                 612.0
             };
-            let default_size = if id == "memory-code-list-host" {
-                vec2(inner_width, 520.0)
+            let (default_size, min_size) = if id == "memory-code-list-host" {
+                (vec2(inner_width, 520.0), vec2(inner_width, 240.0))
+            } else if id == "memory-stable-pointer-host" {
+                (vec2(stable_pointer_width, 620.0), vec2(stable_pointer_width, 280.0))
             } else {
-                vec2(640.0, 440.0)
+                (vec2(640.0, 440.0), vec2(380.0, 240.0))
             };
-            egui::Window::new(title)
+            let mut window = egui::Window::new(title)
                 .id(egui::Id::new(id))
                 .default_size(default_size)
-                .min_size(vec2(inner_width, 240.0))
+                .min_size(min_size)
                 .collapsible(false)
-                .open(&mut open)
-                .show(ctx, |ui| {
+                .open(&mut open);
+            if id == "memory-stable-pointer-host" {
+                let unpinned_key = egui::Id::new((id, "unpinned_size_v3", show_target, show_resolved));
+                let applied: bool = ctx.data(|d| d.get_temp(unpinned_key)).unwrap_or(false);
+                if !applied {
+                    ctx.data_mut(|d| d.insert_temp(unpinned_key, true));
+                    window = window.fixed_size(default_size);
+                }
+            }
+            window.show(ctx, |ui| {
                     ui.horizontal(|ui| {
                         let pin_label = self.tr("Pin", "Ghim");
                         if ui
@@ -8476,6 +8508,7 @@ impl CrosshairApp {
                 filter_value: String::new(),
                 filter_status: StablePointerStatusFilter::All,
                 exe_only: false,
+                show_target_address: false,
                 show_resolved: false,
                 last_live_refresh: Instant::now(),
                 validation_rx: None,
@@ -8616,6 +8649,7 @@ impl CrosshairApp {
                     filter_value: String::new(),
                     filter_status: StablePointerStatusFilter::All,
                     exe_only: false,
+                    show_target_address: false,
                     show_resolved: false,
                     last_live_refresh: Instant::now(),
                     validation_rx: None,
@@ -8698,6 +8732,7 @@ impl CrosshairApp {
             filter_value: String::new(),
             filter_status: StablePointerStatusFilter::All,
             exe_only: false,
+            show_target_address: false,
             show_resolved: false,
             last_live_refresh: Instant::now(),
             validation_rx: None,
@@ -11115,7 +11150,7 @@ impl CrosshairApp {
             });
         } else {
             ui.group(|ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Levels:");
                     ui.add(egui::DragValue::new(&mut dialog.limits.max_depth).range(1..=8));
                     ui.label("Max offset:");
@@ -11149,18 +11184,44 @@ impl CrosshairApp {
                     {
                         rescan_requested = true;
                     }
+
+                    ui.separator();
+                    let cb_label = if self.state.ui_language == UiLanguage::Vietnamese {
+                        "Khóa offset cuối"
+                    } else {
+                        "Must end with"
+                    };
+                    ui.checkbox(&mut dialog.must_end_with_enabled, RichText::new(cb_label).strong())
+                        .on_hover_text(if self.state.ui_language == UiLanguage::Vietnamese {
+                            "Chỉ quét các pointer kết thúc bằng các offset này (ví dụ: 0, 58) giống Cheat Engine để tìm Base mới cực nhanh sau khi game update."
+                        } else {
+                            "Only match pointers that end with these specific offsets (e.g. 0, 58) like Cheat Engine to quickly recover Base after game update."
+                        });
+
+                    if dialog.must_end_with_enabled {
+                        ui.label("Offsets:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut dialog.must_end_with_offsets)
+                                .desired_width(100.0)
+                                .hint_text("0, 58"),
+                        );
+
+                        let order_label = if dialog.must_end_order_ce {
+                            if self.state.ui_language == UiLanguage::Vietnamese { "Thứ tự CE" } else { "CE order" }
+                        } else {
+                            if self.state.ui_language == UiLanguage::Vietnamese { "Thứ tự deref" } else { "Deref order" }
+                        };
+                        if ui.button(RichText::new(order_label).small()).on_hover_text(if self.state.ui_language == UiLanguage::Vietnamese {
+                            "Chuyển đổi giữa thứ tự Cheat Engine (Offset 0 là offset cuối trỏ vào target) và thứ tự deref thông thường."
+                        } else {
+                            "Toggle between Cheat Engine order (Offset 0 = final offset to target) and dereference order."
+                        }).clicked() {
+                            dialog.must_end_order_ce = !dialog.must_end_order_ce;
+                        }
+                    }
                 });
 
-                render_must_end_with_controls(
-                    ui,
-                    &mut dialog.must_end_with_enabled,
-                    &mut dialog.must_end_with_offsets,
-                    &mut dialog.must_end_order_ce,
-                    dialog.source_addresses.first().copied(),
-                    self.state.ui_language,
-                );
-
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.checkbox(
                         &mut dialog.strict_multi_scan,
                         RichText::new(if self.state.ui_language == UiLanguage::Vietnamese {
@@ -11273,7 +11334,8 @@ impl CrosshairApp {
             };
 
             let is_vietnamese = self.state.ui_language == UiLanguage::Vietnamese;
-            ui.horizontal(|ui| {
+            let single_target = dialog.source_addresses.first().copied();
+            ui.horizontal_wrapped(|ui| {
                 let btn = ui
                     .add_enabled(
                         can_validate,
@@ -11385,80 +11447,84 @@ impl CrosshairApp {
                 {
                     add = Some(dialog.selected.iter().copied().collect());
                 }
-                    ui.separator();
-                    let filter_resp = ui.add(
-                        egui::TextEdit::singleline(&mut dialog.filter)
-                            .desired_width(130.0)
-                            .hint_text(RichText::new("Filter module, path...").weak()),
-                    );
-                    Self::apply_vietnamese_input_if_changed(
-                        &filter_resp,
-                        self.state.vietnamese_input_enabled,
-                        self.state.vietnamese_input_mode,
-                        &mut dialog.filter,
-                    );
-                    let val_filter_resp = ui.add(
-                        egui::TextEdit::singleline(&mut dialog.filter_value)
-                            .desired_width(105.0)
-                            .hint_text(RichText::new("Search value...").weak()),
-                    );
-                    Self::apply_vietnamese_input_if_changed(
-                        &val_filter_resp,
-                        self.state.vietnamese_input_enabled,
-                        self.state.vietnamese_input_mode,
-                        &mut dialog.filter_value,
-                    );
-                    egui::ComboBox::from_id_salt("stable-pointer-status-filter")
-                        .width(85.0)
-                        .selected_text(match dialog.filter_status {
-                            StablePointerStatusFilter::All => "All",
-                            StablePointerStatusFilter::VerifiedOnly => "Verified",
-                            StablePointerStatusFilter::ValueChangedOnly => "Changed",
-                            StablePointerStatusFilter::BrokenOnly => "Broken",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::All, "All");
-                            ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::VerifiedOnly, "Verified");
-                            ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::ValueChangedOnly, "Changed");
-                            ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::BrokenOnly, "Broken");
-                        });
-                    ui.checkbox(&mut dialog.exe_only, "EXE only");
-                    ui.checkbox(&mut dialog.show_resolved, "Show resolved");
-                    ui.checkbox(
-                        &mut dialog.exact_search,
-                        if is_vietnamese { "Khớp chính xác" } else { "Exact match" },
-                    )
-                    .on_hover_text(if is_vietnamese {
-                        "Khớp chính xác giá trị, địa chỉ, module (ví dụ tìm 12 sẽ không hiện 123123)"
-                    } else {
-                        "Exact match for value, address, module (e.g. searching 12 won't match 123123)"
-                    });
-                });
-                ui.separator();
-                const TARGET_WIDTH: f32 = 145.0;
-                const STATUS_WIDTH: f32 = 108.0;
-                const ROOT_WIDTH: f32 = 195.0;
-                const OFFSETS_WIDTH: f32 = 170.0;
-                const LEVEL_WIDTH: f32 = 60.0;
-                const ADDRESS_WIDTH: f32 = 145.0;
-                const VALUE_WIDTH: f32 = 92.0;
-                const CURRENT_WIDTH: f32 = 92.0;
-                let single_target = dialog.source_addresses.first().copied();
-                let show_target_column = single_target.is_some_and(|target| {
-                    dialog
-                        .source_addresses
-                        .iter()
-                        .skip(1)
-                        .any(|other| *other != target)
-                });
-                if !show_target_column {
+
+                if !dialog.show_target_address {
                     if let Some(target) = single_target {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Target Address:").strong());
-                            ui.monospace(format_prefixed_memory_address(target));
-                        });
+                        ui.separator();
+                        ui.label(RichText::new("Target:").strong());
+                        ui.monospace(format_prefixed_memory_address(target));
                     }
                 }
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                let filter_resp = ui.add(
+                    egui::TextEdit::singleline(&mut dialog.filter)
+                        .desired_width(110.0)
+                        .hint_text(RichText::new("Filter module...").weak()),
+                );
+                Self::apply_vietnamese_input_if_changed(
+                    &filter_resp,
+                    self.state.vietnamese_input_enabled,
+                    self.state.vietnamese_input_mode,
+                    &mut dialog.filter,
+                );
+                let val_filter_resp = ui.add(
+                    egui::TextEdit::singleline(&mut dialog.filter_value)
+                        .desired_width(90.0)
+                        .hint_text(RichText::new("Search val...").weak()),
+                );
+                Self::apply_vietnamese_input_if_changed(
+                    &val_filter_resp,
+                    self.state.vietnamese_input_enabled,
+                    self.state.vietnamese_input_mode,
+                    &mut dialog.filter_value,
+                );
+                egui::ComboBox::from_id_salt("stable-pointer-status-filter")
+                    .width(80.0)
+                    .selected_text(match dialog.filter_status {
+                        StablePointerStatusFilter::All => "All",
+                        StablePointerStatusFilter::VerifiedOnly => "Verified",
+                        StablePointerStatusFilter::ValueChangedOnly => "Changed",
+                        StablePointerStatusFilter::BrokenOnly => "Broken",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::All, "All");
+                        ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::VerifiedOnly, "Verified");
+                        ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::ValueChangedOnly, "Changed");
+                        ui.selectable_value(&mut dialog.filter_status, StablePointerStatusFilter::BrokenOnly, "Broken");
+                    });
+                ui.checkbox(&mut dialog.exe_only, "EXE only");
+                let target_cb_label = if is_vietnamese { "Hiện Target" } else { "Target" };
+                if ui.checkbox(&mut dialog.show_target_address, target_cb_label)
+                    .on_hover_text(if is_vietnamese { "Bật/tắt hiển thị cột Target Address trong bảng" } else { "Show/hide Target Address column in table" })
+                    .changed()
+                {
+                    ctx.request_repaint();
+                }
+                if ui.checkbox(&mut dialog.show_resolved, "Resolved").changed() {
+                    ctx.request_repaint();
+                }
+                ui.checkbox(
+                    &mut dialog.exact_search,
+                    if is_vietnamese { "Khớp chính xác" } else { "Exact" },
+                )
+                .on_hover_text(if is_vietnamese {
+                    "Khớp chính xác giá trị, địa chỉ, module (ví dụ tìm 12 sẽ không hiện 123123)"
+                } else {
+                    "Exact match for value, address, module (e.g. searching 12 won't match 123123)"
+                });
+            });
+            ui.separator();
+            const TARGET_WIDTH: f32 = 145.0;
+            const STATUS_WIDTH: f32 = 108.0;
+            const ROOT_WIDTH: f32 = 195.0;
+            const OFFSETS_WIDTH: f32 = 170.0;
+            const LEVEL_WIDTH: f32 = 60.0;
+            const ADDRESS_WIDTH: f32 = 145.0;
+            const VALUE_WIDTH: f32 = 92.0;
+            const CURRENT_WIDTH: f32 = 92.0;
+            let show_target_column = dialog.show_target_address;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     if show_target_column {
@@ -15699,16 +15765,20 @@ impl CrosshairApp {
         if dialog.pinned {
             let scale = self.state.memory_pinned_ui_scale;
             let fit_columns = dialog.fit_memory_columns;
+            let target_view_width = match kind {
+                MemoryViewKind::Bytes => three_column_width,
+                MemoryViewKind::Structure => 666.0,
+            };
             let mut builder = egui::ViewportBuilder::default()
                 .with_title(&title)
                 .with_position(egui::pos2(0.0, 0.0))
-                .with_min_inner_size(vec2(420.0, 360.0) * scale)
+                .with_min_inner_size(vec2(target_view_width.min(380.0), 360.0) * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_always_on_top();
             if fit_columns {
-                builder = builder.with_inner_size(vec2(three_column_width, 820.0) * scale);
+                builder = builder.with_inner_size(vec2(target_view_width, 820.0) * scale);
             }
             let mut unpin = false;
             ctx.show_viewport_immediate(
@@ -15716,6 +15786,9 @@ impl CrosshairApp {
                 builder,
                 |ctx, _| {
                     Self::sync_pinned_viewport_scale(ctx, "memory-view-pinned-struct", scale);
+                    if fit_columns {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(target_view_width, 820.0) * scale));
+                    }
                     if !ctx.wants_keyboard_input() {
                         if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
                             nav_delta = -1;
@@ -15772,10 +15845,14 @@ impl CrosshairApp {
             }
             return;
         }
+        let unpinned_default_width = match kind {
+            MemoryViewKind::Bytes => 680.0,
+            MemoryViewKind::Structure => 666.0,
+        };
         egui::Window::new(&title)
             .id(egui::Id::new("memory-view-main"))
-            .default_size(vec2(680.0, 440.0))
-            .min_size(vec2(380.0, 240.0))
+            .default_size(vec2(unpinned_default_width, 440.0))
+            .min_size(vec2(unpinned_default_width.min(380.0), 240.0))
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
@@ -16017,7 +16094,7 @@ impl CrosshairApp {
                 dialog.scroll_offset = 0;
                 dialog.reset_memory_scroll = true;
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new("Stride").small().strong());
                 ui.add(
                     egui::TextEdit::singleline(&mut dialog.stride_address_a)
@@ -16116,8 +16193,8 @@ impl CrosshairApp {
                         active.elements = dialog.elements.clone();
                     }
                 }
-                // Top Toolbar: single line layout without left sidebar
-                ui.horizontal(|ui| {
+                // Top Toolbar: wrapped layout without left sidebar
+                ui.horizontal_wrapped(|ui| {
                     if !dialog.history.is_empty() {
                         if ui
                             .small_button(Self::tr_lang(language, "◀ Back", "◀ Quay lại"))
@@ -16208,10 +16285,10 @@ impl CrosshairApp {
                     }
 
                     ui.separator();
-                    ui.label(RichText::new("Base Address:").small().strong());
+                    ui.label(RichText::new("Base:").small().strong());
                     let back_step = parse_hex_offset(&dialog.structure_back_step);
                     if ui
-                        .add_enabled(back_step.is_some(), egui::Button::new("-"))
+                        .add_enabled(back_step.is_some(), egui::Button::new("-").small())
                         .on_hover_text("Move the base address backward by the hexadecimal step")
                         .clicked()
                     {
@@ -16223,24 +16300,23 @@ impl CrosshairApp {
                     ui.label("0x");
                     ui.add(
                         egui::TextEdit::singleline(&mut dialog.structure_back_step)
-                            .desired_width(48.0)
+                            .desired_width(40.0)
                             .char_limit(12)
                             .hint_text("10"),
                     )
                     .on_hover_text("Backward step (hex), for example 48");
 
-                    ui.separator();
                     ui.label("0x");
                     ui.add(
                         egui::TextEdit::singleline(&mut dialog.structure_forward_step)
-                            .desired_width(48.0)
+                            .desired_width(40.0)
                             .char_limit(12)
                             .hint_text("10"),
                     )
                     .on_hover_text("Forward step (hex), for example 48");
                     let forward_step = parse_hex_offset(&dialog.structure_forward_step);
                     if ui
-                        .add_enabled(forward_step.is_some(), egui::Button::new("+"))
+                        .add_enabled(forward_step.is_some(), egui::Button::new("+").small())
                         .on_hover_text("Move the base address forward by the hexadecimal step")
                         .clicked()
                     {
@@ -25416,5 +25492,28 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
         assert_eq!(end_bwd, 0x1000);
         assert_eq!(calculate_dump_relative_offset(500, 500, 4, MemoryDumpDirection::Backward), 0);
         assert_eq!(calculate_dump_relative_offset(0, 500, 4, MemoryDumpDirection::Backward), -2000);
+    }
+
+    #[test]
+    fn stable_pointer_and_structure_view_boundaries() {
+        // Find stable pointer base table width:
+        // Status (108) + Root (195) + Offsets (170) + Level (60) + Value (92) + Current (92) = 717
+        let base_table_width = 108.0 + 195.0 + 170.0 + 60.0 + 92.0 + 92.0;
+        assert_eq!(base_table_width, 717.0);
+
+        // Window boundary when show_target and show_resolved are off (default):
+        let default_window_width = base_table_width + 26.0;
+        assert_eq!(default_window_width, 743.0);
+
+        // With target column (145.0):
+        let with_target = default_window_width + 145.0;
+        assert_eq!(with_target, 888.0);
+
+        // Structure view table width:
+        // Arrow (20) + Description (340) + Address:Value (280) = 640
+        let structure_table_width = 20.0 + 340.0 + 280.0;
+        assert_eq!(structure_table_width, 640.0);
+        let structure_window_width = structure_table_width + 26.0;
+        assert_eq!(structure_window_width, 666.0);
     }
 }
