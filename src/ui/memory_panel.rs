@@ -18680,61 +18680,112 @@ impl CrosshairApp {
     }
 
     fn add_manual_memory_address(&mut self) {
-        let Some(pid) = self.memory_panel.process_pid else {
-            self.memory_panel.status = "Select a process".to_owned();
-            return;
-        };
-        let pointer = parse_pointer_spec(&self.memory_panel.manual_address);
-        let (address, pointer) = if let Some(pointer) = pointer {
-            match resolve_memory_address(pid, pointer.base, Some(&pointer)) {
-                Ok(address) => (address, Some(pointer)),
-                Err(error) => {
-                    self.memory_panel.status = format!("Unable to resolve pointer: {error}");
-                    return;
-                }
-            }
-        } else if let Some(address) = parse_memory_address(&self.memory_panel.manual_address) {
-            let pointer = self.resolve_static_module_address(address).map(|(mod_name, mod_off)| PointerSpec {
-                base: 0,
-                module: Some((mod_name, mod_off)),
-                offsets: Vec::new(),
-            });
-            (address, pointer)
-        } else {
+        let entries = extract_memory_address_entries(&self.memory_panel.manual_address);
+        if entries.is_empty() {
             self.memory_panel.status = "Invalid address or pointer expression".to_owned();
             return;
-        };
+        }
+
+        let pid = self.memory_panel.process_pid;
         let value_type = self.memory_panel.value_type;
         let text_encoding = self.memory_panel.text_encoding;
-        let (current, current_text, text_byte_len) = if let Some(encoding) = text_encoding {
-            let byte_len = if encoding == TextEncoding::Utf16 { 64 } else { 32 };
-            let text = read_text_memory(pid, address, byte_len, encoding).ok();
-            (None, text, byte_len)
+        let mut added_count = 0;
+        let mut unresolved_count = 0;
+        let mut syntax_error_count = 0;
+
+        for entry_text in &entries {
+            let pointer = parse_pointer_spec(entry_text);
+            let resolved = if let Some(pointer) = pointer {
+                let address = pid
+                    .and_then(|p| resolve_memory_address(p, pointer.base, Some(&pointer)).ok())
+                    .unwrap_or(0);
+                if address == 0 && pid.is_some() {
+                    unresolved_count += 1;
+                }
+                Some((address, Some(pointer)))
+            } else if let Some(address) = parse_memory_address(entry_text) {
+                let pointer = self.resolve_static_module_address(address).map(|(mod_name, mod_off)| PointerSpec {
+                    base: 0,
+                    module: Some((mod_name, mod_off)),
+                    offsets: Vec::new(),
+                });
+                Some((address, pointer))
+            } else {
+                syntax_error_count += 1;
+                None
+            };
+
+            let Some((address, pointer)) = resolved else {
+                continue;
+            };
+
+            let (current, current_text, text_byte_len) = if let Some(pid) = pid {
+                if address != 0 {
+                    if let Some(encoding) = text_encoding {
+                        let byte_len = if encoding == TextEncoding::Utf16 { 64 } else { 32 };
+                        let text = read_text_memory(pid, address, byte_len, encoding).ok();
+                        (None, text, byte_len)
+                    } else {
+                        let current = read_scan_value(pid, address, value_type).ok();
+                        (current, None, 0)
+                    }
+                } else {
+                    (None, None, 0)
+                }
+            } else {
+                (None, None, 0)
+            };
+
+            let description = pointer
+                .as_ref()
+                .map(format_pointer_expression)
+                .unwrap_or_default();
+            self.memory_panel.saved.push(SavedMemoryAddress {
+                address,
+                value_type: if text_encoding.is_some() { ScanValueType::I8 } else { value_type },
+                current,
+                text_encoding,
+                text_byte_len,
+                current_text,
+                description,
+                group: String::new(),
+                hexadecimal: self.memory_panel.hex,
+                pointer,
+                frozen: None,
+                saved_to_library: false,
+                aob_sample_1: None,
+                aob_pattern: None,
+            });
+            added_count += 1;
+        }
+
+        if added_count > 0 {
+            self.memory_panel.manual_address.clear();
+            let is_vn = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
+            if syntax_error_count == 0 && unresolved_count == 0 {
+                self.memory_panel.status = if is_vn {
+                    format!("Đã thêm {added_count} địa chỉ / pointer")
+                } else {
+                    format!("Added {added_count} address(es) / pointer(s)")
+                };
+            } else if syntax_error_count > 0 {
+                self.memory_panel.status = if is_vn {
+                    format!("Đã thêm {added_count} địa chỉ / pointer ({syntax_error_count} lỗi cú pháp)")
+                } else {
+                    format!("Added {added_count} item(s) ({syntax_error_count} syntax error(s))")
+                };
+            } else {
+                self.memory_panel.status = if is_vn {
+                    format!("Đã thêm {added_count} địa chỉ / pointer ({unresolved_count} chưa resolve được)")
+                } else {
+                    format!("Added {added_count} item(s) ({unresolved_count} unresolvable)")
+                };
+            }
+        } else if syntax_error_count > 0 {
+            self.memory_panel.status = "Invalid address or pointer expression".to_owned();
         } else {
-            let current = read_scan_value(pid, address, value_type).ok();
-            (current, None, 0)
-        };
-        let description = pointer
-            .as_ref()
-            .map(format_pointer_expression)
-            .unwrap_or_default();
-        self.memory_panel.saved.push(SavedMemoryAddress {
-            address,
-            value_type: if text_encoding.is_some() { ScanValueType::I8 } else { value_type },
-            current,
-            text_encoding,
-            text_byte_len,
-            current_text,
-            description,
-            group: String::new(),
-            hexadecimal: self.memory_panel.hex,
-            pointer,
-            frozen: None,
-            saved_to_library: false,
-            aob_sample_1: None,
-            aob_pattern: None,
-        });
-        self.memory_panel.manual_address.clear();
+            self.memory_panel.status = "Unable to add addresses".to_owned();
+        }
     }
 
     fn find_saved_address_by_aob(&mut self, pid: u32, saved_idx: usize, pattern: &str) {
@@ -22892,6 +22943,95 @@ fn parse_hex_offset_expr(text: &str) -> Option<usize> {
     }
 }
 
+fn extract_memory_address_entries(text: &str) -> Vec<String> {
+    let mut entries = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+
+    while i < n {
+        while i < n && (chars[i].is_whitespace() || chars[i] == ',' || chars[i] == ';') {
+            i += 1;
+        }
+        if i >= n {
+            break;
+        }
+
+        let start = i;
+        let mut has_bracket = false;
+        let mut entry_end = n;
+
+        while i < n {
+            if chars[i] == '[' {
+                has_bracket = true;
+                while i < n && chars[i] != ']' {
+                    i += 1;
+                }
+                if i < n && chars[i] == ']' {
+                    i += 1;
+                    let mut lookahead = i;
+                    while lookahead < n && (chars[lookahead] == ' ' || chars[lookahead] == '\t') {
+                        lookahead += 1;
+                    }
+                    if lookahead < n && (chars[lookahead] == '+' || chars[lookahead] == '-') {
+                        let mut math_end = lookahead + 1;
+                        while math_end < n && (chars[math_end] == ' ' || chars[math_end] == '\t') {
+                            math_end += 1;
+                        }
+                        let hex_start = math_end;
+                        while math_end < n
+                            && (chars[math_end].is_ascii_hexdigit()
+                                || chars[math_end] == 'x'
+                                || chars[math_end] == 'X')
+                        {
+                            math_end += 1;
+                        }
+                        if math_end > hex_start {
+                            i = math_end;
+                        }
+                    }
+                    entry_end = i;
+                    break;
+                }
+            } else if !has_bracket {
+                if chars[i] == '\n' || chars[i] == '\r' || chars[i] == ',' || chars[i] == ';' {
+                    entry_end = i;
+                    break;
+                }
+                if chars[i].is_whitespace() {
+                    let mut next = i;
+                    while next < n && (chars[next] == ' ' || chars[next] == '\t') {
+                        next += 1;
+                    }
+                    let mut prev = i;
+                    while prev > start && (chars[prev - 1] == ' ' || chars[prev - 1] == '\t') {
+                        prev -= 1;
+                    }
+                    let preceded_by_op =
+                        prev > start && (chars[prev - 1] == '+' || chars[prev - 1] == '-');
+                    let followed_by_op =
+                        next < n && (chars[next] == '+' || chars[next] == '-');
+                    let followed_by_bracket = next < n && chars[next] == '[';
+
+                    if !preceded_by_op && !followed_by_op && !followed_by_bracket {
+                        entry_end = i;
+                        break;
+                    }
+                }
+                i += 1;
+            }
+        }
+
+        let entry: String = chars[start..entry_end].iter().collect();
+        let trimmed = entry.trim();
+        if !trimmed.is_empty() {
+            entries.push(trimmed.to_string());
+        }
+        i = entry_end;
+    }
+    entries
+}
+
 fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
     let text = text.trim();
     if let Some(offsets_start) = text.rfind('[') {
@@ -22900,8 +23040,13 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
         let trailing_math = text[offsets_close + 1..].trim();
 
         let cleaned_offsets = offsets_text.replace("->", ",").replace('→', ",");
+        let delimiter: &[char] = if cleaned_offsets.contains([',', ';']) {
+            &[',', ';']
+        } else {
+            &[',', ';', ' ']
+        };
         let mut offsets = cleaned_offsets
-            .split([',', ';'])
+            .split(delimiter)
             .filter(|part| !part.trim().is_empty())
             .map(parse_hex_offset_expr)
             .collect::<Option<Vec<_>>>()?;
@@ -22928,6 +23073,8 @@ fn parse_pointer_spec(text: &str) -> Option<PointerSpec> {
             }
         } else if root.contains('.') && !root.starts_with("0x") && !root.starts_with("0X") {
             (Some((root.to_owned(), 0)), 0)
+        } else if root.is_empty() {
+            (None, 0)
         } else {
             (None, parse_memory_address(root)?)
         };
@@ -24203,6 +24350,55 @@ mod tests {
         let spec_addr = parse_pointer_spec("0x1753DD5F874 [0, 28, 274] + 50").unwrap();
         assert_eq!(spec_addr.base, 0x1753DD5F874);
         assert_eq!(spec_addr.offsets, vec![0, 0x28, 0x2C4]);
+
+        // Space-separated offsets within brackets
+        let spec_space = parse_pointer_spec("neox_engine.dll+87BAB10 [50 21D0 1034]").unwrap();
+        assert_eq!(spec_space.offsets, vec![0x50, 0x21D0, 0x1034]);
+    }
+
+    #[test]
+    fn extracts_multiple_memory_address_entries_from_text() {
+        // Multi-line pointer expressions
+        let multiline = "\
+neox_engine.dll+87BAB10 [50, 21D0, 1034]
+neox_engine.dll+87BAB10 [50, 21D0, 8A8]
+neox_engine.dll+87BAB10 [A0, DB0, E60]";
+        let entries = extract_memory_address_entries(multiline);
+        assert_eq!(
+            entries,
+            vec![
+                "neox_engine.dll+87BAB10 [50, 21D0, 1034]",
+                "neox_engine.dll+87BAB10 [50, 21D0, 8A8]",
+                "neox_engine.dll+87BAB10 [A0, DB0, E60]",
+            ]
+        );
+
+        // Single line space-separated pointers
+        let space_separated = "neox_engine.dll+87BAB10 [50, 21D0, 1034] neox_engine.dll+87BAB10 [50, 21D0, 8A8]";
+        assert_eq!(
+            extract_memory_address_entries(space_separated),
+            vec![
+                "neox_engine.dll+87BAB10 [50, 21D0, 1034]",
+                "neox_engine.dll+87BAB10 [50, 21D0, 8A8]",
+            ]
+        );
+
+        // Raw addresses separated by spaces and commas
+        let mixed_addresses = "0x1000 0x2000, 0x3000; 0x4000";
+        assert_eq!(
+            extract_memory_address_entries(mixed_addresses),
+            vec!["0x1000", "0x2000", "0x3000", "0x4000"]
+        );
+
+        // Pointers with trailing math
+        let trailing_math = "engine.dll+100 [10, 20] + 50 client.dll+200 [30, 40] - 10";
+        assert_eq!(
+            extract_memory_address_entries(trailing_math),
+            vec![
+                "engine.dll+100 [10, 20] + 50",
+                "client.dll+200 [30, 40] - 10",
+            ]
+        );
     }
 
     #[test]

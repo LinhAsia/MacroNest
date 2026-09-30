@@ -1163,38 +1163,41 @@ impl CrosshairApp {
                                             .color(ui.visuals().weak_text_color()),
                                         ),
                                 );
-                                let raw_root = crate::model::shift_raw_entity_root(
+                                let can_shift = crate::model::shift_entity_root(
                                     &preset.entity_root,
                                     root_step,
                                     0,
+                                    preset.entity_stride_level,
                                 )
                                 .is_some();
                                 if ui
-                                    .add_enabled(raw_root, egui::Button::new("▲"))
+                                    .add_enabled(can_shift, egui::Button::new("▲"))
                                     .on_hover_text(
-                                        "Replace the raw root address with root - (Step x multiplier)",
+                                        "Shift root address or pointer offset - (Step x multiplier)",
                                     )
                                     .clicked()
                                 {
-                                    if let Some(root) = crate::model::shift_raw_entity_root(
+                                    if let Some(root) = crate::model::shift_entity_root(
                                         &preset.entity_root,
                                         navigation_step,
                                         -1,
+                                        preset.entity_stride_level,
                                     ) {
                                         preset.entity_root = root;
                                     }
                                 }
                                 if ui
-                                    .add_enabled(raw_root, egui::Button::new("▼"))
+                                    .add_enabled(can_shift, egui::Button::new("▼"))
                                     .on_hover_text(
-                                        "Replace the raw root address with root + (Step x multiplier)",
+                                        "Shift root address or pointer offset + (Step x multiplier)",
                                     )
                                     .clicked()
                                 {
-                                    if let Some(root) = crate::model::shift_raw_entity_root(
+                                    if let Some(root) = crate::model::shift_entity_root(
                                         &preset.entity_root,
                                         navigation_step,
                                         1,
+                                        preset.entity_stride_level,
                                     ) {
                                         preset.entity_root = root;
                                     }

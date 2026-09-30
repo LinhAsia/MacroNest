@@ -417,6 +417,134 @@ pub(crate) fn shift_raw_entity_root(text: &str, stride: u32, slots: i32) -> Opti
     Some(format!("0x{address:X}"))
 }
 
+pub(crate) fn shift_entity_root(
+    text: &str,
+    stride: u32,
+    slots: i32,
+    stride_level: u32,
+) -> Option<String> {
+    let trimmed = text.trim();
+    if let Some(shifted_raw) = shift_raw_entity_root(trimmed, stride, slots) {
+        return Some(shifted_raw);
+    }
+
+    if let (Some(open), Some(close)) = (trimmed.find('['), trimmed.rfind(']')) {
+        if open < close {
+            let prefix = trimmed[..open].trim();
+            let inside = &trimmed[open + 1..close];
+            let trailing = trimmed[close + 1..].trim();
+
+            struct OffsetEntry {
+                val: usize,
+                is_varying: bool,
+                has_0x: bool,
+            }
+
+            let cleaned = inside.replace("->", ",").replace('→', ",");
+            let mut entries = Vec::new();
+            let mut user_varying_idx = None;
+
+            for part in cleaned.split([',', ';', ' ']).filter(|p| !p.trim().is_empty()) {
+                let part = part.trim();
+                let (is_varying, clean) = if let Some(stripped) =
+                    part.strip_suffix('*').or_else(|| part.strip_prefix('*'))
+                {
+                    (true, stripped.trim())
+                } else {
+                    (false, part)
+                };
+                let has_0x = clean.starts_with("0x") || clean.starts_with("0X");
+                let digits = clean
+                    .strip_prefix("0x")
+                    .or_else(|| clean.strip_prefix("0X"))
+                    .unwrap_or(clean);
+                let val = usize::from_str_radix(digits, 16).ok()?;
+                if is_varying && user_varying_idx.is_none() {
+                    user_varying_idx = Some(entries.len());
+                }
+                entries.push(OffsetEntry {
+                    val,
+                    is_varying,
+                    has_0x,
+                });
+            }
+
+            if entries.is_empty() {
+                return None;
+            }
+
+            let default_level_idx = (stride_level.saturating_sub(1) as usize)
+                .min(entries.len().saturating_sub(1));
+            let target_idx = user_varying_idx
+                .unwrap_or(default_level_idx)
+                .min(entries.len().saturating_sub(1));
+
+            if slots != 0 {
+                let delta = (stride as usize).checked_mul(slots.unsigned_abs() as usize)?;
+                let entry = &mut entries[target_idx];
+                if slots > 0 {
+                    entry.val = entry.val.checked_add(delta)?;
+                } else {
+                    entry.val = entry.val.checked_sub(delta)?;
+                }
+            }
+
+            let formatted_offsets = entries
+                .iter()
+                .map(|e| {
+                    let hex = if e.has_0x {
+                        format!("0x{:X}", e.val)
+                    } else {
+                        format!("{:X}", e.val)
+                    };
+                    if e.is_varying {
+                        format!("{hex}*")
+                    } else {
+                        hex
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let result = match (prefix.is_empty(), trailing.is_empty()) {
+                (true, true) => format!("[{formatted_offsets}]"),
+                (true, false) => format!("[{formatted_offsets}] {trailing}"),
+                (false, true) => format!("{prefix} [{formatted_offsets}]"),
+                (false, false) => format!("{prefix} [{formatted_offsets}] {trailing}"),
+            };
+            return Some(result);
+        }
+    }
+
+    if let Some((module, offset_str)) = trimmed.split_once('+') {
+        let module = module.trim();
+        let offset_clean = offset_str.trim();
+        if !module.is_empty() && !offset_clean.is_empty() && !offset_clean.contains('[') {
+            let has_0x = offset_clean.starts_with("0x") || offset_clean.starts_with("0X");
+            let digits = offset_clean
+                .strip_prefix("0x")
+                .or_else(|| offset_clean.strip_prefix("0X"))
+                .unwrap_or(offset_clean);
+            if let Ok(val) = usize::from_str_radix(digits, 16) {
+                let delta = (stride as usize).checked_mul(slots.unsigned_abs() as usize)?;
+                let new_val = if slots >= 0 {
+                    val.checked_add(delta)?
+                } else {
+                    val.checked_sub(delta)?
+                };
+                let formatted = if has_0x {
+                    format!("{module}+0x{new_val:X}")
+                } else {
+                    format!("{module}+{new_val:X}")
+                };
+                return Some(formatted);
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 pub(crate) fn entity_root_from_instruction_hits(
     hits: &[usize],
@@ -649,6 +777,65 @@ mod entity_address_tests {
         assert_eq!(
             shift_raw_entity_root("0x1F009EAF340", 0x370, 1).as_deref(),
             Some("0x1F009EAF6B0")
+        );
+    }
+
+    #[test]
+    fn shifts_entity_root_with_pointers_and_levels() {
+        use super::shift_entity_root;
+
+        // Raw address fallback
+        assert_eq!(
+            shift_entity_root("0x1000", 0x18, 2, 1).as_deref(),
+            Some("0x1030")
+        );
+
+        // Pointer expression at level 1 (default)
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, 274]", 8, 1, 1).as_deref(),
+            Some("neox_engine.dll+87BAB10 [8, 2868, 274]")
+        );
+
+        // Pointer expression at level 2
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, 274]", 8, 1, 2).as_deref(),
+            Some("neox_engine.dll+87BAB10 [0, 2870, 274]")
+        );
+
+        // Pointer expression at level 3
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, 274]", 8, 1, 3).as_deref(),
+            Some("neox_engine.dll+87BAB10 [0, 2868, 27C]")
+        );
+
+        // Pointer expression decrement (slots = -1)
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [8, 2868, 274]", 8, -1, 1).as_deref(),
+            Some("neox_engine.dll+87BAB10 [0, 2868, 274]")
+        );
+
+        // Underflow returns None to prevent invalid pointer addresses
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, 274]", 8, -1, 1),
+            None
+        );
+
+        // User varying with '*' overrides level selector and preserves '*'
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868*, 274]", 8, 1, 1).as_deref(),
+            Some("neox_engine.dll+87BAB10 [0, 2870*, 274]")
+        );
+
+        // Validation only (slots = 0) enables buttons
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, 274]", 8, 0, 1).as_deref(),
+            Some("neox_engine.dll+87BAB10 [0, 2868, 274]")
+        );
+
+        // Module + offset syntax without brackets
+        assert_eq!(
+            shift_entity_root("game.exe+1000", 0x10, 1, 1).as_deref(),
+            Some("game.exe+1010")
         );
     }
 
