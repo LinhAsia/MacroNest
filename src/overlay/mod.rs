@@ -26042,7 +26042,7 @@ mod windows_overlay {
                 let compact = trailing.replace([' ', '_'], "");
                 if compact.starts_with(['+', '-']) {
                     if let Some(last) = base_offsets.last_mut() {
-                        if let Some(adj) = apply_offset_math(*last, &compact) {
+                        if let Some(adj) = apply_offset_math_signed(*last, &compact) {
                             *last = adj;
                         }
                     }
@@ -26055,8 +26055,22 @@ mod windows_overlay {
 
             for index in 0..count {
                 let mut offsets = base_offsets.clone();
-                offsets[varying_idx] = offsets[varying_idx].saturating_add((index as usize).saturating_mul(stride as usize));
-                let expr = format!("{} [{}]", root_prefix, offsets.iter().map(|o| format!("{:X}", o)).collect::<Vec<_>>().join(", "));
+                offsets[varying_idx] = offsets[varying_idx].saturating_add((index as isize).saturating_mul(stride as isize));
+                let expr = format!(
+                    "{} [{}]",
+                    root_prefix,
+                    offsets
+                        .iter()
+                        .map(|&o| {
+                            if o < 0 {
+                                format!("-0x{:X}", o.unsigned_abs())
+                            } else {
+                                format!("{:X}", o)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 if let Some((_, addr)) = frame.resolve_address(pid, &expr, false) {
                     if addr >= 0x10000 && addr < 0x7FFF_FFFF_0000 && !preset.entity_blacklisted_addresses.contains(&addr) {
                         addrs.push(addr);
@@ -26246,7 +26260,7 @@ mod windows_overlay {
                     let compact = trailing.replace([' ', '_'], "");
                     if compact.starts_with(['+', '-']) {
                         if let Some(last) = base_offsets.last_mut() {
-                            if let Some(adj) = apply_offset_math(*last, &compact) {
+                            if let Some(adj) = apply_offset_math_signed(*last, &compact) {
                                 *last = adj;
                             }
                         }
@@ -26260,8 +26274,22 @@ mod windows_overlay {
 
                 for index in 0..count {
                     let mut offsets = base_offsets.clone();
-                    offsets[varying_idx] = offsets[varying_idx].saturating_add((index as usize).saturating_mul(stride as usize));
-                    let expr = format!("{} [{}]", root_prefix, offsets.iter().map(|o| format!("{:X}", o)).collect::<Vec<_>>().join(", "));
+                    offsets[varying_idx] = offsets[varying_idx].saturating_add((index as isize).saturating_mul(stride as isize));
+                    let expr = format!(
+                        "{} [{}]",
+                        root_prefix,
+                        offsets
+                            .iter()
+                            .map(|&o| {
+                                if o < 0 {
+                                    format!("-0x{:X}", o.unsigned_abs())
+                                } else {
+                                    format!("{:X}", o)
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                     if let Some((t_pid, addr)) = frame.resolve_address(pid, &expr, false) {
                         target_pid = t_pid;
                         if addr >= 0x10000 && addr < 0x7FFF_FFFF_0000 && !preset.entity_blacklisted_addresses.contains(&addr) {
@@ -31894,6 +31922,30 @@ mod windows_overlay {
         Some(addr)
     }
 
+    fn apply_offset_math_signed(mut addr: isize, compact: &str) -> Option<isize> {
+        let mut pos = 0;
+        while pos < compact.len() {
+            let op = compact.as_bytes()[pos];
+            let start = pos + 1;
+            pos = compact[start..]
+                .char_indices()
+                .find(|(_, c)| matches!(c, '+' | '-'))
+                .map_or(compact.len(), |(n, _)| start + n);
+            let off_str = &compact[start..pos];
+            let off_hex = off_str
+                .strip_prefix("0x")
+                .or_else(|| off_str.strip_prefix("0X"))
+                .unwrap_or(off_str);
+            let off = isize::from_str_radix(off_hex, 16).ok()?;
+            addr = if op == b'+' {
+                addr.checked_add(off)?
+            } else {
+                addr.checked_sub(off)?
+            };
+        }
+        Some(addr)
+    }
+
     fn parse_memory_address(text: &str) -> Option<usize> {
         let address_text = interpolate_variables(text);
         let address_text = address_text
@@ -32044,7 +32096,7 @@ mod windows_overlay {
         pid: u32,
         module: &str,
         module_offset: usize,
-        offsets: &[usize],
+        offsets: &[isize],
     ) -> Option<usize> {
         let (module_base, module_size, pointer_width) = macro_memory_process_info(pid, module)?;
         if module_offset >= module_size {
@@ -32075,12 +32127,12 @@ mod windows_overlay {
                 },
                 _ => return None,
             };
-            address = next.checked_add(*offset)?;
+            address = next.checked_add_signed(*offset)?;
         }
         Some(address)
     }
 
-    fn parse_pointer_offsets_with_varying(text: &str) -> Option<(Vec<usize>, Option<usize>)> {
+    fn parse_pointer_offsets_with_varying(text: &str) -> Option<(Vec<isize>, Option<usize>)> {
         let mut offsets = Vec::new();
         let mut varying_idx = None;
         let cleaned = text.replace("->", ",").replace('→', ",");
@@ -32091,11 +32143,18 @@ mod windows_overlay {
             } else {
                 (false, part_str)
             };
-            let digits = clean
+            let is_negative = clean.starts_with('-');
+            let clean_no_sign = clean.strip_prefix('-').or_else(|| clean.strip_prefix('+')).unwrap_or(clean);
+            let digits = clean_no_sign
                 .strip_prefix("0x")
-                .or_else(|| clean.strip_prefix("0X"))
-                .unwrap_or(clean);
-            let val = usize::from_str_radix(digits, 16).ok()?;
+                .or_else(|| clean_no_sign.strip_prefix("0X"))
+                .unwrap_or(clean_no_sign);
+            let abs_val = isize::from_str_radix(digits, 16).ok()?;
+            let val = if is_negative {
+                abs_val.checked_neg()?
+            } else {
+                abs_val
+            };
             if is_varying && varying_idx.is_none() {
                 varying_idx = Some(offsets.len());
             }
@@ -32107,7 +32166,7 @@ mod windows_overlay {
         Some((offsets, varying_idx))
     }
 
-    fn parse_pointer_offsets(text: &str) -> Option<Vec<usize>> {
+    fn parse_pointer_offsets(text: &str) -> Option<Vec<isize>> {
         parse_pointer_offsets_with_varying(text).map(|(offsets, _)| offsets)
     }
 
@@ -32624,11 +32683,12 @@ mod windows_overlay {
             if let Some(address) = entry.absolute_address {
                 return Some((pid, address));
             }
+            let offsets: Vec<isize> = entry.offsets.iter().map(|&o| o as isize).collect();
             return resolve_memory_pointer_entry(
                 pid,
                 &entry.module,
                 entry.module_offset,
-                &entry.offsets,
+                &offsets,
             )
             .map(|address| (pid, address));
         }
@@ -32656,7 +32716,7 @@ mod windows_overlay {
                     return None;
                 }
                 let last = offsets.last_mut()?;
-                *last = apply_offset_math(*last, &compact)?;
+                *last = apply_offset_math_signed(*last, &compact)?;
             }
             return resolve_memory_pointer_entry(pid, module.trim(), module_offset, &offsets)
                 .map(|address| (pid, address));
@@ -33244,6 +33304,7 @@ mod windows_overlay {
                 Some(vec![0x494, 0x140])
             );
             assert_eq!(parse_pointer_offsets("0x20, 8"), Some(vec![0x20, 0x8]));
+            assert_eq!(parse_pointer_offsets("0, 2868, -2260"), Some(vec![0, 0x2868, -0x2260]));
         }
 
         #[test]
@@ -33264,8 +33325,13 @@ mod windows_overlay {
                 parse_pointer_offsets_with_varying("0x50, 0x28*, 0x274"),
                 Some((vec![0x50, 0x28, 0x274], Some(1)))
             );
+            assert_eq!(
+                parse_pointer_offsets_with_varying("0, 2868, -370*"),
+                Some((vec![0, 0x2868, -0x370], Some(2)))
+            );
             assert_eq!(apply_offset_math(0x274, "+50"), Some(0x2C4));
             assert_eq!(apply_offset_math(0x274, "+50-10"), Some(0x2B4));
+            assert_eq!(apply_offset_math_signed(0, "-2260"), Some(-0x2260));
             assert_eq!(parse_memory_address("0x1753DD5F874 + 50"), Some(0x1753DD5F8C4));
         }
 

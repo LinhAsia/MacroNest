@@ -435,7 +435,7 @@ pub(crate) fn shift_entity_root(
             let trailing = trimmed[close + 1..].trim();
 
             struct OffsetEntry {
-                val: usize,
+                val: isize,
                 is_varying: bool,
                 has_0x: bool,
             }
@@ -453,12 +453,19 @@ pub(crate) fn shift_entity_root(
                 } else {
                     (false, part)
                 };
-                let has_0x = clean.starts_with("0x") || clean.starts_with("0X");
-                let digits = clean
+                let is_negative = clean.starts_with('-');
+                let clean_no_sign = clean.strip_prefix('-').or_else(|| clean.strip_prefix('+')).unwrap_or(clean);
+                let has_0x = clean_no_sign.starts_with("0x") || clean_no_sign.starts_with("0X");
+                let digits = clean_no_sign
                     .strip_prefix("0x")
-                    .or_else(|| clean.strip_prefix("0X"))
-                    .unwrap_or(clean);
-                let val = usize::from_str_radix(digits, 16).ok()?;
+                    .or_else(|| clean_no_sign.strip_prefix("0X"))
+                    .unwrap_or(clean_no_sign);
+                let abs_val = isize::from_str_radix(digits, 16).ok()?;
+                let val = if is_negative {
+                    abs_val.checked_neg()?
+                } else {
+                    abs_val
+                };
                 if is_varying && user_varying_idx.is_none() {
                     user_varying_idx = Some(entries.len());
                 }
@@ -480,19 +487,21 @@ pub(crate) fn shift_entity_root(
                 .min(entries.len().saturating_sub(1));
 
             if slots != 0 {
-                let delta = (stride as usize).checked_mul(slots.unsigned_abs() as usize)?;
+                let delta = (stride as isize).checked_mul(slots as isize)?;
                 let entry = &mut entries[target_idx];
-                if slots > 0 {
-                    entry.val = entry.val.checked_add(delta)?;
-                } else {
-                    entry.val = entry.val.checked_sub(delta)?;
-                }
+                entry.val = entry.val.checked_add(delta)?;
             }
 
             let formatted_offsets = entries
                 .iter()
                 .map(|e| {
-                    let hex = if e.has_0x {
+                    let hex = if e.val < 0 {
+                        if e.has_0x {
+                            format!("-0x{:X}", e.val.unsigned_abs())
+                        } else {
+                            format!("-{:X}", e.val.unsigned_abs())
+                        }
+                    } else if e.has_0x {
                         format!("0x{:X}", e.val)
                     } else {
                         format!("{:X}", e.val)
@@ -814,10 +823,18 @@ mod entity_address_tests {
             Some("neox_engine.dll+87BAB10 [0, 2868, 274]")
         );
 
-        // Underflow returns None to prevent invalid pointer addresses
+        // Pointer offsets can be decremented into negative values for pool scanning
         assert_eq!(
-            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, 274]", 8, -1, 1),
-            None
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, 274]", 8, -1, 1).as_deref(),
+            Some("neox_engine.dll+87BAB10 [-8, 2868, 274]")
+        );
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, 0]", 0x370, -1, 3).as_deref(),
+            Some("neox_engine.dll+87BAB10 [0, 2868, -370]")
+        );
+        assert_eq!(
+            shift_entity_root("neox_engine.dll+87BAB10 [0, 2868, -370]", 0x370, 1, 3).as_deref(),
+            Some("neox_engine.dll+87BAB10 [0, 2868, 0]")
         );
 
         // User varying with '*' overrides level selector and preserves '*'
