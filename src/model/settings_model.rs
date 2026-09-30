@@ -42,6 +42,27 @@ fn default_memory_pinned_ui_scale() -> f32 {
     1.0
 }
 
+fn default_memory_dump_range_count() -> usize {
+    500
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum MemoryDumpStride {
+    #[default]
+    Auto,
+    Bytes4,
+    Bytes8,
+    Bytes1,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum MemoryDumpDirection {
+    #[default]
+    Surrounding,
+    Forward,
+    Backward,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 enum GlobalConstantStoredValue {
@@ -564,6 +585,12 @@ pub struct AppState {
     pub memory_pointer_list: Vec<MemoryPointerEntry>,
     #[serde(default = "default_memory_pinned_ui_scale")]
     pub memory_pinned_ui_scale: f32,
+    #[serde(default = "default_memory_dump_range_count")]
+    pub memory_dump_range_count: usize,
+    #[serde(default)]
+    pub memory_dump_stride: MemoryDumpStride,
+    #[serde(default)]
+    pub memory_dump_direction: MemoryDumpDirection,
     pub ui_language: UiLanguage,
     pub vietnamese_input_enabled: bool,
     pub vietnamese_input_mode: VietnameseInputMode,
@@ -1017,6 +1044,9 @@ impl Default for AppState {
             memory_code_list: Vec::new(),
             memory_pointer_list: Vec::new(),
             memory_pinned_ui_scale: 1.0,
+            memory_dump_range_count: 500,
+            memory_dump_stride: MemoryDumpStride::Auto,
+            memory_dump_direction: MemoryDumpDirection::Surrounding,
             ui_language: UiLanguage::English,
             vietnamese_input_enabled: false,
             vietnamese_input_mode: VietnameseInputMode::Telex,
@@ -1158,6 +1188,9 @@ mod tests {
     fn app_state_defaults_memory_pinned_ui_scale() {
         let state: AppState = serde_json::from_value(json!({})).expect("default app state");
         assert!((state.memory_pinned_ui_scale - 1.0).abs() < f32::EPSILON);
+        assert_eq!(state.memory_dump_range_count, 500);
+        assert_eq!(state.memory_dump_stride, super::MemoryDumpStride::Auto);
+        assert_eq!(state.memory_dump_direction, super::MemoryDumpDirection::Surrounding);
     }
 
     #[test]

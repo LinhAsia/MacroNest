@@ -15,7 +15,8 @@ use crate::{
     hotkey,
     model::{
         AppPanel, EspPreset, HotkeyBinding, MacroAction, MacroStep,
-        MemoryAobDirection, MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod, MemoryPointerEntry,
+        MemoryAobDirection, MemoryCodeEntry, MemoryDebuggerArchitecture, MemoryDebuggerMethod,
+        MemoryDumpDirection, MemoryDumpStride, MemoryPointerEntry,
         UiLanguage,
     },
     process_memory::{
@@ -5048,6 +5049,77 @@ impl CrosshairApp {
                                     ui.ctx().copy_text(format_pointer_expression(pointer));
                                     ui.close();
                                 }
+                                let mut context_selected_indices = self.memory_panel.selected_saved.iter().copied().collect::<Vec<_>>();
+                                if context_selected_indices.is_empty() {
+                                    context_selected_indices.push(index);
+                                } else {
+                                    context_selected_indices.sort_unstable();
+                                }
+                                let ctx_sel_count = context_selected_indices.len();
+
+                                let copy_quick_label = if ctx_sel_count <= 1 {
+                                    self.tr("Copy address / pointer", "Sao chép địa chỉ / con trỏ").to_string()
+                                } else if self.state.ui_language == UiLanguage::Vietnamese {
+                                    format!("Sao chép toàn bộ {} địa chỉ đã chọn", ctx_sel_count)
+                                } else {
+                                    format!("Copy all {} selected addresses", ctx_sel_count)
+                                };
+                                if ui.button(copy_quick_label).clicked() {
+                                    self.copy_saved_addresses_plain(ui.ctx(), &context_selected_indices);
+                                    ui.close();
+                                }
+
+                                ui.menu_button(
+                                    self.tr("Copy & AI Analysis Export >", "Sao chép & Xuất dữ liệu AI >"),
+                                    |ui| {
+                                        let detailed_label = if ctx_sel_count <= 1 {
+                                            self.tr("Copy address details (AI / Backup)", "Sao chép chi tiết địa chỉ (AI / Sao lưu)").to_string()
+                                        } else if self.state.ui_language == UiLanguage::Vietnamese {
+                                            format!("Sao chép chi tiết {} địa chỉ (AI / Sao lưu)", ctx_sel_count)
+                                        } else {
+                                            format!("Copy {} address details (AI / Backup)", ctx_sel_count)
+                                        };
+                                        if ui.button(detailed_label).clicked() {
+                                            self.copy_saved_addresses_detailed(ui.ctx(), &context_selected_indices);
+                                            ui.close();
+                                        }
+
+                                        ui.separator();
+
+                                        let dump_clip_label = if ctx_sel_count <= 1 {
+                                            self.tr("Copy memory range to clipboard (AI format)", "Sao chép vùng bộ nhớ vào clipboard (AI format)").to_string()
+                                        } else if self.state.ui_language == UiLanguage::Vietnamese {
+                                            format!("Sao chép vùng bộ nhớ cho {} địa chỉ (Clipboard)", ctx_sel_count)
+                                        } else {
+                                            format!("Copy memory range for {} addresses (Clipboard)", ctx_sel_count)
+                                        };
+                                        if ui.button(dump_clip_label).clicked() {
+                                            self.copy_memory_dump_to_clipboard(ui.ctx(), &context_selected_indices);
+                                            ui.close();
+                                        }
+
+                                        let dump_file_label = if ctx_sel_count <= 1 {
+                                            self.tr("Export memory range to text file (.txt)...", "Xuất vùng bộ nhớ ra file text (.txt)...").to_string()
+                                        } else if self.state.ui_language == UiLanguage::Vietnamese {
+                                            format!("Xuất vùng bộ nhớ cho {} địa chỉ ra .txt...", ctx_sel_count)
+                                        } else {
+                                            format!("Export memory range for {} addresses to .txt...", ctx_sel_count)
+                                        };
+                                        if ui.button(dump_file_label).clicked() {
+                                            self.export_memory_dump_to_file(&context_selected_indices);
+                                            ui.close();
+                                        }
+
+                                        if self.memory_panel.saved.len() > ctx_sel_count {
+                                            ui.separator();
+                                            if ui.button(self.tr("Copy ALL addresses in list", "Sao chép TẤT CẢ địa chỉ trong danh sách")).clicked() {
+                                                let all_indices: Vec<usize> = (0..self.memory_panel.saved.len()).collect();
+                                                self.copy_saved_addresses_plain(ui.ctx(), &all_indices);
+                                                ui.close();
+                                            }
+                                        }
+                                    },
+                                );
                                 ui.separator();
                                 ui.menu_button(
                                     self.tr("AOB Actions >", "Thao tác AOB >"),
@@ -5581,6 +5653,62 @@ impl CrosshairApp {
                     {
                         self.state.memory_pinned_ui_scale = 1.0;
                         changed = true;
+                    }
+                });
+                ui.separator();
+                ui.label(RichText::new(self.tr("Memory Dump & AI Analysis Settings", "Cài đặt Dump bộ nhớ & Phân tích AI")).strong());
+                ui.horizontal(|ui| {
+                    ui.label(self.tr("Dump range count (addresses):", "Số lượng địa chỉ dump:"));
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut self.state.memory_dump_range_count).range(1..=50000).speed(10))
+                        .changed();
+                    if ui.button("500").clicked() {
+                        self.state.memory_dump_range_count = 500;
+                        changed = true;
+                    }
+                    if ui.button("1000").clicked() {
+                        self.state.memory_dump_range_count = 1000;
+                        changed = true;
+                    }
+                    if ui.button("5000").clicked() {
+                        self.state.memory_dump_range_count = 5000;
+                        changed = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(self.tr("Stride:", "Bước nhảy:"));
+                    for (stride, label) in [
+                        (MemoryDumpStride::Auto, self.tr("Auto", "Tự động")),
+                        (MemoryDumpStride::Bytes4, "4 Bytes (DWORD)"),
+                        (MemoryDumpStride::Bytes8, "8 Bytes (QWORD)"),
+                        (MemoryDumpStride::Bytes1, "1 Byte"),
+                    ] {
+                        changed |= ui.radio_value(&mut self.state.memory_dump_stride, stride, label).changed();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(self.tr("Direction:", "Phạm vi:"));
+                    for (dir, label, desc) in [
+                        (
+                            MemoryDumpDirection::Surrounding,
+                            self.tr("Surrounding (-/+)", "Xung quanh (-/+)"),
+                            self.tr("Dump memory both before and after the target address", "Dump bộ nhớ cả trước và sau địa chỉ mục tiêu"),
+                        ),
+                        (
+                            MemoryDumpDirection::Forward,
+                            self.tr("Forward (+)", "Phía sau (+)"),
+                            self.tr("Dump memory forward from target address", "Dump bộ nhớ từ địa chỉ mục tiêu trở đi"),
+                        ),
+                        (
+                            MemoryDumpDirection::Backward,
+                            self.tr("Backward (-)", "Phía trước (-)"),
+                            self.tr("Dump memory preceding target address", "Dump bộ nhớ các địa chỉ phía trước địa chỉ mục tiêu"),
+                        ),
+                    ] {
+                        changed |= ui
+                            .radio_value(&mut self.state.memory_dump_direction, dir, label)
+                            .on_hover_text(desc)
+                            .changed();
                     }
                 });
         if changed {
@@ -19392,6 +19520,371 @@ impl CrosshairApp {
         addrs
     }
 
+    fn copy_saved_addresses_plain(&mut self, ctx: &egui::Context, indices: &[usize]) {
+        let mut lines = Vec::new();
+        for &idx in indices {
+            if let Some(saved) = self.memory_panel.saved.get(idx) {
+                let addr_str = if let Some(pointer) = saved.pointer.as_ref() {
+                    format_pointer_expression(pointer)
+                } else {
+                    format_prefixed_memory_address(saved.address)
+                };
+                lines.push(addr_str);
+            }
+        }
+        if !lines.is_empty() {
+            let text = lines.join("\n");
+            ctx.copy_text(text);
+            let count = lines.len();
+            self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+                format!("Đã sao chép {} địa chỉ / con trỏ vào clipboard", count)
+            } else {
+                format!("Copied {} address(es)/pointer(s) to clipboard", count)
+            };
+        }
+    }
+
+    fn format_saved_live_value(&self, saved: &SavedMemoryAddress) -> String {
+        if let Some(pid) = self.memory_panel.process_pid {
+            if let Some(enc) = saved.text_encoding {
+                if let Ok(text) = read_text_memory(pid, saved.address, saved.text_byte_len.max(16), enc) {
+                    return text;
+                }
+            } else if let Ok(val) = read_scan_value(pid, saved.address, saved.value_type) {
+                return format_scan_value(val, saved.hexadecimal);
+            }
+        }
+        saved.current
+            .map(|v| format_scan_value(v, saved.hexadecimal))
+            .or_else(|| saved.current_text.clone())
+            .unwrap_or_else(|| "—".to_string())
+    }
+
+    fn copy_saved_addresses_detailed(&mut self, ctx: &egui::Context, indices: &[usize]) {
+        let mut output = String::new();
+        let process_info = if let Some(pid) = self.memory_panel.process_pid {
+            let name = if self.memory_panel.process_selector.is_empty() {
+                "Attached Process"
+            } else {
+                &self.memory_panel.process_selector
+            };
+            format!("PID {pid} ({name})")
+        } else {
+            "No Process Attached".to_string()
+        };
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        output.push_str(&format!("=== MACRONEST ADDRESS LIST EXPORT ({}) ===\n", now));
+        output.push_str(&format!("Target: {}\n", process_info));
+        output.push_str(&format!("Total Items: {}\n\n", indices.len()));
+        output.push_str(&format!(
+            "{:<4} {:<18} {:<14} {:<20} {:<30} {}\n",
+            "#", "Address", "Type", "Live Value", "Description", "Pointer / Base"
+        ));
+        output.push_str(&format!("{}\n", "-".repeat(110)));
+
+        for (pos, &idx) in indices.iter().enumerate() {
+            if let Some(saved) = self.memory_panel.saved.get(idx) {
+                let addr_str = format_prefixed_memory_address(saved.address);
+                let type_str = if let Some(enc) = saved.text_encoding {
+                    format!("Text ({:?})", enc)
+                } else {
+                    format!("{:?}", saved.value_type)
+                };
+                let val_str = self.format_saved_live_value(saved);
+                let desc_str = if saved.description.is_empty() {
+                    "—".to_string()
+                } else {
+                    saved.description.clone()
+                };
+                let ptr_str = if let Some(ptr) = saved.pointer.as_ref() {
+                    format_pointer_expression(ptr)
+                } else {
+                    "Static".to_string()
+                };
+                output.push_str(&format!(
+                    "{:<4} {:<18} {:<14} {:<20} {:<30} {}\n",
+                    pos + 1, addr_str, type_str, val_str, desc_str, ptr_str
+                ));
+            }
+        }
+        ctx.copy_text(output);
+        let count = indices.len();
+        self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+            format!("Đã sao chép chi tiết {} địa chỉ (AI / Sao lưu) vào clipboard", count)
+        } else {
+            format!("Copied detailed list of {} address(es) to clipboard", count)
+        };
+    }
+
+    fn generate_memory_range_dump(&self, indices: &[usize]) -> Result<String, String> {
+        let pid = self.memory_panel.process_pid.ok_or_else(|| {
+            if self.state.ui_language == UiLanguage::Vietnamese {
+                "Chưa chọn hoặc chưa kết nối tiến trình nào".to_string()
+            } else {
+                "No target process attached".to_string()
+            }
+        })?;
+
+        let count = self.state.memory_dump_range_count.clamp(1, 50000);
+        let direction = self.state.memory_dump_direction;
+        let proc_name = if self.memory_panel.process_selector.is_empty() {
+            "Unknown".to_string()
+        } else {
+            self.memory_panel.process_selector.clone()
+        };
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+
+        let mut output = String::new();
+        output.push_str("================================================================================\n");
+        output.push_str(" MACRONEST MEMORY RANGE DUMP & AI ANALYSIS EXPORT\n");
+        output.push_str(&format!(" Generated: {}\n", now));
+        output.push_str(&format!(" Target Process: PID {} ({})\n", pid, proc_name));
+        output.push_str(&format!(" Range Count per Target: {} entries\n", count));
+        output.push_str(&format!(" Dump Direction: {:?}\n", direction));
+        output.push_str(&format!(" Total Targets Selected: {}\n", indices.len()));
+        output.push_str("================================================================================\n\n");
+
+        output.push_str("--- TARGET SUMMARY ---\n");
+        for (seq, &idx) in indices.iter().enumerate() {
+            if let Some(saved) = self.memory_panel.saved.get(idx) {
+                let addr_str = format_prefixed_memory_address(saved.address);
+                let desc_str = if saved.description.is_empty() { "—" } else { &saved.description };
+                let val_str = self.format_saved_live_value(saved);
+                let ptr_str = if let Some(ptr) = saved.pointer.as_ref() {
+                    format_pointer_expression(ptr)
+                } else {
+                    "Static".to_string()
+                };
+                output.push_str(&format!(
+                    "#{:<2} | {:<18} | Type: {:<8} | Val: {:<16} | Desc: {:<20} | Ptr: {}\n",
+                    seq + 1, addr_str, format!("{:?}", saved.value_type), val_str, desc_str, ptr_str
+                ));
+            }
+        }
+        output.push_str("\n");
+
+        for (seq, &idx) in indices.iter().enumerate() {
+            let Some(saved) = self.memory_panel.saved.get(idx) else { continue; };
+            let target_addr = saved.address;
+            let stride = memory_dump_stride_bytes(
+                self.state.memory_dump_stride,
+                saved.value_type,
+                saved.text_encoding.is_some(),
+            );
+
+            let (start_addr, end_addr) = calculate_dump_bounds(target_addr, count, stride, direction);
+            let total_bytes = count.saturating_mul(stride);
+
+            output.push_str("--------------------------------------------------------------------------------\n");
+            output.push_str(&format!(" TARGET #{}: {}\n", seq + 1, format_prefixed_memory_address(target_addr)));
+            if !saved.description.is_empty() {
+                output.push_str(&format!(" Description: {}\n", saved.description));
+            }
+            output.push_str(&format!(" Value Type: {:?}\n", saved.value_type));
+            if let Some(ptr) = saved.pointer.as_ref() {
+                output.push_str(&format!(" Pointer Expression: {}\n", format_pointer_expression(ptr)));
+            }
+            let live_val = self.format_saved_live_value(saved);
+            output.push_str(&format!(" Current Target Value: {}\n", live_val));
+            output.push_str(&format!(
+                " Range: {} .. {} ({} entries, stride {} bytes)\n",
+                format_prefixed_memory_address(start_addr),
+                format_prefixed_memory_address(end_addr),
+                count,
+                stride
+            ));
+            output.push_str("--------------------------------------------------------------------------------\n");
+
+            let (raw_bytes, mask) = Self::read_memory_bytes_with_mask(pid, start_addr, total_bytes);
+
+            match stride {
+                8 => {
+                    output.push_str(&format!(
+                        "{:<10} {:<18} {:<24} {:<22} {:<20} {:<18} {:<10} {}\n",
+                        "Offset", "Address", "Hex Bytes (LE)", "i64", "f64", "Hex (u64)", "ASCII", "Notes"
+                    ));
+                }
+                1 => {
+                    output.push_str(&format!(
+                        "{:<10} {:<18} {:<6} {:<6} {:<8} {:<8} {}\n",
+                        "Offset", "Address", "Hex", "i8", "u8", "ASCII", "Notes"
+                    ));
+                }
+                _ => {
+                    output.push_str(&format!(
+                        "{:<10} {:<18} {:<14} {:<14} {:<14} {:<12} {:<6} {}\n",
+                        "Offset", "Address", "Hex Bytes", "i32", "f32", "Hex (u32)", "ASCII", "Notes"
+                    ));
+                }
+            }
+            output.push_str(&format!("{}\n", "-".repeat(110)));
+
+            for i in 0..count {
+                let step_offset = i * stride;
+                let current_addr = start_addr.wrapping_add(step_offset);
+                let rel_offset = calculate_dump_relative_offset(i, count, stride, direction);
+                let offset_str = if rel_offset >= 0 {
+                    format!("+0x{:04X}", rel_offset)
+                } else {
+                    format!("-0x{:04X}", rel_offset.abs())
+                };
+                let addr_str = format_prefixed_memory_address(current_addr);
+                let is_target = current_addr == target_addr;
+
+                let readable = (step_offset + stride <= raw_bytes.len())
+                    && mask[step_offset..step_offset + stride].iter().all(|&b| b);
+
+                if !readable {
+                    let note = if is_target { "<== [TARGET ADDRESS - UNREADABLE]" } else { "<unreadable>" };
+                    output.push_str(&format!("{:<10} {:<18} ??\t{}\n", offset_str, addr_str, note));
+                    continue;
+                }
+
+                let slice = &raw_bytes[step_offset..step_offset + stride];
+                let mut hex_bytes = String::new();
+                for b in slice {
+                    hex_bytes.push_str(&format!("{:02X} ", b));
+                }
+
+                let mut ascii = String::new();
+                for &b in slice {
+                    if (32..=126).contains(&b) {
+                        ascii.push(b as char);
+                    } else {
+                        ascii.push('.');
+                    }
+                }
+
+                let mut notes = String::new();
+                if is_target {
+                    notes.push_str(&format!("<== [TARGET] Desc: \"{}\" | Live: {}", saved.description, live_val));
+                }
+
+                match stride {
+                    8 => {
+                        let mut b8 = [0u8; 8];
+                        b8.copy_from_slice(slice);
+                        let val_i64 = i64::from_le_bytes(b8);
+                        let val_u64 = u64::from_le_bytes(b8);
+                        let val_f64 = f64::from_le_bytes(b8);
+                        let f64_str = if val_f64.is_finite() && (val_f64.abs() < 1e12 && val_f64.abs() > 1e-6 || val_f64 == 0.0) {
+                            format!("{:.4}", val_f64)
+                        } else if val_f64.is_nan() {
+                            "NaN".to_string()
+                        } else {
+                            format!("{:e}", val_f64)
+                        };
+                        if is_target && notes.is_empty() {
+                            notes.push_str("<== TARGET");
+                        } else if val_u64 >= 0x10000 && val_u64 < 0x0000_7FFF_FFFF_FFFF && notes.is_empty() {
+                            notes.push_str(&format!("(Ptr? 0x{:X})", val_u64));
+                        }
+                        output.push_str(&format!(
+                            "{:<10} {:<18} {:<24} {:<22} {:<20} 0x{:<16X} {:<10} {}\n",
+                            offset_str, addr_str, hex_bytes.trim_end(), val_i64, f64_str, val_u64, ascii, notes
+                        ));
+                    }
+                    1 => {
+                        let b = slice[0];
+                        let val_i8 = b as i8;
+                        output.push_str(&format!(
+                            "{:<10} {:<18} {:<6} {:<6} {:<8} {:<8} {}\n",
+                            offset_str, addr_str, format!("{:02X}", b), val_i8, b, ascii, notes
+                        ));
+                    }
+                    _ => {
+                        let mut b4 = [0u8; 4];
+                        if slice.len() == 4 {
+                            b4.copy_from_slice(slice);
+                        } else {
+                            b4[..slice.len()].copy_from_slice(slice);
+                        }
+                        let val_i32 = i32::from_le_bytes(b4);
+                        let val_u32 = u32::from_le_bytes(b4);
+                        let val_f32 = f32::from_le_bytes(b4);
+                        let f32_str = if val_f32.is_finite() && (val_f32.abs() < 1e7 && val_f32.abs() > 1e-4 || val_f32 == 0.0) {
+                            format!("{:.3}", val_f32)
+                        } else if val_f32.is_nan() {
+                            "NaN".to_string()
+                        } else {
+                            format!("{:e}", val_f32)
+                        };
+                        output.push_str(&format!(
+                            "{:<10} {:<18} {:<14} {:<14} {:<14} 0x{:<10X} {:<6} {}\n",
+                            offset_str, addr_str, hex_bytes.trim_end(), val_i32, f32_str, val_u32, ascii, notes
+                        ));
+                    }
+                }
+            }
+            output.push_str("\n\n");
+        }
+
+        Ok(output)
+    }
+
+    fn copy_memory_dump_to_clipboard(&mut self, ctx: &egui::Context, indices: &[usize]) {
+        match self.generate_memory_range_dump(indices) {
+            Ok(text) => {
+                let count = indices.len();
+                let range_count = self.state.memory_dump_range_count;
+                ctx.copy_text(text);
+                self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+                    format!("Đã sao chép dump bộ nhớ ({} địa chỉ, {} mục mỗi địa chỉ) vào clipboard", count, range_count)
+                } else {
+                    format!("Copied memory dump ({} target(s), {} entries each) to clipboard", count, range_count)
+                };
+            }
+            Err(err) => {
+                self.memory_panel.status = err;
+            }
+        }
+    }
+
+    fn export_memory_dump_to_file(&mut self, indices: &[usize]) {
+        match self.generate_memory_range_dump(indices) {
+            Ok(text) => {
+                let count = indices.len();
+                let default_name = if count == 1 {
+                    if let Some(saved) = indices.first().and_then(|&i| self.memory_panel.saved.get(i)) {
+                        let desc = if saved.description.is_empty() { "memory" } else { saved.description.as_str() };
+                        let clean_desc: String = desc.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
+                        format!("MemoryDump_0x{:X}_{}.txt", saved.address, clean_desc)
+                    } else {
+                        "MemoryDump.txt".to_string()
+                    }
+                } else {
+                    format!("MemoryDump_{}_targets.txt", count)
+                };
+
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Text files (*.txt)", &["txt"])
+                    .set_file_name(&default_name)
+                    .save_file()
+                {
+                    match std::fs::write(&path, text) {
+                        Ok(_) => {
+                            self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+                                format!("Đã xuất file dump bộ nhớ thành công: {}", path.display())
+                            } else {
+                                format!("Successfully exported memory dump to {}", path.display())
+                            };
+                        }
+                        Err(e) => {
+                            self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+                                format!("Lỗi khi lưu file: {}", e)
+                            } else {
+                                format!("Failed to write file: {}", e)
+                            };
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                self.memory_panel.status = err;
+            }
+        }
+    }
+
     fn open_proximity_finder_dialog(&mut self) {
         self.memory_panel.show_proximity_finder = true;
     }
@@ -21386,6 +21879,57 @@ fn render_must_end_with_controls(
         must_end_offsets
     } else {
         Vec::new()
+    }
+}
+
+fn memory_dump_stride_bytes(dump_stride: MemoryDumpStride, value_type: ScanValueType, is_text: bool) -> usize {
+    match dump_stride {
+        MemoryDumpStride::Auto => {
+            if is_text {
+                1
+            } else {
+                match value_type {
+                    ScanValueType::I64 | ScanValueType::F64 => 8,
+                    ScanValueType::I16 => 2,
+                    ScanValueType::I8 => 1,
+                    _ => 4,
+                }
+            }
+        }
+        MemoryDumpStride::Bytes1 => 1,
+        MemoryDumpStride::Bytes4 => 4,
+        MemoryDumpStride::Bytes8 => 8,
+    }
+}
+
+fn calculate_dump_bounds(
+    target_addr: usize,
+    count: usize,
+    stride: usize,
+    direction: MemoryDumpDirection,
+) -> (usize, usize) {
+    let half_count = count / 2;
+    let start_addr = match direction {
+        MemoryDumpDirection::Surrounding => target_addr.wrapping_sub(half_count * stride),
+        MemoryDumpDirection::Forward => target_addr,
+        MemoryDumpDirection::Backward => target_addr.wrapping_sub(count * stride),
+    };
+    let total_bytes = count.saturating_mul(stride);
+    let end_addr = start_addr.wrapping_add(total_bytes);
+    (start_addr, end_addr)
+}
+
+fn calculate_dump_relative_offset(
+    step_index: usize,
+    count: usize,
+    stride: usize,
+    direction: MemoryDumpDirection,
+) -> isize {
+    let half_count = count / 2;
+    match direction {
+        MemoryDumpDirection::Surrounding => (step_index as isize - half_count as isize) * stride as isize,
+        MemoryDumpDirection::Forward => (step_index * stride) as isize,
+        MemoryDumpDirection::Backward => -((count - step_index) as isize * stride as isize),
     }
 }
 
@@ -24573,5 +25117,46 @@ mod tests {
 
         lengths.sort_by(|a, b| b.cmp(a));
         assert_eq!(lengths, vec![4, 3, 2, 1]);
+    }
+
+    #[test]
+    fn test_memory_dump_bounds_and_offsets() {
+        use super::{calculate_dump_bounds, calculate_dump_relative_offset, memory_dump_stride_bytes};
+        use crate::model::{MemoryDumpDirection, MemoryDumpStride};
+        use crate::process_memory::ScanValueType;
+
+        // 1. Stride bytes resolution
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Auto, ScanValueType::I32, false), 4);
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Auto, ScanValueType::I64, false), 8);
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Auto, ScanValueType::F32, false), 4);
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Auto, ScanValueType::F64, false), 8);
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Auto, ScanValueType::I16, false), 2);
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Auto, ScanValueType::I8, false), 1);
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Auto, ScanValueType::I8, true), 1);
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Bytes8, ScanValueType::I32, false), 8);
+        assert_eq!(memory_dump_stride_bytes(MemoryDumpStride::Bytes1, ScanValueType::I64, false), 1);
+
+        // 2. Surrounding bounds (count = 500, stride = 4) -> 2000 bytes, half_count = 250 -> 1000 bytes
+        let target = 0x1000;
+        let (start_sur, end_sur) = calculate_dump_bounds(target, 500, 4, MemoryDumpDirection::Surrounding);
+        assert_eq!(start_sur, 0x1000 - 1000);
+        assert_eq!(end_sur, start_sur + 2000);
+        assert_eq!(calculate_dump_relative_offset(250, 500, 4, MemoryDumpDirection::Surrounding), 0);
+        assert_eq!(calculate_dump_relative_offset(0, 500, 4, MemoryDumpDirection::Surrounding), -1000);
+        assert_eq!(calculate_dump_relative_offset(251, 500, 4, MemoryDumpDirection::Surrounding), 4);
+
+        // 3. Forward bounds
+        let (start_fwd, end_fwd) = calculate_dump_bounds(target, 500, 4, MemoryDumpDirection::Forward);
+        assert_eq!(start_fwd, 0x1000);
+        assert_eq!(end_fwd, 0x1000 + 2000);
+        assert_eq!(calculate_dump_relative_offset(0, 500, 4, MemoryDumpDirection::Forward), 0);
+        assert_eq!(calculate_dump_relative_offset(1, 500, 4, MemoryDumpDirection::Forward), 4);
+
+        // 4. Backward bounds
+        let (start_bwd, end_bwd) = calculate_dump_bounds(target, 500, 4, MemoryDumpDirection::Backward);
+        assert_eq!(start_bwd, 0x1000 - 2000);
+        assert_eq!(end_bwd, 0x1000);
+        assert_eq!(calculate_dump_relative_offset(500, 500, 4, MemoryDumpDirection::Backward), 0);
+        assert_eq!(calculate_dump_relative_offset(0, 500, 4, MemoryDumpDirection::Backward), -2000);
     }
 }
