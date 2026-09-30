@@ -3368,6 +3368,7 @@ impl CrosshairApp {
                         self.capture_hotkey_combo_vks.clear();
                         self.persist_memory_hotkeys();
                     } else {
+                        let _ = crate::overlay::take_memory_trigger_events();
                         self.memory_panel.capturing_hotkey = Some(action);
                         self.capture_ignored_keys = self.snapshot_pressed_capture_keys();
                         self.capture_ignored_keys.extend([0x01, 0x02, 0x04, 0x05, 0x06]);
@@ -20947,6 +20948,7 @@ impl CrosshairApp {
     }
 
     fn finish_memory_hotkey_capture(&mut self, action: MemoryScanAction, binding: HotkeyBinding) {
+        let _ = crate::overlay::take_memory_trigger_events();
         self.memory_panel.hotkeys.insert(action, binding);
         self.memory_panel.capturing_hotkey = None;
         self.capture_hotkey_combo_keys = None;
@@ -20956,6 +20958,7 @@ impl CrosshairApp {
 
     fn poll_memory_hotkeys(&mut self, ctx: &egui::Context) {
         if self.memory_panel.capturing_hotkey.is_some() {
+            let _ = crate::overlay::take_memory_trigger_events();
             return;
         }
         let events = crate::overlay::take_memory_trigger_events();
@@ -23863,6 +23866,17 @@ mod tests {
             None,
             None
         ));
+    }
+
+    #[test]
+    fn test_memory_hotkey_combo_and_single_key_binding() {
+        let single = CrosshairApp::hotkey_binding_from_combo_keys(vec!["F1".to_string()]);
+        assert_eq!(single.key, "F1");
+        assert!(!single.ctrl && !single.alt && !single.shift);
+
+        let combo = CrosshairApp::hotkey_binding_from_combo_keys(vec!["Ctrl".to_string(), "F1".to_string()]);
+        assert_eq!(combo.key, "F1");
+        assert!(combo.ctrl && !combo.alt && !combo.shift);
     }
 
     #[test]

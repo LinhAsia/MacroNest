@@ -14439,12 +14439,22 @@ impl CrosshairApp {
             self.capture_hotkey_combo_keys = Some(newly_pressed_keys);
         }
 
-        if let Some(target) = capture_target.as_ref()
-            && self.capture_request_registers_on_press(target)
-            && let Some(key) = first_newly_pressed
-        {
-            self.capture_hotkey_combo_keys = None;
-            return Some(Self::hotkey_binding_from_combo_keys(vec![key]));
+        let registers_on_press = self.memory_panel.capturing_hotkey.is_some()
+            || capture_target
+                .as_ref()
+                .is_some_and(|target| self.capture_request_registers_on_press(target));
+
+        if registers_on_press && let Some(key) = first_newly_pressed {
+            let mut keys = self.capture_hotkey_combo_keys.take().unwrap_or_default();
+            if !keys.iter().any(|k| k.eq_ignore_ascii_case(&key)) {
+                keys.push(key.clone());
+            }
+            if hotkey::is_modifier_key_name(&key) {
+                self.capture_hotkey_combo_keys = Some(keys);
+            } else {
+                self.capture_hotkey_combo_keys = None;
+                return Some(Self::hotkey_binding_from_combo_keys(keys));
+            }
         }
 
         if let Some(target) = capture_target
