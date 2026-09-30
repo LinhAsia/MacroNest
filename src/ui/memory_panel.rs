@@ -5034,21 +5034,6 @@ impl CrosshairApp {
                                     });
                                     ui.close();
                                 }
-                                if let Some(pointer) = saved.pointer.as_ref()
-                                    && pointer.module.is_some()
-                                    && ui
-                                        .add_enabled(
-                                            single_target,
-                                            Button::new(self.tr(
-                                                "Copy pointer for Macro",
-                                                "Sao chép pointer cho Macro",
-                                            )),
-                                        )
-                                        .clicked()
-                                {
-                                    ui.ctx().copy_text(format_pointer_expression(pointer));
-                                    ui.close();
-                                }
                                 let mut context_selected_indices = self.memory_panel.selected_saved.iter().copied().collect::<Vec<_>>();
                                 if context_selected_indices.is_empty() {
                                     context_selected_indices.push(index);

@@ -74,6 +74,10 @@ fn default_selected_permutation() -> usize {
     1
 }
 
+fn default_entity_stride_level() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct EspPreset {
@@ -91,6 +95,8 @@ pub struct EspPreset {
     pub entity_y_offset: i64,
     pub entity_z_offset: i64,
     pub entity_stride: u32,
+    #[serde(default = "default_entity_stride_level")]
+    pub entity_stride_level: u32,
     pub entity_root_step: Option<u32>,
     pub entity_root_step_multiplier: u32,
     pub entity_count: u32,
@@ -238,6 +244,7 @@ impl EspPreset {
             entity_y_offset: 4,
             entity_z_offset: 8,
             entity_stride: 0x48,
+            entity_stride_level: 1,
             entity_root_step: None,
             entity_root_step_multiplier: 1,
             entity_count: 32,
@@ -1533,6 +1540,13 @@ mod tests {
         assert!((esp_spatial_audio_gain(&preset, 5.0) - 0.8).abs() < f32::EPSILON);
         assert!((esp_spatial_audio_gain(&preset, 60.0) - 0.2).abs() < 0.001);
         assert_eq!(esp_spatial_audio_gain(&preset, 120.0), 0.0);
+    }
+
+    #[test]
+    fn esp_preset_defaults_entity_stride_level_to_1() {
+        let preset: EspPreset = serde_json::from_str("{}").expect("default json");
+        assert_eq!(preset.entity_stride_level, 1);
+        assert_eq!(EspPreset::default().entity_stride_level, 1);
     }
 
     #[test]

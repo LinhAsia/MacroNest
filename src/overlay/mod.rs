@@ -26049,7 +26049,8 @@ mod windows_overlay {
                 }
             }
             let root_prefix = root_expression[..open].trim();
-            let varying_idx = user_varying_idx.unwrap_or(0).min(base_offsets.len().saturating_sub(1));
+            let default_level_idx = (preset.entity_stride_level.saturating_sub(1) as usize).min(base_offsets.len().saturating_sub(1));
+            let varying_idx = user_varying_idx.unwrap_or(default_level_idx).min(base_offsets.len().saturating_sub(1));
             let mut addrs = Vec::with_capacity(count as usize);
 
             for index in 0..count {
@@ -26252,7 +26253,8 @@ mod windows_overlay {
                     }
                 }
                 let root_prefix = root_expression[..open].trim();
-                let varying_idx = user_varying_idx.unwrap_or(0).min(base_offsets.len().saturating_sub(1));
+                let default_level_idx = (preset.entity_stride_level.saturating_sub(1) as usize).min(base_offsets.len().saturating_sub(1));
+                let varying_idx = user_varying_idx.unwrap_or(default_level_idx).min(base_offsets.len().saturating_sub(1));
                 let mut addrs = Vec::with_capacity(count as usize);
                 let mut target_pid = pid;
 

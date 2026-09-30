@@ -1237,6 +1237,14 @@ impl CrosshairApp {
                                         .range(1..=0x10000)
                                         .hexadecimal(1, false, false),
                                 );
+                                ui.label("Level");
+                                ui.add(
+                                    DragValue::new(&mut preset.entity_stride_level)
+                                        .range(1..=8),
+                                )
+                                .on_hover_text(
+                                    "Pointer offset level to apply Stride to (1 = 1st offset, 2 = 2nd offset, etc.). Overridden if '*' is specified.",
+                                );
                                 ui.label("Count");
                                 ui.add(
                                     DragValue::new(&mut preset.entity_count).range(1..=512),
