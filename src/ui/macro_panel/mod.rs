@@ -8890,7 +8890,7 @@ impl CrosshairApp {
                                         };
                                         ui.horizontal_wrapped(|ui| {
                                             ui.label(Self::tr_lang(language, "On Stop", "On Stop"));
-                                            let _hold_stop_combo = egui::ComboBox::from_id_salt((
+                                            let hold_stop_combo_resp = egui::ComboBox::from_id_salt((
                                                 group.id,
                                                 preset.id,
                                                 "hold-stop-action",
@@ -8905,15 +8905,16 @@ impl CrosshairApp {
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(455.0);
+                                                ui.set_min_height(240.0);
                                                 ui.horizontal(|ui| {
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                     ui.add_space(8.0);
-                                                    ui.add(
+                                                    let search_resp = ui.add(
                                                         egui::TextEdit::singleline(&mut self.action_search_text)
                                                             .desired_width(140.0)
                                                             .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
                                                     );
-                                                    if !self.action_search_text.is_empty() && ui.small_button("×").clicked() {
+                                                    if !self.action_search_text.is_empty() && (ui.small_button("×").clicked() || (search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))) {
                                                         self.action_search_text.clear();
                                                     }
                                                 });
@@ -8923,7 +8924,7 @@ impl CrosshairApp {
                                                         ui,
                                                         language,
                                                         self.state.ui_theme,
-                                                        &self.action_search_text,
+                                                        &mut self.action_search_text,
                                                         &mut step.action,
                                                         &mut live_sync,
                                                     );
@@ -8955,7 +8956,14 @@ impl CrosshairApp {
                                                     );
                                                 }
                                                 Self::forward_action_popup_scroll(ui);
-                            });
+                                            });
+                                            let hold_stop_open_id = ui.id().with((group.id, preset.id, "hold-stop-open-state"));
+                                            let was_open = ui.ctx().data(|d| d.get_temp::<bool>(hold_stop_open_id)).unwrap_or(false);
+                                            let is_open = hold_stop_combo_resp.inner.is_some();
+                                            if was_open != is_open {
+                                                self.action_search_text.clear();
+                                            }
+                                            ui.ctx().data_mut(|d| d.insert_temp(hold_stop_open_id, is_open));
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
                                                 Self::macro_action_supports_capture(step.action);
@@ -11188,7 +11196,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                         };
                                         ui.horizontal_wrapped(|ui| {
                                             ui.label(Self::tr_lang(language, "On Stop", "On Stop"));
-                                            let _hold_stop_combo = egui::ComboBox::from_id_salt((
+                                            let press_stop_combo_resp = egui::ComboBox::from_id_salt((
                                                 group.id,
                                                 preset.id,
                                                 "press-stop-action",
@@ -11203,15 +11211,16 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(455.0);
+                                                ui.set_min_height(240.0);
                                                 ui.horizontal(|ui| {
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                     ui.add_space(8.0);
-                                                    ui.add(
+                                                    let search_resp = ui.add(
                                                         egui::TextEdit::singleline(&mut self.action_search_text)
                                                             .desired_width(140.0)
                                                             .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
                                                     );
-                                                    if !self.action_search_text.is_empty() && ui.small_button("×").clicked() {
+                                                    if !self.action_search_text.is_empty() && (ui.small_button("×").clicked() || (search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))) {
                                                         self.action_search_text.clear();
                                                     }
                                                 });
@@ -11221,7 +11230,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                         ui,
                                                         language,
                                                         self.state.ui_theme,
-                                                        &self.action_search_text,
+                                                        &mut self.action_search_text,
                                                         &mut step.action,
                                                         &mut live_sync,
                                                     );
@@ -11253,7 +11262,14 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                     );
                                                 }
                                                 Self::forward_action_popup_scroll(ui);
-                            });
+                                            });
+                                            let press_stop_open_id = ui.id().with((group.id, preset.id, "press-stop-open-state"));
+                                            let was_open = ui.ctx().data(|d| d.get_temp::<bool>(press_stop_open_id)).unwrap_or(false);
+                                            let is_open = press_stop_combo_resp.inner.is_some();
+                                            if was_open != is_open {
+                                                self.action_search_text.clear();
+                                            }
+                                            ui.ctx().data_mut(|d| d.insert_temp(press_stop_open_id, is_open));
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
                                                 Self::macro_action_supports_capture(step.action);
@@ -14422,7 +14438,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     }
                                                 });
                                             let previous_action = step.action;
-                                            let _action_combo = egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "action"))
+                                            let action_combo_resp = egui::ComboBox::from_id_salt((group.id, preset.id, step_index, "action"))
                                                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                                 .width(146.0)
                                                 .height(420.0)
@@ -14433,15 +14449,16 @@ if supports_move_mouse || show_detection_tuning {
                                                 ))
                                                 .show_ui(ui, |ui| {
                                                     ui.set_min_width(455.0);
+                                                    ui.set_min_height(240.0);
                                                     ui.horizontal(|ui| {
                                                         live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                         ui.add_space(8.0);
-                                                        ui.add(
+                                                        let search_resp = ui.add(
                                                             egui::TextEdit::singleline(&mut self.action_search_text)
                                                                 .desired_width(140.0)
                                                                 .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
                                                         );
-                                                        if !self.action_search_text.is_empty() && ui.small_button("×").clicked() {
+                                                        if !self.action_search_text.is_empty() && (ui.small_button("×").clicked() || (search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))) {
                                                             self.action_search_text.clear();
                                                         }
                                                     });
@@ -14451,7 +14468,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             ui,
                                                             language,
                                                             self.state.ui_theme,
-                                                            &self.action_search_text,
+                                                            &mut self.action_search_text,
                                                             &mut step.action,
                                                             &mut live_sync,
                                                         );
@@ -14485,6 +14502,13 @@ if supports_move_mouse || show_detection_tuning {
                                                     }
                                                     Self::forward_action_popup_scroll(ui);
                                                 });
+                                            let action_open_id = ui.id().with((group.id, preset.id, step_index, "action-open-state"));
+                                            let was_open = ui.ctx().data(|d| d.get_temp::<bool>(action_open_id)).unwrap_or(false);
+                                            let is_open = action_combo_resp.inner.is_some();
+                                            if was_open != is_open {
+                                                self.action_search_text.clear();
+                                            }
+                                            ui.ctx().data_mut(|d| d.insert_temp(action_open_id, is_open));
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
                                             let action_supports_capture =
                                                 Self::macro_action_supports_capture(step.action);
@@ -20581,7 +20605,7 @@ if supports_move_mouse || show_detection_tuning {
         ui: &mut egui::Ui,
         language: UiLanguage,
         theme: UiThemeMode,
-        search_query: &str,
+        search_query: &mut String,
         current: &mut MacroAction,
         live_sync: &mut bool,
     ) {
@@ -20711,24 +20735,23 @@ if supports_move_mouse || show_detection_tuning {
         }
 
         ui.add_space(4.0);
-        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for action in matches {
-                    let is_active = *current == action;
-                    let widget_text = Self::macro_action_selected_widget_text(action, language, theme);
-                    let mut btn = egui::Button::new(widget_text).min_size(egui::vec2(85.0, 24.0));
-                    if is_active {
-                        btn = btn.fill(egui::Color32::from_rgba_unmultiplied(84, 178, 222, 60));
-                    }
-                    let resp = ui.add(btn);
-                    if resp.clicked() {
-                        *current = action;
-                        *live_sync = true;
-                        ui.close_menu();
-                    }
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+            for action in matches {
+                let is_active = *current == action;
+                let widget_text = Self::macro_action_selected_widget_text(action, language, theme);
+                let mut btn = egui::Button::new(widget_text).min_size(egui::vec2(85.0, 24.0));
+                if is_active {
+                    btn = btn.fill(egui::Color32::from_rgba_unmultiplied(84, 178, 222, 60));
                 }
-            });
+                let resp = ui.add(btn);
+                if resp.clicked() {
+                    *current = action;
+                    *live_sync = true;
+                    search_query.clear();
+                    ui.close();
+                }
+            }
         });
     }
 
