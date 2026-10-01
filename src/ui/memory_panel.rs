@@ -4144,40 +4144,27 @@ impl CrosshairApp {
                     self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
                 }
                 if self.memory_panel.saved_list_active && !editing {
-                    let (arrow_up, arrow_down) = ui.input(|input| {
-                        (
-                            !input.modifiers.shift && !input.modifiers.ctrl && input.key_pressed(egui::Key::ArrowUp),
-                            !input.modifiers.shift && !input.modifiers.ctrl && input.key_pressed(egui::Key::ArrowDown),
-                        )
-                    });
-                    if arrow_up && !self.memory_panel.saved.is_empty() {
-                        let cur = self.memory_panel.selected_saved.iter().copied().min().unwrap_or(0);
-                        if cur > 0 {
-                            let next = cur - 1;
+                    let arrow_up = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
+                    let arrow_down = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
+                    if arrow_up || arrow_down {
+                        let delta = if arrow_up { -1 } else { 1 };
+                        if let Some(mut view) = self.memory_panel.memory_view_dialog.take() {
+                            Self::navigate_memory_view_relative_in_list_state(&mut self.memory_panel, delta, &mut view);
+                            self.memory_panel.memory_view_dialog = Some(view);
+                        } else if !self.memory_panel.saved.is_empty() {
+                            let cur = if arrow_up {
+                                self.memory_panel.selected_saved.iter().copied().min().unwrap_or(0)
+                            } else {
+                                self.memory_panel.selected_saved.iter().copied().max().unwrap_or(0)
+                            };
+                            let next = if arrow_up {
+                                cur.saturating_sub(1)
+                            } else {
+                                (cur + 1).min(self.memory_panel.saved.len().saturating_sub(1))
+                            };
                             self.memory_panel.selected_saved.clear();
                             self.memory_panel.selected_saved.insert(next);
                             self.memory_panel.saved_selection_anchor = Some(next);
-                            let target_addr = self.memory_panel.saved[next].address;
-                            if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
-                                view.source_saved_index = Some(next);
-                                view.display_type = memory_display_type_for_saved(&self.memory_panel.saved[next]);
-                                Self::navigate_memory_view_dialog(view, target_addr);
-                            }
-                        }
-                    }
-                    if arrow_down && !self.memory_panel.saved.is_empty() {
-                        let cur = self.memory_panel.selected_saved.iter().copied().max().unwrap_or(0);
-                        if cur + 1 < self.memory_panel.saved.len() {
-                            let next = cur + 1;
-                            self.memory_panel.selected_saved.clear();
-                            self.memory_panel.selected_saved.insert(next);
-                            self.memory_panel.saved_selection_anchor = Some(next);
-                            let target_addr = self.memory_panel.saved[next].address;
-                            if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
-                                view.source_saved_index = Some(next);
-                                view.display_type = memory_display_type_for_saved(&self.memory_panel.saved[next]);
-                                Self::navigate_memory_view_dialog(view, target_addr);
-                            }
                         }
                     }
                     let (shift_w, shift_s, delete, shift_delete, edit) = ui.input(|input| {
@@ -15816,9 +15803,9 @@ impl CrosshairApp {
         };
         let mut open = true;
         let mut nav_delta = 0isize;
-        if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
             nav_delta = -1;
-        } else if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
             nav_delta = 1;
         }
         if dialog.pinned {
@@ -15848,9 +15835,9 @@ impl CrosshairApp {
                     if fit_columns {
                         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(target_view_width, 820.0) * scale));
                     }
-                    if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+                    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
                         nav_delta = -1;
-                    } else if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+                    } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
                         nav_delta = 1;
                     }
                     Self::constrain_memory_popup_to_monitor(ctx);
@@ -15913,9 +15900,9 @@ impl CrosshairApp {
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
-                if ui.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
                     nav_delta = -1;
-                } else if ui.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
                     nav_delta = 1;
                 }
                 let pin_label = self.tr("Pin", "Ghim");
@@ -20274,12 +20261,20 @@ impl CrosshairApp {
     fn open_memory_view_dialog_at_address(&mut self, address: usize) {
         if !self.navigate_open_memory_view(address) {
             let elements = default_structure_elements();
+            let source_saved_index = self
+                .memory_panel
+                .saved
+                .iter()
+                .position(|item| item.address == address);
+            let display_type = source_saved_index
+                .map(|idx| memory_display_type_for_saved(&self.memory_panel.saved[idx]))
+                .unwrap_or(MemoryDisplayType::ByteHex);
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                 address,
                 tracked_base: None,
-                source_saved_index: None,
+                source_saved_index,
                 kind: MemoryViewKind::Bytes,
-                display_type: MemoryDisplayType::ByteHex,
+                display_type,
                 relative_addresses: false,
                 pinned: true,
                 elements: elements.clone(),
@@ -21150,6 +21145,14 @@ impl CrosshairApp {
         let Some(dialog) = self.memory_panel.memory_view_dialog.as_mut() else {
             return false;
         };
+        dialog.source_saved_index = self
+            .memory_panel
+            .saved
+            .iter()
+            .position(|item| item.address == address);
+        if let Some(idx) = dialog.source_saved_index {
+            dialog.display_type = memory_display_type_for_saved(&self.memory_panel.saved[idx]);
+        }
         Self::navigate_memory_view_dialog(dialog, address);
         true
     }
@@ -25739,5 +25742,24 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
         assert_eq!(structure_table_width, 640.0);
         let structure_window_width = structure_table_width + 26.0;
         assert_eq!(structure_window_width, 666.0);
+    }
+
+    #[test]
+    fn test_arrow_navigation_consume_prevents_double_jump() {
+        let ctx = egui::Context::default();
+        ctx.input_mut(|i| {
+            i.events.push(egui::Event::Key {
+                key: egui::Key::ArrowDown,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+        });
+        let first = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
+        assert!(first, "First call should consume key");
+
+        let second = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
+        assert!(!second, "Second call in same frame must NOT see the consumed key");
     }
 }
