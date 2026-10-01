@@ -8905,40 +8905,55 @@ impl CrosshairApp {
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(455.0);
-                                                live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
+                                                ui.horizontal(|ui| {
+                                                    live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
+                                                    ui.add_space(8.0);
+                                                    ui.add(
+                                                        egui::TextEdit::singleline(&mut self.action_search_text)
+                                                            .desired_width(140.0)
+                                                            .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
+                                                    );
+                                                    if !self.action_search_text.is_empty() && ui.small_button("×").clicked() {
+                                                        self.action_search_text.clear();
+                                                    }
+                                                });
                                                 ui.separator();
-                                                let action_hover_id = ui.make_persistent_id((
-                                                    group.id,
-                                                    preset.id,
-                                                    "hold-stop-action-hover",
-                                                ));
-                                                let block_top_level_hover =
-                                                    Self::pointer_in_mouse_click_child_popup(
+                                                if !self.action_search_text.trim().is_empty() {
+                                                    Self::render_filtered_macro_actions(
                                                         ui,
+                                                        language,
+                                                        self.state.ui_theme,
+                                                        &self.action_search_text,
+                                                        &mut step.action,
+                                                        &mut live_sync,
+                                                    );
+                                                } else {
+                                                    let action_hover_id = ui.make_persistent_id((
+                                                        group.id,
+                                                        preset.id,
+                                                        "hold-stop-action-hover",
+                                                    ));
+                                                    let block_top_level_hover =
+                                                        Self::pointer_in_mouse_click_child_popup(
+                                                            ui,
+                                                            action_hover_id,
+                                                        );
+                                                    ui.ctx().data_mut(|data| {
+                                                        data.insert_temp(action_hover_id, false);
+                                                        data.insert_temp(
+                                                            action_hover_id.with("submenu-hover-block"),
+                                                            block_top_level_hover,
+                                                        );
+                                                    });
+                                                    Self::render_macro_action_picker_grid(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, "hold-stop-action-grid"),
+                                                        &mut step.action,
+                                                        &mut live_sync,
                                                         action_hover_id,
                                                     );
-                                                ui.ctx().data_mut(|data| {
-                                                    data.insert_temp(action_hover_id, false);
-                                                    data.insert_temp(
-                                                        action_hover_id.with("submenu-hover-block"),
-                                                        block_top_level_hover,
-                                                    );
-                                                });
-                                                Self::render_macro_action_picker_grid(
-
-                                                    ui,
-
-                                                    language,
-
-                                                    (group.id, preset.id, "hold-stop-action-grid"),
-
-                                                    &mut step.action,
-
-                                                    &mut live_sync,
-
-                                                    action_hover_id,
-
-                                                );
+                                                }
                                                 Self::forward_action_popup_scroll(ui);
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -11188,40 +11203,55 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(455.0);
-                                                live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
+                                                ui.horizontal(|ui| {
+                                                    live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
+                                                    ui.add_space(8.0);
+                                                    ui.add(
+                                                        egui::TextEdit::singleline(&mut self.action_search_text)
+                                                            .desired_width(140.0)
+                                                            .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
+                                                    );
+                                                    if !self.action_search_text.is_empty() && ui.small_button("×").clicked() {
+                                                        self.action_search_text.clear();
+                                                    }
+                                                });
                                                 ui.separator();
-                                                let action_hover_id = ui.make_persistent_id((
-                                                    group.id,
-                                                    preset.id,
-                                                    "press-stop-action-hover",
-                                                ));
-                                                let block_top_level_hover =
-                                                    Self::pointer_in_mouse_click_child_popup(
+                                                if !self.action_search_text.trim().is_empty() {
+                                                    Self::render_filtered_macro_actions(
                                                         ui,
+                                                        language,
+                                                        self.state.ui_theme,
+                                                        &self.action_search_text,
+                                                        &mut step.action,
+                                                        &mut live_sync,
+                                                    );
+                                                } else {
+                                                    let action_hover_id = ui.make_persistent_id((
+                                                        group.id,
+                                                        preset.id,
+                                                        "press-stop-action-hover",
+                                                    ));
+                                                    let block_top_level_hover =
+                                                        Self::pointer_in_mouse_click_child_popup(
+                                                            ui,
+                                                            action_hover_id,
+                                                        );
+                                                    ui.ctx().data_mut(|data| {
+                                                        data.insert_temp(action_hover_id, false);
+                                                        data.insert_temp(
+                                                            action_hover_id.with("submenu-hover-block"),
+                                                            block_top_level_hover,
+                                                        );
+                                                    });
+                                                    Self::render_macro_action_picker_grid(
+                                                        ui,
+                                                        language,
+                                                        (group.id, preset.id, "press-stop-action-grid"),
+                                                        &mut step.action,
+                                                        &mut live_sync,
                                                         action_hover_id,
                                                     );
-                                                ui.ctx().data_mut(|data| {
-                                                    data.insert_temp(action_hover_id, false);
-                                                    data.insert_temp(
-                                                        action_hover_id.with("submenu-hover-block"),
-                                                        block_top_level_hover,
-                                                    );
-                                                });
-                                                Self::render_macro_action_picker_grid(
-
-                                                    ui,
-
-                                                    language,
-
-                                                    (group.id, preset.id, "press-stop-action-grid"),
-
-                                                    &mut step.action,
-
-                                                    &mut live_sync,
-
-                                                    action_hover_id,
-
-                                                );
+                                                }
                                                 Self::forward_action_popup_scroll(ui);
                             });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -14403,41 +14433,56 @@ if supports_move_mouse || show_detection_tuning {
                                                 ))
                                                 .show_ui(ui, |ui| {
                                                     ui.set_min_width(455.0);
-                                                    live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
+                                                    ui.horizontal(|ui| {
+                                                        live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
+                                                        ui.add_space(8.0);
+                                                        ui.add(
+                                                            egui::TextEdit::singleline(&mut self.action_search_text)
+                                                                .desired_width(140.0)
+                                                                .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
+                                                        );
+                                                        if !self.action_search_text.is_empty() && ui.small_button("×").clicked() {
+                                                            self.action_search_text.clear();
+                                                        }
+                                                    });
                                                     ui.separator();
-                                                    let action_hover_id = ui.make_persistent_id((
-                                                        group.id,
-                                                        preset.id,
-                                                        step_index,
-                                                        "action-hover",
-                                                    ));
-                                                    let block_top_level_hover =
-                                                        Self::pointer_in_mouse_click_child_popup(
+                                                    if !self.action_search_text.trim().is_empty() {
+                                                        Self::render_filtered_macro_actions(
                                                             ui,
+                                                            language,
+                                                            self.state.ui_theme,
+                                                            &self.action_search_text,
+                                                            &mut step.action,
+                                                            &mut live_sync,
+                                                        );
+                                                    } else {
+                                                        let action_hover_id = ui.make_persistent_id((
+                                                            group.id,
+                                                            preset.id,
+                                                            step_index,
+                                                            "action-hover",
+                                                        ));
+                                                        let block_top_level_hover =
+                                                            Self::pointer_in_mouse_click_child_popup(
+                                                                ui,
+                                                                action_hover_id,
+                                                            );
+                                                        ui.ctx().data_mut(|data| {
+                                                            data.insert_temp(action_hover_id, false);
+                                                            data.insert_temp(
+                                                                action_hover_id.with("submenu-hover-block"),
+                                                                block_top_level_hover,
+                                                            );
+                                                        });
+                                                        Self::render_macro_action_picker_grid(
+                                                            ui,
+                                                            language,
+                                                            (group.id, preset.id, step_index, "action-grid"),
+                                                            &mut step.action,
+                                                            &mut live_sync,
                                                             action_hover_id,
                                                         );
-                                                    ui.ctx().data_mut(|data| {
-                                                        data.insert_temp(action_hover_id, false);
-                                                        data.insert_temp(
-                                                            action_hover_id.with("submenu-hover-block"),
-                                                            block_top_level_hover,
-                                                        );
-                                                    });
-                                                    Self::render_macro_action_picker_grid(
-
-                                                        ui,
-
-                                                        language,
-
-                                                        (group.id, preset.id, step_index, "action-grid"),
-
-                                                        &mut step.action,
-
-                                                        &mut live_sync,
-
-                                                        action_hover_id,
-
-                                                    );
+                                                    }
                                                     Self::forward_action_popup_scroll(ui);
                                                 });
                                             let action_uses_key = Self::macro_action_uses_key(step.action);
@@ -20530,6 +20575,161 @@ if supports_move_mouse || show_detection_tuning {
             2,
             135.0,
         );
+    }
+
+    fn render_filtered_macro_actions(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        theme: UiThemeMode,
+        search_query: &str,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+    ) {
+        let q = search_query.trim().to_lowercase();
+        let all_actions: &[MacroAction] = &[
+            MacroAction::KeyPress,
+            MacroAction::KeyDown,
+            MacroAction::KeyUp,
+            MacroAction::TypeText,
+            MacroAction::Wait,
+            MacroAction::BackgroundKey,
+            MacroAction::BackgroundClick,
+            MacroAction::BackgroundMouseMove,
+            MacroAction::MouseLeftClick,
+            MacroAction::MouseLeftDown,
+            MacroAction::MouseLeftUp,
+            MacroAction::MouseRightClick,
+            MacroAction::MouseRightDown,
+            MacroAction::MouseRightUp,
+            MacroAction::MouseMiddleClick,
+            MacroAction::MouseMiddleDown,
+            MacroAction::MouseMiddleUp,
+            MacroAction::MouseX1Click,
+            MacroAction::MouseX1Down,
+            MacroAction::MouseX1Up,
+            MacroAction::MouseX2Click,
+            MacroAction::MouseX2Down,
+            MacroAction::MouseX2Up,
+            MacroAction::MouseWheelUp,
+            MacroAction::MouseWheelDown,
+            MacroAction::MouseMoveAbsolute,
+            MacroAction::MouseMoveRelative,
+            MacroAction::PlayMousePathPreset,
+            MacroAction::ApplyMouseSensitivityPreset,
+            MacroAction::LoopStart,
+            MacroAction::LoopEnd,
+            MacroAction::StopIfKeyPressed,
+            MacroAction::StopIfTriggerPressedAgain,
+            MacroAction::IfStart,
+            MacroAction::Else,
+            MacroAction::IfEnd,
+            MacroAction::JumpToStep,
+            MacroAction::SetVariable,
+            MacroAction::StartTimerPreset,
+            MacroAction::PauseTimerPreset,
+            MacroAction::StopTimerPreset,
+            MacroAction::ReadTimerPreset,
+            MacroAction::EnableStep,
+            MacroAction::DisableStep,
+            MacroAction::TriggerMacroPreset,
+            MacroAction::TriggerMacroPresetIfEnabled,
+            MacroAction::StopMacroPreset,
+            MacroAction::EnableMacroPreset,
+            MacroAction::DisableMacroPreset,
+            MacroAction::ApplyWindowPreset,
+            MacroAction::FocusWindowPreset,
+            MacroAction::ShowTaskbar,
+            MacroAction::HideTaskbar,
+            MacroAction::TriggerCommandPreset,
+            MacroAction::EnableCrosshairProfile,
+            MacroAction::DisableCrosshair,
+            MacroAction::EnablePinPreset,
+            MacroAction::DisablePin,
+            MacroAction::ShowHud,
+            MacroAction::HideHud,
+            MacroAction::LockKeys,
+            MacroAction::UnlockKeys,
+            MacroAction::LockMouse,
+            MacroAction::UnlockMouse,
+            MacroAction::PlaySoundPreset,
+            MacroAction::StartAudioSensePreset,
+            MacroAction::StopAudioSense,
+            MacroAction::ReadMemory,
+            MacroAction::WriteMemory,
+            MacroAction::ScanInstruction,
+            MacroAction::StopInstructionScan,
+            MacroAction::StartVisionSearch,
+            MacroAction::ScanVisionOnce,
+            MacroAction::StopVisionWait,
+            MacroAction::StopVision,
+            MacroAction::TriggerVisionTiming,
+            MacroAction::StartVisionTiming,
+            MacroAction::StopVisionTiming,
+            MacroAction::OcrSearch,
+            MacroAction::EnableEspPreset,
+            MacroAction::DisableEspPreset,
+            MacroAction::StartEspScan,
+            MacroAction::StopEspScan,
+            MacroAction::ReadEspTarget,
+            MacroAction::Esp3DAimLock,
+            MacroAction::Follow3DTarget,
+            MacroAction::DrawGeometry,
+            MacroAction::ShowGeometryPreset,
+            MacroAction::HideGeometryPreset,
+            MacroAction::DisableNetworkAdapter,
+            MacroAction::EnableNetworkAdapter,
+            MacroAction::CutInternetRoute,
+            MacroAction::RestoreInternetRoute,
+            MacroAction::SetWifiRadioOff,
+            MacroAction::SetWifiRadioOn,
+            MacroAction::EnableZoomPreset,
+            MacroAction::DisableZoom,
+            MacroAction::FunnyMemeReply,
+            MacroAction::AiResponse,
+        ];
+
+        let matches: Vec<MacroAction> = all_actions
+            .iter()
+            .copied()
+            .filter(|&action| {
+                let name = format!("{:?}", action).to_lowercase();
+                let label = Self::macro_action_label(action).to_lowercase();
+                let short_label = Self::macro_action_short_label(action, language).to_lowercase();
+                let is_break = (q == "break" || q == "brk" || q == "ngắt") && matches!(action, MacroAction::StopIfKeyPressed);
+                name.contains(&q) || label.contains(&q) || short_label.contains(&q) || is_break
+            })
+            .collect();
+
+        if matches.is_empty() {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(Self::tr_lang(language, "No actions match your search", "Không tìm thấy action phù hợp"))
+                    .italics()
+                    .color(egui::Color32::from_gray(140)),
+            );
+            return;
+        }
+
+        ui.add_space(4.0);
+        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                for action in matches {
+                    let is_active = *current == action;
+                    let widget_text = Self::macro_action_selected_widget_text(action, language, theme);
+                    let mut btn = egui::Button::new(widget_text).min_size(egui::vec2(85.0, 24.0));
+                    if is_active {
+                        btn = btn.fill(egui::Color32::from_rgba_unmultiplied(84, 178, 222, 60));
+                    }
+                    let resp = ui.add(btn);
+                    if resp.clicked() {
+                        *current = action;
+                        *live_sync = true;
+                        ui.close_menu();
+                    }
+                }
+            });
+        });
     }
 
     fn render_macro_action_picker_grid(

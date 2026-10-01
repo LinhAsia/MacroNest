@@ -968,6 +968,7 @@ pub struct CrosshairApp {
     distance_measurement_active: bool,
     native_capture_in_progress: bool,
     startup_ram_trimmed: bool,
+    pub action_search_text: String,
 }
 
 impl CrosshairApp {
@@ -1141,6 +1142,7 @@ impl CrosshairApp {
             selected_macro_groups: HashSet::new(),
             macro_groups_favorite_filter: MacroGroupFavoriteFilter::All,
             macro_preset_search_query: String::new(),
+            action_search_text: String::new(),
             macro_group_clipboard: Vec::new(),
             macro_group_clipboard_is_cut: false,
             macro_group_clipboard_feedback: None,

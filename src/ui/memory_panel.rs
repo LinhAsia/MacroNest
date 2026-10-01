@@ -835,6 +835,7 @@ struct CodeAccessDialog {
     value_filter_max: String,
     feedback_message: Option<(String, Instant)>,
     last_value_refresh: Instant,
+    pending_scroll_adjust: f32,
 }
 
 struct AobCompareEntry {
@@ -1142,6 +1143,9 @@ pub(crate) struct MemoryPanelState {
     marked_result_addresses: HashSet<usize>,
     selection_anchor: Option<usize>,
     saved: Vec<SavedMemoryAddress>,
+    pub(crate) address_list_filter_mode: bool,
+    pub(crate) address_list_base_values: HashMap<usize, ScanValue>,
+    pub(crate) address_list_base_texts: HashMap<usize, String>,
     selected_saved: HashSet<usize>,
     saved_selection_anchor: Option<usize>,
     saved_list_active: bool,
@@ -1384,6 +1388,9 @@ impl Default for MemoryPanelState {
             batch_new_base: String::new(),
             batch_replace_status: String::new(),
             batch_replace_filter: String::new(),
+            address_list_filter_mode: false,
+            address_list_base_values: HashMap::new(),
+            address_list_base_texts: HashMap::new(),
         }
     }
 }
@@ -4047,6 +4054,19 @@ impl CrosshairApp {
                 ui.set_min_size(size - vec2(14.0, 14.0));
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(self.tr("Address list", "Address list")).strong());
+                    ui.add_space(4.0);
+                    let filter_label = self.tr("Filter mode", "Lọc theo dõi");
+                    let filter_tooltip = self.tr(
+                        "When enabled: snapshots current values as base, and applies scanner hotkeys / actions (Changed, Unchanged, Increased, Decreased, etc.) to filter and remove non-matching addresses directly.",
+                        "Khi bật: ghi nhớ giá trị hiện tại làm mốc và áp dụng các hotkey/nút scan (Changed, Unchanged, Increased, Decreased,...) để lọc và xóa các địa chỉ không thỏa mãn khỏi danh sách này."
+                    );
+                    let filter_mode_chk = ui.checkbox(
+                        &mut self.memory_panel.address_list_filter_mode,
+                        filter_label,
+                    ).on_hover_text(filter_tooltip);
+                    if filter_mode_chk.changed() && self.memory_panel.address_list_filter_mode {
+                        self.snapshot_address_list_base();
+                    }
                     let selected = self.memory_panel.selected_saved.len();
                     if selected > 0 {
                         if ui.button(self.tr("Delete", "Delete")).clicked() {
@@ -8427,6 +8447,7 @@ impl CrosshairApp {
                 value_filter_max: String::new(),
                 feedback_message: None,
                 last_value_refresh: Instant::now(),
+                pending_scroll_adjust: 0.0,
             });
             return;
         }
@@ -8471,6 +8492,7 @@ impl CrosshairApp {
             value_filter_max: String::new(),
             feedback_message: None,
             last_value_refresh: Instant::now(),
+            pending_scroll_adjust: 0.0,
         });
     }
 
@@ -14720,7 +14742,10 @@ impl CrosshairApp {
                     {
                         *count += 1;
                     } else {
-                        dialog.addresses.push((data_address, 1));
+                        dialog.addresses.insert(0, (data_address, 1));
+                        if dialog.addresses.len() > 1 {
+                            dialog.pending_scroll_adjust += 24.0;
+                        }
                     }
                     if dialog.auto_stop_on_hit
                         && let Some(mut active) = dialog.active.take()
@@ -14756,9 +14781,7 @@ impl CrosshairApp {
                 dialog.last_value_refresh = now;
             }
             if addresses_updated {
-                dialog
-                    .addresses
-                    .sort_unstable_by_key(|(address, _)| *address);
+                // Keep arrival order with newest at top without shifting viewed addresses
             }
             if let Some(pid) = self.memory_panel.process_pid {
                 for (data_address, _) in &dialog.addresses {
@@ -15302,7 +15325,17 @@ impl CrosshairApp {
             dialog.selection_anchor = Some(0);
         }
         let has_visible_addresses = !display_addresses.is_empty();
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        let scroll_id = ui.make_persistent_id("code-access-addresses-scroll");
+        let mut scroll_offset = ui.data(|d| d.get_temp::<f32>(scroll_id)).unwrap_or(0.0);
+        if dialog.pending_scroll_adjust > 0.0 {
+            scroll_offset += dialog.pending_scroll_adjust;
+            dialog.pending_scroll_adjust = 0.0;
+        }
+        let mut scroll_area = egui::ScrollArea::vertical().id_salt(scroll_id);
+        if scroll_offset > 0.0 {
+            scroll_area = scroll_area.vertical_scroll_offset(scroll_offset);
+        }
+        let scroll_output = scroll_area.show(ui, |ui| {
             for (row_idx, (original_index, (address, count))) in
                 display_addresses.into_iter().enumerate()
             {
@@ -15449,6 +15482,7 @@ impl CrosshairApp {
                 });
             }
         });
+        ui.data_mut(|d| d.insert_temp(scroll_id, scroll_output.state.offset.y));
         if context_add.is_some() {
             add = context_add;
         }
@@ -17856,8 +17890,174 @@ impl CrosshairApp {
         true
     }
 
+    fn snapshot_address_list_base(&mut self) {
+        let pid = self.memory_panel.process_pid;
+        self.memory_panel.address_list_base_values.clear();
+        self.memory_panel.address_list_base_texts.clear();
+        for entry in &mut self.memory_panel.saved {
+            let addr = entry.address;
+            if addr == 0 {
+                continue;
+            }
+            if let Some(pid) = pid {
+                if let Some(enc) = entry.text_encoding {
+                    let byte_len = entry.text_byte_len.max(if enc == TextEncoding::Utf16 { 64 } else { 32 });
+                    if let Ok(text) = read_text_memory(pid, addr, byte_len, enc) {
+                        entry.current_text = Some(text.clone());
+                        self.memory_panel.address_list_base_texts.insert(addr, text);
+                        continue;
+                    }
+                } else if let Ok(val) = read_scan_value(pid, addr, entry.value_type) {
+                    entry.current = Some(val);
+                    self.memory_panel.address_list_base_values.insert(addr, val);
+                    continue;
+                }
+            }
+            if let Some(txt) = entry.current_text.as_ref() {
+                self.memory_panel.address_list_base_texts.insert(addr, txt.clone());
+            } else if let Some(val) = entry.current {
+                self.memory_panel.address_list_base_values.insert(addr, val);
+            }
+        }
+    }
+
+    fn start_address_list_filter(&mut self, action: MemoryScanAction) {
+        if action == MemoryScanAction::SetBase {
+            self.snapshot_address_list_base();
+            let count = self.memory_panel.saved.len();
+            self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+                format!("Đã ghi nhớ giá trị mốc cho {count} địa chỉ trong danh sách")
+            } else {
+                format!("Updated baseline for {count} address(es) in list")
+            };
+            self.memory_panel.last_action = action.label().to_owned();
+            return;
+        }
+        let Some(pid) = self.memory_panel.process_pid else {
+            self.memory_panel.status = "Select a process".to_owned();
+            return;
+        };
+        if self.memory_panel.saved.is_empty() {
+            self.memory_panel.status = "Address list is empty".to_owned();
+            return;
+        }
+        let comparison = action.comparison();
+        let range = if action == MemoryScanAction::Between {
+            let Some(min) = parse_scan_value(
+                &self.memory_panel.between_min_input,
+                self.memory_panel.value_type,
+                self.memory_panel.hex,
+            ) else {
+                self.memory_panel.status = "Invalid minimum value".to_owned();
+                return;
+            };
+            let Some(max) = parse_scan_value(
+                &self.memory_panel.between_max_input,
+                self.memory_panel.value_type,
+                self.memory_panel.hex,
+            ) else {
+                self.memory_panel.status = "Invalid maximum value".to_owned();
+                return;
+            };
+            if !scan_bounds_are_ordered(min, max) {
+                self.memory_panel.status = "Minimum must not exceed maximum".to_owned();
+                return;
+            }
+            Some((min, max))
+        } else {
+            None
+        };
+        let exact = if matches!(
+            action,
+            MemoryScanAction::FirstScan
+                | MemoryScanAction::Exact
+                | MemoryScanAction::Less
+                | MemoryScanAction::Greater
+        ) {
+            parse_scan_value(
+                &self.memory_panel.value_input,
+                self.memory_panel.value_type,
+                self.memory_panel.hex,
+            )
+        } else {
+            None
+        };
+        let exact_text = if matches!(action, MemoryScanAction::FirstScan | MemoryScanAction::Exact) {
+            Some(self.memory_panel.value_input.clone())
+        } else {
+            None
+        };
+
+        let before_count = self.memory_panel.saved.len();
+        let mut new_base_values = HashMap::new();
+        let mut new_base_texts = HashMap::new();
+
+        self.memory_panel.saved.retain_mut(|entry| {
+            let addr = if let Some(pointer) = entry.pointer.as_ref() {
+                resolve_memory_address(pid, pointer.base, Some(pointer)).unwrap_or(entry.address)
+            } else {
+                entry.address
+            };
+            entry.address = addr;
+            if addr == 0 {
+                return false;
+            }
+            if let Some(enc) = entry.text_encoding {
+                let byte_len = entry.text_byte_len.max(if enc == TextEncoding::Utf16 { 64 } else { 32 });
+                let Ok(live_text) = read_text_memory(pid, addr, byte_len, enc) else {
+                    return false;
+                };
+                entry.current_text = Some(live_text.clone());
+                let prev_text = self.memory_panel.address_list_base_texts.get(&addr);
+                let matches = match comparison {
+                    Some(ScanComparison::Exact) => exact_text.as_ref().map_or(false, |e| e == &live_text),
+                    Some(ScanComparison::Changed) => prev_text.map_or(true, |p| p != &live_text),
+                    Some(ScanComparison::Unchanged) => prev_text.map_or(false, |p| p == &live_text),
+                    None => true,
+                    _ => true,
+                };
+                if matches {
+                    new_base_texts.insert(addr, live_text);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                let Ok(live_val) = read_scan_value(pid, addr, entry.value_type) else {
+                    return false;
+                };
+                entry.current = Some(live_val);
+                let prev_val = self.memory_panel.address_list_base_values.get(&addr).copied();
+                let matches = scan_value_matches_comparison(live_val, prev_val, comparison, exact, range);
+                if matches {
+                    new_base_values.insert(addr, live_val);
+                    true
+                } else {
+                    false
+                }
+            }
+        });
+
+        self.memory_panel.address_list_base_values = new_base_values;
+        self.memory_panel.address_list_base_texts = new_base_texts;
+        self.memory_panel.selected_saved.clear();
+        self.memory_panel.saved_selection_anchor = None;
+        let after_count = self.memory_panel.saved.len();
+        let removed = before_count.saturating_sub(after_count);
+        self.memory_panel.last_action = action.label().to_owned();
+        self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+            format!("Đã lọc Address list: còn {after_count} địa chỉ (đã xóa {removed})")
+        } else {
+            format!("Address list filtered: {after_count} remaining ({removed} removed)")
+        };
+    }
+
     fn start_memory_action(&mut self, action: MemoryScanAction) {
         if self.start_stable_pointer_filter(action) {
+            return;
+        }
+        if self.memory_panel.address_list_filter_mode {
+            self.start_address_list_filter(action);
             return;
         }
         if action == MemoryScanAction::SetBase {
