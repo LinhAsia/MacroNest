@@ -714,16 +714,34 @@ pub struct SharedEspPreset {
     pub preset: EspPreset,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hud_preset: Option<HudPreset>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_code: Option<MemoryCodeEntry>,
 }
 
-pub fn encode_esp_preset(preset: &EspPreset, hud_presets: &[HudPreset]) -> Result<String> {
+pub fn encode_esp_preset(
+    preset: &EspPreset,
+    hud_presets: &[HudPreset],
+    memory_code_list: &[MemoryCodeEntry],
+) -> Result<String> {
     let hud_preset = preset
         .entity_auto_hud_preset_id
         .and_then(|id| hud_presets.iter().find(|h| h.id == id).cloned());
+    let memory_code = if !preset.entity_auto_code_module.trim().is_empty() {
+        memory_code_list
+            .iter()
+            .find(|c| {
+                c.module.eq_ignore_ascii_case(&preset.entity_auto_code_module)
+                    && c.offset == preset.entity_auto_code_offset
+            })
+            .cloned()
+    } else {
+        None
+    };
     encode_v2(
         &SharedEspPreset {
             preset: preset.clone(),
             hud_preset,
+            memory_code,
         },
         PREFIX_ESP,
         "ESP preset",
@@ -1107,13 +1125,42 @@ mod tests {
             name: "Auto Hud".to_string(),
             ..Default::default()
         };
+        let code_entry = MemoryCodeEntry {
+            name: "Enemy Hook".to_string(),
+            module: "client.dll".to_string(),
+            offset: 0x4A10,
+            instruction: "mov [rax+0x10], rbx".to_string(),
+            ..Default::default()
+        };
         let mut esp_with_hud = esp.clone();
         esp_with_hud.entity_auto_hud_preset_id = Some(99);
-        let encoded_esp = encode_esp_preset(&esp_with_hud, &[hud.clone()]).expect("encode esp");
+        esp_with_hud.entity_auto_code_module = "client.dll".to_string();
+        esp_with_hud.entity_auto_code_offset = 0x4A10;
+        let encoded_esp = encode_esp_preset(&esp_with_hud, &[hud.clone()], &[code_entry.clone()]).expect("encode esp");
         assert!(encoded_esp.starts_with(PREFIX_ESP));
         let decoded_esp = decode_esp_preset(&encoded_esp).expect("decode esp");
         assert_eq!(decoded_esp.preset, esp_with_hud);
         assert_eq!(decoded_esp.hud_preset, Some(hud));
+        assert_eq!(decoded_esp.memory_code, Some(code_entry));
+
+        // Test without instruction selected
+        let esp_plain = EspPreset::new(43);
+        let encoded_plain = encode_esp_preset(&esp_plain, &[], &[]).expect("encode esp plain");
+        let decoded_plain = decode_esp_preset(&encoded_plain).expect("decode esp plain");
+        assert_eq!(decoded_plain.preset, esp_plain);
+        assert_eq!(decoded_plain.hud_preset, None);
+        assert_eq!(decoded_plain.memory_code, None);
+
+        // Test backwards compatibility with legacy json (without memory_code key)
+        let legacy_json = format!(
+            r#"{{"preset":{}}}"#,
+            serde_json::to_string(&esp).unwrap()
+        );
+        let legacy_encoded = encode_v2(&serde_json::from_str::<serde_json::Value>(&legacy_json).unwrap(), PREFIX_ESP, "ESP preset").unwrap();
+        let legacy_decoded = decode_esp_preset(&legacy_encoded).expect("decode legacy esp");
+        assert_eq!(legacy_decoded.preset, esp);
+        assert_eq!(legacy_decoded.hud_preset, None);
+        assert_eq!(legacy_decoded.memory_code, None);
 
         let crosshair = ProfileRecord {
             name: "Test Crosshair".to_string(),

@@ -10604,7 +10604,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn export_esp_preset(&mut self, preset: &crate::model::EspPreset) {
-        match crate::macro_code::encode_esp_preset(preset, &self.state.hud_presets) {
+        match crate::macro_code::encode_esp_preset(preset, &self.state.hud_presets, &self.state.memory_code_list) {
             Ok(code) => self.copy_share_code_to_clipboard(
                 code,
                 "ESP preset code copied to clipboard.",
@@ -10785,6 +10785,19 @@ impl CrosshairApp {
                         preset.entity_auto_hud_preset_id = Some(hud.id);
                         self.state.hud_presets.push(hud);
                         self.sync_hud_presets();
+                    } else if preset.entity_auto_hud_preset_id.is_some() {
+                        preset.entity_auto_hud_preset_id = None;
+                    }
+                    if let Some(mut entry) = shared.memory_code {
+                        entry.replaced = false;
+                        entry.original_bytes = None;
+                        if !self.state.memory_code_list.iter().any(|existing| {
+                            existing.module.eq_ignore_ascii_case(&entry.module)
+                                && existing.offset == entry.offset
+                        }) {
+                            self.state.memory_code_list.push(entry);
+                            crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
+                        }
                     }
                     preset.id = Self::allocate_next_id(
                         &self.state.esp_presets,
