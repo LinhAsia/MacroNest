@@ -713,6 +713,7 @@ struct StructureClass {
 struct MemoryViewDialog {
     address: usize,
     tracked_base: Option<usize>,
+    source_saved_index: Option<usize>,
     kind: MemoryViewKind,
     display_type: MemoryDisplayType,
     relative_addresses: bool,
@@ -1964,6 +1965,8 @@ impl CrosshairApp {
                 vec2(inner_width, 520.0)
             } else if id == "memory-stable-pointer-host" {
                 vec2(stable_pointer_width, 620.0)
+            } else if id == "memory-settings-host" {
+                vec2(600.0, 720.0)
             } else {
                 vec2(860.0, 620.0)
             };
@@ -1971,6 +1974,8 @@ impl CrosshairApp {
                 vec2(inner_width, 240.0)
             } else if id == "memory-stable-pointer-host" {
                 vec2(stable_pointer_width, 280.0)
+            } else if id == "memory-settings-host" {
+                vec2(440.0, 320.0)
             } else {
                 vec2(480.0, 280.0)
             };
@@ -2035,6 +2040,8 @@ impl CrosshairApp {
                 (vec2(inner_width, 520.0), vec2(inner_width, 240.0))
             } else if id == "memory-stable-pointer-host" {
                 (vec2(stable_pointer_width, 620.0), vec2(stable_pointer_width, 280.0))
+            } else if id == "memory-settings-host" {
+                (vec2(600.0, 720.0), vec2(440.0, 320.0))
             } else {
                 (vec2(640.0, 440.0), vec2(380.0, 240.0))
             };
@@ -2200,7 +2207,7 @@ impl CrosshairApp {
             .with_title("MacroNest — Scan results")
             .with_position(egui::pos2(0.0, 0.0))
             .with_inner_size(vec2(560.0, 430.0) * scale)
-            .with_min_inner_size(vec2(400.0, 260.0) * scale)
+            .with_min_inner_size(vec2(220.0, 160.0) * scale)
             .with_clamp_size_to_monitor_size(true)
             .with_decorations(false)
             .with_resizable(true)
@@ -3475,8 +3482,8 @@ impl CrosshairApp {
         pinned: bool,
         index: usize,
         pane_width: f32,
-        address_ratio: f32,
-        value_ratio: f32,
+        address_col_width: f32,
+        value_col_width: f32,
         show_previous: bool,
     ) {
         let (address_value, current_value, previous_value) =
@@ -3570,7 +3577,7 @@ impl CrosshairApp {
                 };
                 Self::memory_table_cell_with_bg_and_tooltip(
                     ui,
-                    pane_width * address_ratio,
+                    address_col_width,
                     RichText::new(addr_text).monospace().color(addr_color),
                     None,
                     addr_tooltip.as_deref(),
@@ -3622,14 +3629,14 @@ impl CrosshairApp {
                 };
                 Self::memory_table_cell_with_bg(
                     ui,
-                    pane_width * value_ratio,
+                    value_col_width,
                     RichText::new(&current_value).monospace().color(text_color),
                     cell_bg,
                 );
                 if show_previous {
                     Self::memory_table_cell(
                         ui,
-                        pane_width * value_ratio,
+                        value_col_width,
                         RichText::new(&previous_value).monospace(),
                     );
                 }
@@ -3787,15 +3794,23 @@ impl CrosshairApp {
             }
             // Widening the pinned window creates compact parallel result panes.
             let show_previous = self.memory_panel.show_scan_previous;
-            let minimum_pane_width = if show_previous { 360.0 } else { 250.0 };
+            let minimum_pane_width = if show_previous { 280.0 } else { 190.0 };
             let pane_count = if pinned {
                 (ui.available_width() / minimum_pane_width).floor().max(1.0) as usize
             } else {
                 1
             };
             let pane_width = ui.available_width() / pane_count as f32;
-            let address_ratio = if show_previous { 0.40 } else { 0.56 };
-            let value_ratio = if show_previous { 0.30 } else { 0.44 };
+            let address_col_width = if show_previous {
+                115.0f32.min(pane_width * 0.38)
+            } else {
+                120.0f32.min(pane_width * 0.48)
+            };
+            let value_col_width = if show_previous {
+                ((pane_width - address_col_width) / 2.0).max(60.0)
+            } else {
+                (pane_width - address_col_width).max(60.0)
+            };
             let grid_row_count = visible_count.div_ceil(pane_count);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -3807,18 +3822,18 @@ impl CrosshairApp {
                             ui.spacing_mut().item_spacing.x = 0.0;
                             Self::memory_table_cell(
                                 ui,
-                                pane_width * address_ratio,
+                                address_col_width,
                                 RichText::new(self.tr("Address", "Address")).strong(),
                             );
                             Self::memory_table_cell(
                                 ui,
-                                pane_width * value_ratio,
+                                value_col_width,
                                 RichText::new(self.tr("Current", "Current")).strong(),
                             );
                             if show_previous {
                                 Self::memory_table_cell(
                                     ui,
-                                    pane_width * value_ratio,
+                                    value_col_width,
                                     RichText::new(previous_label).strong(),
                                 );
                             }
@@ -3855,8 +3870,8 @@ impl CrosshairApp {
                                     pinned,
                                     index,
                                     pane_width,
-                                    address_ratio,
-                                    value_ratio,
+                                    address_col_width,
+                                    value_col_width,
                                     show_previous,
                                 );
                             }
@@ -4122,15 +4137,13 @@ impl CrosshairApp {
                 ui.separator();
                 let editing = self.memory_panel.edit_value_index.is_some()
                     || self.memory_panel.edit_description_index.is_some();
-                let has_kb_focus = ui.ctx().wants_keyboard_input();
                 if self.memory_panel.saved_list_active
                     && !editing
-                    && !has_kb_focus
                     && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A))
                 {
                     self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
                 }
-                if self.memory_panel.saved_list_active && !editing && !has_kb_focus {
+                if self.memory_panel.saved_list_active && !editing {
                     let (arrow_up, arrow_down) = ui.input(|input| {
                         (
                             !input.modifiers.shift && !input.modifiers.ctrl && input.key_pressed(egui::Key::ArrowUp),
@@ -4146,6 +4159,8 @@ impl CrosshairApp {
                             self.memory_panel.saved_selection_anchor = Some(next);
                             let target_addr = self.memory_panel.saved[next].address;
                             if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                view.source_saved_index = Some(next);
+                                view.display_type = memory_display_type_for_saved(&self.memory_panel.saved[next]);
                                 Self::navigate_memory_view_dialog(view, target_addr);
                             }
                         }
@@ -4159,6 +4174,8 @@ impl CrosshairApp {
                             self.memory_panel.saved_selection_anchor = Some(next);
                             let target_addr = self.memory_panel.saved[next].address;
                             if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                view.source_saved_index = Some(next);
+                                view.display_type = memory_display_type_for_saved(&self.memory_panel.saved[next]);
                                 Self::navigate_memory_view_dialog(view, target_addr);
                             }
                         }
@@ -4537,11 +4554,6 @@ impl CrosshairApp {
                             for hit in row_hits {
                                 response = response.union(hit);
                             }
-                            if response.clicked_by(egui::PointerButton::Middle) {
-                                self.memory_panel.saved_list_active = true;
-                                self.select_saved_memory_row(index, selected, ui);
-                                self.navigate_open_memory_view(address);
-                            }
                             if ui.input(|input| {
                                 input.pointer.button_pressed(egui::PointerButton::Primary)
                             }) && let Some(pointer) = ui.ctx().pointer_latest_pos()
@@ -4578,6 +4590,11 @@ impl CrosshairApp {
                             }
                             if response.clicked() && !response.double_clicked() {
                                 self.select_saved_memory_row(index, selected, ui);
+                                if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                    view.source_saved_index = Some(index);
+                                    view.display_type = memory_display_type_for_saved(&self.memory_panel.saved[index]);
+                                    Self::navigate_memory_view_dialog(view, address);
+                                }
                             }
                             if response.secondary_clicked() {
                                 self.memory_panel.saved_list_active = true;
@@ -4593,11 +4610,14 @@ impl CrosshairApp {
                                 self.memory_panel.selected_saved.insert(index);
                                 self.memory_panel.saved_selection_anchor = Some(index);
                                 if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                    view.source_saved_index = Some(index);
+                                    view.display_type = memory_display_type_for_saved(&self.memory_panel.saved[index]);
                                     Self::navigate_memory_view_dialog(view, address);
                                 } else {
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address,
                                         tracked_base: None,
+                                        source_saved_index: Some(index),
                                         kind: MemoryViewKind::Bytes,
                                         display_type: if text_encoding.is_some() { MemoryDisplayType::Text } else { memory_display_type_for_scan_type(value_type) },
                                         relative_addresses: false,
@@ -4978,49 +4998,60 @@ impl CrosshairApp {
                                     )
                                     .clicked()
                                 {
-                                    self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
-                                        address: saved.address,
-                                        tracked_base: None,
-                                        kind: MemoryViewKind::Bytes,
-                                        display_type: memory_display_type_for_saved(&saved),
-                                        relative_addresses: false,
-                                        pinned: true,
-                                        elements: default_structure_elements(),
-                                        pending_add: None,
-                                        pending_track: None,
-                                        pointer_width: self
-                                            .memory_panel
-                                            .process_pid
-                                            .and_then(|pid| process_pointer_width(pid).ok())
-                                            .unwrap_or(8),
-                                        previous_bytes: Vec::new(),
-                                        previous_byte_map: HashMap::new(),
-                                        track_changes: false,
-                                        changed_addresses: HashSet::new(),
-                                        classes: vec![StructureClass {
-                                            name: "Class_0".to_owned(),
+                                    self.memory_panel.saved_list_active = true;
+                                    self.memory_panel.selected_saved.clear();
+                                    self.memory_panel.selected_saved.insert(index);
+                                    self.memory_panel.saved_selection_anchor = Some(index);
+                                    if let Some(view) = self.memory_panel.memory_view_dialog.as_mut() {
+                                        view.source_saved_index = Some(index);
+                                        view.display_type = memory_display_type_for_saved(&saved);
+                                        Self::navigate_memory_view_dialog(view, saved.address);
+                                    } else {
+                                        self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                             address: saved.address,
+                                            tracked_base: None,
+                                            source_saved_index: Some(index),
+                                            kind: MemoryViewKind::Bytes,
+                                            display_type: memory_display_type_for_saved(&saved),
+                                            relative_addresses: false,
+                                            pinned: true,
                                             elements: default_structure_elements(),
-                                        }],
-                                        selected_class: 0,
-                                        class_detection_status: String::new(),
-                                        class_detection_attempted: false,
-                                        auto_dissected: false,
-                                        history: Vec::new(),
-                                        structure_back_step: "10".to_owned(),
-                                        structure_forward_step: "C".to_owned(),
-                                        selected_structure_address: None,
-                                        scroll_offset: 0,
-                                        memory_columns: 3,
-                                        reset_memory_scroll: true,
-                                        memory_scroll_override: None,
-                                        memory_region_override: None,
-                                        fit_memory_columns: true,
-                                        stride_address_a: String::new(),
-                                        stride_address_b: String::new(),
-                                        track_range_hex: "1000".to_owned(),
-                                        filter_changed_only: false,
-                                    });
+                                            pending_add: None,
+                                            pending_track: None,
+                                            pointer_width: self
+                                                .memory_panel
+                                                .process_pid
+                                                .and_then(|pid| process_pointer_width(pid).ok())
+                                                .unwrap_or(8),
+                                            previous_bytes: Vec::new(),
+                                            previous_byte_map: HashMap::new(),
+                                            track_changes: false,
+                                            changed_addresses: HashSet::new(),
+                                            classes: vec![StructureClass {
+                                                name: "Class_0".to_owned(),
+                                                address: saved.address,
+                                                elements: default_structure_elements(),
+                                            }],
+                                            selected_class: 0,
+                                            class_detection_status: String::new(),
+                                            class_detection_attempted: false,
+                                            auto_dissected: false,
+                                            history: Vec::new(),
+                                            structure_back_step: "10".to_owned(),
+                                            structure_forward_step: "C".to_owned(),
+                                            selected_structure_address: None,
+                                            scroll_offset: 0,
+                                            memory_columns: 3,
+                                            reset_memory_scroll: true,
+                                            memory_scroll_override: None,
+                                            memory_region_override: None,
+                                            fit_memory_columns: true,
+                                            stride_address_a: String::new(),
+                                            stride_address_b: String::new(),
+                                            track_range_hex: "1000".to_owned(),
+                                            filter_changed_only: false,
+                                        });
+                                    }
                                     ui.close();
                                 }
                                 if ui
@@ -5040,9 +5071,14 @@ impl CrosshairApp {
                                     )
                                     .clicked()
                                 {
+                                    self.memory_panel.saved_list_active = true;
+                                    self.memory_panel.selected_saved.clear();
+                                    self.memory_panel.selected_saved.insert(index);
+                                    self.memory_panel.saved_selection_anchor = Some(index);
                                     self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                                         address: saved.address,
                                         tracked_base: None,
+                                        source_saved_index: Some(index),
                                         kind: MemoryViewKind::Structure,
                                         display_type: MemoryDisplayType::ByteHex,
                                         relative_addresses: false,
@@ -5492,6 +5528,10 @@ impl CrosshairApp {
             return;
         }
         let mut changed = false;
+        egui::ScrollArea::vertical()
+            .id_salt("memory-settings-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
                 ui.label("Debugger method");
                 changed |= ui
                     .radio_value(
@@ -5747,6 +5787,7 @@ impl CrosshairApp {
                             .changed();
                     }
                 });
+            });
         if changed {
             ui.ctx().request_repaint();
             self.persist();
@@ -14501,6 +14542,7 @@ impl CrosshairApp {
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                 address: addr,
                 tracked_base: None,
+                source_saved_index: None,
                 kind: MemoryViewKind::Bytes,
                 display_type: MemoryDisplayType::ByteHex,
                 relative_addresses: false,
@@ -14540,6 +14582,7 @@ impl CrosshairApp {
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                 address: addr,
                 tracked_base: None,
+                source_saved_index: None,
                 kind: MemoryViewKind::Structure,
                 display_type: MemoryDisplayType::ByteHex,
                 relative_addresses: true,
@@ -14946,6 +14989,7 @@ impl CrosshairApp {
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                 address,
                 tracked_base: Some(address),
+                source_saved_index: None,
                 kind: MemoryViewKind::Bytes,
                 display_type: if dialog.text_encoding.is_some() {
                     MemoryDisplayType::Text
@@ -15772,12 +15816,10 @@ impl CrosshairApp {
         };
         let mut open = true;
         let mut nav_delta = 0isize;
-        if !ctx.wants_keyboard_input() {
-            if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
-                nav_delta = -1;
-            } else if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
-                nav_delta = 1;
-            }
+        if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+            nav_delta = -1;
+        } else if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+            nav_delta = 1;
         }
         if dialog.pinned {
             let scale = self.state.memory_pinned_ui_scale;
@@ -15806,12 +15848,10 @@ impl CrosshairApp {
                     if fit_columns {
                         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(target_view_width, 820.0) * scale));
                     }
-                    if !ctx.wants_keyboard_input() {
-                        if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
-                            nav_delta = -1;
-                        } else if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
-                            nav_delta = 1;
-                        }
+                    if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+                        nav_delta = -1;
+                    } else if ctx.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+                        nav_delta = 1;
                     }
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
@@ -15873,12 +15913,10 @@ impl CrosshairApp {
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
-                if !ui.ctx().wants_keyboard_input() {
-                    if ui.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
-                        nav_delta = -1;
-                    } else if ui.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
-                        nav_delta = 1;
-                    }
+                if ui.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowUp)) {
+                    nav_delta = -1;
+                } else if ui.input(|i| !i.modifiers.shift && !i.modifiers.ctrl && i.key_pressed(egui::Key::ArrowDown)) {
+                    nav_delta = 1;
                 }
                 let pin_label = self.tr("Pin", "Ghim");
                 if ui.button(pin_label).clicked() {
@@ -20239,6 +20277,7 @@ impl CrosshairApp {
             self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
                 address,
                 tracked_base: None,
+                source_saved_index: None,
                 kind: MemoryViewKind::Bytes,
                 display_type: MemoryDisplayType::ByteHex,
                 relative_addresses: false,
@@ -21133,22 +21172,22 @@ impl CrosshairApp {
         dialog: &mut MemoryViewDialog,
     ) -> bool {
         let current_address = dialog.address;
-        let in_saved = panel
-            .saved
-            .iter()
-            .position(|item| item.address == current_address);
-        let in_candidates = panel
-            .candidates
-            .iter()
-            .position(|item| item.address == current_address);
+        let in_saved = dialog
+            .source_saved_index
+            .filter(|&idx| idx < panel.saved.len())
+            .or_else(|| {
+                panel
+                    .saved
+                    .iter()
+                    .position(|item| item.address == current_address)
+            });
 
-        if panel.saved_list_active
-            || in_saved.is_some()
-            || (!panel.saved.is_empty() && in_candidates.is_none())
+        if !panel.saved.is_empty()
+            && (dialog.source_saved_index.is_some()
+                || panel.saved_list_active
+                || in_saved.is_some()
+                || panel.candidates.is_empty())
         {
-            if panel.saved.is_empty() {
-                return false;
-            }
             let cur = in_saved
                 .or_else(|| panel.selected_saved.iter().copied().min())
                 .unwrap_or(0);
@@ -21157,22 +21196,21 @@ impl CrosshairApp {
             } else {
                 (cur + 1).min(panel.saved.len().saturating_sub(1))
             };
+            dialog.source_saved_index = Some(next);
             panel.selected_saved.clear();
             panel.selected_saved.insert(next);
             panel.saved_selection_anchor = Some(next);
             panel.saved_list_active = true;
             let item = &panel.saved[next];
             let new_address = item.address;
-            let val_type = item.value_type;
-            let text_enc = item.text_encoding;
             Self::navigate_memory_view_dialog(dialog, new_address);
-            if text_enc.is_some() {
-                dialog.display_type = MemoryDisplayType::Text;
-            } else {
-                dialog.display_type = memory_display_type_for_scan_type(val_type);
-            }
+            dialog.display_type = memory_display_type_for_saved(item);
             return true;
         } else if !panel.candidates.is_empty() {
+            let in_candidates = panel
+                .candidates
+                .iter()
+                .position(|item| item.address == current_address);
             let cur = in_candidates
                 .or_else(|| panel.selected_results.iter().copied().min())
                 .unwrap_or(0);
@@ -21303,6 +21341,7 @@ impl CrosshairApp {
         self.memory_panel.memory_view_dialog = Some(MemoryViewDialog {
             address,
             tracked_base: None,
+            source_saved_index: None,
             kind: MemoryViewKind::Structure,
             display_type: MemoryDisplayType::ByteHex,
             relative_addresses: true,
@@ -24800,6 +24839,7 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
         let mut dialog = MemoryViewDialog {
             address: 0x1000,
             tracked_base: None,
+            source_saved_index: None,
             kind: MemoryViewKind::Bytes,
             display_type: MemoryDisplayType::Float,
             relative_addresses: false,
@@ -25530,6 +25570,7 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
         let mut dialog = MemoryViewDialog {
             address: 0x1000,
             tracked_base: None,
+            source_saved_index: None,
             kind: MemoryViewKind::Bytes,
             display_type: MemoryDisplayType::I32Hex,
             relative_addresses: false,
