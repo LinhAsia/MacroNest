@@ -8905,6 +8905,7 @@ impl CrosshairApp {
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(442.0);
+                                                ui.set_min_height(218.0);
                                                 ui.horizontal(|ui| {
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -11223,6 +11224,7 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                             ))
                                             .show_ui(ui, |ui| {
                                                 ui.set_min_width(442.0);
+                                                ui.set_min_height(218.0);
                                                 ui.horizontal(|ui| {
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -14473,6 +14475,7 @@ if supports_move_mouse || show_detection_tuning {
                                                 ))
                                                 .show_ui(ui, |ui| {
                                                     ui.set_min_width(442.0);
+                                                    ui.set_min_height(218.0);
                                                     ui.horizontal(|ui| {
                                                         live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
                                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
