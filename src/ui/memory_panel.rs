@@ -835,7 +835,6 @@ struct CodeAccessDialog {
     value_filter_max: String,
     feedback_message: Option<(String, Instant)>,
     last_value_refresh: Instant,
-    pending_scroll_adjust: f32,
 }
 
 struct AobCompareEntry {
@@ -8447,7 +8446,6 @@ impl CrosshairApp {
                 value_filter_max: String::new(),
                 feedback_message: None,
                 last_value_refresh: Instant::now(),
-                pending_scroll_adjust: 0.0,
             });
             return;
         }
@@ -8492,7 +8490,6 @@ impl CrosshairApp {
             value_filter_max: String::new(),
             feedback_message: None,
             last_value_refresh: Instant::now(),
-            pending_scroll_adjust: 0.0,
         });
     }
 
@@ -14742,10 +14739,7 @@ impl CrosshairApp {
                     {
                         *count += 1;
                     } else {
-                        dialog.addresses.insert(0, (data_address, 1));
-                        if dialog.addresses.len() > 1 {
-                            dialog.pending_scroll_adjust += 24.0;
-                        }
+                        dialog.addresses.push((data_address, 1));
                     }
                     if dialog.auto_stop_on_hit
                         && let Some(mut active) = dialog.active.take()
@@ -14779,9 +14773,6 @@ impl CrosshairApp {
         if addresses_updated || should_refresh_periodically {
             if should_refresh_periodically {
                 dialog.last_value_refresh = now;
-            }
-            if addresses_updated {
-                // Keep arrival order with newest at top without shifting viewed addresses
             }
             if let Some(pid) = self.memory_panel.process_pid {
                 for (data_address, _) in &dialog.addresses {
@@ -15325,17 +15316,10 @@ impl CrosshairApp {
             dialog.selection_anchor = Some(0);
         }
         let has_visible_addresses = !display_addresses.is_empty();
-        let scroll_id = ui.make_persistent_id("code-access-addresses-scroll");
-        let mut scroll_offset = ui.data(|d| d.get_temp::<f32>(scroll_id)).unwrap_or(0.0);
-        if dialog.pending_scroll_adjust > 0.0 {
-            scroll_offset += dialog.pending_scroll_adjust;
-            dialog.pending_scroll_adjust = 0.0;
-        }
-        let mut scroll_area = egui::ScrollArea::vertical().id_salt(scroll_id);
-        if scroll_offset > 0.0 {
-            scroll_area = scroll_area.vertical_scroll_offset(scroll_offset);
-        }
-        let scroll_output = scroll_area.show(ui, |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("code-access-addresses-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
             for (row_idx, (original_index, (address, count))) in
                 display_addresses.into_iter().enumerate()
             {
@@ -15482,7 +15466,6 @@ impl CrosshairApp {
                 });
             }
         });
-        ui.data_mut(|d| d.insert_temp(scroll_id, scroll_output.state.offset.y));
         if context_add.is_some() {
             add = context_add;
         }
