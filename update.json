@@ -1,5 +1,5 @@
 {
-  "version": "1.2.8",
-  "notes": "Added Background Keyboard and Background Mouse actions without stealing window focus.",
-  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.8/MacroNest.exe"
+  "version": "1.2.9",
+  "notes": "Added action search in step picker, background mouse movement with drag & drop, [The Unfocused One] window targeting, math functions, universal preset import/export, and UI refinements.",
+  "url": "https://github.com/LinhAsia/MacroNest/releases/download/v1.2.9/MacroNest.exe"
 }
