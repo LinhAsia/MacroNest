@@ -8904,19 +8904,25 @@ impl CrosshairApp {
                                                 self.state.ui_theme,
                                             ))
                                             .show_ui(ui, |ui| {
-                                                ui.set_min_width(455.0);
-                                                ui.set_min_height(240.0);
+                                                ui.set_min_width(442.0);
                                                 ui.horizontal(|ui| {
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
-                                                    ui.add_space(8.0);
-                                                    let search_resp = ui.add(
-                                                        egui::TextEdit::singleline(&mut self.action_search_text)
-                                                            .desired_width(140.0)
-                                                            .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
-                                                    );
-                                                    if !self.action_search_text.is_empty() && (ui.small_button("×").clicked() || (search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))) {
-                                                        self.action_search_text.clear();
-                                                    }
+                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                                        let has_text = !self.action_search_text.is_empty();
+                                                        let mut clear_clicked = false;
+                                                        if has_text && ui.small_button("×").clicked() {
+                                                            clear_clicked = true;
+                                                        }
+                                                        let search_resp = ui.add(
+                                                            egui::TextEdit::singleline(&mut self.action_search_text)
+                                                                .desired_width(140.0)
+                                                                .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
+                                                        );
+                                                        if clear_clicked || (has_text && search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+                                                            self.action_search_text.clear();
+                                                        }
+                                                    });
                                                 });
                                                 ui.separator();
                                                 if !self.action_search_text.trim().is_empty() {
@@ -11210,19 +11216,25 @@ if preset.trigger_mode == MacroTriggerMode::Press && preset.stop_on_retrigger_im
                                                 self.state.ui_theme,
                                             ))
                                             .show_ui(ui, |ui| {
-                                                ui.set_min_width(455.0);
-                                                ui.set_min_height(240.0);
+                                                ui.set_min_width(442.0);
                                                 ui.horizontal(|ui| {
                                                     live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
-                                                    ui.add_space(8.0);
-                                                    let search_resp = ui.add(
-                                                        egui::TextEdit::singleline(&mut self.action_search_text)
-                                                            .desired_width(140.0)
-                                                            .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
-                                                    );
-                                                    if !self.action_search_text.is_empty() && (ui.small_button("×").clicked() || (search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))) {
-                                                        self.action_search_text.clear();
-                                                    }
+                                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                        ui.spacing_mut().item_spacing.x = 4.0;
+                                                        let has_text = !self.action_search_text.is_empty();
+                                                        let mut clear_clicked = false;
+                                                        if has_text && ui.small_button("×").clicked() {
+                                                            clear_clicked = true;
+                                                        }
+                                                        let search_resp = ui.add(
+                                                            egui::TextEdit::singleline(&mut self.action_search_text)
+                                                                .desired_width(140.0)
+                                                                .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
+                                                        );
+                                                        if clear_clicked || (has_text && search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+                                                            self.action_search_text.clear();
+                                                        }
+                                                    });
                                                 });
                                                 ui.separator();
                                                 if !self.action_search_text.trim().is_empty() {
@@ -14448,19 +14460,25 @@ if supports_move_mouse || show_detection_tuning {
                                                     self.state.ui_theme,
                                                 ))
                                                 .show_ui(ui, |ui| {
-                                                    ui.set_min_width(455.0);
-                                                    ui.set_min_height(240.0);
+                                                    ui.set_min_width(442.0);
                                                     ui.horizontal(|ui| {
                                                         live_sync |= ui.checkbox(&mut step.toggle_enabled_on_run, Self::tr_lang(language, "Toggle self enabled on run", "Toggle self enabled on run")).changed();
-                                                        ui.add_space(8.0);
-                                                        let search_resp = ui.add(
-                                                            egui::TextEdit::singleline(&mut self.action_search_text)
-                                                                .desired_width(140.0)
-                                                                .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
-                                                        );
-                                                        if !self.action_search_text.is_empty() && (ui.small_button("×").clicked() || (search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)))) {
-                                                            self.action_search_text.clear();
-                                                        }
+                                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                            ui.spacing_mut().item_spacing.x = 4.0;
+                                                            let has_text = !self.action_search_text.is_empty();
+                                                            let mut clear_clicked = false;
+                                                            if has_text && ui.small_button("×").clicked() {
+                                                                clear_clicked = true;
+                                                            }
+                                                            let search_resp = ui.add(
+                                                                egui::TextEdit::singleline(&mut self.action_search_text)
+                                                                    .desired_width(140.0)
+                                                                    .hint_text(Self::tr_lang(language, "Search action...", "Tìm action..."))
+                                                            );
+                                                            if clear_clicked || (has_text && search_resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape))) {
+                                                                self.action_search_text.clear();
+                                                            }
+                                                        });
                                                     });
                                                     ui.separator();
                                                     if !self.action_search_text.trim().is_empty() {
