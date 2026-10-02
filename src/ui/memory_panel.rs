@@ -3030,7 +3030,9 @@ impl CrosshairApp {
                     if (value_response.has_focus() || value_response.lost_focus())
                         && ui.input(|input| input.key_pressed(egui::Key::Enter))
                     {
-                        let action = if self.memory_panel.has_scan_session {
+                        let action = if self.memory_panel.address_list_filter_mode
+                            || self.memory_panel.has_scan_session
+                        {
                             MemoryScanAction::Exact
                         } else {
                             MemoryScanAction::FirstScan
@@ -3067,6 +3069,20 @@ impl CrosshairApp {
                             null_label,
                         );
                         ui.label(RichText::new(self.tr("Exact text", "Exact text")).weak().small());
+                    });
+                }
+                if self.memory_panel.address_list_filter_mode {
+                    ui.add_space(3.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(self.tr(
+                                "⚡ Filter mode active: Scanner buttons will filter the Address list below",
+                                "⚡ Chế độ lọc đang bật: Các nút scan sẽ lọc trực tiếp Address list bên dưới"
+                            ))
+                            .small()
+                            .strong()
+                            .color(Color32::from_rgb(255, 205, 80))
+                        );
                     });
                 }
                 ui.add_space(8.0);
@@ -3120,7 +3136,13 @@ impl CrosshairApp {
                             self.state.vietnamese_input_mode,
                             &mut self.memory_panel.between_max_input,
                         );
-                        if ui.button(self.tr("Scan", "Scan")).clicked() {
+                        let between_enabled = self.memory_panel.process_pid.is_some()
+                            && !self.memory_panel.scanning
+                            && ((self.memory_panel.address_list_filter_mode && !self.memory_panel.saved.is_empty())
+                                || !self.memory_panel.candidates.is_empty()
+                                || !self.memory_panel.text_candidates.is_empty()
+                                || self.memory_panel.raw_snapshot.is_some());
+                        if ui.add_enabled(between_enabled, egui::Button::new(self.tr("Scan", "Scan"))).clicked() {
                             self.start_memory_action(MemoryScanAction::Between);
                         }
                     }
@@ -3322,6 +3344,8 @@ impl CrosshairApp {
         let width = ui.available_width();
         let action_btn_text = RichText::new(self.tr(action.label(), action.label()));
         ui.horizontal(|ui| {
+            let address_list_filter_enabled = self.memory_panel.address_list_filter_mode
+                && !self.memory_panel.saved.is_empty();
             let stable_filter_enabled = self
                 .memory_panel
                 .stable_pointer_dialog
@@ -3333,9 +3357,10 @@ impl CrosshairApp {
                         && dialog.filter_rx.is_none()
                 });
             let enabled = self.memory_panel.process_pid.is_some()
+                && !self.memory_panel.scanning
                 && (stable_filter_enabled
-                    || (!self.memory_panel.scanning
-                        && (self.memory_panel.text_encoding.is_none()
+                    || address_list_filter_enabled
+                    || ((self.memory_panel.text_encoding.is_none()
                             || matches!(
                                 action,
                                 MemoryScanAction::FirstScan | MemoryScanAction::Exact
@@ -17903,7 +17928,12 @@ impl CrosshairApp {
         self.memory_panel.address_list_base_values.clear();
         self.memory_panel.address_list_base_texts.clear();
         for entry in &mut self.memory_panel.saved {
-            let addr = entry.address;
+            let addr = if let (Some(pid), Some(pointer)) = (pid, entry.pointer.as_ref()) {
+                resolve_memory_address(pid, pointer.base, Some(pointer)).unwrap_or(entry.address)
+            } else {
+                entry.address
+            };
+            entry.address = addr;
             if addr == 0 {
                 continue;
             }
@@ -17930,7 +17960,7 @@ impl CrosshairApp {
     }
 
     fn start_address_list_filter(&mut self, action: MemoryScanAction) {
-        if action == MemoryScanAction::SetBase {
+        if action == MemoryScanAction::SetBase || action == MemoryScanAction::Unknown {
             self.snapshot_address_list_base();
             let count = self.memory_panel.saved.len();
             self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
@@ -17949,7 +17979,11 @@ impl CrosshairApp {
             self.memory_panel.status = "Address list is empty".to_owned();
             return;
         }
-        let comparison = action.comparison();
+        let comparison = if action == MemoryScanAction::FirstScan {
+            Some(ScanComparison::Exact)
+        } else {
+            action.comparison()
+        };
         let range = if action == MemoryScanAction::Between {
             let Some(min) = parse_scan_value(
                 &self.memory_panel.between_min_input,
@@ -17982,11 +18016,20 @@ impl CrosshairApp {
                 | MemoryScanAction::Less
                 | MemoryScanAction::Greater
         ) {
-            parse_scan_value(
+            let parsed = parse_scan_value(
                 &self.memory_panel.value_input,
                 self.memory_panel.value_type,
                 self.memory_panel.hex,
-            )
+            );
+            if parsed.is_none() && self.memory_panel.saved.iter().any(|e| e.text_encoding.is_none()) {
+                self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+                    "Vui lòng nhập giá trị hợp lệ".to_owned()
+                } else {
+                    "Please enter a valid value".to_owned()
+                };
+                return;
+            }
+            parsed
         } else {
             None
         };
@@ -17995,6 +18038,24 @@ impl CrosshairApp {
         } else {
             None
         };
+
+        if matches!(
+            comparison,
+            Some(ScanComparison::Increased)
+                | Some(ScanComparison::Decreased)
+                | Some(ScanComparison::Changed)
+                | Some(ScanComparison::Unchanged)
+        ) && self.memory_panel.address_list_base_values.is_empty()
+            && self.memory_panel.address_list_base_texts.is_empty()
+        {
+            self.snapshot_address_list_base();
+            self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+                "Đã tự động ghi nhớ mốc giá trị hiện tại. Hãy đổi giá trị trong game rồi bấm lại.".to_owned()
+            } else {
+                "Captured current values as baseline. Change value in game and click again.".to_owned()
+            };
+            return;
+        }
 
         let before_count = self.memory_panel.saved.len();
         let mut new_base_values = HashMap::new();
@@ -18015,12 +18076,12 @@ impl CrosshairApp {
                 let Ok(live_text) = read_text_memory(pid, addr, byte_len, enc) else {
                     return false;
                 };
+                let prev_text = self.memory_panel.address_list_base_texts.get(&addr).cloned().or_else(|| entry.current_text.clone());
                 entry.current_text = Some(live_text.clone());
-                let prev_text = self.memory_panel.address_list_base_texts.get(&addr);
                 let matches = match comparison {
                     Some(ScanComparison::Exact) => exact_text.as_ref().map_or(false, |e| e == &live_text),
-                    Some(ScanComparison::Changed) => prev_text.map_or(true, |p| p != &live_text),
-                    Some(ScanComparison::Unchanged) => prev_text.map_or(false, |p| p == &live_text),
+                    Some(ScanComparison::Changed) => prev_text.as_ref().map_or(true, |p| p != &live_text),
+                    Some(ScanComparison::Unchanged) => prev_text.as_ref().map_or(false, |p| p == &live_text),
                     None => true,
                     _ => true,
                 };
@@ -18034,8 +18095,8 @@ impl CrosshairApp {
                 let Ok(live_val) = read_scan_value(pid, addr, entry.value_type) else {
                     return false;
                 };
+                let prev_val = self.memory_panel.address_list_base_values.get(&addr).copied().or(entry.current);
                 entry.current = Some(live_val);
-                let prev_val = self.memory_panel.address_list_base_values.get(&addr).copied();
                 let matches = scan_value_matches_comparison(live_val, prev_val, comparison, exact, range);
                 if matches {
                     new_base_values.insert(addr, live_val);
@@ -24548,6 +24609,27 @@ mod tests {
         assert_eq!(pattern, "48 89 ?? 24 ?? 57 48");
         assert_eq!(total, 7);
         assert_eq!(wildcards, 2);
+    }
+
+    #[test]
+    fn test_address_list_filter_comparisons() {
+        let cur = ScanValue::I32(150);
+        let prev = Some(ScanValue::I32(100));
+        let exact_match = Some(ScanValue::I32(150));
+        let exact_diff = Some(ScanValue::I32(200));
+
+        assert!(scan_value_matches_comparison(cur, prev, Some(ScanComparison::Exact), exact_match, None));
+        assert!(!scan_value_matches_comparison(cur, prev, Some(ScanComparison::Exact), exact_diff, None));
+
+        assert!(scan_value_matches_comparison(cur, prev, Some(ScanComparison::Increased), None, None));
+        assert!(!scan_value_matches_comparison(ScanValue::I32(80), prev, Some(ScanComparison::Increased), None, None));
+
+        assert!(scan_value_matches_comparison(ScanValue::I32(80), prev, Some(ScanComparison::Decreased), None, None));
+        assert!(!scan_value_matches_comparison(cur, prev, Some(ScanComparison::Decreased), None, None));
+
+        assert!(scan_value_matches_comparison(cur, prev, Some(ScanComparison::Changed), None, None));
+        assert!(!scan_value_matches_comparison(cur, prev, Some(ScanComparison::Unchanged), None, None));
+        assert!(scan_value_matches_comparison(cur, Some(ScanValue::I32(150)), Some(ScanComparison::Unchanged), None, None));
     }
 
     #[test]
