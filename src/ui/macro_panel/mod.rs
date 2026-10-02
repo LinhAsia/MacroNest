@@ -19413,7 +19413,7 @@ if supports_move_mouse || show_detection_tuning {
 
                                                     if ui
                                                         .add_sized(
-                                                            [36.0, 24.0],
+                                                            [34.0, 24.0],
                                                             Button::new(Self::material_icon_text(
                                                                 enabled_icon,
                                                                 18.0,
@@ -19433,7 +19433,11 @@ if supports_move_mouse || show_detection_tuning {
                                                     }
 
                                                     // 2. Trash Button (delete table)
-                                                    if Self::sound_style_remove_button(ui)
+                                                    if ui
+                                                        .add_sized(
+                                                            [28.0, 24.0],
+                                                            Button::new(Self::material_icon_text(0xe872, 15.0)),
+                                                        )
                                                         .on_hover_text(Self::tr_lang(
                                                             language,
                                                             "Delete Table",
@@ -19446,9 +19450,9 @@ if supports_move_mouse || show_detection_tuning {
 
                                                     // 3. Paste Button (import TSV/CSV from clipboard)
                                                     let paste_btn = ui
-                                                        .add(
-                                                            Button::new(Self::material_icon_text(0xe14f, 15.0))
-                                                                .min_size(egui::vec2(28.0, 22.0)),
+                                                        .add_sized(
+                                                            [28.0, 24.0],
+                                                            Button::new(Self::material_icon_text(0xe14f, 15.0)),
                                                         )
                                                         .on_hover_text(Self::tr_lang(
                                                             language,
@@ -19476,9 +19480,9 @@ if supports_move_mouse || show_detection_tuning {
                                                         ui.visuals().widgets.inactive.bg_stroke.color
                                                     };
                                                     let copy_btn = ui
-                                                        .add(
+                                                        .add_sized(
+                                                            [28.0, 24.0],
                                                             Button::new(Self::material_icon_text(0xe14d, 15.0))
-                                                                .min_size(egui::vec2(28.0, 22.0))
                                                                 .fill(copy_fill)
                                                                 .stroke(egui::Stroke::new(1.0, copy_stroke)),
                                                         )
@@ -19529,7 +19533,7 @@ if supports_move_mouse || show_detection_tuning {
                                                         "custom_table_grid",
                                                         table_id,
                                                     )))
-                                                    .num_columns(col_count + 4)
+                                                    .num_columns(col_count + 3)
                                                     .spacing([6.0, 6.0])
                                                     .striped(true)
                                                     .show(ui, |ui| {
@@ -19556,7 +19560,7 @@ if supports_move_mouse || show_detection_tuning {
                                                             RichText::new(Self::tr_lang(
                                                                 language,
                                                                 "Row Name",
-                                                                "Tên",
+                                                                "Tên Đối Tượng",
                                                             ))
                                                             .strong(),
                                                         );
@@ -19564,53 +19568,56 @@ if supports_move_mouse || show_detection_tuning {
                                                         for c_idx in 0..col_count {
                                                             ui.horizontal(|ui| {
                                                                 ui.spacing_mut().item_spacing.x = 2.0;
+                                                                let width = if col_count > 1 { 48.0 } else { 70.0 };
                                                                 if ui
                                                                     .add(
                                                                         egui::TextEdit::singleline(
                                                                             &mut table.columns[c_idx],
                                                                         )
-                                                                        .desired_width(55.0),
+                                                                        .desired_width(width),
                                                                     )
                                                                     .changed()
                                                                 {
                                                                     tables_changed = true;
                                                                 }
-                                                                if table.columns.len() > 1
-                                                                    && ui
-                                                                        .small_button("×")
+                                                                if col_count > 1 {
+                                                                    if ui
+                                                                        .add_sized(
+                                                                            [18.0, 20.0],
+                                                                            Button::new(Self::material_icon_text(0xe5cd, 12.0)),
+                                                                        )
                                                                         .on_hover_text(Self::tr_lang(
                                                                             language,
                                                                             "Delete Column",
                                                                             "Xóa Cột",
                                                                         ))
                                                                         .clicked()
-                                                                {
-                                                                    col_to_delete = Some((t_idx, c_idx));
+                                                                    {
+                                                                        col_to_delete = Some((t_idx, c_idx));
+                                                                    }
                                                                 }
                                                             });
                                                         }
 
-                                                        // Column '+' button directly at the column header
+                                                        // Column addition button right in the Action column header!
                                                         if ui
-                                                            .button(RichText::new("+").size(15.0).strong())
+                                                            .add_sized(
+                                                                [56.0, 22.0],
+                                                                Button::new(RichText::new(Self::tr_lang(
+                                                                    language,
+                                                                    "+ Col",
+                                                                    "+ Cột",
+                                                                )).size(12.0).strong()),
+                                                            )
                                                             .on_hover_text(Self::tr_lang(
                                                                 language,
-                                                                "Add Column",
-                                                                "Thêm cột",
+                                                                "Add new column",
+                                                                "Thêm cột mới",
                                                             ))
                                                             .clicked()
                                                         {
                                                             col_to_add = Some(t_idx);
                                                         }
-
-                                                        ui.label(
-                                                            RichText::new(Self::tr_lang(
-                                                                language,
-                                                                "Action",
-                                                                "Thao tác",
-                                                            ))
-                                                            .strong(),
-                                                        );
                                                         ui.end_row();
 
                                                         // --- DATA ROWS ---
@@ -19650,7 +19657,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                         egui::TextEdit::singleline(
                                                                             &mut row.values[c_idx],
                                                                         )
-                                                                        .desired_width(55.0),
+                                                                        .desired_width(70.0),
                                                                     )
                                                                     .changed()
                                                                 {
@@ -19658,13 +19665,14 @@ if supports_move_mouse || show_detection_tuning {
                                                                 }
                                                             }
 
-                                                            // Spacer for header '+' column
-                                                            ui.label("");
-
+                                                            // Row action buttons: Duplicate and Delete in Action column
                                                             ui.horizontal(|ui| {
-                                                                ui.spacing_mut().item_spacing.x = 2.0;
+                                                                ui.spacing_mut().item_spacing.x = 4.0;
                                                                 if ui
-                                                                    .small_button("+")
+                                                                    .add_sized(
+                                                                        [26.0, 22.0],
+                                                                        Button::new(Self::material_icon_text(0xe14d, 13.0)),
+                                                                    )
                                                                     .on_hover_text(Self::tr_lang(
                                                                         language,
                                                                         "Duplicate Row",
@@ -19675,7 +19683,10 @@ if supports_move_mouse || show_detection_tuning {
                                                                     row_to_dup = Some((t_idx, r_idx));
                                                                 }
                                                                 if ui
-                                                                    .small_button("×")
+                                                                    .add_sized(
+                                                                        [26.0, 22.0],
+                                                                        Button::new(Self::material_icon_text(0xe872, 13.0)),
+                                                                    )
                                                                     .on_hover_text(Self::tr_lang(
                                                                         language,
                                                                         "Delete Row",
@@ -19690,27 +19701,22 @@ if supports_move_mouse || show_detection_tuning {
                                                             ui.end_row();
                                                         }
 
-                                                        // --- ROW ADDITION '+' in the grid! ---
+                                                        // --- FOOTER ROW: Add Row button directly under Row Name! ---
+                                                        ui.label("");
                                                         if ui
-                                                            .button(RichText::new("+").size(15.0).strong())
-                                                            .on_hover_text(Self::tr_lang(
-                                                                language,
-                                                                "Add Row",
-                                                                "Thêm dòng",
-                                                            ))
-                                                            .clicked()
-                                                        {
-                                                            row_to_add = Some(t_idx);
-                                                        }
-                                                        if ui
-                                                            .button(
-                                                                RichText::new(Self::tr_lang(
+                                                            .add_sized(
+                                                                [100.0, 22.0],
+                                                                Button::new(RichText::new(Self::tr_lang(
                                                                     language,
                                                                     "+ Add Row",
-                                                                    "+ Thêm dòng",
-                                                                ))
-                                                                .weak(),
+                                                                    "+ Thêm Dòng",
+                                                                )).strong()),
                                                             )
+                                                            .on_hover_text(Self::tr_lang(
+                                                                language,
+                                                                "Add new row",
+                                                                "Thêm dòng mới",
+                                                            ))
                                                             .clicked()
                                                         {
                                                             row_to_add = Some(t_idx);
@@ -19718,7 +19724,6 @@ if supports_move_mouse || show_detection_tuning {
                                                         for _ in 0..col_count {
                                                             ui.label("");
                                                         }
-                                                        ui.label("");
                                                         ui.label("");
                                                         ui.end_row();
                                                     });
