@@ -955,7 +955,8 @@ pub struct CrosshairApp {
     macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
     variable_inspector_tab: usize,
-    selected_custom_table_id: Option<u32>,
+    custom_table_copy_feedback_target: Option<u32>,
+    custom_table_copy_feedback_until: Option<Instant>,
     variable_inspector_search: String,
     custom_table_search: String,
     titlebar_guides_open: bool,
@@ -1020,6 +1021,21 @@ impl CrosshairApp {
                 if clean_row.is_empty() {
                     continue;
                 }
+
+                // Register row name directly (e.g. `a1`, `target1`) using the first column value
+                if let Some(first_val) = row.values.first() {
+                    let trimmed_val = first_val.trim();
+                    let row_name = clean_row.clone();
+                    if let Ok(parsed) = trimmed_val.parse::<f64>() {
+                        run_vars.insert(row_name.clone(), parsed);
+                        text_vars.remove(&row_name);
+                    } else {
+                        run_vars.remove(&row_name);
+                        text_vars.insert(row_name.clone(), trimmed_val.to_owned());
+                    }
+                    prev_registered.insert(row_name);
+                }
+
                 for (col_idx, col_name) in table.columns.iter().enumerate() {
                     let clean_col = col_name.trim().replace(' ', "_");
                     if clean_col.is_empty() {
@@ -1031,6 +1047,7 @@ impl CrosshairApp {
                     let mut names = vec![
                         format!("{clean_row}_{clean_col}"),
                         format!("{clean_row}.{clean_col}"),
+                        format!("{clean_row}{clean_col}"),
                     ];
                     if !table_prefix.is_empty() {
                         names.push(format!("{table_prefix}_{clean_row}_{clean_col}"));
@@ -1374,7 +1391,8 @@ impl CrosshairApp {
 
             variable_inspector_open: false,
             variable_inspector_tab: 0,
-            selected_custom_table_id: None,
+            custom_table_copy_feedback_target: None,
+            custom_table_copy_feedback_until: None,
             variable_inspector_search: String::new(),
             custom_table_search: String::new(),
             titlebar_guides_open: false,

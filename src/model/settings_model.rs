@@ -123,6 +123,8 @@ pub struct CustomTable {
     pub id: u32,
     pub name: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub collapsed: bool,
     pub columns: Vec<String>,
     pub rows: Vec<CustomTableRow>,
 }
@@ -133,6 +135,7 @@ impl Default for CustomTable {
             id: 1,
             name: "Table 1".to_string(),
             enabled: true,
+            collapsed: false,
             columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
             rows: Vec::new(),
         }
@@ -1308,6 +1311,7 @@ mod tests {
             id: 1,
             name: "Objects_3D".to_string(),
             enabled: true,
+            collapsed: false,
             columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
             rows: vec![super::CustomTableRow {
                 id: 1,
