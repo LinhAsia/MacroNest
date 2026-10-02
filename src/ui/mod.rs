@@ -1012,48 +1012,42 @@ impl CrosshairApp {
             if !table.enabled {
                 continue;
             }
-            let table_prefix = table.name.trim().replace(' ', "_");
             for row in &table.rows {
                 if !row.enabled {
                     continue;
                 }
-                let clean_row = row.name.trim().replace(' ', "_");
-                if clean_row.is_empty() {
-                    continue;
-                }
+                let clean_row = row.name.trim();
 
-                // Register row name directly (e.g. `a1`, `target1`) using the first column value
-                if let Some(first_val) = row.values.first() {
-                    let trimmed_val = first_val.trim();
-                    let row_name = clean_row.clone();
-                    if let Ok(parsed) = trimmed_val.parse::<f64>() {
-                        run_vars.insert(row_name.clone(), parsed);
-                        text_vars.remove(&row_name);
-                    } else {
-                        run_vars.remove(&row_name);
-                        text_vars.insert(row_name.clone(), trimmed_val.to_owned());
+                if table.columns.is_empty() {
+                    if let Some(first_val) = row.values.first() {
+                        let trimmed_val = first_val.trim();
+                        let var_name = clean_row.to_string();
+                        if !var_name.is_empty() {
+                            if let Ok(parsed) = trimmed_val.parse::<f64>() {
+                                run_vars.insert(var_name.clone(), parsed);
+                                text_vars.remove(&var_name);
+                            } else {
+                                run_vars.remove(&var_name);
+                                text_vars.insert(var_name.clone(), trimmed_val.to_owned());
+                            }
+                            prev_registered.insert(var_name);
+                        }
                     }
-                    prev_registered.insert(row_name);
-                }
+                } else {
+                    for (col_idx, col_name) in table.columns.iter().enumerate() {
+                        let clean_col = col_name.trim();
+                        let val_str = row.values.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                        let trimmed_val = val_str.trim();
 
-                for (col_idx, col_name) in table.columns.iter().enumerate() {
-                    let clean_col = col_name.trim().replace(' ', "_");
-                    if clean_col.is_empty() {
-                        continue;
-                    }
-                    let val_str = row.values.get(col_idx).map(|s| s.as_str()).unwrap_or("");
-                    let trimmed_val = val_str.trim();
+                        // The variable name is exactly {RowName}{Col}
+                        // - Row "a" + Col "x" => "ax"
+                        // - Empty Row + Col "x" => "x"
+                        // - Row "a1" + Empty Col => "a1"
+                        let var_name = format!("{clean_row}{clean_col}");
+                        if var_name.is_empty() {
+                            continue;
+                        }
 
-                    let mut names = vec![
-                        format!("{clean_row}_{clean_col}"),
-                        format!("{clean_row}.{clean_col}"),
-                        format!("{clean_row}{clean_col}"),
-                    ];
-                    if !table_prefix.is_empty() {
-                        names.push(format!("{table_prefix}_{clean_row}_{clean_col}"));
-                    }
-
-                    for var_name in names {
                         if let Ok(parsed) = trimmed_val.parse::<f64>() {
                             run_vars.insert(var_name.clone(), parsed);
                             text_vars.remove(&var_name);

@@ -19735,15 +19735,10 @@ if supports_move_mouse || show_detection_tuning {
                                             let total_rows = table.rows.len();
                                             ui.label(
                                                 RichText::new(format!(
-                                                    "{}/{} {} | Variables: {{{}}}, {{{}_{}}}, {{{}.{}}}, {{{}{}}}",
+                                                    "{}/{} {} | Variable = {{{}}}{{{}}}",
                                                     active_rows,
                                                     total_rows,
                                                     Self::tr_lang(language, "active", "đang bật"),
-                                                    Self::tr_lang(language, "RowName", "TênDòng"),
-                                                    Self::tr_lang(language, "RowName", "TênDòng"),
-                                                    Self::tr_lang(language, "Col", "Cột"),
-                                                    Self::tr_lang(language, "RowName", "TênDòng"),
-                                                    Self::tr_lang(language, "Col", "Cột"),
                                                     Self::tr_lang(language, "RowName", "TênDòng"),
                                                     Self::tr_lang(language, "Col", "Cột"),
                                                 ))
