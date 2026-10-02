@@ -18932,12 +18932,7 @@ if supports_move_mouse || show_detection_tuning {
                 if ui
                     .selectable_label(
                         self.variable_inspector_tab == 0,
-                        RichText::new(format!(
-                            "{} {}",
-                            Self::material_icon_text(0xe8b8, 14.0).text(),
-                            Self::tr_lang(language, "Variables", "Biến Đơn")
-                        ))
-                        .strong(),
+                        RichText::new(Self::tr_lang(language, "Variables", "Biến Đơn")).strong(),
                     )
                     .clicked()
                 {
@@ -18946,12 +18941,7 @@ if supports_move_mouse || show_detection_tuning {
                 if ui
                     .selectable_label(
                         self.variable_inspector_tab == 1,
-                        RichText::new(format!(
-                            "{} {}",
-                            Self::material_icon_text(0xe242, 14.0).text(),
-                            Self::tr_lang(language, "Data Tables", "Bảng Dữ Liệu")
-                        ))
-                        .strong(),
+                        RichText::new(Self::tr_lang(language, "Data Tables", "Bảng Dữ Liệu")).strong(),
                     )
                     .clicked()
                 {
@@ -18961,7 +18951,7 @@ if supports_move_mouse || show_detection_tuning {
             ui.separator();
 
             if self.variable_inspector_tab == 0 {
-                // Tab 0: Scalar Variables (Fixed Variables with Toggle & Search + Runtime Variables)
+                // Tab 0: Scalar Variables
                 let constant_names: std::collections::HashSet<&str> = self
                     .state
                     .global_constants
@@ -19004,9 +18994,9 @@ if supports_move_mouse || show_detection_tuning {
                                         .hint_text(Self::tr_lang(
                                             language,
                                             "Search...",
-                                            "Tìm biến...",
+                                            "Tìm kiếm...",
                                         ))
-                                        .desired_width(120.0),
+                                        .desired_width(110.0),
                                 );
                             });
                         });
@@ -19031,18 +19021,18 @@ if supports_move_mouse || show_detection_tuning {
                         };
                         ui.horizontal(|ui| {
                             let name_response = ui.add_sized(
-                                [100.0, 20.0],
+                                [90.0, 20.0],
                                 egui::TextEdit::singleline(&mut name_buf).hint_text(
-                                    RichText::new(Self::tr_lang(language, "CONST_NAME", "CONST_NAME"))
+                                    RichText::new(Self::tr_lang(language, "NAME", "TÊN"))
                                         .color(hint_color)
                                         .weak(),
                                 ),
                             );
                             ui.label("=");
                             let value_response = ui.add_sized(
-                                [140.0, 20.0],
+                                [120.0, 20.0],
                                 egui::TextEdit::singleline(&mut val_buf).hint_text(
-                                    RichText::new(Self::tr_lang(language, "Value", "Value"))
+                                    RichText::new(Self::tr_lang(language, "Value", "Giá trị"))
                                         .color(hint_color)
                                         .weak(),
                                 ),
@@ -19150,15 +19140,12 @@ if supports_move_mouse || show_detection_tuning {
                                                         .color(Color32::from_rgb(120, 120, 120))
                                                 };
                                                 ui.add_sized(
-                                                    [140.0, 20.0],
+                                                    [130.0, 20.0],
                                                     egui::Label::new(val_text),
                                                 );
 
                                                 if ui
-                                                    .button(Self::material_icon_text(0xe872, 14.0))
-                                                    .on_hover_text(Self::tr_lang(
-                                                        language, "Delete", "Xóa",
-                                                    ))
+                                                    .button(Self::tr_lang(language, "Del", "Xóa"))
                                                     .clicked()
                                                 {
                                                     to_remove_idx = Some((orig_idx, name));
@@ -19207,18 +19194,13 @@ if supports_move_mouse || show_detection_tuning {
                                 RichText::new(Self::tr_lang(
                                     language,
                                     "Runtime Variables",
-                                    "Biến Đang Chạy (Runtime Variables)",
+                                    "Biến Runtime (Runtime Variables)",
                                 ))
                                 .strong(),
                             );
                             if !vars_list.is_empty()
                                 && ui
-                                    .button(Self::tr_lang(language, "Clear All", "Xóa Tất Cả"))
-                                    .on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Clear all active runtime variables",
-                                        "Xóa tất cả các biến runtime đang hoạt động",
-                                    ))
+                                    .button(Self::tr_lang(language, "Clear All", "Xóa Hết"))
                                     .clicked()
                             {
                                 crate::overlay::RUNTIME_VARIABLES.lock().clear();
@@ -19228,8 +19210,8 @@ if supports_move_mouse || show_detection_tuning {
                         ui.label(
                             RichText::new(Self::tr_lang(
                                 language,
-                                "These values change while macros are running.",
-                                "Các giá trị này thay đổi tự động trong khi macro đang chạy.",
+                                "Values updated during macro execution.",
+                                "Giá trị tự động cập nhật khi macro đang chạy.",
                             ))
                             .size(11.0)
                             .weak(),
@@ -19253,14 +19235,11 @@ if supports_move_mouse || show_detection_tuning {
                                                         .color(Color32::from_rgb(243, 156, 18)),
                                                 );
                                                 ui.add_sized(
-                                                    [160.0, 20.0],
+                                                    [150.0, 20.0],
                                                     egui::Label::new(RichText::new(value).monospace()),
                                                 );
                                                 if ui
-                                                    .button(Self::material_icon_text(0xe872, 14.0))
-                                                    .on_hover_text(Self::tr_lang(
-                                                        language, "Delete", "Xóa",
-                                                    ))
+                                                    .button(Self::tr_lang(language, "Del", "Xóa"))
                                                     .clicked()
                                                 {
                                                     to_remove_var = Some(name.clone());
@@ -19292,7 +19271,6 @@ if supports_move_mouse || show_detection_tuning {
                 let mut tables_changed = false;
                 let mut table_to_add = false;
                 let mut table_to_delete_idx = None;
-                let mut table_to_dup_idx = None;
 
                 let selected_idx = if let Some(id) = self.selected_custom_table_id {
                     self.state.custom_tables.iter().position(|t| t.id == id)
@@ -19308,23 +19286,12 @@ if supports_move_mouse || show_detection_tuning {
                     }
                 });
 
-                // Top control bar
+                // Top Table Bar
                 ui.horizontal(|ui| {
-                    if ui
-                        .button(RichText::new(format!(
-                            "{} {}",
-                            Self::material_icon_text(0xe145, 14.0).text(),
-                            Self::tr_lang(language, "+ New Table", "+ Thêm Bảng Mới")
-                        )))
-                        .clicked()
-                    {
-                        table_to_add = true;
-                    }
+                    ui.label(RichText::new(Self::tr_lang(language, "Table:", "Bảng:")).strong());
 
                     if let Some(idx) = selected_idx {
                         if idx < self.state.custom_tables.len() {
-                            ui.separator();
-                            ui.label(RichText::new(Self::tr_lang(language, "Table:", "Bảng:")).strong());
                             let curr_name = self.state.custom_tables[idx].name.clone();
                             egui::ComboBox::from_id_salt("custom_table_selector")
                                 .selected_text(&curr_name)
@@ -19333,13 +19300,27 @@ if supports_move_mouse || show_detection_tuning {
                                         let text = if t.enabled {
                                             t.name.clone()
                                         } else {
-                                            format!("{} ({})", t.name, Self::tr_lang(language, "disabled", "tắt"))
+                                            format!("{} ({})", t.name, Self::tr_lang(language, "off", "tắt"))
                                         };
                                         if ui.selectable_label(t_idx == idx, text).clicked() {
                                             self.selected_custom_table_id = Some(t.id);
                                         }
                                     }
                                 });
+                        }
+                    }
+
+                    if ui.button(Self::tr_lang(language, "+ New Table", "+ Bảng Mới")).clicked() {
+                        table_to_add = true;
+                    }
+
+                    if let Some(idx) = selected_idx {
+                        if idx < self.state.custom_tables.len() {
+                            if ui.button(Self::tr_lang(language, "Delete Table", "Xóa Bảng")).clicked() {
+                                table_to_delete_idx = Some(idx);
+                            }
+
+                            ui.separator();
 
                             let table = &mut self.state.custom_tables[idx];
                             if ui.checkbox(&mut table.enabled, Self::tr_lang(language, "Active", "Bật Bảng")).changed() {
@@ -19349,20 +19330,6 @@ if supports_move_mouse || show_detection_tuning {
                             ui.label(Self::tr_lang(language, "Name:", "Tên:"));
                             if ui.add(egui::TextEdit::singleline(&mut table.name).desired_width(120.0)).changed() {
                                 tables_changed = true;
-                            }
-
-                            if ui.button(Self::material_icon_text(0xe14d, 14.0))
-                                .on_hover_text(Self::tr_lang(language, "Duplicate Table", "Nhân Bản Bảng"))
-                                .clicked()
-                            {
-                                table_to_dup_idx = Some(idx);
-                            }
-
-                            if ui.button(Self::material_icon_text(0xe872, 14.0))
-                                .on_hover_text(Self::tr_lang(language, "Delete Table", "Xóa Bảng"))
-                                .clicked()
-                            {
-                                table_to_delete_idx = Some(idx);
                             }
                         }
                     }
@@ -19383,19 +19350,6 @@ if supports_move_mouse || show_detection_tuning {
                     tables_changed = true;
                 }
 
-                if let Some(dup_idx) = table_to_dup_idx {
-                    if dup_idx < self.state.custom_tables.len() {
-                        let mut cloned = self.state.custom_tables[dup_idx].clone();
-                        let new_id = self.state.next_custom_table_id;
-                        self.state.next_custom_table_id = new_id.saturating_add(1);
-                        cloned.id = new_id;
-                        cloned.name = format!("{} (Copy)", cloned.name);
-                        self.state.custom_tables.push(cloned);
-                        self.selected_custom_table_id = Some(new_id);
-                        tables_changed = true;
-                    }
-                }
-
                 if let Some(del_idx) = table_to_delete_idx {
                     if del_idx < self.state.custom_tables.len() {
                         self.state.custom_tables.remove(del_idx);
@@ -19405,6 +19359,8 @@ if supports_move_mouse || show_detection_tuning {
                 }
 
                 ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
 
                 if let Some(curr_idx) = self.selected_custom_table_id.and_then(|id| {
                     self.state.custom_tables.iter().position(|t| t.id == id)
@@ -19413,19 +19369,9 @@ if supports_move_mouse || show_detection_tuning {
                     let mut row_to_dup = None;
                     let mut col_to_delete = None;
 
-                    // Table action toolbar
+                    // Row 2: Action Toolbar
                     ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.custom_table_search)
-                                .hint_text(Self::tr_lang(language, "Search rows...", "Tìm dòng..."))
-                                .desired_width(120.0),
-                        );
-
-                        if ui.button(RichText::new(format!(
-                            "{} {}",
-                            Self::material_icon_text(0xe145, 13.0).text(),
-                            Self::tr_lang(language, "Add Row", "Thêm Dòng")
-                        ))).clicked() {
+                        if ui.button(Self::tr_lang(language, "+ Add Row", "+ Thêm Dòng")).clicked() {
                             let table = &mut self.state.custom_tables[curr_idx];
                             let new_row_id = table.rows.len() as u32 + 1;
                             let col_count = table.columns.len();
@@ -19438,11 +19384,7 @@ if supports_move_mouse || show_detection_tuning {
                             tables_changed = true;
                         }
 
-                        if ui.button(RichText::new(format!(
-                            "{} {}",
-                            Self::material_icon_text(0xe145, 13.0).text(),
-                            Self::tr_lang(language, "Add Column", "Thêm Cột")
-                        ))).clicked() {
+                        if ui.button(Self::tr_lang(language, "+ Add Column", "+ Thêm Cột")).clicked() {
                             let table = &mut self.state.custom_tables[curr_idx];
                             let new_col_name = format!("col_{}", table.columns.len() + 1);
                             table.columns.push(new_col_name);
@@ -19452,11 +19394,11 @@ if supports_move_mouse || show_detection_tuning {
                             tables_changed = true;
                         }
 
-                        if ui.button(Self::tr_lang(language, "Paste Clipboard", "Dán từ Clipboard"))
+                        if ui.button(Self::tr_lang(language, "Paste", "Dán"))
                             .on_hover_text(Self::tr_lang(
                                 language,
-                                "Import rows from TSV / CSV text in clipboard",
-                                "Nhập các dòng từ văn bản TSV / CSV trong clipboard",
+                                "Import rows from clipboard (TSV/CSV)",
+                                "Nhập các dòng từ clipboard (TSV/CSV)",
                             ))
                             .clicked()
                         {
@@ -19494,17 +19436,17 @@ if supports_move_mouse || show_detection_tuning {
                                     count += 1;
                                 }
                                 if count > 0 {
-                                    self.status = format!("Pasted {count} rows into table");
+                                    self.status = format!("Pasted {count} rows");
                                     tables_changed = true;
                                 }
                             }
                         }
 
-                        if ui.button(Self::tr_lang(language, "Copy Table", "Sao Chép Bảng"))
+                        if ui.button(Self::tr_lang(language, "Copy", "Sao Chép"))
                             .on_hover_text(Self::tr_lang(
                                 language,
-                                "Copy table data to clipboard in TSV format (Excel-ready)",
-                                "Sao chép toàn bộ dữ liệu bảng vào clipboard dạng TSV (mở được bằng Excel)",
+                                "Copy table data to clipboard as TSV",
+                                "Sao chép bảng vào clipboard dạng TSV",
                             ))
                             .clicked()
                         {
@@ -19528,7 +19470,7 @@ if supports_move_mouse || show_detection_tuning {
 
                         ui.separator();
 
-                        if ui.button(Self::tr_lang(language, "Check All", "Bật Hết")).clicked() {
+                        if ui.button(Self::tr_lang(language, "Enable All", "Bật Hết")).clicked() {
                             let table = &mut self.state.custom_tables[curr_idx];
                             for r in &mut table.rows {
                                 r.enabled = true;
@@ -19536,48 +19478,52 @@ if supports_move_mouse || show_detection_tuning {
                             tables_changed = true;
                         }
 
-                        if ui.button(Self::tr_lang(language, "Uncheck All", "Tắt Hết")).clicked() {
+                        if ui.button(Self::tr_lang(language, "Disable All", "Tắt Hết")).clicked() {
                             let table = &mut self.state.custom_tables[curr_idx];
                             for r in &mut table.rows {
                                 r.enabled = false;
                             }
                             tables_changed = true;
                         }
+
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.custom_table_search)
+                                    .hint_text(Self::tr_lang(language, "Search...", "Tìm kiếm..."))
+                                    .desired_width(110.0),
+                            );
+                        });
                     });
 
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
 
-                    // Table Grid View
+                    // Table Data Grid
                     let search_q = self.custom_table_search.trim().to_lowercase();
                     let table = &mut self.state.custom_tables[curr_idx];
                     let col_count = table.columns.len();
 
                     egui::ScrollArea::both()
                         .id_salt("custom_table_scroll")
-                        .max_height(280.0)
+                        .max_height(320.0)
                         .show(ui, |ui| {
                             egui::Grid::new("custom_table_grid")
                                 .num_columns(col_count + 3)
-                                .spacing([6.0, 4.0])
+                                .spacing([8.0, 6.0])
                                 .striped(true)
                                 .show(ui, |ui| {
                                     // Headers
-                                    ui.label(RichText::new("✓").strong());
+                                    ui.label(RichText::new(Self::tr_lang(language, "Active", "Bật")).strong());
                                     ui.label(RichText::new(Self::tr_lang(language, "Row Name", "Tên Đối Tượng")).strong());
 
                                     for col_idx in 0..col_count {
                                         ui.horizontal(|ui| {
                                             if ui.add(
                                                 egui::TextEdit::singleline(&mut table.columns[col_idx])
-                                                    .desired_width(65.0)
+                                                    .desired_width(60.0)
                                             ).changed() {
                                                 tables_changed = true;
                                             }
-                                            if table.columns.len() > 1
-                                                && ui.button(Self::material_icon_text(0xe5cd, 11.0))
-                                                    .on_hover_text(Self::tr_lang(language, "Delete Column", "Xóa Cột"))
-                                                    .clicked()
-                                            {
+                                            if table.columns.len() > 1 && ui.small_button("-").on_hover_text(Self::tr_lang(language, "Delete Column", "Xóa Cột")).clicked() {
                                                 col_to_delete = Some(col_idx);
                                             }
                                         });
@@ -19613,24 +19559,18 @@ if supports_move_mouse || show_detection_tuning {
                                         for col_idx in 0..col_count {
                                             if ui.add(
                                                 egui::TextEdit::singleline(&mut row.values[col_idx])
-                                                    .desired_width(70.0)
+                                                    .desired_width(65.0)
                                             ).changed() {
                                                 tables_changed = true;
                                             }
                                         }
 
                                         ui.horizontal(|ui| {
-                                            if ui.button(Self::material_icon_text(0xe14d, 12.0))
-                                                .on_hover_text(Self::tr_lang(language, "Duplicate Row", "Nhân bản dòng"))
-                                                .clicked()
-                                            {
+                                            if ui.small_button(Self::tr_lang(language, "Copy", "Copy")).clicked() {
                                                 row_to_dup = Some(r_idx);
                                             }
 
-                                            if ui.button(Self::material_icon_text(0xe872, 12.0))
-                                                .on_hover_text(Self::tr_lang(language, "Delete Row", "Xóa dòng"))
-                                                .clicked()
-                                            {
+                                            if ui.small_button(Self::tr_lang(language, "Del", "Xóa")).clicked() {
                                                 row_to_delete = Some(r_idx);
                                             }
                                         });
@@ -19675,35 +19615,22 @@ if supports_move_mouse || show_detection_tuning {
                     ui.add_space(4.0);
                     let active_rows = self.state.custom_tables[curr_idx].rows.iter().filter(|r| r.enabled).count();
                     let total_rows = self.state.custom_tables[curr_idx].rows.len();
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} ({}/{} {})",
-                                Self::tr_lang(language, "💡 Variables generated:", "💡 Các biến được tự động sinh:"),
-                                active_rows,
-                                total_rows,
-                                Self::tr_lang(language, "rows active", "dòng đang bật")
-                            ))
-                            .size(11.0)
-                            .strong()
-                            .color(Color32::from_rgb(0, 180, 216)),
-                        );
-                        ui.label(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "{RowName}_{Col} & {RowName}.{Col} (e.g. {Obj_1_x}, {Obj_1.x}). Disabled rows are omitted from runtime.",
-                                "{TênDòng}_{Cột} & {TênDòng}.{Cột} (vd: {Obj_1_x}, {Obj_1.x}). Dòng bị tắt sẽ không nạp vào runtime.",
-                            ))
-                            .size(11.0)
-                            .weak(),
-                        );
-                    });
+                    ui.label(
+                        RichText::new(format!(
+                            "{}/{} {} | Variables: {{RowName}}_{{Col}}",
+                            active_rows,
+                            total_rows,
+                            Self::tr_lang(language, "active", "đang bật")
+                        ))
+                        .size(11.0)
+                        .weak(),
+                    );
                 } else {
                     ui.label(
                         RichText::new(Self::tr_lang(
                             language,
-                            "No data tables created yet. Click '+ New Table' to create a table for 3D coordinates, pointers, or custom records.",
-                            "Chưa có bảng dữ liệu nào. Nhấn '+ Thêm Bảng Mới' để tạo bảng lưu tọa độ 3D, địa chỉ pointer, hoặc các thông số khác.",
+                            "No data tables created yet. Click '+ New Table' to create a table.",
+                            "Chưa có bảng dữ liệu nào. Nhấn '+ Bảng Mới' để tạo bảng.",
                         ))
                         .weak(),
                     );
