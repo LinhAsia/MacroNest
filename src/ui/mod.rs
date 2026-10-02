@@ -954,6 +954,10 @@ pub struct CrosshairApp {
 
     macro_referenced_variables_cache: Option<Vec<String>>,
     variable_inspector_open: bool,
+    variable_inspector_tab: usize,
+    selected_custom_table_id: Option<u32>,
+    variable_inspector_search: String,
+    custom_table_search: String,
     titlebar_guides_open: bool,
     pub show_share_buttons: bool,
     arduino_available_ports: Vec<String>,
@@ -990,6 +994,61 @@ impl CrosshairApp {
     pub(crate) fn remove_fixed_variable_from_overlay(name: &str) {
         crate::overlay::RUNTIME_VARIABLES.lock().remove(name);
         crate::overlay::TEXT_VARIABLES.lock().remove(name);
+    }
+
+    pub(crate) fn sync_custom_tables_to_overlay(&self) {
+        let mut prev_registered = crate::overlay::REGISTERED_TABLE_VARIABLES.lock();
+        let mut run_vars = crate::overlay::RUNTIME_VARIABLES.lock();
+        let mut text_vars = crate::overlay::TEXT_VARIABLES.lock();
+
+        for var_name in prev_registered.iter() {
+            run_vars.remove(var_name);
+            text_vars.remove(var_name);
+        }
+        prev_registered.clear();
+
+        for table in &self.state.custom_tables {
+            if !table.enabled {
+                continue;
+            }
+            let table_prefix = table.name.trim().replace(' ', "_");
+            for row in &table.rows {
+                if !row.enabled {
+                    continue;
+                }
+                let clean_row = row.name.trim().replace(' ', "_");
+                if clean_row.is_empty() {
+                    continue;
+                }
+                for (col_idx, col_name) in table.columns.iter().enumerate() {
+                    let clean_col = col_name.trim().replace(' ', "_");
+                    if clean_col.is_empty() {
+                        continue;
+                    }
+                    let val_str = row.values.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                    let trimmed_val = val_str.trim();
+
+                    let mut names = vec![
+                        format!("{clean_row}_{clean_col}"),
+                        format!("{clean_row}.{clean_col}"),
+                    ];
+                    if !table_prefix.is_empty() {
+                        names.push(format!("{table_prefix}_{clean_row}_{clean_col}"));
+                    }
+
+                    for var_name in names {
+                        if let Ok(parsed) = trimmed_val.parse::<f64>() {
+                            run_vars.insert(var_name.clone(), parsed);
+                            text_vars.remove(&var_name);
+                        } else {
+                            run_vars.remove(&var_name);
+                            text_vars.insert(var_name.clone(), trimmed_val.to_owned());
+                        }
+                        prev_registered.insert(var_name);
+                    }
+                }
+            }
+        }
     }
 
     pub fn new(
@@ -1314,6 +1373,10 @@ impl CrosshairApp {
             macro_referenced_variables_cache: None,
 
             variable_inspector_open: false,
+            variable_inspector_tab: 0,
+            selected_custom_table_id: None,
+            variable_inspector_search: String::new(),
+            custom_table_search: String::new(),
             titlebar_guides_open: false,
             show_share_buttons: false,
             arduino_available_ports: Vec::new(),
@@ -1337,8 +1400,11 @@ impl CrosshairApp {
         crate::overlay::RUNTIME_VARIABLES.lock().clear();
         crate::overlay::TEXT_VARIABLES.lock().clear();
         for (name, val) in &app.state.global_constants {
-            Self::apply_fixed_variable_to_overlay(name, val);
+            if !app.state.disabled_global_constants.contains(name) {
+                Self::apply_fixed_variable_to_overlay(name, val);
+            }
         }
+        app.sync_custom_tables_to_overlay();
         app
     }
 
@@ -17790,9 +17856,13 @@ impl eframe::App for CrosshairApp {
             } else {
                 self.render_modal_backdrop(ctx, true);
                 let (panel_size, panel_pos) =
-                    Self::centered_modal_placement(ctx, vec2(840.0, 460.0), vec2(620.0, 360.0));
+                    Self::centered_modal_placement(ctx, vec2(960.0, 560.0), vec2(680.0, 420.0));
                 let mut close_request = false;
-                let title = Self::tr_lang(self.state.ui_language, "Variables", "Variables");
+                let title = Self::tr_lang(
+                    self.state.ui_language,
+                    "Variables & Data Tables",
+                    "Biến & Bảng Dữ Liệu",
+                );
                 egui::Area::new(egui::Id::new("variable-inspector-modal"))
                     .order(Order::Foreground)
                     .fixed_pos(panel_pos)

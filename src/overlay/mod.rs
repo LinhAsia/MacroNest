@@ -1796,6 +1796,8 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
     pub static TEXT_VARIABLES: Lazy<Mutex<std::collections::HashMap<String, String>>> =
         Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
+    pub static REGISTERED_TABLE_VARIABLES: Lazy<Mutex<std::collections::HashSet<String>>> =
+        Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
 
     #[derive(Debug, Clone)]
     pub enum OverlayCommand {

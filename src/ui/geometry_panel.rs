@@ -71,7 +71,9 @@ impl CrosshairApp {
             }
         }
         for (const_name, _) in &self.state.global_constants {
-            suggestion_names.insert(const_name.clone());
+            if !self.state.disabled_global_constants.contains(const_name) {
+                suggestion_names.insert(const_name.clone());
+            }
         }
         let mut suggestion_names: Vec<String> = suggestion_names.into_iter().collect();
         suggestion_names.sort();

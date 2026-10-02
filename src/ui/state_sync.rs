@@ -500,8 +500,11 @@ impl CrosshairApp {
         crate::overlay::RUNTIME_VARIABLES.lock().clear();
         crate::overlay::TEXT_VARIABLES.lock().clear();
         for (name, val) in &self.state.global_constants {
-            Self::apply_fixed_variable_to_overlay(name, val);
+            if !self.state.disabled_global_constants.contains(name) {
+                Self::apply_fixed_variable_to_overlay(name, val);
+            }
         }
+        self.sync_custom_tables_to_overlay();
         let mut persist_pending = startup_state_dirty;
         if self.apply_startup_state_adjustments() {
             persist_pending = true;

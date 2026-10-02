@@ -6074,7 +6074,27 @@ impl CrosshairApp {
             suggestion_names.insert(name.to_string());
         }
         for (const_name, _) in &self.state.global_constants {
-            suggestion_names.insert(const_name.clone());
+            if !self.state.disabled_global_constants.contains(const_name) {
+                suggestion_names.insert(const_name.clone());
+            }
+        }
+        for table in &self.state.custom_tables {
+            if table.enabled {
+                for row in &table.rows {
+                    if row.enabled {
+                        let clean_row = row.name.trim().replace(' ', "_");
+                        if !clean_row.is_empty() {
+                            for col in &table.columns {
+                                let clean_col = col.trim().replace(' ', "_");
+                                if !clean_col.is_empty() {
+                                    suggestion_names.insert(format!("{clean_row}_{clean_col}"));
+                                    suggestion_names.insert(format!("{clean_row}.{clean_col}"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         for name in self.collect_all_macro_referenced_variables() {
             if !name.contains('.') {
@@ -6607,7 +6627,21 @@ impl CrosshairApp {
                 "Variable manager",
                 "Variable manager",
             ));
-            if !self.state.global_constants.is_empty() {
+            let active_constants = self
+                .state
+                .global_constants
+                .iter()
+                .filter(|(n, _)| !self.state.disabled_global_constants.contains(n))
+                .count();
+            let active_table_rows: usize = self
+                .state
+                .custom_tables
+                .iter()
+                .filter(|t| t.enabled)
+                .map(|t| t.rows.iter().filter(|r| r.enabled).count())
+                .sum();
+            let total_active_vars = active_constants + active_table_rows;
+            if total_active_vars > 0 {
                 let badge_center = variable_response.rect.right_top() + egui::vec2(-6.0, 6.0);
                 ui.painter()
                     .circle_filled(badge_center, 7.5, Color32::from_rgb(255, 60, 60));
@@ -6619,7 +6653,7 @@ impl CrosshairApp {
                 ui.painter().text(
                     badge_center,
                     egui::Align2::CENTER_CENTER,
-                    self.state.global_constants.len().to_string(),
+                    total_active_vars.to_string(),
                     egui::FontId::proportional(9.0),
                     Color32::WHITE,
                 );
@@ -18889,261 +18923,797 @@ if supports_move_mouse || show_detection_tuning {
     pub(crate) fn render_variable_inspector(&mut self, ui: &mut egui::Ui) {
         let language = self.state.ui_language;
         Self::remember_macro_panel_language(ui, language);
-        ui.vertical(|ui| {
-            ui.add_space(4.0);
-            let constant_names: std::collections::HashSet<&str> = self
-                .state
-                .global_constants
-                .iter()
-                .map(|(name, _)| name.as_str())
-                .collect();
-            let mut vars_list: Vec<(String, String)> = Vec::new();
-            {
-                let runtime_vars = crate::overlay::RUNTIME_VARIABLES.lock();
-                for (name, value) in runtime_vars.iter() {
-                    if !constant_names.contains(name.as_str()) {
-                        vars_list.push((name.clone(), value.to_string()));
-                    }
-                }
-            }
-            {
-                let text_vars = crate::overlay::TEXT_VARIABLES.lock();
-                for (name, value) in text_vars.iter() {
-                    if !constant_names.contains(name.as_str()) {
-                        vars_list.push((name.clone(), value.clone()));
-                    }
-                }
-            }
-            vars_list.sort_by(|a, b| a.0.cmp(&b.0));
 
-            ui.columns(2, |columns| {
-                columns[0].vertical(|ui| {
-                    ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "Fixed Variables",
-                            "Fixed Variables",
+        ui.vertical(|ui| {
+            ui.add_space(2.0);
+
+            // Tab bar switcher
+            ui.horizontal(|ui| {
+                if ui
+                    .selectable_label(
+                        self.variable_inspector_tab == 0,
+                        RichText::new(format!(
+                            "{} {}",
+                            Self::material_icon_text(0xe8b8, 14.0).text(),
+                            Self::tr_lang(language, "Variables", "Biến Đơn")
                         ))
                         .strong(),
-                    );
-                    ui.add_space(4.0);
-                    let id_const_name = ui.id().with("new_const_name");
-                    let id_const_val = ui.id().with("new_const_val");
-                    let mut name_buf = ui.memory(|mem| {
-                        mem.data
-                            .get_temp::<String>(id_const_name)
-                            .unwrap_or_default()
-                    });
-                    let mut val_buf = ui.memory(|mem| {
-                        mem.data
-                            .get_temp::<String>(id_const_val)
-                            .unwrap_or_default()
-                    });
-                    let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
-                    let hint_color = if is_dark_theme {
-                        Color32::from_rgba_premultiplied(140, 140, 140, 150)
-                    } else {
-                        Color32::from_rgba_premultiplied(100, 100, 100, 150)
-                    };
-                    ui.horizontal(|ui| {
-                        let name_response = ui.add_sized(
-                            [100.0, 20.0],
-                            egui::TextEdit::singleline(&mut name_buf).hint_text(
-                                RichText::new(Self::tr_lang(language, "CONST_NAME", "CONST_NAME"))
-                                    .color(hint_color)
-                                    .weak(),
-                            ),
-                        );
-                        ui.label("=");
-                        let value_response = ui.add_sized(
-                            [140.0, 20.0],
-                            egui::TextEdit::singleline(&mut val_buf).hint_text(
-                                RichText::new(Self::tr_lang(language, "Value", "Value"))
-                                    .color(hint_color)
-                                    .weak(),
-                            ),
-                        );
-                        Self::apply_vietnamese_input_if_changed(
-                            &value_response,
-                            self.state.vietnamese_input_enabled,
-                            self.state.vietnamese_input_mode,
-                            &mut val_buf,
-                        );
-                        let enter_pressed = (name_response.has_focus()
-                            || value_response.has_focus())
-                            && ui.input_mut(|i| {
-                                i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                    )
+                    .clicked()
+                {
+                    self.variable_inspector_tab = 0;
+                }
+                if ui
+                    .selectable_label(
+                        self.variable_inspector_tab == 1,
+                        RichText::new(format!(
+                            "{} {}",
+                            Self::material_icon_text(0xe242, 14.0).text(),
+                            Self::tr_lang(language, "Data Tables", "Bảng Dữ Liệu")
+                        ))
+                        .strong(),
+                    )
+                    .clicked()
+                {
+                    self.variable_inspector_tab = 1;
+                }
+            });
+            ui.separator();
+
+            if self.variable_inspector_tab == 0 {
+                // Tab 0: Scalar Variables (Fixed Variables with Toggle & Search + Runtime Variables)
+                let constant_names: std::collections::HashSet<&str> = self
+                    .state
+                    .global_constants
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect();
+                let mut vars_list: Vec<(String, String)> = Vec::new();
+                {
+                    let runtime_vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                    for (name, value) in runtime_vars.iter() {
+                        if !constant_names.contains(name.as_str()) {
+                            vars_list.push((name.clone(), value.to_string()));
+                        }
+                    }
+                }
+                {
+                    let text_vars = crate::overlay::TEXT_VARIABLES.lock();
+                    for (name, value) in text_vars.iter() {
+                        if !constant_names.contains(name.as_str()) {
+                            vars_list.push((name.clone(), value.clone()));
+                        }
+                    }
+                }
+                vars_list.sort_by(|a, b| a.0.cmp(&b.0));
+
+                ui.columns(2, |columns| {
+                    columns[0].vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Fixed Variables",
+                                    "Hằng Số Cố Định (Fixed Variables)",
+                                ))
+                                .strong(),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.variable_inspector_search)
+                                        .hint_text(Self::tr_lang(
+                                            language,
+                                            "Search...",
+                                            "Tìm biến...",
+                                        ))
+                                        .desired_width(120.0),
+                                );
                             });
-                        let add_clicked =
-                            ui.button(Self::tr_lang(language, "Add", "Add")).clicked();
-                        if add_clicked || enter_pressed {
-                            let name_trimmed = name_buf.trim().to_owned();
-                            if !name_trimmed.is_empty() {
-                                let stored_value = val_buf.trim().to_owned();
-                                if !self
-                                    .state
-                                    .global_constants
-                                    .iter()
-                                    .any(|(n, _)| n == &name_trimmed)
-                                {
-                                    self.state
+                        });
+                        ui.add_space(4.0);
+                        let id_const_name = ui.id().with("new_const_name");
+                        let id_const_val = ui.id().with("new_const_val");
+                        let mut name_buf = ui.memory(|mem| {
+                            mem.data
+                                .get_temp::<String>(id_const_name)
+                                .unwrap_or_default()
+                        });
+                        let mut val_buf = ui.memory(|mem| {
+                            mem.data
+                                .get_temp::<String>(id_const_val)
+                                .unwrap_or_default()
+                        });
+                        let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
+                        let hint_color = if is_dark_theme {
+                            Color32::from_rgba_premultiplied(140, 140, 140, 150)
+                        } else {
+                            Color32::from_rgba_premultiplied(100, 100, 100, 150)
+                        };
+                        ui.horizontal(|ui| {
+                            let name_response = ui.add_sized(
+                                [100.0, 20.0],
+                                egui::TextEdit::singleline(&mut name_buf).hint_text(
+                                    RichText::new(Self::tr_lang(language, "CONST_NAME", "CONST_NAME"))
+                                        .color(hint_color)
+                                        .weak(),
+                                ),
+                            );
+                            ui.label("=");
+                            let value_response = ui.add_sized(
+                                [140.0, 20.0],
+                                egui::TextEdit::singleline(&mut val_buf).hint_text(
+                                    RichText::new(Self::tr_lang(language, "Value", "Value"))
+                                        .color(hint_color)
+                                        .weak(),
+                                ),
+                            );
+                            Self::apply_vietnamese_input_if_changed(
+                                &value_response,
+                                self.state.vietnamese_input_enabled,
+                                self.state.vietnamese_input_mode,
+                                &mut val_buf,
+                            );
+                            let enter_pressed = (name_response.has_focus()
+                                || value_response.has_focus())
+                                && ui.input_mut(|i| {
+                                    i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                                });
+                            let add_clicked =
+                                ui.button(Self::tr_lang(language, "Add", "Thêm")).clicked();
+                            if add_clicked || enter_pressed {
+                                let name_trimmed = name_buf.trim().to_owned();
+                                if !name_trimmed.is_empty() {
+                                    let stored_value = val_buf.trim().to_owned();
+                                    if !self
+                                        .state
                                         .global_constants
-                                        .push((name_trimmed.clone(), stored_value.clone()));
-                                    Self::apply_fixed_variable_to_overlay(
-                                        &name_trimmed,
-                                        &stored_value,
-                                    );
-                                    name_buf.clear();
-                                    val_buf.clear();
-                                    self.persist();
+                                        .iter()
+                                        .any(|(n, _)| n == &name_trimmed)
+                                    {
+                                        self.state
+                                            .global_constants
+                                            .push((name_trimmed.clone(), stored_value.clone()));
+                                        Self::apply_fixed_variable_to_overlay(
+                                            &name_trimmed,
+                                            &stored_value,
+                                        );
+                                        name_buf.clear();
+                                        val_buf.clear();
+                                        self.persist();
+                                    }
+                                }
+                            }
+                        });
+                        ui.memory_mut(|mem| {
+                            mem.data.insert_temp(id_const_name, name_buf);
+                            mem.data.insert_temp(id_const_val, val_buf);
+                        });
+
+                        ui.add_space(6.0);
+                        let search_query = self.variable_inspector_search.trim().to_lowercase();
+                        let filtered_constants: Vec<(usize, String, String, bool)> = self
+                            .state
+                            .global_constants
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, (name, val))| {
+                                if search_query.is_empty() {
+                                    true
+                                } else {
+                                    name.to_lowercase().contains(&search_query)
+                                        || val.to_lowercase().contains(&search_query)
+                                }
+                            })
+                            .map(|(idx, (name, val))| {
+                                let is_enabled =
+                                    !self.state.disabled_global_constants.contains(name);
+                                (idx, name.clone(), val.clone(), is_enabled)
+                            })
+                            .collect();
+
+                        if !self.state.global_constants.is_empty() {
+                            egui::ScrollArea::vertical()
+                                .id_salt("global_constants_scroll")
+                                .max_height(340.0)
+                                .show(ui, |ui| {
+                                    egui::Grid::new("global_constants_grid")
+                                        .num_columns(4)
+                                        .spacing([8.0, 6.0])
+                                        .striped(true)
+                                        .show(ui, |ui| {
+                                            let mut to_remove_idx = None;
+                                            let mut to_toggle: Option<(String, bool)> = None;
+
+                                            for (orig_idx, name, val, is_enabled) in filtered_constants {
+                                                let mut enabled_check = is_enabled;
+                                                if ui.checkbox(&mut enabled_check, "").changed() {
+                                                    to_toggle = Some((name.clone(), enabled_check));
+                                                }
+
+                                                let name_text = if is_enabled {
+                                                    RichText::new(&name)
+                                                        .monospace()
+                                                        .color(Color32::from_rgb(0, 180, 216))
+                                                } else {
+                                                    RichText::new(&name)
+                                                        .monospace()
+                                                        .color(Color32::from_rgb(120, 120, 120))
+                                                        .strikethrough()
+                                                };
+                                                ui.label(name_text);
+
+                                                let val_text = if is_enabled {
+                                                    RichText::new(&val).monospace()
+                                                } else {
+                                                    RichText::new(&val)
+                                                        .monospace()
+                                                        .color(Color32::from_rgb(120, 120, 120))
+                                                };
+                                                ui.add_sized(
+                                                    [140.0, 20.0],
+                                                    egui::Label::new(val_text),
+                                                );
+
+                                                if ui
+                                                    .button(Self::material_icon_text(0xe872, 14.0))
+                                                    .on_hover_text(Self::tr_lang(
+                                                        language, "Delete", "Xóa",
+                                                    ))
+                                                    .clicked()
+                                                {
+                                                    to_remove_idx = Some((orig_idx, name));
+                                                }
+                                                ui.end_row();
+                                            }
+
+                                            if let Some((name, new_state)) = to_toggle {
+                                                if new_state {
+                                                    self.state.disabled_global_constants.remove(&name);
+                                                    if let Some((_, val)) = self.state.global_constants.iter().find(|(n, _)| n == &name) {
+                                                        Self::apply_fixed_variable_to_overlay(&name, val);
+                                                    }
+                                                } else {
+                                                    self.state.disabled_global_constants.insert(name.clone());
+                                                    Self::remove_fixed_variable_from_overlay(&name);
+                                                }
+                                                self.persist();
+                                            }
+
+                                            if let Some((idx, removed_name)) = to_remove_idx {
+                                                if idx < self.state.global_constants.len() {
+                                                    self.state.global_constants.remove(idx);
+                                                    self.state.disabled_global_constants.remove(&removed_name);
+                                                    Self::remove_fixed_variable_from_overlay(&removed_name);
+                                                    self.persist();
+                                                }
+                                            }
+                                        });
+                                });
+                        } else {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "No fixed variables yet.",
+                                    "Chưa có biến cố định nào.",
+                                ))
+                                .weak(),
+                            );
+                        }
+                    });
+
+                    columns[1].vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Runtime Variables",
+                                    "Biến Đang Chạy (Runtime Variables)",
+                                ))
+                                .strong(),
+                            );
+                            if !vars_list.is_empty()
+                                && ui
+                                    .button(Self::tr_lang(language, "Clear All", "Xóa Tất Cả"))
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Clear all active runtime variables",
+                                        "Xóa tất cả các biến runtime đang hoạt động",
+                                    ))
+                                    .clicked()
+                            {
+                                crate::overlay::RUNTIME_VARIABLES.lock().clear();
+                                crate::overlay::TEXT_VARIABLES.lock().clear();
+                            }
+                        });
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "These values change while macros are running.",
+                                "Các giá trị này thay đổi tự động trong khi macro đang chạy.",
+                            ))
+                            .size(11.0)
+                            .weak(),
+                        );
+                        ui.add_space(6.0);
+                        if !vars_list.is_empty() {
+                            egui::ScrollArea::vertical()
+                                .id_salt("macro_vars_scroll")
+                                .max_height(340.0)
+                                .show(ui, |ui| {
+                                    egui::Grid::new("macro_vars_grid")
+                                        .num_columns(3)
+                                        .spacing([8.0, 6.0])
+                                        .striped(true)
+                                        .show(ui, |ui| {
+                                            let mut to_remove_var = None;
+                                            for (name, value) in &vars_list {
+                                                ui.label(
+                                                    RichText::new(name)
+                                                        .monospace()
+                                                        .color(Color32::from_rgb(243, 156, 18)),
+                                                );
+                                                ui.add_sized(
+                                                    [160.0, 20.0],
+                                                    egui::Label::new(RichText::new(value).monospace()),
+                                                );
+                                                if ui
+                                                    .button(Self::material_icon_text(0xe872, 14.0))
+                                                    .on_hover_text(Self::tr_lang(
+                                                        language, "Delete", "Xóa",
+                                                    ))
+                                                    .clicked()
+                                                {
+                                                    to_remove_var = Some(name.clone());
+                                                }
+                                                ui.end_row();
+                                            }
+                                            if let Some(var_name) = to_remove_var {
+                                                crate::overlay::RUNTIME_VARIABLES
+                                                    .lock()
+                                                    .remove(&var_name);
+                                                crate::overlay::TEXT_VARIABLES.lock().remove(&var_name);
+                                            }
+                                        });
+                                });
+                        } else {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "No runtime variables yet.",
+                                    "Chưa có biến runtime nào.",
+                                ))
+                                .weak(),
+                            );
+                        }
+                    });
+                });
+            } else {
+                // Tab 1: Custom Data Tables
+                let mut tables_changed = false;
+                let mut table_to_add = false;
+                let mut table_to_delete_idx = None;
+                let mut table_to_dup_idx = None;
+
+                let selected_idx = if let Some(id) = self.selected_custom_table_id {
+                    self.state.custom_tables.iter().position(|t| t.id == id)
+                } else {
+                    None
+                }
+                .or_else(|| {
+                    if !self.state.custom_tables.is_empty() {
+                        self.selected_custom_table_id = Some(self.state.custom_tables[0].id);
+                        Some(0)
+                    } else {
+                        None
+                    }
+                });
+
+                // Top control bar
+                ui.horizontal(|ui| {
+                    if ui
+                        .button(RichText::new(format!(
+                            "{} {}",
+                            Self::material_icon_text(0xe145, 14.0).text(),
+                            Self::tr_lang(language, "+ New Table", "+ Thêm Bảng Mới")
+                        )))
+                        .clicked()
+                    {
+                        table_to_add = true;
+                    }
+
+                    if let Some(idx) = selected_idx {
+                        if idx < self.state.custom_tables.len() {
+                            ui.separator();
+                            ui.label(RichText::new(Self::tr_lang(language, "Table:", "Bảng:")).strong());
+                            let curr_name = self.state.custom_tables[idx].name.clone();
+                            egui::ComboBox::from_id_salt("custom_table_selector")
+                                .selected_text(&curr_name)
+                                .show_ui(ui, |ui| {
+                                    for (t_idx, t) in self.state.custom_tables.iter().enumerate() {
+                                        let text = if t.enabled {
+                                            t.name.clone()
+                                        } else {
+                                            format!("{} ({})", t.name, Self::tr_lang(language, "disabled", "tắt"))
+                                        };
+                                        if ui.selectable_label(t_idx == idx, text).clicked() {
+                                            self.selected_custom_table_id = Some(t.id);
+                                        }
+                                    }
+                                });
+
+                            let table = &mut self.state.custom_tables[idx];
+                            if ui.checkbox(&mut table.enabled, Self::tr_lang(language, "Active", "Bật Bảng")).changed() {
+                                tables_changed = true;
+                            }
+
+                            ui.label(Self::tr_lang(language, "Name:", "Tên:"));
+                            if ui.add(egui::TextEdit::singleline(&mut table.name).desired_width(120.0)).changed() {
+                                tables_changed = true;
+                            }
+
+                            if ui.button(Self::material_icon_text(0xe14d, 14.0))
+                                .on_hover_text(Self::tr_lang(language, "Duplicate Table", "Nhân Bản Bảng"))
+                                .clicked()
+                            {
+                                table_to_dup_idx = Some(idx);
+                            }
+
+                            if ui.button(Self::material_icon_text(0xe872, 14.0))
+                                .on_hover_text(Self::tr_lang(language, "Delete Table", "Xóa Bảng"))
+                                .clicked()
+                            {
+                                table_to_delete_idx = Some(idx);
+                            }
+                        }
+                    }
+                });
+
+                if table_to_add {
+                    let new_id = self.state.next_custom_table_id;
+                    self.state.next_custom_table_id = new_id.saturating_add(1);
+                    let count = self.state.custom_tables.len() + 1;
+                    self.state.custom_tables.push(crate::model::CustomTable {
+                        id: new_id,
+                        name: format!("Objects_{count}"),
+                        enabled: true,
+                        columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+                        rows: Vec::new(),
+                    });
+                    self.selected_custom_table_id = Some(new_id);
+                    tables_changed = true;
+                }
+
+                if let Some(dup_idx) = table_to_dup_idx {
+                    if dup_idx < self.state.custom_tables.len() {
+                        let mut cloned = self.state.custom_tables[dup_idx].clone();
+                        let new_id = self.state.next_custom_table_id;
+                        self.state.next_custom_table_id = new_id.saturating_add(1);
+                        cloned.id = new_id;
+                        cloned.name = format!("{} (Copy)", cloned.name);
+                        self.state.custom_tables.push(cloned);
+                        self.selected_custom_table_id = Some(new_id);
+                        tables_changed = true;
+                    }
+                }
+
+                if let Some(del_idx) = table_to_delete_idx {
+                    if del_idx < self.state.custom_tables.len() {
+                        self.state.custom_tables.remove(del_idx);
+                        self.selected_custom_table_id = self.state.custom_tables.first().map(|t| t.id);
+                        tables_changed = true;
+                    }
+                }
+
+                ui.add_space(4.0);
+
+                if let Some(curr_idx) = self.selected_custom_table_id.and_then(|id| {
+                    self.state.custom_tables.iter().position(|t| t.id == id)
+                }) {
+                    let mut row_to_delete = None;
+                    let mut row_to_dup = None;
+                    let mut col_to_delete = None;
+
+                    // Table action toolbar
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.custom_table_search)
+                                .hint_text(Self::tr_lang(language, "Search rows...", "Tìm dòng..."))
+                                .desired_width(120.0),
+                        );
+
+                        if ui.button(RichText::new(format!(
+                            "{} {}",
+                            Self::material_icon_text(0xe145, 13.0).text(),
+                            Self::tr_lang(language, "Add Row", "Thêm Dòng")
+                        ))).clicked() {
+                            let table = &mut self.state.custom_tables[curr_idx];
+                            let new_row_id = table.rows.len() as u32 + 1;
+                            let col_count = table.columns.len();
+                            table.rows.push(crate::model::CustomTableRow {
+                                id: new_row_id,
+                                enabled: true,
+                                name: format!("Obj_{new_row_id}"),
+                                values: vec!["0".to_string(); col_count],
+                            });
+                            tables_changed = true;
+                        }
+
+                        if ui.button(RichText::new(format!(
+                            "{} {}",
+                            Self::material_icon_text(0xe145, 13.0).text(),
+                            Self::tr_lang(language, "Add Column", "Thêm Cột")
+                        ))).clicked() {
+                            let table = &mut self.state.custom_tables[curr_idx];
+                            let new_col_name = format!("col_{}", table.columns.len() + 1);
+                            table.columns.push(new_col_name);
+                            for r in &mut table.rows {
+                                r.values.push("0".to_string());
+                            }
+                            tables_changed = true;
+                        }
+
+                        if ui.button(Self::tr_lang(language, "Paste Clipboard", "Dán từ Clipboard"))
+                            .on_hover_text(Self::tr_lang(
+                                language,
+                                "Import rows from TSV / CSV text in clipboard",
+                                "Nhập các dòng từ văn bản TSV / CSV trong clipboard",
+                            ))
+                            .clicked()
+                        {
+                            if let Some(text) = self.read_clipboard_text() {
+                                let table = &mut self.state.custom_tables[curr_idx];
+                                let mut count = 0;
+                                for line in text.lines() {
+                                    let trimmed = line.trim();
+                                    if trimmed.is_empty() {
+                                        continue;
+                                    }
+                                    let tokens: Vec<&str> = if trimmed.contains('\t') {
+                                        trimmed.split('\t').map(|s| s.trim()).collect()
+                                    } else if trimmed.contains(',') {
+                                        trimmed.split(',').map(|s| s.trim()).collect()
+                                    } else {
+                                        trimmed.split_whitespace().collect()
+                                    };
+                                    if tokens.is_empty() {
+                                        continue;
+                                    }
+                                    let row_name = tokens[0].to_string();
+                                    let mut vals = Vec::new();
+                                    for i in 0..table.columns.len() {
+                                        let v = tokens.get(i + 1).copied().unwrap_or("0");
+                                        vals.push(v.to_string());
+                                    }
+                                    let r_id = table.rows.len() as u32 + 1;
+                                    table.rows.push(crate::model::CustomTableRow {
+                                        id: r_id,
+                                        enabled: true,
+                                        name: row_name,
+                                        values: vals,
+                                    });
+                                    count += 1;
+                                }
+                                if count > 0 {
+                                    self.status = format!("Pasted {count} rows into table");
+                                    tables_changed = true;
                                 }
                             }
                         }
-                    });
-                    ui.memory_mut(|mem| {
-                        mem.data.insert_temp(id_const_name, name_buf);
-                        mem.data.insert_temp(id_const_val, val_buf);
-                    });
 
-                    ui.add_space(6.0);
-                    if !self.state.global_constants.is_empty() {
-                        egui::ScrollArea::vertical()
-                            .id_salt("global_constants_scroll")
-                            .max_height(300.0)
-                            .show(ui, |ui| {
-                                egui::Grid::new("global_constants_grid")
-                                    .num_columns(3)
-                                    .spacing([8.0, 6.0])
-                                    .striped(true)
-                                    .show(ui, |ui| {
-                                        let mut to_remove_idx = None;
-                                        for (idx, (name, val)) in
-                                            self.state.global_constants.iter().enumerate()
-                                        {
-                                            ui.label(
-                                                RichText::new(name)
-                                                    .monospace()
-                                                    .color(Color32::from_rgb(0, 180, 216)),
-                                            );
-                                            ui.add_sized(
-                                                [140.0, 20.0],
-                                                egui::Label::new(
-                                                    RichText::new(val.to_string()).monospace(),
-                                                ),
-                                            );
-                                            if ui
-                                                .button(Self::material_icon_text(0xe872, 14.0))
-                                                .on_hover_text(Self::tr_lang(
-                                                    language, "Delete", "Delete",
-                                                ))
-                                                .clicked()
-                                            {
-                                                to_remove_idx = Some(idx);
-                                            }
-                                            ui.end_row();
-                                        }
-                                        if let Some(idx) = to_remove_idx {
-                                            let (removed_name, _) =
-                                                self.state.global_constants.remove(idx);
-                                            Self::remove_fixed_variable_from_overlay(&removed_name);
-                                            self.persist();
-                                        }
-                                    });
-                            });
-                    } else {
-                        ui.label(
-                            RichText::new(Self::tr_lang(
+                        if ui.button(Self::tr_lang(language, "Copy Table", "Sao Chép Bảng"))
+                            .on_hover_text(Self::tr_lang(
                                 language,
-                                "No fixed variables yet.",
-                                "No fixed variables yet.",
+                                "Copy table data to clipboard in TSV format (Excel-ready)",
+                                "Sao chép toàn bộ dữ liệu bảng vào clipboard dạng TSV (mở được bằng Excel)",
                             ))
-                            .weak(),
-                        );
-                    }
-                });
-
-                columns[1].vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "Runtime Variables",
-                                "Runtime Variables",
-                            ))
-                            .strong(),
-                        );
-                        if !vars_list.is_empty()
-                            && ui
-                                .button(Self::tr_lang(language, "Clear All", "Clear All"))
-                                .on_hover_text("Clear all active runtime variables")
-                                .clicked()
+                            .clicked()
                         {
-                            crate::overlay::RUNTIME_VARIABLES.lock().clear();
-                            crate::overlay::TEXT_VARIABLES.lock().clear();
+                            let table = &self.state.custom_tables[curr_idx];
+                            let mut tsv = String::new();
+                            tsv.push_str("Name\t");
+                            tsv.push_str(&table.columns.join("\t"));
+                            tsv.push('\n');
+                            for r in &table.rows {
+                                tsv.push_str(&r.name);
+                                for col_idx in 0..table.columns.len() {
+                                    tsv.push('\t');
+                                    let v = r.values.get(col_idx).map(|s| s.as_str()).unwrap_or("0");
+                                    tsv.push_str(v);
+                                }
+                                tsv.push('\n');
+                            }
+                            ui.ctx().copy_text(tsv);
+                            self.status = "Copied table rows to clipboard".to_string();
+                        }
+
+                        ui.separator();
+
+                        if ui.button(Self::tr_lang(language, "Check All", "Bật Hết")).clicked() {
+                            let table = &mut self.state.custom_tables[curr_idx];
+                            for r in &mut table.rows {
+                                r.enabled = true;
+                            }
+                            tables_changed = true;
+                        }
+
+                        if ui.button(Self::tr_lang(language, "Uncheck All", "Tắt Hết")).clicked() {
+                            let table = &mut self.state.custom_tables[curr_idx];
+                            for r in &mut table.rows {
+                                r.enabled = false;
+                            }
+                            tables_changed = true;
                         }
                     });
+
+                    ui.add_space(4.0);
+
+                    // Table Grid View
+                    let search_q = self.custom_table_search.trim().to_lowercase();
+                    let table = &mut self.state.custom_tables[curr_idx];
+                    let col_count = table.columns.len();
+
+                    egui::ScrollArea::both()
+                        .id_salt("custom_table_scroll")
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            egui::Grid::new("custom_table_grid")
+                                .num_columns(col_count + 3)
+                                .spacing([6.0, 4.0])
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    // Headers
+                                    ui.label(RichText::new("✓").strong());
+                                    ui.label(RichText::new(Self::tr_lang(language, "Row Name", "Tên Đối Tượng")).strong());
+
+                                    for col_idx in 0..col_count {
+                                        ui.horizontal(|ui| {
+                                            if ui.add(
+                                                egui::TextEdit::singleline(&mut table.columns[col_idx])
+                                                    .desired_width(65.0)
+                                            ).changed() {
+                                                tables_changed = true;
+                                            }
+                                            if table.columns.len() > 1
+                                                && ui.button(Self::material_icon_text(0xe5cd, 11.0))
+                                                    .on_hover_text(Self::tr_lang(language, "Delete Column", "Xóa Cột"))
+                                                    .clicked()
+                                            {
+                                                col_to_delete = Some(col_idx);
+                                            }
+                                        });
+                                    }
+                                    ui.label(RichText::new(Self::tr_lang(language, "Actions", "Thao Tác")).strong());
+                                    ui.end_row();
+
+                                    // Rows
+                                    for (r_idx, row) in table.rows.iter_mut().enumerate() {
+                                        if !search_q.is_empty() {
+                                            let matches_name = row.name.to_lowercase().contains(&search_q);
+                                            let matches_val = row.values.iter().any(|v| v.to_lowercase().contains(&search_q));
+                                            if !matches_name && !matches_val {
+                                                continue;
+                                            }
+                                        }
+
+                                        if ui.checkbox(&mut row.enabled, "").changed() {
+                                            tables_changed = true;
+                                        }
+
+                                        if ui.add(
+                                            egui::TextEdit::singleline(&mut row.name)
+                                                .desired_width(110.0)
+                                        ).changed() {
+                                            tables_changed = true;
+                                        }
+
+                                        while row.values.len() < col_count {
+                                            row.values.push("0".to_string());
+                                        }
+
+                                        for col_idx in 0..col_count {
+                                            if ui.add(
+                                                egui::TextEdit::singleline(&mut row.values[col_idx])
+                                                    .desired_width(70.0)
+                                            ).changed() {
+                                                tables_changed = true;
+                                            }
+                                        }
+
+                                        ui.horizontal(|ui| {
+                                            if ui.button(Self::material_icon_text(0xe14d, 12.0))
+                                                .on_hover_text(Self::tr_lang(language, "Duplicate Row", "Nhân bản dòng"))
+                                                .clicked()
+                                            {
+                                                row_to_dup = Some(r_idx);
+                                            }
+
+                                            if ui.button(Self::material_icon_text(0xe872, 12.0))
+                                                .on_hover_text(Self::tr_lang(language, "Delete Row", "Xóa dòng"))
+                                                .clicked()
+                                            {
+                                                row_to_delete = Some(r_idx);
+                                            }
+                                        });
+
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+
+                    if let Some(col_idx) = col_to_delete {
+                        let table = &mut self.state.custom_tables[curr_idx];
+                        if col_idx < table.columns.len() {
+                            table.columns.remove(col_idx);
+                            for r in &mut table.rows {
+                                if col_idx < r.values.len() {
+                                    r.values.remove(col_idx);
+                                }
+                            }
+                            tables_changed = true;
+                        }
+                    }
+
+                    if let Some(r_idx) = row_to_dup {
+                        let table = &mut self.state.custom_tables[curr_idx];
+                        if r_idx < table.rows.len() {
+                            let mut cloned_row = table.rows[r_idx].clone();
+                            cloned_row.id = table.rows.len() as u32 + 1;
+                            cloned_row.name = format!("{}_copy", cloned_row.name);
+                            table.rows.insert(r_idx + 1, cloned_row);
+                            tables_changed = true;
+                        }
+                    }
+
+                    if let Some(r_idx) = row_to_delete {
+                        let table = &mut self.state.custom_tables[curr_idx];
+                        if r_idx < table.rows.len() {
+                            table.rows.remove(r_idx);
+                            tables_changed = true;
+                        }
+                    }
+
+                    ui.add_space(4.0);
+                    let active_rows = self.state.custom_tables[curr_idx].rows.iter().filter(|r| r.enabled).count();
+                    let total_rows = self.state.custom_tables[curr_idx].rows.len();
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} ({}/{} {})",
+                                Self::tr_lang(language, "💡 Variables generated:", "💡 Các biến được tự động sinh:"),
+                                active_rows,
+                                total_rows,
+                                Self::tr_lang(language, "rows active", "dòng đang bật")
+                            ))
+                            .size(11.0)
+                            .strong()
+                            .color(Color32::from_rgb(0, 180, 216)),
+                        );
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "{RowName}_{Col} & {RowName}.{Col} (e.g. {Obj_1_x}, {Obj_1.x}). Disabled rows are omitted from runtime.",
+                                "{TênDòng}_{Cột} & {TênDòng}.{Cột} (vd: {Obj_1_x}, {Obj_1.x}). Dòng bị tắt sẽ không nạp vào runtime.",
+                            ))
+                            .size(11.0)
+                            .weak(),
+                        );
+                    });
+                } else {
                     ui.label(
                         RichText::new(Self::tr_lang(
                             language,
-                            "These values change while macros are running.",
-                            "These values change while macros are running.",
+                            "No data tables created yet. Click '+ New Table' to create a table for 3D coordinates, pointers, or custom records.",
+                            "Chưa có bảng dữ liệu nào. Nhấn '+ Thêm Bảng Mới' để tạo bảng lưu tọa độ 3D, địa chỉ pointer, hoặc các thông số khác.",
                         ))
-                        .size(11.0)
                         .weak(),
                     );
-                    ui.add_space(6.0);
-                    if !vars_list.is_empty() {
-                        egui::ScrollArea::vertical()
-                            .id_salt("macro_vars_scroll")
-                            .max_height(300.0)
-                            .show(ui, |ui| {
-                                egui::Grid::new("macro_vars_grid")
-                                    .num_columns(3)
-                                    .spacing([8.0, 6.0])
-                                    .striped(true)
-                                    .show(ui, |ui| {
-                                        let mut to_remove_var = None;
-                                        for (name, value) in &vars_list {
-                                            ui.label(
-                                                RichText::new(name)
-                                                    .monospace()
-                                                    .color(Color32::from_rgb(243, 156, 18)),
-                                            );
-                                            ui.add_sized(
-                                                [160.0, 20.0],
-                                                egui::Label::new(RichText::new(value).monospace()),
-                                            );
-                                            if ui
-                                                .button(Self::material_icon_text(0xe872, 14.0))
-                                                .on_hover_text(Self::tr_lang(
-                                                    language, "Delete", "Delete",
-                                                ))
-                                                .clicked()
-                                            {
-                                                to_remove_var = Some(name.clone());
-                                            }
-                                            ui.end_row();
-                                        }
-                                        if let Some(var_name) = to_remove_var {
-                                            crate::overlay::RUNTIME_VARIABLES
-                                                .lock()
-                                                .remove(&var_name);
-                                            crate::overlay::TEXT_VARIABLES.lock().remove(&var_name);
-                                        }
-                                    });
-                            });
-                    } else {
-                        ui.label(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "No runtime variables yet.",
-                                "No runtime variables yet.",
-                            ))
-                            .weak(),
-                        );
-                    }
-                });
-            });
+                }
+
+                if tables_changed {
+                    self.sync_custom_tables_to_overlay();
+                    self.persist();
+                }
+            }
         });
     }
 

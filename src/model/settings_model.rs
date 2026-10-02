@@ -97,6 +97,52 @@ where
         .collect())
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CustomTableRow {
+    pub id: u32,
+    pub enabled: bool,
+    pub name: String,
+    pub values: Vec<String>,
+}
+
+impl Default for CustomTableRow {
+    fn default() -> Self {
+        Self {
+            id: 1,
+            enabled: true,
+            name: String::new(),
+            values: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct CustomTable {
+    pub id: u32,
+    pub name: String,
+    pub enabled: bool,
+    pub columns: Vec<String>,
+    pub rows: Vec<CustomTableRow>,
+}
+
+impl Default for CustomTable {
+    fn default() -> Self {
+        Self {
+            id: 1,
+            name: "Table 1".to_string(),
+            enabled: true,
+            columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            rows: Vec::new(),
+        }
+    }
+}
+
+fn default_custom_table_id() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum QuickKeyDisplayMode {
     Normal,
@@ -716,6 +762,12 @@ pub struct AppState {
     #[serde(default, deserialize_with = "deserialize_global_constants")]
     pub global_constants: Vec<(String, String)>,
     #[serde(default)]
+    pub disabled_global_constants: std::collections::HashSet<String>,
+    #[serde(default)]
+    pub custom_tables: Vec<CustomTable>,
+    #[serde(default = "default_custom_table_id")]
+    pub next_custom_table_id: u32,
+    #[serde(default)]
     pub ocr_presets: Vec<OcrPreset>,
     #[serde(default = "default_ocr_language_code")]
     pub ocr_language: String,
@@ -1127,6 +1179,9 @@ impl Default for AppState {
             macro_mouse_click_delay_ms: 0,
             macro_keyboard_key_press_delay_ms: 0,
             global_constants: Vec::new(),
+            disabled_global_constants: std::collections::HashSet::new(),
+            custom_tables: Vec::new(),
+            next_custom_table_id: 1,
             ocr_presets: Vec::new(),
             ocr_language: default_ocr_language_code(),
             next_ocr_preset_id: 1,
@@ -1243,6 +1298,33 @@ mod tests {
                 ("NAME".to_owned(), "hello123".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn app_state_custom_tables_and_disabled_constants_roundtrip() {
+        let mut state = AppState::default();
+        state.disabled_global_constants.insert("HP".to_string());
+        state.custom_tables.push(super::CustomTable {
+            id: 1,
+            name: "Objects_3D".to_string(),
+            enabled: true,
+            columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            rows: vec![super::CustomTableRow {
+                id: 1,
+                enabled: true,
+                name: "Ore_1".to_string(),
+                values: vec!["100.5".to_string(), "200.0".to_string(), "-50.2".to_string()],
+            }],
+        });
+
+        let json = serde_json::to_value(&state).expect("serialize");
+        let deserialized: AppState = serde_json::from_value(json).expect("deserialize");
+
+        assert!(deserialized.disabled_global_constants.contains("HP"));
+        assert_eq!(deserialized.custom_tables.len(), 1);
+        assert_eq!(deserialized.custom_tables[0].name, "Objects_3D");
+        assert_eq!(deserialized.custom_tables[0].rows[0].name, "Ore_1");
+        assert_eq!(deserialized.custom_tables[0].rows[0].values[0], "100.5");
     }
 
     #[test]
