@@ -5240,11 +5240,12 @@ mod windows_overlay {
             if message == WM_LBUTTONDOWN {
                 let pt_x = info.pt.x;
                 let pt_y = info.pt.y;
-                let hits = ESP_DEBUG_BOX_HITS.lock();
-                if let Some(hit) = hits
+                let hit = ESP_DEBUG_BOX_HITS
+                    .lock()
                     .iter()
                     .find(|h| pt_x >= h.min_x && pt_x <= h.max_x && pt_y >= h.min_y && pt_y <= h.max_y)
-                {
+                    .copied();
+                if let Some(hit) = hit {
                     let addr = hit.address;
                     let text = format!("0x{addr:X}");
                     if let Ok(mut clipboard) = Clipboard::new() {
@@ -5252,7 +5253,9 @@ mod windows_overlay {
                     }
                     *ESP_DEBUG_CLICK_TOAST.lock() =
                         Some((Instant::now(), format!("Copied {text} to Clipboard")));
+                    show_ocr_copy_toast_async(None, format!("Copied {text} to Clipboard"), false);
                     wake_command_queue();
+                    return LRESULT(1);
                 }
             }
             let active_mouse_path_draw_capture = HOOK_STATE.lock().mouse_path_draw_capture.clone();
@@ -25438,6 +25441,7 @@ mod windows_overlay {
                     let mut frames = Vec::with_capacity(presets.len());
                     let mut snapshots = HashMap::with_capacity(presets.len());
                     let mut audio_updates = Vec::new();
+                    ESP_DEBUG_BOX_HITS.lock().clear();
                     read_frame.begin_sample();
                     let mut all_preset_targets: HashMap<u32, Vec<([f32; 3], usize, usize)>> =
                         HashMap::with_capacity(presets.len());
@@ -26552,9 +26556,6 @@ mod windows_overlay {
         }
         let mut shapes = Vec::new();
         let mut best_snapshot = None;
-        if preset.debug_mode {
-            ESP_DEBUG_BOX_HITS.lock().clear();
-        }
         for (target, entity_address, entity_index) in targets {
             let aabb_bounds = frame.aabb_bounds.get(&(preset.id, entity_index)).copied();
             let (mut target_shapes, snapshot) = esp_shapes_for_target(
@@ -27005,10 +27006,103 @@ mod windows_overlay {
             None
         };
         let mut shapes = Vec::new();
+        let append_debug_info = |shapes: &mut Vec<GeometryRenderShape>, top_y: i32, bottom_y: i32| {
+            if !preset.debug_mode {
+                return;
+            }
+            let closest_base = if !preset.probe_base_addresses.is_empty() {
+                preset
+                    .probe_base_addresses
+                    .iter()
+                    .min_by_key(|&&base| (entity_address as isize).wrapping_sub(base as isize).abs())
+                    .copied()
+            } else {
+                None
+            };
+
+            let debug_text = if entity_address != 0 {
+                if let Some(base_addr) = closest_base {
+                    let diff = (entity_address as isize).wrapping_sub(base_addr as isize);
+                    let sign = if diff > 0 { "+" } else { "" };
+                    format!(
+                        "0x{entity_address:X} ({sign}{diff})\nBase: 0x{base_addr:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
+                        target[0], target[1], target[2]
+                    )
+                } else {
+                    format!(
+                        "0x{entity_address:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
+                        target[0], target[1], target[2]
+                    )
+                }
+            } else {
+                format!("X:{:.1} Y:{:.1} Z:{:.1}", target[0], target[1], target[2])
+            };
+            let text_y = if closest_base.is_some() {
+                top_y - 42
+            } else {
+                top_y - 28
+            };
+            shapes.push(GeometryRenderShape {
+                bounds: geometry_label_bounds(x, text_y, 12, &debug_text, 0.0),
+                draw: GeometryRenderDraw::Label(GeometryRenderText {
+                    x,
+                    y: text_y,
+                    font_size: 12,
+                    color: [255, 230, 0, 255],
+                    rotation_deg: 0.0,
+                    text: debug_text,
+                }),
+            });
+
+            if entity_address != 0 {
+                let btn_hw = 24;
+                let btn_hh = 9;
+                let btn_y = if text_y - (if closest_base.is_some() { 35 } else { 27 }) >= 14 {
+                    text_y - (if closest_base.is_some() { 35 } else { 27 })
+                } else {
+                    bottom_y + 16
+                };
+                shapes.push(GeometryRenderShape {
+                    bounds: (x - btn_hw - 1, btn_y - btn_hh - 1, x + btn_hw + 1, btn_y + btn_hh + 1),
+                    draw: GeometryRenderDraw::Polygon {
+                        points: vec![
+                            (x - btn_hw, btn_y - btn_hh),
+                            (x + btn_hw, btn_y - btn_hh),
+                            (x + btn_hw, btn_y + btn_hh),
+                            (x - btn_hw, btn_y + btn_hh),
+                        ],
+                        stroke: [0, 220, 255, 240],
+                        fill: Some([18, 24, 38, 230]),
+                        thickness: 1,
+                    },
+                });
+                shapes.push(GeometryRenderShape {
+                    bounds: (x - btn_hw, btn_y - btn_hh, x + btn_hw, btn_y + btn_hh),
+                    draw: GeometryRenderDraw::Label(GeometryRenderText {
+                        x,
+                        y: btn_y,
+                        font_size: 11,
+                        color: [255, 255, 255, 255],
+                        rotation_deg: 0.0,
+                        text: "[Copy]".to_string(),
+                    }),
+                });
+                ESP_DEBUG_BOX_HITS.lock().push(EspDebugBoxHit {
+                    min_x: x - btn_hw - 4,
+                    min_y: btn_y - btn_hh - 4,
+                    max_x: x + btn_hw + 4,
+                    max_y: btn_y + btn_hh + 4,
+                    address: entity_address,
+                });
+            }
+        };
+
         match preset.marker_source {
             crate::model::EspMarkerSource::None => {}
             crate::model::EspMarkerSource::Geometry => match preset.marker {
-                crate::model::EspMarkerKind::None => {}
+                crate::model::EspMarkerKind::None => {
+                    append_debug_info(&mut shapes, y - 6, y + 6);
+                }
                 crate::model::EspMarkerKind::Dot => {
                     let radius = (preset.dot_radius * marker_scale).round().max(1.0) as i32;
                     shapes.push(GeometryRenderShape {
@@ -27027,52 +27121,7 @@ mod windows_overlay {
                             thickness,
                         },
                     });
-
-                    if preset.debug_mode {
-                        let closest_base = if !preset.probe_base_addresses.is_empty() {
-                            preset
-                                .probe_base_addresses
-                                .iter()
-                                .min_by_key(|&&base| (entity_address as isize).wrapping_sub(base as isize).abs())
-                                .copied()
-                        } else {
-                            None
-                        };
-
-                        let debug_text = if entity_address != 0 {
-                            if let Some(base_addr) = closest_base {
-                                let diff = (entity_address as isize).wrapping_sub(base_addr as isize);
-                                let sign = if diff > 0 { "+" } else { "" };
-                                format!(
-                                    "0x{entity_address:X} ({sign}{diff})\nBase: 0x{base_addr:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
-                                    target[0], target[1], target[2]
-                                )
-                            } else {
-                                format!(
-                                    "0x{entity_address:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
-                                    target[0], target[1], target[2]
-                                )
-                            }
-                        } else {
-                            format!("X:{:.1} Y:{:.1} Z:{:.1}", target[0], target[1], target[2])
-                        };
-                        let text_y = if closest_base.is_some() {
-                            y - radius - 42
-                        } else {
-                            y - radius - 28
-                        };
-                        shapes.push(GeometryRenderShape {
-                            bounds: geometry_label_bounds(x, text_y, 12, &debug_text, 0.0),
-                            draw: GeometryRenderDraw::Label(GeometryRenderText {
-                                x,
-                                y: text_y,
-                                font_size: 12,
-                                color: [255, 230, 0, 255],
-                                rotation_deg: 0.0,
-                                text: debug_text,
-                            }),
-                        });
-                    }
+                    append_debug_info(&mut shapes, y - radius, y + radius);
                 }
                 crate::model::EspMarkerKind::Box => {
                     let (points, box_min_x, box_min_y, box_max_x, box_max_y) =
@@ -27116,60 +27165,7 @@ mod windows_overlay {
                             thickness,
                         },
                     });
-
-                    if preset.debug_mode {
-                        ESP_DEBUG_BOX_HITS.lock().push(EspDebugBoxHit {
-                            min_x: box_min_x,
-                            min_y: box_min_y,
-                            max_x: box_max_x,
-                            max_y: box_max_y,
-                            address: entity_address,
-                        });
-
-                        let closest_base = if !preset.probe_base_addresses.is_empty() {
-                            preset
-                                .probe_base_addresses
-                                .iter()
-                                .min_by_key(|&&base| (entity_address as isize).wrapping_sub(base as isize).abs())
-                                .copied()
-                        } else {
-                            None
-                        };
-
-                        let debug_text = if entity_address != 0 {
-                            if let Some(base_addr) = closest_base {
-                                let diff = (entity_address as isize).wrapping_sub(base_addr as isize);
-                                let sign = if diff > 0 { "+" } else { "" };
-                                format!(
-                                    "0x{entity_address:X} ({sign}{diff})\nBase: 0x{base_addr:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
-                                    target[0], target[1], target[2]
-                                )
-                            } else {
-                                format!(
-                                    "0x{entity_address:X}\nX:{:.1} Y:{:.1} Z:{:.1}",
-                                    target[0], target[1], target[2]
-                                )
-                            }
-                        } else {
-                            format!("X:{:.1} Y:{:.1} Z:{:.1}", target[0], target[1], target[2])
-                        };
-                        let text_y = if closest_base.is_some() {
-                            box_min_y - 42
-                        } else {
-                            box_min_y - 28
-                        };
-                        shapes.push(GeometryRenderShape {
-                            bounds: geometry_label_bounds(x, text_y, 12, &debug_text, 0.0),
-                            draw: GeometryRenderDraw::Label(GeometryRenderText {
-                                x,
-                                y: text_y,
-                                font_size: 12,
-                                color: [255, 230, 0, 255],
-                                rotation_deg: 0.0,
-                                text: debug_text,
-                            }),
-                        });
-                    }
+                    append_debug_info(&mut shapes, box_min_y, box_max_y);
                 }
             },
             crate::model::EspMarkerSource::Text => {
@@ -33251,6 +33247,37 @@ mod windows_overlay {
         fn esp_worker_generation_never_uses_stopped_generation_zero() {
             assert_eq!(next_esp_worker_generation(1), 2);
             assert_eq!(next_esp_worker_generation(u64::MAX), 1);
+        }
+
+        #[test]
+        fn esp_debug_mode_registers_copy_button_hit() {
+            let _lock = TEST_MUTEX.lock();
+            ESP_DEBUG_BOX_HITS.lock().clear();
+            let mut preset = crate::model::EspPreset::default();
+            preset.debug_mode = true;
+            preset.marker = crate::model::EspMarkerKind::Box;
+            preset.target_window = "test".to_string();
+            let (shapes, _) = esp_shapes_for_target(
+                &preset,
+                None,
+                [10.0, 2.0, 2.0],
+                None,
+                0x12345678,
+                0,
+                [0.0; 3],
+                0.0,
+                0.0,
+                0,
+                0,
+                800,
+                600,
+            );
+            assert!(shapes.iter().any(|s| match &s.draw {
+                GeometryRenderDraw::Label(l) => l.text == "[Copy]",
+                _ => false,
+            }));
+            let hits = ESP_DEBUG_BOX_HITS.lock();
+            assert!(hits.iter().any(|h| h.address == 0x12345678));
         }
 
         #[test]

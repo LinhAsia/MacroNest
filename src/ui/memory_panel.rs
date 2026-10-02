@@ -20710,12 +20710,18 @@ impl CrosshairApp {
             z_off = 8;
         }
 
+        let (backward_count, forward_count) = if addrs.len() > 1 {
+            (0, 0)
+        } else {
+            (1, 1)
+        };
+
         self.memory_panel.location_probe_dialog = Some(LocationProbeDialog {
             preset_id,
             base_addresses: addrs,
             selected_address_idx: 0,
-            backward_count: 1,
-            forward_count: 1,
+            backward_count,
+            forward_count,
             y_offset_from_x: y_off,
             z_offset_from_x: z_off,
             current_offset: 0,
