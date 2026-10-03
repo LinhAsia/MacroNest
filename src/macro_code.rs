@@ -536,6 +536,9 @@ fn expand_preset(compact: SparseMacroPreset) -> Result<MacroPreset> {
 fn step_field_is_relevant(action: crate::model::MacroAction, field: &str) -> bool {
     use crate::model::MacroAction;
 
+    if field == "data_table_id" || field == "data_table_target_state" {
+        return action == MacroAction::SetDataTable;
+    }
     if field == "if_variable_name" {
         return matches!(
             action,

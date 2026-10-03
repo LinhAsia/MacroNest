@@ -3417,6 +3417,7 @@ impl CrosshairApp {
         let hud_popup_id = egui::Id::new((id_source, "hud-submenu-popup"));
         let keylock_popup_id = egui::Id::new((id_source, "keylock-submenu-popup"));
         let step_popup_id = egui::Id::new((id_source, "step-submenu-popup"));
+        let var_popup_id = egui::Id::new((id_source, "var-submenu-popup"));
         ui.ctx().data_mut(|data| {
             data.insert_temp(owner_id, None::<MacroActionSubmenuKind>);
             data.insert_temp(macro_popup_id, false);
@@ -3437,6 +3438,7 @@ impl CrosshairApp {
             data.insert_temp(hud_popup_id, false);
             data.insert_temp(keylock_popup_id, false);
             data.insert_temp(step_popup_id, false);
+            data.insert_temp(var_popup_id, false);
         });
         egui::Popup::close_id(ui.ctx(), macro_popup_id);
         egui::Popup::close_id(ui.ctx(), mouse_popup_id);
@@ -3455,6 +3457,7 @@ impl CrosshairApp {
         egui::Popup::close_id(ui.ctx(), hud_popup_id);
         egui::Popup::close_id(ui.ctx(), keylock_popup_id);
         egui::Popup::close_id(ui.ctx(), step_popup_id);
+        egui::Popup::close_id(ui.ctx(), var_popup_id);
         for (_, _, _, popup_key) in Self::mouse_click_action_groups().iter().copied() {
             let child_popup_id = egui::Id::new((id_source, popup_key, "popup"));
             ui.ctx()
@@ -10788,6 +10791,13 @@ if supports_move_mouse || show_detection_tuning {
                                                               self.state.vietnamese_input_enabled,
                                                               self.state.vietnamese_input_mode,
                                                           );
+                                                      } else if step.action == MacroAction::SetDataTable {
+                                                          live_sync |= Self::render_data_table_macro_step_editor(
+                                                              ui,
+                                                              language,
+                                                              (group.id, preset.id, 0, "hold-stop-set-data-table"),
+                                                              step,
+                                                          );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
                                                         ui.spacing_mut().item_spacing.x = 2.0;
@@ -13102,6 +13112,13 @@ if supports_move_mouse || show_detection_tuning {
                                                               &timer_names,
                                                               self.state.vietnamese_input_enabled,
                                                               self.state.vietnamese_input_mode,
+                                                          );
+                                                      } else if step.action == MacroAction::SetDataTable {
+                                                          live_sync |= Self::render_data_table_macro_step_editor(
+                                                              ui,
+                                                              language,
+                                                              (group.id, preset.id, 0, "press-stop-set-data-table"),
+                                                              step,
                                                           );
                                                       } else if step.action == MacroAction::SetVariable {
                                                     ui.scope(|ui| {
@@ -16627,6 +16644,13 @@ if supports_move_mouse || show_detection_tuning {
                                                               &timer_names,
                                                               self.state.vietnamese_input_enabled,
                                                               self.state.vietnamese_input_mode,
+                                                          );
+                                                      } else if step.action == MacroAction::SetDataTable {
+                                                          live_sync |= Self::render_data_table_macro_step_editor(
+                                                              ui,
+                                                              language,
+                                                              (group.id, preset.id, step_index, "normal-set-data-table"),
+                                                              step,
                                                           );
                                                       } else if step.action == MacroAction::SetVariable {
                                                           ui.scope(|ui| {
@@ -21622,6 +21646,13 @@ if supports_move_mouse || show_detection_tuning {
         ]
     }
 
+    fn var_macro_actions() -> &'static [MacroAction] {
+        &[
+            MacroAction::SetVariable,
+            MacroAction::SetDataTable,
+        ]
+    }
+
     fn render_macro_action_submenu_group(
         ui: &mut egui::Ui,
         language: UiLanguage,
@@ -21936,6 +21967,30 @@ if supports_move_mouse || show_detection_tuning {
         );
     }
 
+    fn render_var_action_group_option(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        current: &mut MacroAction,
+        live_sync: &mut bool,
+        action_hover_id: egui::Id,
+    ) {
+        Self::render_macro_action_submenu_group(
+            ui,
+            language,
+            current,
+            live_sync,
+            action_hover_id,
+            MacroActionSubmenuKind::Var,
+            "var-submenu-popup",
+            0xe150,
+            "Var",
+            &Self::tr_lang(language, "Variable & Data Table Actions", "Thao tác Biến & Bảng dữ liệu"),
+            Self::var_macro_actions(),
+            2,
+            135.0,
+        );
+    }
+
     fn render_filtered_macro_actions(
         ui: &mut egui::Ui,
         language: UiLanguage,
@@ -21984,6 +22039,7 @@ if supports_move_mouse || show_detection_tuning {
             MacroAction::IfEnd,
             MacroAction::JumpToStep,
             MacroAction::SetVariable,
+            MacroAction::SetDataTable,
             MacroAction::StartTimerPreset,
             MacroAction::PauseTimerPreset,
             MacroAction::StopTimerPreset,
@@ -22116,7 +22172,7 @@ if supports_move_mouse || show_detection_tuning {
                 Self::render_loop_action_group_option(ui, language, current, live_sync, action_hover_id);
                 Self::render_if_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
                 Self::render_macro_action_option(ui, language, current, MacroAction::JumpToStep, live_sync, action_hover_id, false);
-                Self::render_macro_action_option(ui, language, current, MacroAction::SetVariable, live_sync, action_hover_id, false);
+                Self::render_var_action_group_option(ui, language, current, live_sync, action_hover_id);
                 Self::render_timer_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
                 Self::render_step_action_group_option(ui, language, current, live_sync, action_hover_id);
                 Self::render_trigger_macro_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
@@ -22142,6 +22198,140 @@ if supports_move_mouse || show_detection_tuning {
                 Self::render_funny_action_group_option(ui, language, action_hover_id, current, live_sync, action_hover_id);
                 ui.end_row();
             });
+    }
+
+    fn render_data_table_macro_step_editor(
+        ui: &mut egui::Ui,
+        language: UiLanguage,
+        id_source: impl std::hash::Hash + Copy,
+        step: &mut MacroStep,
+    ) -> bool {
+        let custom_tables = crate::overlay::CUSTOM_TABLES_STORE.lock();
+        let mut changed = false;
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().interact_size.y = 20.0;
+            ui.spacing_mut().button_padding.y = 1.0;
+            ui.horizontal(|ui| {
+                let state_label = match step.data_table_target_state {
+                    DataTableTargetState::Disable => Self::tr_lang(language, "Turn Off", "Tắt"),
+                    DataTableTargetState::Enable => Self::tr_lang(language, "Turn On", "Bật"),
+                    DataTableTargetState::Toggle => Self::tr_lang(language, "Toggle", "Đảo"),
+                };
+                let state_combo = ComboBox::from_id_salt((id_source, "dt-target-state"))
+                    .width(78.0)
+                    .selected_text(state_label);
+                state_combo.show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            step.data_table_target_state == DataTableTargetState::Disable,
+                            Self::tr_lang(language, "Turn Off", "Tắt"),
+                        )
+                        .clicked()
+                    {
+                        step.data_table_target_state = DataTableTargetState::Disable;
+                        changed = true;
+                    }
+                    if ui
+                        .selectable_label(
+                            step.data_table_target_state == DataTableTargetState::Enable,
+                            Self::tr_lang(language, "Turn On", "Bật"),
+                        )
+                        .clicked()
+                    {
+                        step.data_table_target_state = DataTableTargetState::Enable;
+                        changed = true;
+                    }
+                    if ui
+                        .selectable_label(
+                            step.data_table_target_state == DataTableTargetState::Toggle,
+                            Self::tr_lang(language, "Toggle", "Đảo"),
+                        )
+                        .clicked()
+                    {
+                        step.data_table_target_state = DataTableTargetState::Toggle;
+                        changed = true;
+                    }
+                });
+
+                if !custom_tables.is_empty() {
+                    let valid = step.data_table_id.map_or(false, |id| {
+                        custom_tables.iter().any(|t| t.id == id)
+                    });
+                    if !valid {
+                        step.data_table_id = Some(custom_tables[0].id);
+                        changed = true;
+                    }
+                }
+
+                let (on_tag, off_tag) = match language {
+                    UiLanguage::Vietnamese => ("[BẬT]", "[TẮT]"),
+                    UiLanguage::English | UiLanguage::Icon => ("[ON]", "[OFF]"),
+                };
+
+                let selected_table = step.data_table_id.and_then(|id| {
+                    custom_tables.iter().find(|t| t.id == id)
+                });
+
+                let selected_label = if let Some(table) = selected_table {
+                    let tag = if table.enabled { on_tag } else { off_tag };
+                    format!("{} {}", tag, table.name)
+                } else if custom_tables.is_empty() {
+                    Self::tr_lang(language, "(No tables)", "(Không có bảng)").to_string()
+                } else {
+                    Self::tr_lang(language, "Select table", "Chọn bảng").to_string()
+                };
+
+                let table_combo = ComboBox::from_id_salt((id_source, "dt-select-table"))
+                    .width(160.0)
+                    .selected_text(selected_label);
+
+                table_combo.show_ui(ui, |ui| {
+                    if custom_tables.is_empty() {
+                        ui.label(Self::tr_lang(
+                            language,
+                            "No tables available",
+                            "Không có bảng nào",
+                        ));
+                    } else {
+                        for table in custom_tables.iter() {
+                            let tag = if table.enabled { on_tag } else { off_tag };
+                            let is_selected = step.data_table_id == Some(table.id);
+
+                            let mut job = egui::text::LayoutJob::default();
+                            let tag_color = if table.enabled {
+                                Color32::from_rgb(60, 180, 75)
+                            } else {
+                                Color32::from_rgb(220, 80, 80)
+                            };
+                            job.append(
+                                tag,
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: egui::FontId::proportional(12.0),
+                                    color: tag_color,
+                                    ..Default::default()
+                                },
+                            );
+                            job.append(
+                                &format!(" {}", table.name),
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: egui::FontId::proportional(12.0),
+                                    color: ui.visuals().text_color(),
+                                    ..Default::default()
+                                },
+                            );
+                            if ui.selectable_label(is_selected, job).clicked() {
+                                step.data_table_id = Some(table.id);
+                                changed = true;
+                            }
+                        }
+                    }
+                });
+            });
+        });
+        changed
     }
 
     fn render_audio_sense_preset_selector(

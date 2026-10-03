@@ -571,6 +571,11 @@ impl CrosshairApp {
         self.persist_after_sync(Self::sync_esp_presets);
     }
 
+    pub(crate) fn persist_custom_tables(&mut self) {
+        self.sync_custom_tables_to_overlay();
+        self.persist();
+    }
+
     pub(crate) fn migrate_legacy_audio_sense_state(&mut self) -> bool {
         let mut changed = false;
 

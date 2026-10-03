@@ -626,6 +626,7 @@ pub(crate) enum MacroActionSubmenuKind {
     Hud,
     KeyLock,
     Step,
+    Var,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -999,68 +1000,7 @@ impl CrosshairApp {
     }
 
     pub(crate) fn sync_custom_tables_to_overlay(&self) {
-        let mut prev_registered = crate::overlay::REGISTERED_TABLE_VARIABLES.lock();
-        let mut run_vars = crate::overlay::RUNTIME_VARIABLES.lock();
-        let mut text_vars = crate::overlay::TEXT_VARIABLES.lock();
-
-        for var_name in prev_registered.iter() {
-            run_vars.remove(var_name);
-            text_vars.remove(var_name);
-        }
-        prev_registered.clear();
-
-        for table in &self.state.custom_tables {
-            if !table.enabled {
-                continue;
-            }
-            for row in &table.rows {
-                if !row.enabled {
-                    continue;
-                }
-                let clean_row = row.name.trim();
-
-                if table.columns.is_empty() {
-                    if let Some(first_val) = row.values.first() {
-                        let trimmed_val = first_val.trim();
-                        let var_name = clean_row.to_string();
-                        if !var_name.is_empty() {
-                            if let Ok(parsed) = trimmed_val.parse::<f64>() {
-                                run_vars.insert(var_name.clone(), parsed);
-                                text_vars.remove(&var_name);
-                            } else {
-                                run_vars.remove(&var_name);
-                                text_vars.insert(var_name.clone(), trimmed_val.to_owned());
-                            }
-                            prev_registered.insert(var_name);
-                        }
-                    }
-                } else {
-                    for (col_idx, col_name) in table.columns.iter().enumerate() {
-                        let clean_col = col_name.trim();
-                        let val_str = row.values.get(col_idx).map(|s| s.as_str()).unwrap_or("");
-                        let trimmed_val = val_str.trim();
-
-                        // The variable name is exactly {RowName}{Col}
-                        // - Row "a" + Col "x" => "ax"
-                        // - Empty Row + Col "x" => "x"
-                        // - Row "a1" + Empty Col => "a1"
-                        let var_name = format!("{clean_row}{clean_col}");
-                        if var_name.is_empty() {
-                            continue;
-                        }
-
-                        if let Ok(parsed) = trimmed_val.parse::<f64>() {
-                            run_vars.insert(var_name.clone(), parsed);
-                            text_vars.remove(&var_name);
-                        } else {
-                            run_vars.remove(&var_name);
-                            text_vars.insert(var_name.clone(), trimmed_val.to_owned());
-                        }
-                        prev_registered.insert(var_name);
-                    }
-                }
-            }
-        }
+        crate::overlay::sync_custom_tables_to_runtime(&self.state.custom_tables);
     }
 
     pub fn new(
@@ -9496,6 +9436,7 @@ impl CrosshairApp {
             MacroAction::Else => "Else",
             MacroAction::IfEnd => "IfEnd",
             MacroAction::SetVariable => "SetVariable",
+            MacroAction::SetDataTable => "SetDataTable",
             MacroAction::ReadMemory => "ReadMemory",
             MacroAction::WriteMemory => "WriteMemory",
             MacroAction::ScanInstruction => "ScanInstruction",
@@ -9805,6 +9746,10 @@ impl CrosshairApp {
                 "macro_action_tooltip.set_variable",
                 "Set a variable to a numeric value or copy from another variable.",
             ),
+            MacroAction::SetDataTable => (
+                "macro_action_tooltip.set_data_table",
+                "Enable or disable a custom data table.",
+            ),
             MacroAction::ReadMemory => (
                 "macro_action_tooltip.read_memory",
                 "Read one value from an address in the selected process and store it in a variable.",
@@ -9994,6 +9939,7 @@ impl CrosshairApp {
             MacroAction::Else => 0xe3ec,
             MacroAction::IfEnd => 0xe040,
             MacroAction::SetVariable => 0xe150,
+            MacroAction::SetDataTable => 0xe228,
             MacroAction::ReadMemory => 0xe30a,
             MacroAction::WriteMemory => 0xe3c9,
             MacroAction::ScanInstruction => 0xe8b6,
@@ -10168,6 +10114,7 @@ impl CrosshairApp {
             MacroAction::Else => ("macro_action_short_label.else", "Else"),
             MacroAction::IfEnd => ("macro_action_short_label.if_end", "IfEnd"),
             MacroAction::SetVariable => ("macro_action_short_label.set_variable", "SetVar"),
+            MacroAction::SetDataTable => ("macro_action_short_label.set_data_table", "DataTable"),
             MacroAction::ReadMemory => ("macro_action_short_label.read_memory", "ReadMemory"),
             MacroAction::WriteMemory => ("macro_action_short_label.write_memory", "WriteMemory"),
             MacroAction::ScanInstruction => ("macro_action_short_label.scan_instruction", "ScanInst"),
@@ -10440,6 +10387,7 @@ impl CrosshairApp {
                 | MacroAction::Else
                 | MacroAction::IfEnd
                 | MacroAction::SetVariable
+                | MacroAction::SetDataTable
                 | MacroAction::ReadMemory
                 | MacroAction::WriteMemory
                 | MacroAction::ScanInstruction
@@ -15766,6 +15714,17 @@ impl eframe::App for CrosshairApp {
                     {
                         preset.enabled = enabled;
                         self.persist_esp_presets();
+                    }
+                }
+                UiCommand::DataTableEnabled { table_id, enabled } => {
+                    if let Some(table) = self
+                        .state
+                        .custom_tables
+                        .iter_mut()
+                        .find(|table| table.id == table_id)
+                    {
+                        table.enabled = enabled;
+                        self.persist_custom_tables();
                     }
                 }
                 UiCommand::StartEspScan {

@@ -1798,6 +1798,74 @@ mod windows_overlay {
         Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
     pub static REGISTERED_TABLE_VARIABLES: Lazy<Mutex<std::collections::HashSet<String>>> =
         Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+    pub static CUSTOM_TABLES_STORE: Lazy<Mutex<Vec<crate::model::CustomTable>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
+
+    pub fn sync_custom_tables_to_runtime(tables: &[crate::model::CustomTable]) {
+        *CUSTOM_TABLES_STORE.lock() = tables.to_vec();
+
+        let mut prev_registered = REGISTERED_TABLE_VARIABLES.lock();
+        let mut run_vars = RUNTIME_VARIABLES.lock();
+        let mut text_vars = TEXT_VARIABLES.lock();
+
+        for var_name in prev_registered.iter() {
+            run_vars.remove(var_name);
+            text_vars.remove(var_name);
+        }
+        prev_registered.clear();
+
+        for table in tables {
+            if !table.enabled {
+                continue;
+            }
+            for row in &table.rows {
+                if !row.enabled {
+                    continue;
+                }
+                let clean_row = row.name.trim();
+
+                if table.columns.is_empty() {
+                    if let Some(first_val) = row.values.first() {
+                        let trimmed_val = first_val.trim();
+                        let var_name = clean_row.to_string();
+                        if !var_name.is_empty() {
+                            if let Ok(parsed) = trimmed_val.parse::<f64>() {
+                                run_vars.insert(var_name.clone(), parsed);
+                                text_vars.remove(&var_name);
+                            } else {
+                                run_vars.remove(&var_name);
+                                text_vars.insert(var_name.clone(), trimmed_val.to_owned());
+                            }
+                            prev_registered.insert(var_name);
+                        }
+                    }
+                } else {
+                    for (col_idx, col_name) in table.columns.iter().enumerate() {
+                        let clean_col = col_name.trim();
+                        let val_str = row.values.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+                        let trimmed_val = val_str.trim();
+
+                        let var_name = if clean_col.is_empty() {
+                            clean_row.to_string()
+                        } else {
+                            format!("{clean_row}{clean_col}")
+                        };
+
+                        if !var_name.is_empty() {
+                            if let Ok(parsed) = trimmed_val.parse::<f64>() {
+                                run_vars.insert(var_name.clone(), parsed);
+                                text_vars.remove(&var_name);
+                            } else {
+                                run_vars.remove(&var_name);
+                                text_vars.insert(var_name.clone(), trimmed_val.to_owned());
+                            }
+                            prev_registered.insert(var_name);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[derive(Debug, Clone)]
     pub enum OverlayCommand {
@@ -2348,6 +2416,10 @@ mod windows_overlay {
         },
         EspPresetEnabled {
             preset_id: u32,
+            enabled: bool,
+        },
+        DataTableEnabled {
+            table_id: u32,
             enabled: bool,
         },
         StartEspScan {
@@ -29072,6 +29144,42 @@ mod windows_overlay {
         None
     }
 
+    fn execute_set_data_table_step(step: &MacroStep) {
+        let mut tables = CUSTOM_TABLES_STORE.lock();
+        let target_id = step.data_table_id.or_else(|| {
+            let name_or_id = step.key.trim();
+            if let Ok(id) = name_or_id.parse::<u32>() {
+                Some(id)
+            } else {
+                tables.iter().find(|t| t.name.trim() == name_or_id).map(|t| t.id)
+            }
+        });
+
+        if let Some(table_id) = target_id {
+            if let Some(table) = tables.iter_mut().find(|t| t.id == table_id) {
+                let new_enabled = match step.data_table_target_state {
+                    crate::model::DataTableTargetState::Disable => false,
+                    crate::model::DataTableTargetState::Enable => true,
+                    crate::model::DataTableTargetState::Toggle => !table.enabled,
+                };
+                if table.enabled != new_enabled {
+                    table.enabled = new_enabled;
+                    let tables_snapshot = tables.clone();
+                    drop(tables);
+                    sync_custom_tables_to_runtime(&tables_snapshot);
+
+                    let hook_state = HOOK_STATE.lock();
+                    if let Some(ui_tx) = &hook_state.ui_tx {
+                        let _ = ui_tx.send(UiCommand::DataTableEnabled {
+                            table_id,
+                            enabled: new_enabled,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     fn execute_hold_abort_step(preset_id: u32, step: &MacroStep, step_kind: AbortStepKind) {
         let mut run_step = step.enabled;
         if step.toggle_enabled_on_run {
@@ -29349,6 +29457,10 @@ mod windows_overlay {
 
             MacroAction::DisableStep => {
                 let _ = set_macro_steps_enabled(&step.key, false);
+            }
+
+            MacroAction::SetDataTable => {
+                execute_set_data_table_step(step);
             }
 
             MacroAction::ReadMemory => {
@@ -29753,6 +29865,8 @@ mod windows_overlay {
                         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
                     }
                 }
+
+                MacroAction::SetDataTable => execute_set_data_table_step(step),
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
                 MacroAction::WriteMemory => execute_write_memory_action_step(step),
@@ -30644,6 +30758,8 @@ mod windows_overlay {
                         send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
                     }
                 }
+
+                MacroAction::SetDataTable => execute_set_data_table_step(step),
 
                 MacroAction::ReadMemory => execute_read_memory_action_step(step),
                 MacroAction::WriteMemory => execute_write_memory_action_step(step),
@@ -40403,6 +40519,10 @@ mod fallback {
         },
         EspPresetEnabled {
             preset_id: u32,
+            enabled: bool,
+        },
+        DataTableEnabled {
+            table_id: u32,
             enabled: bool,
         },
         StartEspScan {

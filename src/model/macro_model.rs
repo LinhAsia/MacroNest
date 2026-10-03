@@ -99,6 +99,8 @@ pub enum MacroAction {
     Else,
     IfEnd,
     SetVariable,
+    #[serde(alias = "ToggleDataTable", alias = "SetDataTableState", alias = "DataTableState")]
+    SetDataTable,
     ReadMemory,
     WriteMemory,
     #[serde(alias = "ScanMemoryInstruction", alias = "InstructionScan", alias = "ScanMemory")]
@@ -573,6 +575,18 @@ pub struct MacroStep {
     pub follow_3d_collapsed: bool,
     #[serde(default)]
     pub follow_3d_spec: Follow3DTargetSpec,
+    #[serde(default)]
+    pub data_table_id: Option<u32>,
+    #[serde(default)]
+    pub data_table_target_state: DataTableTargetState,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum DataTableTargetState {
+    #[default]
+    Disable,
+    Enable,
+    Toggle,
 }
 
 fn default_scan_instruction_target_count() -> usize {
@@ -722,6 +736,8 @@ impl Default for MacroStep {
             scan_instruction_timeout_ms: 5000,
             follow_3d_collapsed: true,
             follow_3d_spec: Follow3DTargetSpec::default(),
+            data_table_id: None,
+            data_table_target_state: DataTableTargetState::default(),
         }
     }
 }
