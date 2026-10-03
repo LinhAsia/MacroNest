@@ -124,6 +124,24 @@ fn default_custom_table_value_type() -> MemoryValueType {
     MemoryValueType::F32
 }
 
+fn default_table_row_prefix() -> String {
+    "a".to_string()
+}
+
+pub fn split_prefix_and_number(s: &str) -> (&str, Option<u32>) {
+    let s = s.trim();
+    if let Some(digit_start) = s.rfind(|c: char| !c.is_ascii_digit()) {
+        let prefix = &s[..=digit_start];
+        let num_str = &s[digit_start + 1..];
+        let num = num_str.parse::<u32>().ok();
+        (prefix, num)
+    } else if let Ok(num) = s.parse::<u32>() {
+        ("", Some(num))
+    } else {
+        (s, None)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct CustomTable {
@@ -138,6 +156,8 @@ pub struct CustomTable {
     #[serde(default)]
     pub column_offsets: Vec<String>,
     pub rows: Vec<CustomTableRow>,
+    #[serde(default = "default_table_row_prefix")]
+    pub row_prefix: String,
 }
 
 impl Default for CustomTable {
@@ -151,6 +171,23 @@ impl Default for CustomTable {
             columns: vec!["val".to_string()],
             column_offsets: vec!["0x0".to_string()],
             rows: Vec::new(),
+            row_prefix: "a".to_string(),
+        }
+    }
+}
+
+impl CustomTable {
+    pub fn current_prefix(&self) -> &str {
+        if let Some(first_row) = self.rows.first() {
+            let (prefix, _) = split_prefix_and_number(&first_row.name);
+            if !prefix.is_empty() {
+                return prefix;
+            }
+        }
+        if !self.row_prefix.is_empty() {
+            &self.row_prefix
+        } else {
+            "a"
         }
     }
 }
@@ -1458,6 +1495,7 @@ mod tests {
                 base_address: "0x140000".to_string(),
                 values: vec!["100.5".to_string(), "200.0".to_string(), "-50.2".to_string()],
             }],
+            row_prefix: "Ore_".to_string(),
         });
 
         let json = serde_json::to_value(&state).expect("serialize");
@@ -1471,6 +1509,34 @@ mod tests {
         assert_eq!(deserialized.custom_tables[0].rows[0].name, "Ore_1");
         assert_eq!(deserialized.custom_tables[0].rows[0].base_address, "0x140000");
         assert_eq!(deserialized.custom_tables[0].rows[0].values[0], "100.5");
+        assert_eq!(deserialized.custom_tables[0].row_prefix, "Ore_");
+        assert_eq!(deserialized.custom_tables[0].current_prefix(), "Ore_");
+    }
+
+    #[test]
+    fn split_prefix_and_number_and_table_prefix_tests() {
+        assert_eq!(super::split_prefix_and_number("a1"), ("a", Some(1)));
+        assert_eq!(super::split_prefix_and_number("a36"), ("a", Some(36)));
+        assert_eq!(super::split_prefix_and_number("b1"), ("b", Some(1)));
+        assert_eq!(super::split_prefix_and_number("b"), ("b", None));
+        assert_eq!(super::split_prefix_and_number("hunter_1"), ("hunter_", Some(1)));
+        assert_eq!(super::split_prefix_and_number("target"), ("target", None));
+        assert_eq!(super::split_prefix_and_number("12"), ("", Some(12)));
+        assert_eq!(super::split_prefix_and_number(""), ("", None));
+
+        let mut table = super::CustomTable::default();
+        assert_eq!(table.current_prefix(), "a");
+
+        table.row_prefix = "b".to_string();
+        assert_eq!(table.current_prefix(), "b");
+
+        table.rows.push(super::CustomTableRow {
+            id: 1,
+            enabled: true,
+            name: "c1".to_string(),
+            ..Default::default()
+        });
+        assert_eq!(table.current_prefix(), "c");
     }
 
     #[test]

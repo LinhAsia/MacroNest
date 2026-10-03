@@ -19876,6 +19876,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         ui.end_row();
 
                                                         // --- DATA ROWS ---
+                                                        let mut row0_rename_cascade: Option<(String, String)> = None;
+                                                        let current_table_prefix = table.current_prefix().to_string();
                                                         for (r_idx, row) in table.rows.iter_mut().enumerate() {
                                                             if !search_q.is_empty() {
                                                                 let matches_name =
@@ -19900,19 +19902,23 @@ if supports_move_mouse || show_detection_tuning {
                                                                     || (trimmed.len() >= 8 && trimmed.chars().all(|c| c.is_ascii_hexdigit()))
                                                                 {
                                                                     row.base_address = trimmed.to_string();
-                                                                    row.name = format!("a{}", r_idx + 1);
+                                                                    row.name = format!("{}{}", current_table_prefix, r_idx + 1);
                                                                     tables_changed = true;
                                                                 }
                                                             }
 
                                                             // Row Name TextEdit (Width: 100.0)
+                                                            let old_name = row.name.clone();
                                                             let mut name_edit = ui.add(
                                                                 egui::TextEdit::singleline(&mut row.name)
                                                                     .desired_width(100.0)
-                                                                    .hint_text(format!("a{}", r_idx + 1)),
+                                                                    .hint_text(format!("{}{}", current_table_prefix, r_idx + 1)),
                                                             );
                                                             if name_edit.changed() {
                                                                 tables_changed = true;
+                                                                if r_idx == 0 {
+                                                                    row0_rename_cascade = Some((old_name, row.name.clone()));
+                                                                }
                                                             }
                                                             if !row.base_address.is_empty() {
                                                                 name_edit = name_edit.on_hover_text(format!("Base Addr: {}\nRight-click to edit base address", row.base_address));
@@ -19977,6 +19983,33 @@ if supports_move_mouse || show_detection_tuning {
                                                             });
 
                                                             ui.end_row();
+                                                        }
+
+                                                        if let Some((old_name, new_name)) = row0_rename_cascade {
+                                                            let (old_prefix, _) = crate::model::split_prefix_and_number(&old_name);
+                                                            let (new_prefix, _) = crate::model::split_prefix_and_number(&new_name);
+
+                                                            if !new_prefix.is_empty() {
+                                                                table.row_prefix = new_prefix.to_string();
+                                                            }
+
+                                                            let old_seq_prefix = if let Some(r1) = table.rows.get(1) {
+                                                                let (p, _) = crate::model::split_prefix_and_number(&r1.name);
+                                                                if !p.is_empty() { p.to_string() } else { table.row_prefix.clone() }
+                                                            } else {
+                                                                table.row_prefix.clone()
+                                                            };
+
+                                                            if !new_prefix.is_empty() && (new_prefix != old_prefix || new_prefix != old_seq_prefix.as_str()) {
+                                                                for (i, r) in table.rows.iter_mut().enumerate().skip(1) {
+                                                                    let (r_prefix, r_num) = crate::model::split_prefix_and_number(&r.name);
+                                                                    if r_prefix == old_seq_prefix.as_str() || r_prefix == old_prefix || r_prefix == "a" || r.name.is_empty() {
+                                                                        let num = r_num.unwrap_or((i + 1) as u32);
+                                                                        r.name = format!("{new_prefix}{num}");
+                                                                    }
+                                                                }
+                                                                tables_changed = true;
+                                                            }
                                                         }
 
                                                         // --- FOOTER ROW: Add Row button directly under Row Name! ---
@@ -20073,6 +20106,7 @@ if supports_move_mouse || show_detection_tuning {
                         let table = &mut self.state.custom_tables[t_idx];
                         let new_row_id = table.rows.len() as u32 + 1;
                         let col_count = table.columns.len();
+                        let table_prefix = table.current_prefix().to_string();
                         let next_name = if let Some(last_row) = table.rows.last() {
                             let last_name = last_row.name.trim();
                             if let Some(digit_start) = last_name.rfind(|c: char| !c.is_ascii_digit()) {
@@ -20081,17 +20115,17 @@ if supports_move_mouse || show_detection_tuning {
                                 if let Ok(num) = num_str.parse::<u32>() {
                                     format!("{prefix}{}", num + 1)
                                 } else {
-                                    format!("a{}", table.rows.len() + 1)
+                                    format!("{prefix}{new_row_id}")
                                 }
                             } else if let Ok(num) = last_name.parse::<u32>() {
                                 format!("{}", num + 1)
                             } else if !last_name.is_empty() {
-                                format!("{last_name}{}", table.rows.len() + 1)
+                                format!("{last_name}{new_row_id}")
                             } else {
-                                format!("a{}", table.rows.len() + 1)
+                                format!("{table_prefix}{new_row_id}")
                             }
                         } else {
-                            "a1".to_string()
+                            format!("{table_prefix}1")
                         };
                         table.rows.push(crate::model::CustomTableRow {
                             id: new_row_id,
@@ -20171,6 +20205,7 @@ if supports_move_mouse || show_detection_tuning {
                             }
 
                             if !parsed.is_empty() {
+                                let table_prefix = table.current_prefix().to_string();
                                 table.rows.clear();
                                 let mut read_success = 0usize;
 
@@ -20179,7 +20214,7 @@ if supports_move_mouse || show_detection_tuning {
                                     let row_name = if !custom_name.is_empty() {
                                         custom_name
                                     } else {
-                                        format!("a{r_id}")
+                                        format!("{table_prefix}{r_id}")
                                     };
 
                                     let mut vals = Vec::with_capacity(col_count);
@@ -20249,6 +20284,7 @@ if supports_move_mouse || show_detection_tuning {
                             let mut read_success = 0usize;
                             let mut read_fail = 0usize;
 
+                            let current_p = table.current_prefix().to_string();
                             for (r_idx, row) in table.rows.iter_mut().enumerate() {
                                 if row.base_address.is_empty() {
                                     let trimmed_name = row.name.trim();
@@ -20256,7 +20292,7 @@ if supports_move_mouse || show_detection_tuning {
                                         || (trimmed_name.len() >= 6 && trimmed_name.chars().all(|c| c.is_ascii_hexdigit()))
                                     {
                                         row.base_address = trimmed_name.to_string();
-                                        row.name = format!("a{}", r_idx + 1);
+                                        row.name = format!("{}{}", current_p, r_idx + 1);
                                     } else if let Some(v0) = row.values.first() {
                                         let trimmed_v0 = v0.trim();
                                         if trimmed_v0.starts_with("0x") || trimmed_v0.starts_with("0X")
@@ -20347,6 +20383,7 @@ if supports_move_mouse || show_detection_tuning {
                                 .or_else(|| crate::window_list::process_id_for_window(None));
                             let table = &mut self.state.custom_tables[t_idx];
                             let col_count = table.columns.len();
+                            let table_prefix = table.current_prefix().to_string();
                             while table.column_offsets.len() < col_count {
                                 let i = table.column_offsets.len();
                                 table.column_offsets.push(format!("0x{:X}", i * 4));
@@ -20380,7 +20417,7 @@ if supports_move_mouse || show_detection_tuning {
                                 };
 
                                 let (row_name, base_addr, start_col) = if is_single_token && looks_like_addr(tokens[0]) {
-                                    (format!("a{r_id}"), tokens[0].to_string(), None)
+                                    (format!("{table_prefix}{r_id}"), tokens[0].to_string(), None)
                                 } else if tokens.len() == 2 && looks_like_addr(tokens[1]) {
                                     (tokens[0].to_string(), tokens[1].to_string(), None)
                                 } else {
@@ -20447,7 +20484,14 @@ if supports_move_mouse || show_detection_tuning {
                         value_type: crate::model::MemoryValueType::F32,
                         columns: vec!["val".to_string()],
                         column_offsets: vec!["0x0".to_string()],
-                        rows: Vec::new(),
+                        rows: vec![crate::model::CustomTableRow {
+                            id: 1,
+                            enabled: true,
+                            name: "a1".to_string(),
+                            base_address: String::new(),
+                            values: vec!["0".to_string()],
+                        }],
+                        row_prefix: "a".to_string(),
                     });
                     tables_changed = true;
                 }
