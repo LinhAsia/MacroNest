@@ -19586,8 +19586,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         .button(
                                                             RichText::new(Self::tr_lang(
                                                                 language,
-                                                                "📋 Import Pointers",
-                                                                "📋 Nhập Con Trỏ",
+                                                                "Import Pointers",
+                                                                "Nhập Con Trỏ",
                                                             ))
                                                             .size(11.0),
                                                         )
@@ -19605,8 +19605,8 @@ if supports_move_mouse || show_detection_tuning {
                                                         .button(
                                                             RichText::new(Self::tr_lang(
                                                                 language,
-                                                                "⚡ Calc Columns",
-                                                                "⚡ Tính Các Cột",
+                                                                "Calc Columns",
+                                                                "Tính Các Cột",
                                                             ))
                                                             .size(11.0),
                                                         )
@@ -19690,8 +19690,8 @@ if supports_move_mouse || show_detection_tuning {
                                                                         if ui
                                                                             .button(Self::tr_lang(
                                                                                 language,
-                                                                                "🗑 Delete Column",
-                                                                                "🗑 Xóa Cột",
+                                                                                "Delete Column",
+                                                                                "Xóa Cột",
                                                                             ))
                                                                             .clicked()
                                                                         {
@@ -20267,10 +20267,10 @@ if supports_move_mouse || show_detection_tuning {
                         "Địa chỉ / Con trỏ (1 hoặc nhiều dòng):",
                     )).size(12.0));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(Self::tr_lang(language, "🗑 Clear", "🗑 Xóa")).clicked() {
+                        if ui.button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
                             modal.input_text.clear();
                         }
-                        if ui.button(Self::tr_lang(language, "📋 Paste Clipboard", "📋 Dán từ Clipboard")).clicked() {
+                        if ui.button(Self::tr_lang(language, "Paste Clipboard", "Dán từ Clipboard")).clicked() {
                             if let Some(clip) = self.read_clipboard_text() {
                                 if modal.input_text.trim().is_empty() {
                                     modal.input_text = clip;
@@ -20481,8 +20481,8 @@ if supports_move_mouse || show_detection_tuning {
                             Button::new(
                                 RichText::new(Self::tr_lang(
                                     language,
-                                    "✓ Import & Apply",
-                                    "✓ Nhập & Tạo Dòng",
+                                    "Import & Apply",
+                                    "Nhập & Tạo Dòng",
                                 ))
                                 .strong(),
                             )
