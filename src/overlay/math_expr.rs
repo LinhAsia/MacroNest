@@ -5,7 +5,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::{
-    RANDOM_STATE, RUNTIME_VARIABLES, TEXT_VARIABLES, current_mouse_speed,
+    CUSTOM_TABLES_STORE, RANDOM_STATE, RUNTIME_VARIABLES, TEXT_VARIABLES, current_mouse_speed,
     current_system_volume_percent,
 };
 use crate::window_list::window_title;
@@ -97,7 +97,10 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
     while let Some(open_idx) = expr_str.rfind('(') {
         let mut func_start_idx = open_idx;
         let bytes = expr_str.as_bytes();
-        while func_start_idx > 0 && bytes[func_start_idx - 1].is_ascii_alphanumeric() {
+        while func_start_idx > 0
+            && (bytes[func_start_idx - 1].is_ascii_alphanumeric()
+                || bytes[func_start_idx - 1] == b'_')
+        {
             func_start_idx -= 1;
         }
         let func_name = &expr_str[func_start_idx..open_idx];
@@ -116,6 +119,45 @@ pub(crate) fn evaluate_math_expression_f64(expr: &str) -> f64 {
                     "upper" => quote_expression_text(&evaluate_upper_expression(&args)),
                     "trim" => quote_expression_text(&evaluate_trim_expression(&args)),
                     "len" => evaluate_len_expression(&args).to_string(),
+                    "table_nearest_dist" | "nearest_dist" => {
+                        find_nearest_table_row(&args)
+                            .map(|r| r.dist)
+                            .unwrap_or(999999.0)
+                            .to_string()
+                    }
+                    "table_nearest_x" => {
+                        find_nearest_table_row(&args)
+                            .map(|r| r.x)
+                            .unwrap_or(0.0)
+                            .to_string()
+                    }
+                    "table_nearest_y" => {
+                        find_nearest_table_row(&args)
+                            .map(|r| r.y)
+                            .unwrap_or(0.0)
+                            .to_string()
+                    }
+                    "table_nearest_z" => {
+                        find_nearest_table_row(&args)
+                            .map(|r| r.z)
+                            .unwrap_or(0.0)
+                            .to_string()
+                    }
+                    "table_nearest_name" | "nearest_name" => {
+                        quote_expression_text(
+                            &find_nearest_table_row(&args)
+                                .map(|r| r.name)
+                                .unwrap_or_default(),
+                        )
+                    }
+                    "table_cell" => {
+                        let val = get_table_cell(&args).unwrap_or_default();
+                        if let Ok(num) = val.parse::<f64>() {
+                            num.to_string()
+                        } else {
+                            quote_expression_text(&val)
+                        }
+                    }
                     "contains" => {
                         let left = args
                             .first()
@@ -710,6 +752,8 @@ pub(crate) fn looks_like_math_expression_text(text: &str) -> bool {
         || lower.contains("comb(")
         || lower.contains("perm(")
         || lower.contains(".tonumber")
+        || lower.contains("table_")
+        || lower.contains("nearest_")
 }
 
 pub(crate) fn resolve_choice_expression_value(expr: &str) -> Option<String> {
@@ -792,6 +836,16 @@ fn evaluate_text_function_expression(expr: &str) -> Option<String> {
         Some(evaluate_upper_expression(&args))
     } else if func_name.eq_ignore_ascii_case("trim") {
         Some(evaluate_trim_expression(&args))
+    } else if func_name.eq_ignore_ascii_case("table_nearest_name")
+        || func_name.eq_ignore_ascii_case("nearest_name")
+    {
+        Some(
+            find_nearest_table_row(&args)
+                .map(|r| r.name)
+                .unwrap_or_default(),
+        )
+    } else if func_name.eq_ignore_ascii_case("table_cell") {
+        get_table_cell(&args)
     } else {
         None
     }
@@ -879,6 +933,143 @@ fn evaluate_len_expression(args: &[String]) -> usize {
     args.first()
         .map(|arg| resolve_expression_argument_text(arg).chars().count())
         .unwrap_or(0)
+}
+
+#[derive(Debug, Clone)]
+struct NearestTableRowResult {
+    name: String,
+    dist: f64,
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+fn find_nearest_table_row(args: &[String]) -> Option<NearestTableRowResult> {
+    if args.len() < 3 {
+        return None;
+    }
+    let table_name = resolve_expression_argument_text(&args[0]);
+    let px = evaluate_math_expression_f64(&args[1]);
+    let py = evaluate_math_expression_f64(&args[2]);
+    let pz = if args.len() >= 4 {
+        Some(evaluate_math_expression_f64(&args[3]))
+    } else {
+        None
+    };
+
+    let tables = CUSTOM_TABLES_STORE.lock();
+    let table = tables
+        .iter()
+        .find(|t| t.name.trim().eq_ignore_ascii_case(table_name.trim()))?;
+
+    let mut x_col = None;
+    let mut y_col = None;
+    let mut z_col = None;
+
+    for (idx, col) in table.columns.iter().enumerate() {
+        let lower = col.trim().to_ascii_lowercase();
+        if lower == "x" {
+            x_col = Some(idx);
+        } else if lower == "y" {
+            y_col = Some(idx);
+        } else if lower == "z" {
+            z_col = Some(idx);
+        }
+    }
+
+    let x_idx = x_col.unwrap_or(0);
+    let y_idx = y_col.unwrap_or(1);
+    let z_idx = z_col.unwrap_or(2);
+
+    let mut min_dist = f64::MAX;
+    let mut best_result: Option<NearestTableRowResult> = None;
+
+    for row in &table.rows {
+        if !row.enabled {
+            continue;
+        }
+        let rx: f64 = row
+            .values
+            .get(x_idx)
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0.0);
+        let ry: f64 = row
+            .values
+            .get(y_idx)
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0.0);
+        let rz: f64 = row
+            .values
+            .get(z_idx)
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0.0);
+
+        let d = if let Some(pz_val) = pz {
+            let dx = px - rx;
+            let dy = py - ry;
+            let dz = pz_val - rz;
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        } else {
+            let dx = px - rx;
+            let dy = py - ry;
+            dx.hypot(dy)
+        };
+
+        if d < min_dist {
+            min_dist = d;
+            best_result = Some(NearestTableRowResult {
+                name: row.name.clone(),
+                dist: d,
+                x: rx,
+                y: ry,
+                z: rz,
+            });
+        }
+    }
+
+    if let Some(ref res) = best_result {
+        let mut run_vars = RUNTIME_VARIABLES.lock();
+        run_vars.insert("nearest_dist".to_string(), res.dist);
+        run_vars.insert("nearest_x".to_string(), res.x);
+        run_vars.insert("nearest_y".to_string(), res.y);
+        run_vars.insert("nearest_z".to_string(), res.z);
+
+        let mut text_vars = TEXT_VARIABLES.lock();
+        text_vars.insert("nearest_name".to_string(), res.name.clone());
+    }
+
+    best_result
+}
+
+fn get_table_cell(args: &[String]) -> Option<String> {
+    if args.len() < 3 {
+        return None;
+    }
+    let table_name = resolve_expression_argument_text(&args[0]);
+    let row_ident = resolve_expression_argument_text(&args[1]);
+    let col_ident = resolve_expression_argument_text(&args[2]);
+
+    let tables = CUSTOM_TABLES_STORE.lock();
+    let table = tables
+        .iter()
+        .find(|t| t.name.trim().eq_ignore_ascii_case(table_name.trim()))?;
+
+    let row = table.rows.iter().find(|r| {
+        r.name.trim().eq_ignore_ascii_case(row_ident.trim())
+            || if let Ok(idx) = row_ident.trim().parse::<usize>() {
+                idx > 0 && r.id as usize == idx
+            } else {
+                false
+            }
+    })?;
+
+    let col_idx = table
+        .columns
+        .iter()
+        .position(|c| c.trim().eq_ignore_ascii_case(col_ident.trim()))
+        .or_else(|| col_ident.trim().parse::<usize>().ok())?;
+
+    row.values.get(col_idx).cloned()
 }
 
 fn quote_expression_text(text: &str) -> String {
@@ -1139,9 +1330,22 @@ fn split_expression_arguments(expr: &str) -> Vec<String> {
     let mut current = String::new();
     let mut paren_depth = 0i32;
     let mut brace_depth = 0i32;
+    let mut quote_char: Option<char> = None;
 
     for ch in expr.chars() {
+        if let Some(active_quote) = quote_char {
+            if ch == active_quote {
+                quote_char = None;
+            }
+            current.push(ch);
+            continue;
+        }
+
         match ch {
+            '"' | '\'' => {
+                quote_char = Some(ch);
+                current.push(ch);
+            }
             ',' if paren_depth == 0 && brace_depth == 0 => {
                 let trimmed = current.trim();
                 if !trimmed.is_empty() {
@@ -1463,7 +1667,8 @@ fn combination_u128(n: u64, k: u64) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::{
-        RUNTIME_VARIABLES, TEXT_VARIABLES, evaluate_math_expression, evaluate_math_expression_f64,
+        CUSTOM_TABLES_STORE, RUNTIME_VARIABLES, TEXT_VARIABLES, evaluate_math_expression,
+        evaluate_math_expression_f64, resolve_expression_argument_text,
         resolve_text_variable_value, smart_set_variable_from_expression,
     };
     use crate::overlay::interpolate_variables;
@@ -1648,5 +1853,77 @@ mod tests {
         // 3D distance
         assert!((evaluate_math_expression_f64("distance(1, 2, 3, 1, 2, 6)") - 3.0).abs() < 1e-9);
         assert!((evaluate_math_expression_f64("dist(0, 0, 0, 1, 2, 2)") - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn table_nearest_and_cell_functions_work() {
+        let _guard = super::super::tests::TEST_MUTEX.lock().unwrap();
+        use crate::model::{CustomTable, CustomTableRow};
+
+        let test_table = CustomTable {
+            id: 999,
+            name: "TestMap".to_string(),
+            enabled: true,
+            columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            rows: vec![
+                CustomTableRow {
+                    id: 1,
+                    enabled: true,
+                    name: "obj_a".to_string(),
+                    values: vec!["100.0".to_string(), "200.0".to_string(), "0.0".to_string()],
+                    ..Default::default()
+                },
+                CustomTableRow {
+                    id: 2,
+                    enabled: true,
+                    name: "obj_b".to_string(),
+                    values: vec!["10.0".to_string(), "20.0".to_string(), "5.0".to_string()],
+                    ..Default::default()
+                },
+                CustomTableRow {
+                    id: 3,
+                    enabled: false, // disabled should be skipped
+                    name: "obj_disabled".to_string(),
+                    values: vec!["11.0".to_string(), "20.0".to_string(), "5.0".to_string()],
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        {
+            let mut store = CUSTOM_TABLES_STORE.lock();
+            store.clear();
+            store.push(test_table);
+        }
+
+        // Test nearest dist to (11, 20, 5) -> closest is obj_b (dist = 1.0)
+        let dist = evaluate_math_expression_f64("table_nearest_dist(\"TestMap\", 11, 20, 5)");
+        assert!((dist - 1.0).abs() < 1e-6);
+
+        // Check auto-populated variables
+        assert_eq!(
+            TEXT_VARIABLES.lock().get("nearest_name").cloned(),
+            Some("obj_b".to_string())
+        );
+        assert!((RUNTIME_VARIABLES.lock().get("nearest_dist").copied().unwrap_or(0.0) - 1.0).abs() < 1e-6);
+        assert!((RUNTIME_VARIABLES.lock().get("nearest_x").copied().unwrap_or(0.0) - 10.0).abs() < 1e-6);
+        assert!((RUNTIME_VARIABLES.lock().get("nearest_y").copied().unwrap_or(0.0) - 20.0).abs() < 1e-6);
+        assert!((RUNTIME_VARIABLES.lock().get("nearest_z").copied().unwrap_or(0.0) - 5.0).abs() < 1e-6);
+
+        // Test table_cell
+        assert_eq!(
+            resolve_expression_argument_text("table_cell(\"TestMap\", \"obj_a\", \"x\")"),
+            "100.0"
+        );
+        assert_eq!(
+            resolve_expression_argument_text("table_cell(\"TestMap\", \"obj_b\", \"z\")"),
+            "5.0"
+        );
+
+        // Clean up
+        CUSTOM_TABLES_STORE.lock().clear();
+        RUNTIME_VARIABLES.lock().clear();
+        TEXT_VARIABLES.lock().clear();
     }
 }
