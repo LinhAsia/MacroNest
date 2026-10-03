@@ -19285,7 +19285,6 @@ if supports_move_mouse || show_detection_tuning {
                 let mut open_pointer_modal_new = false;
                 let mut table_to_pointer_import_idx = None;
                 let mut table_to_calc_all_idx = None;
-                let mut row_to_calc_offsets = None;
 
                 let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                 let copy_feedback_target = self.custom_table_copy_feedback_target;
@@ -19463,21 +19462,6 @@ if supports_move_mouse || show_detection_tuning {
                                                         table_to_delete_idx = Some(t_idx);
                                                     }
 
-                                                    // 2b. Pointer & Offsets Button
-                                                    let ptr_btn = ui
-                                                        .add_sized(
-                                                            [28.0, 24.0],
-                                                            Button::new(Self::material_icon_text(0xe518, 15.0)),
-                                                        )
-                                                        .on_hover_text(Self::tr_lang(
-                                                            language,
-                                                            "Paste pointers / calculate column offsets",
-                                                            "Dán con trỏ / tính offset các cột",
-                                                        ));
-                                                    if ptr_btn.clicked() {
-                                                        table_to_pointer_import_idx = Some(t_idx);
-                                                    }
-
                                                     // 3. Paste Button (import TSV/CSV from clipboard)
                                                     let paste_btn = ui
                                                         .add_sized(
@@ -19552,13 +19536,92 @@ if supports_move_mouse || show_detection_tuning {
                                         if !table.collapsed {
                                             ui.add_space(4.0);
                                             ui.separator();
-                                            ui.add_space(2.0);
+                                            ui.add_space(3.0);
 
                                             let col_count = table.columns.len();
                                             while table.column_offsets.len() < col_count {
                                                 let i = table.column_offsets.len();
                                                 table.column_offsets.push(format!("0x{:X}", i * 4));
                                             }
+
+                                            // --- OFFSETS & POINTERS TOOLBAR ---
+                                            ui.horizontal(|ui| {
+                                                ui.spacing_mut().item_spacing.x = 6.0;
+                                                ui.label(
+                                                    RichText::new(Self::tr_lang(language, "Offsets:", "Offset:"))
+                                                        .size(11.0)
+                                                        .strong(),
+                                                );
+
+                                                for c_idx in 0..col_count {
+                                                    let col_name = table.columns.get(c_idx).cloned().unwrap_or_default();
+                                                    ui.horizontal(|ui| {
+                                                        ui.spacing_mut().item_spacing.x = 2.0;
+                                                        if !col_name.is_empty() {
+                                                            ui.label(RichText::new(format!("{col_name}:")).size(11.0).weak());
+                                                        }
+                                                        if ui
+                                                            .add(
+                                                                egui::TextEdit::singleline(&mut table.column_offsets[c_idx])
+                                                                    .desired_width(46.0)
+                                                                    .font(egui::TextStyle::Monospace)
+                                                                    .hint_text("0x0"),
+                                                            )
+                                                            .on_hover_text(Self::tr_lang(
+                                                                language,
+                                                                "Column offset from Col 1 base address (e.g. 0x0, 0x4, 0x28)",
+                                                                "Offset của cột tính từ địa chỉ gốc ở Cột 1 (vd: 0x0, 0x4, 0x28)",
+                                                            ))
+                                                            .changed()
+                                                        {
+                                                            tables_changed = true;
+                                                        }
+                                                    });
+                                                }
+
+                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                    ui.spacing_mut().item_spacing.x = 4.0;
+
+                                                    if ui
+                                                        .button(
+                                                            RichText::new(Self::tr_lang(
+                                                                language,
+                                                                "📋 Import Pointers",
+                                                                "📋 Nhập Con Trỏ",
+                                                            ))
+                                                            .size(11.0),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Paste addresses/pointers from clipboard and generate rows",
+                                                            "Dán địa chỉ/con trỏ từ clipboard và tính các cột",
+                                                        ))
+                                                        .clicked()
+                                                    {
+                                                        table_to_pointer_import_idx = Some(t_idx);
+                                                    }
+
+                                                    if ui
+                                                        .button(
+                                                            RichText::new(Self::tr_lang(
+                                                                language,
+                                                                "⚡ Calc Columns",
+                                                                "⚡ Tính Các Cột",
+                                                            ))
+                                                            .size(11.0),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Calculate subsequent columns (Col 2..N) from Col 1 using offsets",
+                                                            "Tính các cột tiếp theo (Cột 2..N) từ Cột 1 theo offset",
+                                                        ))
+                                                        .clicked()
+                                                    {
+                                                        table_to_calc_all_idx = Some(t_idx);
+                                                    }
+                                                });
+                                            });
+                                            ui.add_space(4.0);
 
                                             egui::ScrollArea::horizontal()
                                                 .id_salt(ui.make_persistent_id(("table_hscroll", table_id)))
@@ -19571,7 +19634,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     .spacing([6.0, 6.0])
                                                     .striped(true)
                                                     .show(ui, |ui| {
-                                                        // --- HEADER ROW ---
+                                                        // --- HEADER ROW (Single line, strictly aligned) ---
                                                         let all_rows_enabled = !table.rows.is_empty()
                                                             && table.rows.iter().all(|r| r.enabled);
                                                         let mut toggle_all = all_rows_enabled;
@@ -19590,100 +19653,65 @@ if supports_move_mouse || show_detection_tuning {
                                                             tables_changed = true;
                                                         }
 
-                                                        ui.vertical(|ui| {
-                                                            ui.spacing_mut().item_spacing.y = 2.0;
-                                                            ui.label(
+                                                        // Column 1: Row Name Header (Width: 100.0, Height: 22.0)
+                                                        ui.add_sized(
+                                                            [100.0, 22.0],
+                                                            egui::Label::new(
                                                                 RichText::new(Self::tr_lang(
                                                                     language,
                                                                     "Row Name",
                                                                     "Tên Đối Tượng",
                                                                 ))
-                                                                .strong(),
-                                                            );
-                                                            ui.label(
-                                                                RichText::new(Self::tr_lang(
-                                                                    language,
-                                                                    "Offset:",
-                                                                    "Offset:",
-                                                                ))
-                                                                .size(10.0)
-                                                                .weak(),
-                                                            );
-                                                        });
+                                                                .strong()
+                                                                .size(12.0),
+                                                            ),
+                                                        );
 
+                                                        // Column 2..N: Data Column Name Headers (Width: 70.0 for every column)
                                                         for c_idx in 0..col_count {
-                                                            ui.vertical(|ui| {
-                                                                ui.spacing_mut().item_spacing.y = 2.0;
-                                                                ui.horizontal(|ui| {
-                                                                    ui.spacing_mut().item_spacing.x = 2.0;
-                                                                    let width = if col_count > 1 { 48.0 } else { 70.0 };
-                                                                    if ui
-                                                                        .add(
-                                                                            egui::TextEdit::singleline(
-                                                                                &mut table.columns[c_idx],
-                                                                            )
-                                                                            .desired_width(width),
-                                                                        )
-                                                                        .changed()
-                                                                    {
-                                                                        tables_changed = true;
-                                                                    }
-                                                                    if col_count > 1 {
+                                                            let col_resp = ui.add(
+                                                                egui::TextEdit::singleline(
+                                                                    &mut table.columns[c_idx],
+                                                                )
+                                                                .desired_width(70.0)
+                                                                .hint_text(format!("c{}", c_idx + 1)),
+                                                            );
+                                                            if col_resp.changed() {
+                                                                tables_changed = true;
+                                                            }
+                                                            col_resp
+                                                                .on_hover_text(Self::tr_lang(
+                                                                    language,
+                                                                    "Column name (used in variables {RowName}{Col}). Right-click to delete.",
+                                                                    "Tên cột (dùng trong biến {RowName}{Col}). Chuột phải để xóa.",
+                                                                ))
+                                                                .context_menu(|ui| {
+                                                                    if table.columns.len() > 1 {
                                                                         if ui
-                                                                            .add_sized(
-                                                                                [18.0, 20.0],
-                                                                                Button::new(Self::material_icon_text(0xe5cd, 12.0)),
-                                                                            )
-                                                                            .on_hover_text(Self::tr_lang(
+                                                                            .button(Self::tr_lang(
                                                                                 language,
-                                                                                "Delete Column",
-                                                                                "Xóa Cột",
+                                                                                "🗑 Delete Column",
+                                                                                "🗑 Xóa Cột",
                                                                             ))
                                                                             .clicked()
                                                                         {
                                                                             col_to_delete = Some((t_idx, c_idx));
+                                                                            ui.close_menu();
                                                                         }
                                                                     }
                                                                 });
-                                                                ui.horizontal(|ui| {
-                                                                    ui.spacing_mut().item_spacing.x = 1.0;
-                                                                    ui.label(RichText::new("+").size(10.0).weak());
-                                                                    let off_width = if col_count > 1 { 42.0 } else { 60.0 };
-                                                                    if ui
-                                                                        .add(
-                                                                            egui::TextEdit::singleline(
-                                                                                &mut table.column_offsets[c_idx],
-                                                                            )
-                                                                            .desired_width(off_width)
-                                                                            .font(egui::TextStyle::Monospace)
-                                                                            .hint_text("0x0"),
-                                                                        )
-                                                                        .on_hover_text(Self::tr_lang(
-                                                                            language,
-                                                                            "Column offset from base address (e.g. 0x0, 0x4, 0x28)",
-                                                                            "Offset của cột tính từ địa chỉ gốc (vd: 0x0, 0x4, 0x28)",
-                                                                        ))
-                                                                        .changed()
-                                                                    {
-                                                                        tables_changed = true;
-                                                                    }
-                                                                });
-                                                            });
                                                         }
 
-                                                        // Column addition and Calc All buttons in the Action column header!
-                                                        ui.vertical(|ui| {
-                                                            ui.spacing_mut().item_spacing.y = 2.0;
+                                                        // Action Column Header (Width matching row action buttons: 52.0 x 22.0)
+                                                        if col_count > 1 {
                                                             ui.horizontal(|ui| {
-                                                                ui.spacing_mut().item_spacing.x = 2.0;
+                                                                ui.spacing_mut().item_spacing.x = 4.0;
                                                                 if ui
                                                                     .add_sized(
-                                                                        [38.0, 20.0],
-                                                                        Button::new(RichText::new(Self::tr_lang(
-                                                                            language,
-                                                                            "+ Col",
-                                                                            "+ Cột",
-                                                                        )).size(11.0).strong()),
+                                                                        [24.0, 22.0],
+                                                                        Button::new(
+                                                                            RichText::new("+").size(13.0).strong(),
+                                                                        ),
                                                                     )
                                                                     .on_hover_text(Self::tr_lang(
                                                                         language,
@@ -19696,24 +19724,45 @@ if supports_move_mouse || show_detection_tuning {
                                                                 }
                                                                 if ui
                                                                     .add_sized(
-                                                                        [42.0, 20.0],
-                                                                        Button::new(RichText::new(Self::tr_lang(
-                                                                            language,
-                                                                            "⚡ Calc",
-                                                                            "⚡ Tính",
-                                                                        )).size(11.0).strong()),
+                                                                        [24.0, 22.0],
+                                                                        Button::new(
+                                                                            RichText::new("−").size(13.0).strong(),
+                                                                        ),
                                                                     )
                                                                     .on_hover_text(Self::tr_lang(
                                                                         language,
-                                                                        "Calculate subsequent columns for all rows based on offsets",
-                                                                        "Tính các cột tiếp theo cho tất cả dòng theo offset",
+                                                                        "Delete last column",
+                                                                        "Xóa cột cuối",
                                                                     ))
                                                                     .clicked()
                                                                 {
-                                                                    table_to_calc_all_idx = Some(t_idx);
+                                                                    col_to_delete = Some((t_idx, col_count - 1));
                                                                 }
                                                             });
-                                                        });
+                                                        } else {
+                                                            if ui
+                                                                .add_sized(
+                                                                    [52.0, 22.0],
+                                                                    Button::new(
+                                                                        RichText::new(Self::tr_lang(
+                                                                            language,
+                                                                            "+ Col",
+                                                                            "+ Cột",
+                                                                        ))
+                                                                        .size(11.0)
+                                                                        .strong(),
+                                                                    ),
+                                                                )
+                                                                .on_hover_text(Self::tr_lang(
+                                                                    language,
+                                                                    "Add new column",
+                                                                    "Thêm cột mới",
+                                                                ))
+                                                                .clicked()
+                                                            {
+                                                                col_to_add = Some(t_idx);
+                                                            }
+                                                        }
                                                         ui.end_row();
 
                                                         // --- DATA ROWS ---
@@ -19729,14 +19778,17 @@ if supports_move_mouse || show_detection_tuning {
                                                                 }
                                                             }
 
+                                                            // Checkbox
                                                             if ui.checkbox(&mut row.enabled, "").changed() {
                                                                 tables_changed = true;
                                                             }
 
+                                                            // Row Name TextEdit (Width: 100.0)
                                                             if ui
                                                                 .add(
                                                                     egui::TextEdit::singleline(&mut row.name)
-                                                                        .desired_width(100.0),
+                                                                        .desired_width(100.0)
+                                                                        .hint_text(format!("a{}", r_idx + 1)),
                                                                 )
                                                                 .changed()
                                                             {
@@ -19747,6 +19799,7 @@ if supports_move_mouse || show_detection_tuning {
                                                                 row.values.push("0".to_string());
                                                             }
 
+                                                            // Cell Values (Width: 70.0 for every cell)
                                                             for c_idx in 0..col_count {
                                                                 if ui
                                                                     .add(
@@ -19761,23 +19814,9 @@ if supports_move_mouse || show_detection_tuning {
                                                                 }
                                                             }
 
-                                                            // Row action buttons: Calc Offsets, Duplicate and Delete in Action column
+                                                            // Row Action Buttons: Duplicate and Delete (Width: 24 + 4 + 24 = 52.0 x 22.0)
                                                             ui.horizontal(|ui| {
-                                                                ui.spacing_mut().item_spacing.x = 3.0;
-                                                                if ui
-                                                                    .add_sized(
-                                                                        [22.0, 22.0],
-                                                                        Button::new(Self::material_icon_text(0xe518, 12.0)),
-                                                                    )
-                                                                    .on_hover_text(Self::tr_lang(
-                                                                        language,
-                                                                        "Calculate subsequent columns from Col 1 based on offsets",
-                                                                        "Tính các cột tiếp theo từ Cột 1 theo offset",
-                                                                    ))
-                                                                    .clicked()
-                                                                {
-                                                                    row_to_calc_offsets = Some((t_idx, r_idx));
-                                                                }
+                                                                ui.spacing_mut().item_spacing.x = 4.0;
                                                                 if ui
                                                                     .add_sized(
                                                                         [24.0, 22.0],
@@ -20023,58 +20062,6 @@ if supports_move_mouse || show_detection_tuning {
                             "Đã tính các cột tiếp theo từ địa chỉ gốc cho tất cả các dòng.",
                         )
                         .to_owned();
-                    }
-                }
-
-                if let Some((t_idx, r_idx)) = row_to_calc_offsets {
-                    if t_idx < self.state.custom_tables.len() {
-                        let table = &mut self.state.custom_tables[t_idx];
-                        let col_count = table.columns.len();
-                        while table.column_offsets.len() < col_count {
-                            let i = table.column_offsets.len();
-                            table.column_offsets.push(format!("0x{:X}", i * 4));
-                        }
-                        let base_off = crate::model::parse_offset(
-                            table.column_offsets.first().map(|s| s.as_str()).unwrap_or("0x0"),
-                        )
-                        .unwrap_or(0);
-                        let offsets: Vec<i64> = (0..col_count)
-                            .map(|c| {
-                                crate::model::parse_offset(
-                                    table.column_offsets.get(c).map(|s| s.as_str()).unwrap_or("0x0"),
-                                )
-                                .unwrap_or(0)
-                            })
-                            .collect();
-
-                        if r_idx < table.rows.len() {
-                            let row = &mut table.rows[r_idx];
-                            while row.values.len() < col_count {
-                                row.values.push("0".to_string());
-                            }
-                            let base_val = row.values[0].clone();
-                            if !base_val.trim().is_empty() {
-                                for c in 1..col_count {
-                                    let rel_off = offsets[c] - base_off;
-                                    row.values[c] =
-                                        crate::model::add_offset_to_address(&base_val, rel_off);
-                                }
-                                tables_changed = true;
-                                self.status = format!(
-                                    "{}: {}",
-                                    Self::tr_lang(
-                                        language,
-                                        "Calculated offsets for row",
-                                        "Đã tính offset cho dòng"
-                                    ),
-                                    if row.name.is_empty() {
-                                        format!("#{}", r_idx + 1)
-                                    } else {
-                                        row.name.clone()
-                                    }
-                                );
-                            }
-                        }
                     }
                 }
 
