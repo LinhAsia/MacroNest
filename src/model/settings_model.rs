@@ -4,7 +4,7 @@ use crate::ocr::OcrResult;
 
 use super::{
     AudioSensePreset, AudioSettings, CrosshairStyle, EspPreset, GeometryPreset, HotkeyBinding,
-    MacroFolder, MacroGroup, MacroPreset, MasterPreset, MousePathPreset, MouseSensitivityPreset,
+    MacroFolder, MacroGroup, MacroPreset, MasterPreset, MemoryValueType, MousePathPreset, MouseSensitivityPreset,
     OcrPreset, PinPreset, ProfileRecord, RgbaColor, VisionPreset, VisionSettings,
     WindowExpandControls, WindowFocusPreset, WindowLayout, WindowPreset, ZoomPreset,
     default_focus_highlight_color, default_hud_border_color, default_hud_border_thickness,
@@ -103,6 +103,8 @@ pub struct CustomTableRow {
     pub id: u32,
     pub enabled: bool,
     pub name: String,
+    #[serde(default)]
+    pub base_address: String,
     pub values: Vec<String>,
 }
 
@@ -112,9 +114,14 @@ impl Default for CustomTableRow {
             id: 1,
             enabled: true,
             name: String::new(),
+            base_address: String::new(),
             values: Vec::new(),
         }
     }
+}
+
+fn default_custom_table_value_type() -> MemoryValueType {
+    MemoryValueType::F32
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -125,6 +132,8 @@ pub struct CustomTable {
     pub enabled: bool,
     #[serde(default)]
     pub collapsed: bool,
+    #[serde(default = "default_custom_table_value_type")]
+    pub value_type: MemoryValueType,
     pub columns: Vec<String>,
     #[serde(default)]
     pub column_offsets: Vec<String>,
@@ -138,6 +147,7 @@ impl Default for CustomTable {
             name: "Table 1".to_string(),
             enabled: true,
             collapsed: false,
+            value_type: MemoryValueType::F32,
             columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
             column_offsets: vec!["0x0".to_string(), "0x4".to_string(), "0x8".to_string()],
             rows: Vec::new(),
@@ -1438,12 +1448,14 @@ mod tests {
             name: "Objects_3D".to_string(),
             enabled: true,
             collapsed: false,
+            value_type: super::MemoryValueType::F32,
             columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
             column_offsets: vec!["0x0".to_string(), "0x4".to_string(), "0x8".to_string()],
             rows: vec![super::CustomTableRow {
                 id: 1,
                 enabled: true,
                 name: "Ore_1".to_string(),
+                base_address: "0x140000".to_string(),
                 values: vec!["100.5".to_string(), "200.0".to_string(), "-50.2".to_string()],
             }],
         });
@@ -1454,8 +1466,10 @@ mod tests {
         assert!(deserialized.disabled_global_constants.contains("HP"));
         assert_eq!(deserialized.custom_tables.len(), 1);
         assert_eq!(deserialized.custom_tables[0].name, "Objects_3D");
+        assert_eq!(deserialized.custom_tables[0].value_type, super::MemoryValueType::F32);
         assert_eq!(deserialized.custom_tables[0].column_offsets.len(), 3);
         assert_eq!(deserialized.custom_tables[0].rows[0].name, "Ore_1");
+        assert_eq!(deserialized.custom_tables[0].rows[0].base_address, "0x140000");
         assert_eq!(deserialized.custom_tables[0].rows[0].values[0], "100.5");
     }
 
@@ -1703,4 +1717,36 @@ mod tests {
             Some((String::new(), "game.exe+0x500000".to_string()))
         );
     }
+
+    #[test]
+    fn test_custom_table_offsets_and_backward_compatibility() {
+        // Verify hex address calculation for 3D coordinates (x, y, z with offsets 0x0, 0x8, 0x4)
+        let base = "0x233AE388958";
+        assert_eq!(super::add_offset_to_address(base, 0), "0x233AE388958");
+        assert_eq!(super::add_offset_to_address(base, 0x8), "0x233AE388960");
+        assert_eq!(super::add_offset_to_address(base, 0x4), "0x233AE38895C");
+
+        // Verify backward compatibility: missing base_address and value_type deserialize cleanly
+        let json_old = r#"{
+            "id": 1,
+            "name": "the red church",
+            "enabled": true,
+            "columns": ["x", "y", "z"],
+            "column_offsets": ["0x0", "0x8", "0x4"],
+            "rows": [
+                {
+                    "id": 1,
+                    "enabled": true,
+                    "name": "0x233AE388958",
+                    "values": ["0", "0x8", "0x4"]
+                }
+            ]
+        }"#;
+
+        let table: super::CustomTable = serde_json::from_str(json_old).expect("deserialize old table");
+        assert_eq!(table.value_type, super::MemoryValueType::F32);
+        assert_eq!(table.rows[0].base_address, "");
+        assert_eq!(table.rows[0].name, "0x233AE388958");
+    }
 }
+
