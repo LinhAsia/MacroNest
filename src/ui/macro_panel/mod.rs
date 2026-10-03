@@ -19641,19 +19641,27 @@ if supports_move_mouse || show_detection_tuning {
                                                         table_to_read_memory_idx = Some(t_idx);
                                                     }
 
+                                                    let val_type_label = match table.value_type {
+                                                        crate::model::MemoryValueType::F32 => "Float",
+                                                        crate::model::MemoryValueType::F64 => "Double",
+                                                        crate::model::MemoryValueType::I32 => "4 Bytes",
+                                                        crate::model::MemoryValueType::I64 => "8 Bytes",
+                                                        crate::model::MemoryValueType::I16 => "2 Bytes",
+                                                        crate::model::MemoryValueType::I8 => "Byte",
+                                                    };
                                                     egui::ComboBox::from_id_salt(ui.make_persistent_id(("table_val_type", table_id)))
-                                                        .selected_text(format!("{:?}", table.value_type))
-                                                        .width(66.0)
+                                                        .selected_text(val_type_label)
+                                                        .width(76.0)
                                                         .show_ui(ui, |ui| {
-                                                            for vt in [
-                                                                crate::model::MemoryValueType::F32,
-                                                                crate::model::MemoryValueType::I32,
-                                                                crate::model::MemoryValueType::I64,
-                                                                crate::model::MemoryValueType::F64,
-                                                                crate::model::MemoryValueType::I16,
-                                                                crate::model::MemoryValueType::I8,
+                                                            for (vt, label) in [
+                                                                (crate::model::MemoryValueType::F32, "Float"),
+                                                                (crate::model::MemoryValueType::F64, "Double"),
+                                                                (crate::model::MemoryValueType::I32, "4 Bytes"),
+                                                                (crate::model::MemoryValueType::I64, "8 Bytes"),
+                                                                (crate::model::MemoryValueType::I16, "2 Bytes"),
+                                                                (crate::model::MemoryValueType::I8, "Byte"),
                                                             ] {
-                                                                if ui.selectable_value(&mut table.value_type, vt, format!("{vt:?}")).changed() {
+                                                                if ui.selectable_value(&mut table.value_type, vt, label).changed() {
                                                                     tables_changed = true;
                                                                 }
                                                             }
