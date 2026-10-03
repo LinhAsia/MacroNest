@@ -126,6 +126,8 @@ pub struct CustomTable {
     #[serde(default)]
     pub collapsed: bool,
     pub columns: Vec<String>,
+    #[serde(default)]
+    pub column_offsets: Vec<String>,
     pub rows: Vec<CustomTableRow>,
 }
 
@@ -137,8 +139,132 @@ impl Default for CustomTable {
             enabled: true,
             collapsed: false,
             columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            column_offsets: vec!["0x0".to_string(), "0x4".to_string(), "0x8".to_string()],
             rows: Vec::new(),
         }
+    }
+}
+
+pub fn parse_offset(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Some(0);
+    }
+    let (sign, rest) = if let Some(stripped) = s.strip_prefix('+') {
+        (1i64, stripped.trim())
+    } else if let Some(stripped) = s.strip_prefix('-') {
+        (-1i64, stripped.trim())
+    } else {
+        (1i64, s)
+    };
+
+    let rest = rest.trim_end_matches(['h', 'H']);
+    let val = if let Some(hex_str) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
+        i64::from_str_radix(hex_str, 16).ok()?
+    } else if rest.chars().any(|c| matches!(c, 'a'..='f' | 'A'..='F')) {
+        i64::from_str_radix(rest, 16).ok()?
+    } else {
+        rest.parse::<i64>().or_else(|_| i64::from_str_radix(rest, 16)).ok()?
+    };
+    Some(sign * val)
+}
+
+pub fn add_offset_to_address(base: &str, offset: i64) -> String {
+    let trimmed = base.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if offset == 0 {
+        return trimmed.to_string();
+    }
+
+    let is_hex_prefix = trimmed.starts_with("0x") || trimmed.starts_with("0X");
+    let num_part = if is_hex_prefix { &trimmed[2..] } else { trimmed };
+    if let Ok(addr) = u64::from_str_radix(num_part, 16) {
+        let new_addr = if offset >= 0 {
+            addr.wrapping_add(offset as u64)
+        } else {
+            addr.wrapping_sub((-offset) as u64)
+        };
+        return format!("0x{:X}", new_addr);
+    }
+
+    if let Some((prefix, last_offset)) = trimmed.rsplit_once('+') {
+        if let Some(existing_off) = parse_offset(last_offset) {
+            let total_off = existing_off + offset;
+            if total_off >= 0 {
+                return format!("{}+0x{:X}", prefix.trim(), total_off);
+            } else {
+                return format!("{}-0x{:X}", prefix.trim(), -total_off);
+            }
+        }
+    }
+
+    if let Some((prefix, last_offset)) = trimmed.rsplit_once('-') {
+        if let Some(existing_off) = parse_offset(last_offset) {
+            let total_off = -existing_off + offset;
+            if total_off >= 0 {
+                return format!("{}+0x{:X}", prefix.trim(), total_off);
+            } else {
+                return format!("{}-0x{:X}", prefix.trim(), -total_off);
+            }
+        }
+    }
+
+    if offset >= 0 {
+        format!("{trimmed}+0x{:X}", offset)
+    } else {
+        format!("{trimmed}-0x{:X}", -offset)
+    }
+}
+
+pub fn parse_pointer_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let clean = trimmed.trim_start_matches(|c: char| c == '-' || c == '*' || c == '•').trim();
+    if clean.is_empty() {
+        return None;
+    }
+
+    let tokens: Vec<&str> = if clean.contains('\t') {
+        clean.split('\t').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+    } else if clean.contains(',') {
+        clean.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+    } else {
+        clean.split_whitespace().collect()
+    };
+
+    if tokens.is_empty() {
+        return None;
+    }
+
+    if tokens.len() == 1 {
+        return Some((String::new(), tokens[0].to_string()));
+    }
+
+    let looks_like_pointer = |s: &str| -> bool {
+        let s = s.trim().trim_matches(|c: char| c == ':' || c == '=' || c == ';');
+        if s.starts_with("0x") || s.starts_with("0X") || s.starts_with('[') || s.contains('+') || s.contains("dll") || s.contains("exe") {
+            return true;
+        }
+        if s.len() >= 6 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+            return true;
+        }
+        false
+    };
+
+    if looks_like_pointer(tokens[1]) {
+        let name = tokens[0].trim_matches(|c: char| c == ':' || c == '=').to_string();
+        let addr = tokens[1].to_string();
+        Some((name, addr))
+    } else if looks_like_pointer(tokens[0]) {
+        let addr = tokens[0].to_string();
+        let name = tokens[1].trim_matches(|c: char| c == ':' || c == '=').to_string();
+        Some((name, addr))
+    } else {
+        Some((tokens[0].to_string(), tokens[1].to_string()))
     }
 }
 
@@ -1313,6 +1439,7 @@ mod tests {
             enabled: true,
             collapsed: false,
             columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            column_offsets: vec!["0x0".to_string(), "0x4".to_string(), "0x8".to_string()],
             rows: vec![super::CustomTableRow {
                 id: 1,
                 enabled: true,
@@ -1327,6 +1454,7 @@ mod tests {
         assert!(deserialized.disabled_global_constants.contains("HP"));
         assert_eq!(deserialized.custom_tables.len(), 1);
         assert_eq!(deserialized.custom_tables[0].name, "Objects_3D");
+        assert_eq!(deserialized.custom_tables[0].column_offsets.len(), 3);
         assert_eq!(deserialized.custom_tables[0].rows[0].name, "Ore_1");
         assert_eq!(deserialized.custom_tables[0].rows[0].values[0], "100.5");
     }
@@ -1533,6 +1661,46 @@ mod tests {
                 .presets
                 .iter()
                 .all(|preset| preset.collapsed)
+        );
+    }
+
+    #[test]
+    fn test_parse_offset_and_address_math() {
+        assert_eq!(super::parse_offset("0x0"), Some(0));
+        assert_eq!(super::parse_offset("+0x4"), Some(4));
+        assert_eq!(super::parse_offset("0x28"), Some(40));
+        assert_eq!(super::parse_offset("-0x10"), Some(-16));
+        assert_eq!(super::parse_offset("8"), Some(8));
+        assert_eq!(super::parse_offset(""), Some(0));
+
+        assert_eq!(super::add_offset_to_address("0x14050000", 0), "0x14050000");
+        assert_eq!(super::add_offset_to_address("0x14050000", 4), "0x14050004");
+        assert_eq!(super::add_offset_to_address("0x14050000", 0x28), "0x14050028");
+        assert_eq!(super::add_offset_to_address("game.exe+0x500", 0x28), "game.exe+0x528");
+        assert_eq!(super::add_offset_to_address("[0x1400]+0x10", 4), "[0x1400]+0x14");
+    }
+
+    #[test]
+    fn test_parse_pointer_line() {
+        assert_eq!(
+            super::parse_pointer_line("0x14050000"),
+            Some((String::new(), "0x14050000".to_string()))
+        );
+        assert_eq!(
+            super::parse_pointer_line("Enemy1 0x14050000"),
+            Some(("Enemy1".to_string(), "0x14050000".to_string()))
+        );
+        assert_eq!(
+            super::parse_pointer_line("0x14050000 Enemy1"),
+            Some(("Enemy1".to_string(), "0x14050000".to_string()))
+        );
+        assert_eq!(
+            super::parse_pointer_line("Boss: 0x7FF7B000"),
+            Some(("Boss".to_string(), "0x7FF7B000".to_string()))
+        );
+        assert_eq!(
+            super::parse_pointer_line("game.exe+0x500000"),
+            Some((String::new(), "game.exe+0x500000".to_string()))
         );
     }
 }
