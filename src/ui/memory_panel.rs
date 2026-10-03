@@ -4489,19 +4489,33 @@ impl CrosshairApp {
                                                     Color32::from_rgb(84, 214, 140),
                                                     Some(format!("Static module address: {mod_name} + 0x{mod_off:X} (0x{address:08X})")),
                                                 )
+                                            } else if address != 0 {
+                                                (
+                                                    format!("P->0x{address:08X}"),
+                                                    Color32::from_rgb(84, 214, 140),
+                                                    Some(format!("Pointer: {mod_name} + 0x{mod_off:X} -> {:X?} = 0x{address:08X}", spec.offsets)),
+                                                )
                                             } else {
                                                 (
                                                     format!("P->{mod_name}+{mod_off:X}"),
                                                     Color32::from_rgb(84, 214, 140),
-                                                    Some(format!("Pointer: {mod_name} + 0x{mod_off:X} -> {:X?} (0x{address:08X})", spec.offsets)),
+                                                    Some(format!("Pointer: {mod_name} + 0x{mod_off:X} -> {:X?} (unresolved)", spec.offsets)),
                                                 )
                                             }
                                         } else if !spec.offsets.is_empty() {
-                                            (
-                                                format!("P->0x{:X}", spec.base),
-                                                ui.visuals().text_color(),
-                                                Some(format!("Pointer: 0x{:X} -> {:X?} (0x{address:08X})", spec.base, spec.offsets)),
-                                            )
+                                            if address != 0 {
+                                                (
+                                                    format!("P->0x{address:08X}"),
+                                                    ui.visuals().text_color(),
+                                                    Some(format!("Pointer: 0x{:X} -> {:X?} = 0x{address:08X}", spec.base, spec.offsets)),
+                                                )
+                                            } else {
+                                                (
+                                                    format!("P->0x{:X}", spec.base),
+                                                    ui.visuals().text_color(),
+                                                    Some(format!("Pointer: 0x{:X} -> {:X?} (unresolved)", spec.base, spec.offsets)),
+                                                )
+                                            }
                                         } else if let Some((mod_name, mod_off)) = self.resolve_static_module_address(address) {
                                             (
                                                 format!("{mod_name}+{mod_off:X}"),
@@ -17662,9 +17676,14 @@ impl CrosshairApp {
             saved.hexadecimal = dialog.hexadecimal;
         }
         let pointer = if dialog.pointer {
-            let offsets = dialog
-                .offsets
-                .split([',', ';', ' '])
+            let cleaned = dialog.offsets.replace("->", ",").replace('→', ",");
+            let delimiter: &[char] = if cleaned.contains([',', ';']) {
+                &[',', ';']
+            } else {
+                &[',', ';', ' ']
+            };
+            let offsets = cleaned
+                .split(delimiter)
                 .filter(|part| !part.trim().is_empty())
                 .map(parse_signed_hex_offset_expr)
                 .collect::<Option<Vec<_>>>();
@@ -23320,6 +23339,21 @@ fn parse_hex_offset_expr(text: &str) -> Option<usize> {
     }
 }
 
+fn parse_hex_term_eval(term: &str) -> Option<isize> {
+    let term = term.trim();
+    if let Some((left, right)) = term.split_once('*') {
+        let l = parse_signed_hex_offset(left.trim())?;
+        let r = if let Ok(m) = right.trim().parse::<isize>() {
+            m
+        } else {
+            parse_signed_hex_offset(right.trim())?
+        };
+        l.checked_mul(r)
+    } else {
+        parse_signed_hex_offset(term)
+    }
+}
+
 fn apply_signed_memory_address_offsets(
     mut address: isize,
     compact: &str,
@@ -23332,7 +23366,7 @@ fn apply_signed_memory_address_offsets(
             .char_indices()
             .find(|(_, character)| matches!(character, '+' | '-'))
             .map_or(compact.len(), |(next, _)| start + next);
-        let offset = parse_hex_offset(&compact[start..position])? as isize;
+        let offset = parse_hex_term_eval(&compact[start..position])?;
         address = if operation == b'+' {
             address.checked_add(offset)?
         } else {
@@ -23359,7 +23393,7 @@ fn parse_signed_hex_offset_expr(text: &str) -> Option<isize> {
         Some(pos) => &compact[..pos],
         None => &compact,
     };
-    let base = parse_signed_hex_offset(base_str)?;
+    let base = parse_hex_term_eval(base_str)?;
     match operator_pos {
         Some(pos) => apply_signed_memory_address_offsets(base, &compact, pos),
         None => Some(base),
@@ -24789,6 +24823,22 @@ mod tests {
                 "neox_engine.dll".to_owned(),
                 0x87BAB10,
                 vec![0x50, 0x28, 0x278],
+            ))
+        );
+        assert_eq!(
+            parse_pointer_expression("neox_engine.dll+87BAB10 [0+50, 28, 274]"),
+            Some((
+                "neox_engine.dll".to_owned(),
+                0x87BAB10,
+                vec![0x50, 0x28, 0x274],
+            ))
+        );
+        assert_eq!(
+            parse_pointer_expression("neox_engine.dll+87BAB10 [0+50*2, 28, 274]"),
+            Some((
+                "neox_engine.dll".to_owned(),
+                0x87BAB10,
+                vec![0xA0, 0x28, 0x274],
             ))
         );
         let spec_mod = parse_pointer_spec("neox_engine.dll+87BAB10 + 50").unwrap();
