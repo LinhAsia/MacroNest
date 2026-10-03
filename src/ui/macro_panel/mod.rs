@@ -19189,24 +19189,14 @@ if supports_move_mouse || show_detection_tuning {
                     });
 
                     columns[1].vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "Runtime Variables",
-                                    "Biến Runtime (Runtime Variables)",
-                                ))
-                                .strong(),
-                            );
-                            if !vars_list.is_empty()
-                                && ui
-                                    .button(Self::tr_lang(language, "Clear All", "Xóa Hết"))
-                                    .clicked()
-                            {
-                                crate::overlay::RUNTIME_VARIABLES.lock().clear();
-                                crate::overlay::TEXT_VARIABLES.lock().clear();
-                            }
-                        });
+                        ui.label(
+                            RichText::new(Self::tr_lang(
+                                language,
+                                "Runtime Variables",
+                                "Biến Runtime (Runtime Variables)",
+                            ))
+                            .strong(),
+                        );
                         ui.label(
                             RichText::new(Self::tr_lang(
                                 language,
@@ -19231,8 +19221,7 @@ if supports_move_mouse || show_detection_tuning {
                                             for (name, value) in &vars_list {
                                                 ui.label(
                                                     RichText::new(name)
-                                                        .monospace()
-                                                        .color(Color32::from_rgb(243, 156, 18)),
+                                                        .monospace(),
                                                 );
                                                 ui.add_sized(
                                                     [150.0, 20.0],
@@ -19311,17 +19300,11 @@ if supports_move_mouse || show_detection_tuning {
                             .unwrap_or(self.memory_panel.process_selector.as_str());
                         format!("{} (PID {})", Self::truncate_window_title(name, 24), pid)
                     } else {
-                        Self::tr_lang(language, "⚠ Select Game Process...", "⚠ Chọn Tiến Trình Game...").to_string()
-                    };
-
-                    let combo_color = if current_pid.is_some() {
-                        ui.visuals().text_color()
-                    } else {
-                        egui::Color32::from_rgb(255, 170, 0)
+                        Self::tr_lang(language, "Select Game Process...", "Chọn Tiến Trình Game...").to_string()
                     };
 
                     egui::ComboBox::from_id_salt("data_tables_game_proc_combo")
-                        .selected_text(RichText::new(selected_text).color(combo_color))
+                        .selected_text(selected_text)
                         .width(220.0)
                         .show_ui(ui, |ui| {
                             if ui.selectable_label(current_pid.is_none(), Self::tr_lang(language, "(None / Detached)", "(Không chọn / Gỡ tiến trình)")).clicked() {
@@ -19581,7 +19564,7 @@ if supports_move_mouse || show_detection_tuning {
 
                                             // --- OFFSETS & POINTERS TOOLBAR ---
                                             ui.horizontal(|ui| {
-                                                ui.spacing_mut().item_spacing.x = 6.0;
+                                                ui.spacing_mut().item_spacing.x = 4.0;
                                                 ui.label(
                                                     RichText::new(Self::tr_lang(language, "Offsets:", "Offset:"))
                                                         .size(11.0)
@@ -19590,28 +19573,26 @@ if supports_move_mouse || show_detection_tuning {
 
                                                 for c_idx in 0..col_count {
                                                     let col_name = table.columns.get(c_idx).cloned().unwrap_or_default();
-                                                    ui.horizontal(|ui| {
-                                                        ui.spacing_mut().item_spacing.x = 2.0;
-                                                        if !col_name.is_empty() {
-                                                            ui.label(RichText::new(format!("{col_name}:")).size(11.0).weak());
-                                                        }
-                                                        if ui
-                                                            .add(
-                                                                egui::TextEdit::singleline(&mut table.column_offsets[c_idx])
-                                                                    .desired_width(46.0)
-                                                                    .font(egui::TextStyle::Monospace)
-                                                                    .hint_text("0x0"),
-                                                            )
-                                                            .on_hover_text(Self::tr_lang(
-                                                                language,
-                                                                "Column offset from Col 1 base address (e.g. 0x0, 0x4, 0x28)",
-                                                                "Offset của cột tính từ địa chỉ gốc ở Cột 1 (vd: 0x0, 0x4, 0x28)",
-                                                            ))
-                                                            .changed()
-                                                        {
-                                                            tables_changed = true;
-                                                        }
-                                                    });
+                                                    if !col_name.is_empty() {
+                                                        ui.add_space(2.0);
+                                                        ui.label(RichText::new(format!("{col_name}:")).size(11.0).weak());
+                                                    }
+                                                    if ui
+                                                        .add_sized(
+                                                            [46.0, 20.0],
+                                                            egui::TextEdit::singleline(&mut table.column_offsets[c_idx])
+                                                                .font(egui::TextStyle::Monospace)
+                                                                .hint_text("0x0"),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Column offset from Col 1 base address (e.g. 0x0, 0x4, 0x28)",
+                                                            "Offset của cột tính từ địa chỉ gốc ở Cột 1 (vd: 0x0, 0x4, 0x28)",
+                                                        ))
+                                                        .changed()
+                                                    {
+                                                        tables_changed = true;
+                                                    }
                                                 }
 
                                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -19730,13 +19711,13 @@ if supports_move_mouse || show_detection_tuning {
                                                             ),
                                                         );
 
-                                                        // Column 2..N: Data Column Name Headers (Width: 70.0 for every column)
+                                                        // Column 2..N: Data Column Name Headers (Width: 90.0 for every column)
                                                         for c_idx in 0..col_count {
-                                                            let col_resp = ui.add(
+                                                            let col_resp = ui.add_sized(
+                                                                [90.0, 20.0],
                                                                 egui::TextEdit::singleline(
                                                                     &mut table.columns[c_idx],
                                                                 )
-                                                                .desired_width(70.0)
                                                                 .hint_text(format!("c{}", c_idx + 1)),
                                                             );
                                                             if col_resp.changed() {
@@ -19881,14 +19862,14 @@ if supports_move_mouse || show_detection_tuning {
                                                                 row.values.push("0".to_string());
                                                             }
 
-                                                            // Cell Values (Width: 70.0 for every cell)
+                                                            // Cell Values (Width: 90.0 for every cell)
                                                             for c_idx in 0..col_count {
                                                                 if ui
-                                                                    .add(
+                                                                    .add_sized(
+                                                                        [90.0, 20.0],
                                                                         egui::TextEdit::singleline(
                                                                             &mut row.values[c_idx],
-                                                                        )
-                                                                        .desired_width(70.0),
+                                                                        ),
                                                                     )
                                                                     .changed()
                                                                 {
