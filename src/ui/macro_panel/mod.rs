@@ -19282,9 +19282,7 @@ if supports_move_mouse || show_detection_tuning {
                 let mut row_to_add = None;
                 let mut row_to_dup = None;
                 let mut row_to_delete = None;
-                let mut open_pointer_modal_new = false;
-                let mut table_to_pointer_import_idx = None;
-                let mut table_to_calc_all_idx = None;
+                let mut table_to_paste_addresses_idx = None;
                 let mut table_to_read_memory_idx = None;
 
                 let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
@@ -19294,26 +19292,70 @@ if supports_move_mouse || show_detection_tuning {
 
                 // Top Table Bar
                 ui.horizontal(|ui| {
-                    if ui.button(Self::tr_lang(language, "+ New Table", "+ Bảng Mới")).clicked() {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+
+                    if ui.button(RichText::new(Self::tr_lang(language, "+ New Table", "+ Bảng Mới")).strong()).clicked() {
                         table_to_add = true;
                     }
-                    if ui.button(Self::tr_lang(language, "+ Pointer Table", "+ Bảng Con Trỏ")).clicked() {
-                        open_pointer_modal_new = true;
-                    }
-                    ui.label(
-                        RichText::new(format!(
-                            "{} {}",
-                            self.state.custom_tables.len(),
-                            Self::tr_lang(language, "tables", "bảng")
-                        ))
-                        .weak(),
-                    );
+
+                    ui.separator();
+
+                    // Game Process Selector
+                    ui.label(RichText::new(Self::tr_lang(language, "Game Process:", "Tiến trình game:")).strong().size(12.0));
+
+                    let current_pid = self.memory_panel.process_pid;
+                    let selected_text = if let Some(pid) = current_pid {
+                        let name = self.open_window_infos.iter()
+                            .find(|w| w.process_id == pid)
+                            .map(|w| w.title.as_str())
+                            .unwrap_or(self.memory_panel.process_selector.as_str());
+                        format!("{} (PID {})", Self::truncate_window_title(name, 24), pid)
+                    } else {
+                        Self::tr_lang(language, "⚠ Select Game Process...", "⚠ Chọn Tiến Trình Game...").to_string()
+                    };
+
+                    let combo_color = if current_pid.is_some() {
+                        ui.visuals().text_color()
+                    } else {
+                        egui::Color32::from_rgb(255, 170, 0)
+                    };
+
+                    egui::ComboBox::from_id_salt("data_tables_game_proc_combo")
+                        .selected_text(RichText::new(selected_text).color(combo_color))
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(current_pid.is_none(), Self::tr_lang(language, "(None / Detached)", "(Không chọn / Gỡ tiến trình)")).clicked() {
+                                self.memory_panel.process_pid = None;
+                                self.memory_panel.process_selector.clear();
+                            }
+                            if !self.open_window_infos.is_empty() {
+                                ui.separator();
+                                for win in &self.open_window_infos {
+                                    let is_sel = current_pid == Some(win.process_id);
+                                    let display = format!("{} (PID {})", Self::truncate_window_title(&win.title, 35), win.process_id);
+                                    if ui.selectable_label(is_sel, display).clicked() {
+                                        self.memory_panel.process_pid = Some(win.process_id);
+                                        self.memory_panel.process_selector = win.title.clone();
+                                    }
+                                }
+                            } else {
+                                ui.label(RichText::new(Self::tr_lang(language, "No open game windows detected", "Chưa phát hiện cửa sổ game nào đang mở")).weak().size(11.0));
+                            }
+                        });
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut self.custom_table_search)
                                 .hint_text(Self::tr_lang(language, "Search...", "Tìm kiếm..."))
                                 .desired_width(120.0),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} {}",
+                                self.state.custom_tables.len(),
+                                Self::tr_lang(language, "tables", "bảng")
+                            ))
+                            .weak(),
                         );
                     });
                 });
@@ -19332,20 +19374,12 @@ if supports_move_mouse || show_detection_tuning {
                             .weak(),
                         );
                         ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            if ui
-                                .button(Self::tr_lang(language, "+ Create First Table", "+ Tạo Bảng Đầu Tiên"))
-                                .clicked()
-                            {
-                                table_to_add = true;
-                            }
-                            if ui
-                                .button(Self::tr_lang(language, "+ From Pointers & Offsets", "+ Từ Con Trỏ & Offset"))
-                                .clicked()
-                            {
-                                open_pointer_modal_new = true;
-                            }
-                        });
+                        if ui
+                            .button(Self::tr_lang(language, "+ Create First Table", "+ Tạo Bảng Đầu Tiên"))
+                            .clicked()
+                        {
+                            table_to_add = true;
+                        }
                     });
                 } else {
                     egui::ScrollArea::vertical()
@@ -19587,44 +19621,6 @@ if supports_move_mouse || show_detection_tuning {
                                                         .button(
                                                             RichText::new(Self::tr_lang(
                                                                 language,
-                                                                "Import Pointers",
-                                                                "Nhập Con Trỏ",
-                                                            ))
-                                                            .size(11.0),
-                                                        )
-                                                        .on_hover_text(Self::tr_lang(
-                                                            language,
-                                                            "Paste addresses/pointers from clipboard and generate rows",
-                                                            "Dán địa chỉ/con trỏ từ clipboard và tính các cột",
-                                                        ))
-                                                        .clicked()
-                                                    {
-                                                        table_to_pointer_import_idx = Some(t_idx);
-                                                    }
-
-                                                    if ui
-                                                        .button(
-                                                            RichText::new(Self::tr_lang(
-                                                                language,
-                                                                "Calc Columns",
-                                                                "Tính Các Cột",
-                                                            ))
-                                                            .size(11.0),
-                                                        )
-                                                        .on_hover_text(Self::tr_lang(
-                                                            language,
-                                                            "Calculate column addresses or read values from base address and offsets",
-                                                            "Tính địa chỉ hoặc đọc giá trị các cột từ địa chỉ gốc và offset",
-                                                        ))
-                                                        .clicked()
-                                                    {
-                                                        table_to_calc_all_idx = Some(t_idx);
-                                                    }
-
-                                                    if ui
-                                                        .button(
-                                                            RichText::new(Self::tr_lang(
-                                                                language,
                                                                 "Read Memory",
                                                                 "Đọc Bộ Nhớ",
                                                             ))
@@ -19639,6 +19635,25 @@ if supports_move_mouse || show_detection_tuning {
                                                         .clicked()
                                                     {
                                                         table_to_read_memory_idx = Some(t_idx);
+                                                    }
+
+                                                    if ui
+                                                        .button(
+                                                            RichText::new(Self::tr_lang(
+                                                                language,
+                                                                "Paste Addresses",
+                                                                "Dán Địa Chỉ",
+                                                            ))
+                                                            .size(11.0),
+                                                        )
+                                                        .on_hover_text(Self::tr_lang(
+                                                            language,
+                                                            "Paste list of addresses from clipboard, assign to rows, and read memory values",
+                                                            "Dán danh sách địa chỉ từ clipboard và đọc giá trị từ bộ nhớ game",
+                                                        ))
+                                                        .clicked()
+                                                    {
+                                                        table_to_paste_addresses_idx = Some(t_idx);
                                                     }
 
                                                     let val_type_label = match table.value_type {
@@ -19975,27 +19990,21 @@ if supports_move_mouse || show_detection_tuning {
                         let table = &mut self.state.custom_tables[t_idx];
                         let next_col_name = if let Some(last_col) = table.columns.last() {
                             let last_trimmed = last_col.trim();
-                            if last_trimmed == "x" {
-                                "y".to_string()
-                            } else if last_trimmed == "y" {
-                                "z".to_string()
-                            } else if last_trimmed == "z" {
-                                "w".to_string()
-                            } else if let Some(digit_start) = last_trimmed.rfind(|c: char| !c.is_ascii_digit()) {
+                            if let Some(digit_start) = last_trimmed.rfind(|c: char| !c.is_ascii_digit()) {
                                 let prefix = &last_trimmed[..=digit_start];
                                 let num_str = &last_trimmed[digit_start + 1..];
                                 if let Ok(num) = num_str.parse::<u32>() {
                                     format!("{prefix}{}", num + 1)
                                 } else {
-                                    format!("c{}", table.columns.len() + 1)
+                                    format!("col_{}", table.columns.len() + 1)
                                 }
                             } else if let Ok(num) = last_trimmed.parse::<u32>() {
                                 format!("{}", num + 1)
                             } else {
-                                format!("c{}", table.columns.len() + 1)
+                                format!("col_{}", table.columns.len() + 1)
                             }
                         } else {
-                            "x".to_string()
+                            "val".to_string()
                         };
                         let next_off = if let Some(last_off) = table.column_offsets.last() {
                             let off = crate::model::parse_offset(last_off).unwrap_or(0);
@@ -20089,83 +20098,90 @@ if supports_move_mouse || show_detection_tuning {
                     }
                 }
 
-                if let Some(t_idx) = table_to_calc_all_idx {
+                if let Some(t_idx) = table_to_paste_addresses_idx {
                     if t_idx < self.state.custom_tables.len() {
-                        let table = &mut self.state.custom_tables[t_idx];
-                        let col_count = table.columns.len();
-                        while table.column_offsets.len() < col_count {
-                            let i = table.column_offsets.len();
-                            table.column_offsets.push(format!("0x{:X}", i * 4));
-                        }
+                        if let Some(text) = self.read_clipboard_text() {
+                            let pid = self.memory_panel.process_pid
+                                .or_else(|| crate::window_list::process_id_for_window(None));
+                            let table = &mut self.state.custom_tables[t_idx];
+                            let col_count = table.columns.len();
+                            while table.column_offsets.len() < col_count {
+                                let i = table.column_offsets.len();
+                                table.column_offsets.push(format!("0x{:X}", i * 4));
+                            }
 
-                        let pid = self.memory_panel.process_pid
-                            .or_else(|| crate::window_list::process_id_for_window(None));
-
-                        let mut calculated_count = 0;
-                        for (r_idx, row) in table.rows.iter_mut().enumerate() {
-                            if row.base_address.is_empty() {
-                                let trimmed_name = row.name.trim();
-                                if trimmed_name.starts_with("0x") || trimmed_name.starts_with("0X")
-                                    || (trimmed_name.len() >= 6 && trimmed_name.chars().all(|c| c.is_ascii_hexdigit()))
-                                {
-                                    row.base_address = trimmed_name.to_string();
-                                    row.name = format!("a{}", r_idx + 1);
-                                } else if let Some(v0) = row.values.first() {
-                                    let trimmed_v0 = v0.trim();
-                                    if trimmed_v0.starts_with("0x") || trimmed_v0.starts_with("0X")
-                                        || (trimmed_v0.len() >= 6 && trimmed_v0.chars().all(|c| c.is_ascii_hexdigit()))
-                                    {
-                                        row.base_address = trimmed_v0.to_string();
+                            let mut parsed = Vec::new();
+                            for line in text.lines() {
+                                let trimmed = line.trim();
+                                if trimmed.is_empty() {
+                                    continue;
+                                }
+                                if let Some((custom_name, addr)) = crate::model::parse_pointer_line(trimmed) {
+                                    if !addr.is_empty() {
+                                        parsed.push((custom_name, addr));
                                     }
                                 }
                             }
 
-                            while row.values.len() < col_count {
-                                row.values.push("0".to_string());
-                            }
+                            if !parsed.is_empty() {
+                                table.rows.clear();
+                                let mut read_success = 0usize;
 
-                            let base_addr_str = row.base_address.trim().to_string();
-                            let base_val = if !base_addr_str.is_empty() {
-                                base_addr_str
-                            } else {
-                                row.values[0].clone()
-                            };
+                                for (idx, (custom_name, base_addr)) in parsed.into_iter().enumerate() {
+                                    let r_id = (idx + 1) as u32;
+                                    let row_name = if !custom_name.is_empty() {
+                                        custom_name
+                                    } else {
+                                        format!("a{r_id}")
+                                    };
 
-                            if !base_val.trim().is_empty() {
-                                for c in 0..col_count {
-                                    let off_str = table.column_offsets.get(c).map(|s| s.as_str()).unwrap_or("0x0");
-                                    if let Some((target_pid, target_addr)) = Self::resolve_table_cell_address(&base_val, off_str, pid) {
-                                        let mut read_ok = false;
-                                        if let Some(p) = target_pid {
-                                            if let Ok(val) = crate::process_memory::read_value(p, target_addr, table.value_type) {
-                                                row.values[c] = val;
-                                                read_ok = true;
+                                    let mut vals = Vec::with_capacity(col_count);
+                                    for c in 0..col_count {
+                                        let off_str = table.column_offsets.get(c).map(|s| s.as_str()).unwrap_or("0x0");
+                                        let mut val = "0".to_string();
+                                        if let Some(p) = pid {
+                                            if let Some((_, target_addr)) = Self::resolve_table_cell_address(&base_addr, off_str, Some(p)) {
+                                                if let Ok(read_val) = crate::process_memory::read_value(p, target_addr, table.value_type) {
+                                                    val = read_val;
+                                                    read_success += 1;
+                                                }
                                             }
                                         }
-                                        if !read_ok {
-                                            row.values[c] = format!("0x{:X}", target_addr);
-                                        }
-                                    } else {
-                                        let off = crate::model::parse_offset(off_str).unwrap_or(0);
-                                        row.values[c] = crate::model::add_offset_to_address(&base_val, off);
+                                        vals.push(val);
                                     }
+
+                                    table.rows.push(crate::model::CustomTableRow {
+                                        id: r_id,
+                                        enabled: true,
+                                        name: row_name,
+                                        base_address: base_addr,
+                                        values: vals,
+                                    });
                                 }
-                                calculated_count += 1;
+
+                                tables_changed = true;
+                                let total = table.rows.len();
+                                if let Some(p) = pid {
+                                    self.status = format!(
+                                        "Pasted {total} addresses & read {read_success} values from PID {p} (type: {:?})",
+                                        table.value_type
+                                    );
+                                } else {
+                                    self.status = Self::tr_lang(
+                                        language,
+                                        "Pasted addresses! Select game process in 'Game Process' above and click 'Read Memory'.",
+                                        "Đã dán danh sách địa chỉ! Chọn tiến trình game ở ô 'Tiến trình game' phía trên rồi bấm 'Đọc Bộ Nhớ'.",
+                                    )
+                                    .to_owned();
+                                }
+                            } else {
+                                self.status = Self::tr_lang(
+                                    language,
+                                    "No valid addresses found in clipboard.",
+                                    "Không tìm thấy địa chỉ hợp lệ trong bộ nhớ tạm.",
+                                )
+                                .to_owned();
                             }
-                        }
-                        tables_changed = true;
-                        if let Some(p) = pid {
-                            self.status = format!(
-                                "Calculated & read memory for {calculated_count} rows from PID {p} (type: {:?})",
-                                table.value_type
-                            );
-                        } else {
-                            self.status = Self::tr_lang(
-                                language,
-                                "Calculated column addresses. Attach game process in Memory Panel to read live values.",
-                                "Đã tính địa chỉ các cột. Chọn tiến trình game trong tab Memory Panel để đọc giá trị thực.",
-                            )
-                            .to_owned();
                         }
                     }
                 }
@@ -20246,41 +20262,6 @@ if supports_move_mouse || show_detection_tuning {
                     }
                 }
 
-                if let Some(t_idx) = table_to_pointer_import_idx {
-                    if t_idx < self.state.custom_tables.len() {
-                        let table = &self.state.custom_tables[t_idx];
-                        let mut offsets = table.column_offsets.clone();
-                        while offsets.len() < table.columns.len() {
-                            let i = offsets.len();
-                            offsets.push(format!("0x{:X}", i * 4));
-                        }
-                        self.custom_table_pointer_modal =
-                            Some(crate::ui::CustomTablePointerModalState {
-                                target_table_idx: Some(t_idx),
-                                input_text: String::new(),
-                                row_prefix: "obj".to_string(),
-                                columns: table.columns.clone(),
-                                column_offsets: offsets,
-                                replace_existing: false,
-                            });
-                    }
-                }
-
-                if open_pointer_modal_new {
-                    self.custom_table_pointer_modal =
-                        Some(crate::ui::CustomTablePointerModalState {
-                            target_table_idx: None,
-                            input_text: String::new(),
-                            row_prefix: "obj".to_string(),
-                            columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
-                            column_offsets: vec![
-                                "0x0".to_string(),
-                                "0x4".to_string(),
-                                "0x8".to_string(),
-                            ],
-                            replace_existing: false,
-                        });
-                }
 
                 if let Some(t_idx) = table_to_copy_idx {
                     if t_idx < self.state.custom_tables.len() {
@@ -20375,7 +20356,7 @@ if supports_move_mouse || show_detection_tuning {
                                                     val_str = Some(v);
                                                 }
                                             }
-                                            vals.push(val_str.unwrap_or_else(|| format!("0x{:X}", target_addr)));
+                                            vals.push(val_str.unwrap_or_else(|| "0".to_string()));
                                         } else {
                                             let off = crate::model::parse_offset(off_str).unwrap_or(0);
                                             vals.push(crate::model::add_offset_to_address(&base_addr, off));
@@ -20417,14 +20398,12 @@ if supports_move_mouse || show_detection_tuning {
                         enabled: true,
                         collapsed: false,
                         value_type: crate::model::MemoryValueType::F32,
-                        columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
-                        column_offsets: vec!["0x0".to_string(), "0x4".to_string(), "0x8".to_string()],
+                        columns: vec!["val".to_string()],
+                        column_offsets: vec!["0x0".to_string()],
                         rows: Vec::new(),
                     });
                     tables_changed = true;
                 }
-
-                self.render_custom_table_pointer_modal(ui.ctx(), language);
 
                 if tables_changed {
                     self.sync_custom_tables_to_overlay();
@@ -20434,392 +20413,7 @@ if supports_move_mouse || show_detection_tuning {
         });
     }
 
-    fn render_custom_table_pointer_modal(&mut self, ctx: &egui::Context, language: crate::model::UiLanguage) {
-        let Some(mut modal) = self.custom_table_pointer_modal.clone() else {
-            return;
-        };
 
-        let mut open = true;
-        let mut apply = false;
-        let mut close = false;
-
-        let title = Self::tr_lang(
-            language,
-            "Paste Pointers & Calculate Offsets",
-            "Dán Con Trỏ & Tính Offset Các Cột",
-        );
-
-        egui::Window::new(title)
-            .id(egui::Id::new("custom_table_pointer_modal_window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_width(500.0)
-            .default_height(460.0)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 6.0;
-
-                // 1. Target table info & mode
-                let target_desc = if let Some(t_idx) = modal.target_table_idx {
-                    if let Some(t) = self.state.custom_tables.get(t_idx) {
-                        format!("{}: {}", Self::tr_lang(language, "Target Table", "Bảng mục tiêu"), t.name)
-                    } else {
-                        Self::tr_lang(language, "New Table", "Bảng Mới").to_string()
-                    }
-                } else {
-                    Self::tr_lang(language, "New Table", "Bảng Mới").to_string()
-                };
-
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(target_desc).strong());
-                    if modal.target_table_idx.is_some() {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.radio_value(&mut modal.replace_existing, true, Self::tr_lang(language, "Replace rows", "Ghi đè dòng"));
-                            ui.radio_value(&mut modal.replace_existing, false, Self::tr_lang(language, "Append rows", "Thêm dòng tiếp"));
-                        });
-                    }
-                });
-
-                ui.separator();
-
-                // 2. Multiline Text Input
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(Self::tr_lang(
-                        language,
-                        "Addresses / Pointers (1 or multiple, one per line):",
-                        "Địa chỉ / Con trỏ (1 hoặc nhiều dòng):",
-                    )).size(12.0));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(Self::tr_lang(language, "Clear", "Xóa")).clicked() {
-                            modal.input_text.clear();
-                        }
-                        if ui.button(Self::tr_lang(language, "Paste Clipboard", "Dán từ Clipboard")).clicked() {
-                            if let Some(clip) = self.read_clipboard_text() {
-                                if modal.input_text.trim().is_empty() {
-                                    modal.input_text = clip;
-                                } else {
-                                    modal.input_text.push('\n');
-                                    modal.input_text.push_str(&clip);
-                                }
-                            }
-                        }
-                    });
-                });
-
-                ui.add(
-                    egui::TextEdit::multiline(&mut modal.input_text)
-                        .desired_rows(6)
-                        .desired_width(f32::INFINITY)
-                        .font(egui::TextStyle::Monospace)
-                        .hint_text("0x14050000\n0x14050100\nEnemy_1 0x14050200\ngame.exe+0x500000"),
-                );
-
-                // 3. Columns & Offsets configuration
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(Self::tr_lang(
-                        language,
-                        "Column Offsets:",
-                        "Offset từng cột:",
-                    )).strong());
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("+8B").size(11.0)).on_hover_text("+0x8 step (0x0, 0x8, 0x10...)").clicked() {
-                            for (i, off) in modal.column_offsets.iter_mut().enumerate() {
-                                *off = format!("0x{:X}", i * 8);
-                            }
-                        }
-                        if ui.button(RichText::new("+4B").size(11.0)).on_hover_text("+0x4 step (0x0, 0x4, 0x8, 0xC...)").clicked() {
-                            for (i, off) in modal.column_offsets.iter_mut().enumerate() {
-                                *off = format!("0x{:X}", i * 4);
-                            }
-                        }
-                        if ui.button(RichText::new("3D (x,y,z)").size(11.0)).on_hover_text("x: +0x0, y: +0x4, z: +0x8").clicked() {
-                            while modal.columns.len() < 3 {
-                                let next = match modal.columns.len() {
-                                    0 => "x",
-                                    1 => "y",
-                                    _ => "z",
-                                };
-                                modal.columns.push(next.to_string());
-                                modal.column_offsets.push(String::new());
-                            }
-                            if modal.columns.len() >= 3 {
-                                modal.columns[0] = "x".to_string();
-                                modal.columns[1] = "y".to_string();
-                                modal.columns[2] = "z".to_string();
-                                modal.column_offsets[0] = "0x0".to_string();
-                                modal.column_offsets[1] = "0x4".to_string();
-                                modal.column_offsets[2] = "0x8".to_string();
-                            }
-                        }
-                    });
-                });
-
-                while modal.column_offsets.len() < modal.columns.len() {
-                    let i = modal.column_offsets.len();
-                    modal.column_offsets.push(format!("0x{:X}", i * 4));
-                }
-
-                egui::ScrollArea::horizontal()
-                    .id_salt("modal_offsets_scroll")
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let mut col_del = None;
-                            for i in 0..modal.columns.len() {
-                                ui.group(|ui| {
-                                    ui.vertical(|ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.label(RichText::new(format!("C{}", i + 1)).size(10.0).weak());
-                                            ui.add(egui::TextEdit::singleline(&mut modal.columns[i]).desired_width(45.0));
-                                            if modal.columns.len() > 1 && ui.button("×").clicked() {
-                                                col_del = Some(i);
-                                            }
-                                        });
-                                        ui.horizontal(|ui| {
-                                            ui.label(RichText::new("+").size(10.0).weak());
-                                            ui.add(
-                                                egui::TextEdit::singleline(&mut modal.column_offsets[i])
-                                                    .desired_width(50.0)
-                                                    .font(egui::TextStyle::Monospace)
-                                                    .hint_text("0x0"),
-                                            );
-                                        });
-                                    });
-                                });
-                            }
-                            if let Some(del) = col_del {
-                                modal.columns.remove(del);
-                                modal.column_offsets.remove(del);
-                            }
-                            if ui.button("+ Col").clicked() {
-                                let next_name = format!("c{}", modal.columns.len() + 1);
-                                let next_off = if let Some(last_off) = modal.column_offsets.last() {
-                                    let off = crate::model::parse_offset(last_off).unwrap_or(0);
-                                    format!("0x{:X}", off + 4)
-                                } else {
-                                    "0x0".to_string()
-                                };
-                                modal.columns.push(next_name);
-                                modal.column_offsets.push(next_off);
-                            }
-                        });
-                    });
-
-                // 4. Row naming prefix
-                ui.horizontal(|ui| {
-                    ui.label(Self::tr_lang(language, "Row Name Prefix:", "Tiền tố tên dòng:"));
-                    ui.add(egui::TextEdit::singleline(&mut modal.row_prefix).desired_width(80.0));
-                    ui.label(
-                        RichText::new(Self::tr_lang(
-                            language,
-                            "(e.g. 'obj' -> obj1, obj2... Leave empty if row name not needed)",
-                            "(vd: 'obj' -> obj1, obj2... Để trống nếu không cần tên dòng)",
-                        ))
-                        .weak()
-                        .size(11.0),
-                    );
-                });
-
-                // 5. Live preview
-                ui.group(|ui| {
-                    ui.set_width(ui.available_width());
-                    let parsed_lines: Vec<(String, String)> = modal
-                        .input_text
-                        .lines()
-                        .filter_map(crate::model::parse_pointer_line)
-                        .collect();
-
-                    let count = parsed_lines.len();
-                    ui.label(
-                        RichText::new(format!(
-                            "{} ({} {})",
-                            Self::tr_lang(language, "Live Preview", "Xem trước kết quả"),
-                            count,
-                            Self::tr_lang(language, "addresses detected", "địa chỉ tìm thấy")
-                        ))
-                        .strong()
-                        .size(11.0),
-                    );
-
-                    if count == 0 {
-                        ui.label(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "Paste addresses above to preview generated rows.",
-                                "Dán địa chỉ ở trên để xem trước các dòng sẽ tạo.",
-                            ))
-                            .weak()
-                            .italics()
-                            .size(11.0),
-                        );
-                    } else {
-                        let preview_count = count.min(3);
-                        for (idx, (custom_name, base_addr)) in parsed_lines.iter().take(preview_count).enumerate() {
-                            let row_name = if !custom_name.is_empty() {
-                                custom_name.clone()
-                            } else if !modal.row_prefix.is_empty() {
-                                format!("{}{}", modal.row_prefix, idx + 1)
-                            } else {
-                                String::new()
-                            };
-
-                            let mut cell_parts = Vec::new();
-                            for (c, col_name) in modal.columns.iter().enumerate() {
-                                let off_str = modal.column_offsets.get(c).map(|s| s.as_str()).unwrap_or("0x0");
-                                let off = crate::model::parse_offset(off_str).unwrap_or(0);
-                                let computed = crate::model::add_offset_to_address(base_addr, off);
-                                cell_parts.push(format!("{col_name}={computed}"));
-                            }
-                            let name_display = if row_name.is_empty() {
-                                "(no name)".to_string()
-                            } else {
-                                row_name
-                            };
-                            ui.label(
-                                RichText::new(format!("{name_display}: {}", cell_parts.join(" | ")))
-                                    .size(11.0)
-                                    .monospace(),
-                            );
-                        }
-                        if count > 3 {
-                            ui.label(
-                                RichText::new(format!("... and {} more rows", count - 3))
-                                    .weak()
-                                    .size(10.0),
-                            );
-                        }
-                    }
-                });
-
-                // 6. Action buttons
-                ui.horizontal(|ui| {
-                    if ui.button(Self::tr_lang(language, "Cancel", "Hủy")).clicked() {
-                        close = true;
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let has_input = !modal.input_text.trim().is_empty();
-                        let apply_btn = ui.add_enabled(
-                            has_input,
-                            Button::new(
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "Import & Apply",
-                                    "Nhập & Tạo Dòng",
-                                ))
-                                .strong(),
-                            )
-                            .fill(ui.visuals().selection.bg_fill),
-                        );
-                        if apply_btn.clicked() {
-                            apply = true;
-                        }
-                    });
-                });
-            });
-
-        if !open || close {
-            self.custom_table_pointer_modal = None;
-        } else if apply {
-            let parsed_lines: Vec<(String, String)> = modal
-                .input_text
-                .lines()
-                .filter_map(crate::model::parse_pointer_line)
-                .collect();
-
-            let pid = self.memory_panel.process_pid
-                .or_else(|| crate::window_list::process_id_for_window(None));
-            let target_val_type = if let Some(t_idx) = modal.target_table_idx {
-                self.state.custom_tables.get(t_idx).map(|t| t.value_type).unwrap_or(crate::model::MemoryValueType::F32)
-            } else {
-                crate::model::MemoryValueType::F32
-            };
-
-            if !parsed_lines.is_empty() {
-                let mut new_rows = Vec::new();
-                for (idx, (custom_name, base_addr)) in parsed_lines.iter().enumerate() {
-                    let row_name = if !custom_name.is_empty() {
-                        custom_name.clone()
-                    } else if !modal.row_prefix.is_empty() {
-                        format!("{}{}", modal.row_prefix, idx + 1)
-                    } else {
-                        format!("a{}", idx + 1)
-                    };
-
-                    let mut values = Vec::new();
-                    for c in 0..modal.columns.len() {
-                        let off_str = modal
-                            .column_offsets
-                            .get(c)
-                            .map(|s| s.as_str())
-                            .unwrap_or("0x0");
-                        if let Some((target_pid, target_addr)) = Self::resolve_table_cell_address(base_addr, off_str, pid) {
-                            let mut val_str = None;
-                            if let Some(p) = target_pid {
-                                if let Ok(v) = crate::process_memory::read_value(p, target_addr, target_val_type) {
-                                    val_str = Some(v);
-                                }
-                            }
-                            values.push(val_str.unwrap_or_else(|| format!("0x{:X}", target_addr)));
-                        } else {
-                            let off = crate::model::parse_offset(off_str).unwrap_or(0);
-                            let computed = crate::model::add_offset_to_address(base_addr, off);
-                            values.push(computed);
-                        }
-                    }
-
-                    new_rows.push(crate::model::CustomTableRow {
-                        id: (idx + 1) as u32,
-                        enabled: true,
-                        name: row_name,
-                        base_address: base_addr.clone(),
-                        values,
-                    });
-                }
-
-                let num_imported = new_rows.len();
-
-                if let Some(t_idx) = modal.target_table_idx {
-                    if t_idx < self.state.custom_tables.len() {
-                        let table = &mut self.state.custom_tables[t_idx];
-                        table.columns = modal.columns.clone();
-                        table.column_offsets = modal.column_offsets.clone();
-                        if modal.replace_existing {
-                            table.rows = new_rows;
-                        } else {
-                            let start_id = table.rows.len() as u32 + 1;
-                            for (i, mut r) in new_rows.into_iter().enumerate() {
-                                r.id = start_id + i as u32;
-                                table.rows.push(r);
-                            }
-                        }
-                    }
-                } else {
-                    let new_id = self.state.next_custom_table_id;
-                    self.state.next_custom_table_id = new_id.saturating_add(1);
-                    let count = self.state.custom_tables.len() + 1;
-                    self.state.custom_tables.push(crate::model::CustomTable {
-                        id: new_id,
-                        name: format!("Pointers_{count}"),
-                        enabled: true,
-                        collapsed: false,
-                        value_type: crate::model::MemoryValueType::F32,
-                        columns: modal.columns.clone(),
-                        column_offsets: modal.column_offsets.clone(),
-                        rows: new_rows,
-                    });
-                }
-
-                self.status = format!("Imported {num_imported} rows from pointers.");
-                self.sync_custom_tables_to_overlay();
-                self.persist();
-            }
-            self.custom_table_pointer_modal = None;
-        } else {
-            self.custom_table_pointer_modal = Some(modal);
-        }
-    }
 
     fn parse_hex_or_dec_address(s: &str) -> Option<usize> {
         let s = s.trim();

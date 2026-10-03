@@ -148,8 +148,8 @@ impl Default for CustomTable {
             enabled: true,
             collapsed: false,
             value_type: MemoryValueType::F32,
-            columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
-            column_offsets: vec!["0x0".to_string(), "0x4".to_string(), "0x8".to_string()],
+            columns: vec!["val".to_string()],
+            column_offsets: vec!["0x0".to_string()],
             rows: Vec::new(),
         }
     }

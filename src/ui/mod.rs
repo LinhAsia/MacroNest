@@ -320,15 +320,6 @@ pub(crate) struct CommandAiDialog {
     prompt: String,
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct CustomTablePointerModalState {
-    pub target_table_idx: Option<usize>,
-    pub input_text: String,
-    pub row_prefix: String,
-    pub columns: Vec<String>,
-    pub column_offsets: Vec<String>,
-    pub replace_existing: bool,
-}
 
 pub(crate) struct CommandAiJob {
     token: u64,
@@ -969,7 +960,6 @@ pub struct CrosshairApp {
     custom_table_copy_feedback_until: Option<Instant>,
     variable_inspector_search: String,
     custom_table_search: String,
-    pub(crate) custom_table_pointer_modal: Option<CustomTablePointerModalState>,
     titlebar_guides_open: bool,
     pub show_share_buttons: bool,
     arduino_available_ports: Vec<String>,
@@ -1400,7 +1390,6 @@ impl CrosshairApp {
             custom_table_copy_feedback_until: None,
             variable_inspector_search: String::new(),
             custom_table_search: String::new(),
-            custom_table_pointer_modal: None,
             titlebar_guides_open: false,
             show_share_buttons: false,
             arduino_available_ports: Vec::new(),

@@ -1100,7 +1100,7 @@ pub enum WildcardScanMessage {
 }
 
 pub(crate) struct MemoryPanelState {
-    process_selector: String,
+    pub(crate) process_selector: String,
     pub(crate) process_pid: Option<u32>,
     last_selected_process: Option<LastSelectedProcessInfo>,
     last_process_liveness_check: Instant,
