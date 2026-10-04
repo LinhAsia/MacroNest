@@ -1057,7 +1057,28 @@ impl CrosshairApp {
                 }
 
                 ui.separator();
-                let col1_max_width = (card_width - 120.0).max(120.0);
+                // ponytail: tab choice lives in egui temp memory (resets to "Targets" on restart); persist in EspPreset if users ask.
+                let tab_id = egui::Id::new(("esp_tab", preset.id));
+                let mut tab: u8 = ui.data_mut(|d| *d.get_temp_mut_or(tab_id, 0u8));
+                ui.horizontal(|ui| {
+                    for (i, (label, hint)) in [
+                        ("1. Targets", "Game window and the entities to mark."),
+                        ("2. Camera", "Camera position/rotation addresses and data format."),
+                        ("3. Calibration", "Fix markers that don't line up with targets."),
+                        ("4. Appearance", "Marker style, tracer, distance and sound."),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        ui.selectable_value(&mut tab, i as u8, RichText::new(label).strong())
+                            .on_hover_text(hint);
+                    }
+                });
+                ui.data_mut(|d| d.insert_temp(tab_id, tab));
+                ui.add_space(4.0);
+                let col1_max_width = (card_width - 140.0).max(120.0);
+                if tab == 0 {
+                section(ui, "Target", Color32::from_rgb(100, 200, 255), |ui| {
                 Grid::new(("esp_addresses", preset.id))
                     .num_columns(2)
                     .spacing([8.0, 4.0])
@@ -1129,7 +1150,7 @@ impl CrosshairApp {
                                 }
                             });
                         ui.end_row();
-                        ui.label("Target source");
+                        ui.label("Mode");
                         ui.scope(|ui| {
                             ui.set_max_width(col1_max_width);
                             ui.horizontal_wrapped(|ui| {
@@ -1137,16 +1158,75 @@ impl CrosshairApp {
                                     &mut preset.entity_list_enabled,
                                     false,
                                     "Single target",
-                                );
+                                )
+                                .on_hover_text("Mark one object whose X/Y/Z addresses you already know.");
                                 ui.selectable_value(
                                     &mut preset.entity_list_enabled,
                                     true,
-                                    "Entity list",
-                                );
+                                    "Multiple targets",
+                                )
+                                .on_hover_text("Mark many entities (players, NPCs...) found by scanning or typed manually.");
                             });
                         });
                         ui.end_row();
-                        if preset.entity_list_enabled {
+                        if !preset.entity_list_enabled {
+                            for (label, value) in [
+                                ("Target X", &mut preset.target_x),
+                                ("Target Y", &mut preset.target_y),
+                                ("Target Z", &mut preset.target_z),
+                            ] {
+                                memory_expression_row(ui, label, value);
+                            }
+                        }
+                    });
+                });
+                if preset.entity_list_enabled {
+                ui.add_space(4.0);
+                section(ui, "Entities", Color32::from_rgb(120, 230, 180), |ui| {
+                Grid::new(("esp_entities", preset.id))
+                    .num_columns(2)
+                    .spacing([8.0, 4.0])
+                    .max_col_width(col1_max_width)
+                    .show(ui, |ui| {
+                            ui.label("Find method");
+                            ui.horizontal_wrapped(|ui| {
+                                use crate::model::EspAutoScanMode as M;
+                                let current = preset.scan_mode();
+                                let name = |mode: M| match mode {
+                                    M::Stride => "Single Stride",
+                                    M::MultiStride => "Multi Stride",
+                                    M::HitOrder => "Hit Order",
+                                    M::AllHits => "All Hits",
+                                    M::ManualAddresses => "Manual Addresses",
+                                };
+                                ComboBox::from_id_salt(("esp_auto_scan_mode", preset.id))
+                                    .selected_text(name(current))
+                                    .width(140.0)
+                                    .show_ui(ui, |ui| {
+                                        for (mode, hint) in [
+                                            (M::Stride, "Entities sit one after another in memory, spaced by one fixed Stride."),
+                                            (M::MultiStride, "Like Single Stride, but entities can be spaced by any of several Strides."),
+                                            (M::HitOrder, "Capture entities in the order the selected instruction touches them."),
+                                            (M::AllHits, "Capture every address the selected instruction touches during the scan."),
+                                            (M::ManualAddresses, "Type entity addresses yourself; the same X/Y/Z offsets apply to each."),
+                                        ] {
+                                            if ui.selectable_label(current == mode, name(mode)).on_hover_text(hint).clicked() {
+                                                preset.entity_auto_scan_mode = mode;
+                                                preset.entity_auto_hit_order = mode == M::HitOrder;
+                                                if mode == M::ManualAddresses
+                                                    && preset.entity_manual_addresses.trim().is_empty()
+                                                    && !preset.entity_root.trim().is_empty()
+                                                {
+                                                    preset.entity_manual_addresses = preset.entity_root.clone();
+                                                }
+                                            }
+                                        }
+                                    });
+                                if current == M::ManualAddresses {
+                                    ui.label(RichText::new("Shared X/Y/Z offsets apply to each address.").weak().size(11.0));
+                                }
+                            });
+                            ui.end_row();
                             let scan_mode = preset.scan_mode();
                             if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
                                 ui.label(self.tr("Addresses", "Địa chỉ"));
@@ -1284,9 +1364,9 @@ impl CrosshairApp {
                         ui.end_row();
                             let scan_mode = preset.scan_mode();
                             ui.label(if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
-                                self.tr("Entity mode", "Chế độ thực thể")
+                                "HUD"
                             } else {
-                                "Auto root"
+                                "Auto scan"
                             });
                             ui.vertical(|ui| {
                                 ui.set_max_width(col1_max_width);
@@ -1312,7 +1392,7 @@ impl CrosshairApp {
                                         )
                                     }
                                 };
-                                // Sub-row 1: Instruction & Scan mode dropdowns
+                                // Sub-row 1: Instruction dropdown (scan method is picked in "Find method")
                                 ui.horizontal_wrapped(|ui| {
                                     ui.spacing_mut().item_spacing.x = 6.0;
                                     if scan_mode != crate::model::EspAutoScanMode::ManualAddresses {
@@ -1341,92 +1421,6 @@ impl CrosshairApp {
                                                     }
                                                 }
                                             });
-                                    }
-
-                                    let mut scan_mode = preset.scan_mode();
-                                    let scan_mode_text = match scan_mode {
-                                        crate::model::EspAutoScanMode::Stride => "Single Stride",
-                                        crate::model::EspAutoScanMode::MultiStride => "Multi Stride",
-                                        crate::model::EspAutoScanMode::HitOrder => "Hit Order",
-                                        crate::model::EspAutoScanMode::AllHits => "All Hits",
-                                        crate::model::EspAutoScanMode::ManualAddresses => "Manual Addresses",
-                                    };
-                                    ComboBox::from_id_salt(("esp_auto_scan_mode", preset.id))
-                                        .selected_text(scan_mode_text)
-                                        .width(115.0)
-                                        .show_ui(ui, |ui| {
-                                            if ui
-                                                .selectable_value(
-                                                    &mut scan_mode,
-                                                    crate::model::EspAutoScanMode::Stride,
-                                                    "Single Stride",
-                                                )
-                                                .clicked()
-                                            {
-                                                preset.entity_auto_scan_mode =
-                                                    crate::model::EspAutoScanMode::Stride;
-                                                preset.entity_auto_hit_order = false;
-                                            }
-                                            if ui
-                                                .selectable_value(
-                                                    &mut scan_mode,
-                                                    crate::model::EspAutoScanMode::MultiStride,
-                                                    "Multi Stride",
-                                                )
-                                                .clicked()
-                                            {
-                                                preset.entity_auto_scan_mode =
-                                                    crate::model::EspAutoScanMode::MultiStride;
-                                                preset.entity_auto_hit_order = false;
-                                            }
-                                            if ui
-                                                .selectable_value(
-                                                    &mut scan_mode,
-                                                    crate::model::EspAutoScanMode::HitOrder,
-                                                    "Hit Order",
-                                                )
-                                                .clicked()
-                                            {
-                                                preset.entity_auto_scan_mode =
-                                                    crate::model::EspAutoScanMode::HitOrder;
-                                                preset.entity_auto_hit_order = true;
-                                            }
-                                            if ui
-                                                .selectable_value(
-                                                    &mut scan_mode,
-                                                    crate::model::EspAutoScanMode::AllHits,
-                                                    "All Hits",
-                                                )
-                                                .clicked()
-                                            {
-                                                preset.entity_auto_scan_mode =
-                                                    crate::model::EspAutoScanMode::AllHits;
-                                                preset.entity_auto_hit_order = false;
-                                            }
-                                            if ui
-                                                .selectable_value(
-                                                    &mut scan_mode,
-                                                    crate::model::EspAutoScanMode::ManualAddresses,
-                                                    "Manual Addresses",
-                                                )
-                                                .clicked()
-                                            {
-                                                preset.entity_auto_scan_mode =
-                                                    crate::model::EspAutoScanMode::ManualAddresses;
-                                                preset.entity_auto_hit_order = false;
-                                                if preset.entity_manual_addresses.trim().is_empty()
-                                                    && !preset.entity_root.trim().is_empty()
-                                                {
-                                                    preset.entity_manual_addresses = preset.entity_root.clone();
-                                                }
-                                            }
-                                        });
-
-                                    if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
-                                        ui.label(RichText::new(self.tr(
-                                            "Common X/Y/Z offsets apply to each address.",
-                                            "Áp dụng chung offset X/Y/Z cho từng địa chỉ."
-                                        )).weak().size(11.0));
                                     }
                                 });
 
@@ -1621,10 +1615,20 @@ impl CrosshairApp {
                                 RichText::new(
                                     "Offsets are bytes. Stride and Step are hexadecimal bytes. Runtime reads are capped at 512 slots.",
                                 )
-                                .weak(),
+                                .weak()
+                                .size(11.0),
                             );
                             ui.end_row();
-                            ui.label("");
+                    });
+                });
+                ui.add_space(4.0);
+                section(ui, "Filters & colors", Color32::from_rgb(180, 140, 255), |ui| {
+                Grid::new(("esp_entity_filters", preset.id))
+                    .num_columns(2)
+                    .spacing([8.0, 4.0])
+                    .max_col_width(col1_max_width)
+                    .show(ui, |ui| {
+                            ui.label("Bounding box");
                             ui.scope(|ui| {
                                 ui.set_max_width(col1_max_width);
                                 ui.horizontal_wrapped(|ui| {
@@ -1648,7 +1652,7 @@ impl CrosshairApp {
                                 });
                             });
                             ui.end_row();
-                            ui.label("");
+                            ui.label("Duplicates");
                             ui.scope(|ui| {
                                 ui.set_max_width(col1_max_width);
                                 ui.horizontal_wrapped(|ui| {
@@ -1694,7 +1698,7 @@ impl CrosshairApp {
                                 });
                             });
                             ui.end_row();
-                            ui.label("");
+                            ui.label("Idle targets");
                             ui.scope(|ui| {
                                 ui.set_max_width(col1_max_width);
                                 ui.horizontal_wrapped(|ui| {
@@ -1718,7 +1722,7 @@ impl CrosshairApp {
                                 });
                             });
                             ui.end_row();
-                            ui.label("Entity colors");
+                            ui.label("Per-entity color");
                             ui.scope(|ui| {
                                 ui.set_max_width(col1_max_width);
                                 ui.horizontal_wrapped(|ui| {
@@ -1806,19 +1810,14 @@ impl CrosshairApp {
                             });
                         });
                         ui.end_row();
-                        } else {
-                            for (label, value) in [
-                                ("Target X", &mut preset.target_x),
-                                ("Target Y", &mut preset.target_y),
-                                ("Target Z", &mut preset.target_z),
-                            ] {
-                                memory_expression_row(ui, label, value);
-                            }
-                        }
                     });
+                });
+                }
+                }
 
-                ui.add_space(2.0);
-
+                if tab == 1 {
+                section(ui, "Camera addresses", Color32::from_rgb(100, 200, 255), |ui| {
+                ui.label(RichText::new("Where the game stores the camera position and rotation.").weak().size(11.0));
                 ui.columns(2, |columns| {
                     // --- Left Column: Camera Position (X, Y, Z) ---
                     columns[0].vertical(|ui| {
@@ -1888,24 +1887,11 @@ impl CrosshairApp {
                             });
                     });
                 });
+                });
 
                 ui.add_space(4.0);
-
-                ui.columns(2, |columns| {
-                    // --- Left Column: Box 1 (Camera & 3D Projection) + Box 2 (Calibration & Helpers) ---
-                    columns[0].vertical(|ui| {
-                        // --- BOX 1: Camera & 3D Projection ---
-                        Frame::group(ui.style())
-                            .inner_margin(egui::Margin::symmetric(8, 6))
-                            .rounding(4.0)
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new("Camera & 3D Projection")
-                                        .strong()
-                                        .color(Color32::from_rgb(100, 200, 255)),
-                                );
-                                ui.add_space(2.0);
-
+                // --- BOX 1: Camera data format ---
+                section(ui, "Data format", Color32::from_rgb(100, 200, 255), |ui| {
                                 // Row 1: Coordinate system & FOV
                                 ui.horizontal_wrapped(|ui| {
                                     ui.label("Value type:");
@@ -1954,9 +1940,14 @@ impl CrosshairApp {
                                         ui.checkbox(&mut preset.invert_direction_b, "Invert B");
                                     }
                                 });
-
-                                ui.add_space(2.0);
-
+                            });
+                }
+                if tab == 2 {
+                ui.label(RichText::new("Only needed if markers don't line up with targets. Try \"Calibration helpers\" first.").weak());
+                ui.add_space(2.0);
+                ui.columns(2, |columns| {
+                    columns[0].vertical(|ui| {
+                        section(ui, "Projection tuning", Color32::from_rgb(100, 200, 255), |ui| {
                                 // Row 3: Invert & Mirror toggles
                                 ui.horizontal_wrapped(|ui| {
                                     ui.checkbox(&mut preset.invert_camera_yaw, "Reverse yaw")
@@ -2108,20 +2099,10 @@ impl CrosshairApp {
                                     }
                                 });
                             });
-
-                        ui.add_space(4.0);
-
+                    });
+                    columns[1].vertical(|ui| {
                         // --- BOX 2: Calibration & Combination Matrix ---
-                        Frame::group(ui.style())
-                            .inner_margin(egui::Margin::symmetric(8, 6))
-                            .rounding(4.0)
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new("Calibration & Helpers")
-                                        .strong()
-                                        .color(Color32::from_rgb(255, 200, 100)),
-                                );
-                                ui.add_space(2.0);
+                        section(ui, "Calibration helpers", Color32::from_rgb(255, 200, 100), |ui| {
 
                                 // Auto Calibration
                                 ui.horizontal_wrapped(|ui| {
@@ -2225,22 +2206,18 @@ impl CrosshairApp {
                                         }
                                     }
                                 });
+                                ui.add_space(2.0);
+                                ui.checkbox(&mut preset.debug_mode, "Debug labels")
+                                    .on_hover_text("Show entity addresses next to each marker on the overlay.");
                             });
                     });
-
-                    // --- Right Column: Box 3 (Marker & Styling) + Box 4 (Display & Overlay) + Box 5 (Spatial Target Audio) ---
-                    columns[1].vertical(|ui| {
+                });
+                }
+                if tab == 3 {
+                ui.columns(2, |columns| {
+                    columns[0].vertical(|ui| {
                         // --- BOX 3: Marker & Styling ---
-                        Frame::group(ui.style())
-                            .inner_margin(egui::Margin::symmetric(8, 6))
-                            .rounding(4.0)
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new("Marker & Styling")
-                                        .strong()
-                                        .color(Color32::from_rgb(180, 140, 255)),
-                                );
-                                ui.add_space(2.0);
+                        section(ui, "Marker", Color32::from_rgb(180, 140, 255), |ui| {
 
                                 // Marker source & Shape settings
                                 ui.horizontal_wrapped(|ui| {
@@ -2422,20 +2399,10 @@ impl CrosshairApp {
                                     }
                                 });
                             });
-
-                        ui.add_space(4.0);
-
+                    });
+                    columns[1].vertical(|ui| {
                         // --- BOX 4: Display & Overlay Effects ---
-                        Frame::group(ui.style())
-                            .inner_margin(egui::Margin::symmetric(8, 6))
-                            .rounding(4.0)
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new("Display & Overlay")
-                                        .strong()
-                                        .color(Color32::from_rgb(120, 230, 180)),
-                                );
-                                ui.add_space(2.0);
+                        section(ui, "Display", Color32::from_rgb(120, 230, 180), |ui| {
 
                                 ui.horizontal_wrapped(|ui| {
                                     let mut color = Color32::from_rgba_unmultiplied(
@@ -2457,9 +2424,7 @@ impl CrosshairApp {
                                 ui.add_space(2.0);
 
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(&mut preset.show_distance, "Distance");
-                                    ui.add_space(6.0);
-                                    ui.checkbox(&mut preset.debug_mode, "Debug Mode");
+                                    ui.checkbox(&mut preset.show_distance, "Show distance");
                                 });
 
                                 ui.add_space(2.0);
@@ -2487,16 +2452,7 @@ impl CrosshairApp {
                         ui.add_space(4.0);
 
                         // --- BOX 5: Spatial Target Audio ---
-                        Frame::group(ui.style())
-                            .inner_margin(egui::Margin::symmetric(8, 6))
-                            .rounding(4.0)
-                            .show(ui, |ui| {
-                                ui.label(
-                                    RichText::new("Spatial Target Audio")
-                                        .strong()
-                                        .color(Color32::from_rgb(255, 150, 150)),
-                                );
-                                ui.add_space(2.0);
+                        section(ui, "Sound alert", Color32::from_rgb(255, 150, 150), |ui| {
 
                                 ui.horizontal_wrapped(|ui| {
                                     ui.checkbox(&mut preset.target_audio_enabled, "Enable sound");
@@ -2532,6 +2488,7 @@ impl CrosshairApp {
                             });
                     });
                 });
+                }
             });
             if copy_preset_index == Some(index) {
                 self.preset_clipboard = Some(crate::ui::PresetClipboard::Esp(preset.clone()));
@@ -2600,6 +2557,18 @@ fn memory_type_name(value_type: MemoryValueType) -> &'static str {
         MemoryValueType::I64 => "8 Bytes",
         MemoryValueType::F64 => "Double (8 Bytes)",
     }
+}
+
+fn section(ui: &mut egui::Ui, title: &str, color: Color32, add: impl FnOnce(&mut egui::Ui)) {
+    Frame::group(ui.style())
+        .inner_margin(egui::Margin::symmetric(8, 6))
+        .rounding(4.0)
+        .show(ui, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.label(RichText::new(title).strong().color(color));
+            ui.add_space(2.0);
+            add(ui);
+        });
 }
 
 fn memory_expression_row(ui: &mut egui::Ui, label: &str, value: &mut String) {
