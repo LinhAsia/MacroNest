@@ -26065,6 +26065,22 @@ mod windows_overlay {
         preset: &crate::model::EspPreset,
     ) -> Vec<usize> {
         let mut frame = EspReadFrame::default();
+        if preset.scan_mode() == crate::model::EspAutoScanMode::ManualAddresses {
+            let raw_exprs = crate::model::parse_multiple_address_expressions(&preset.entity_manual_addresses);
+            let count = preset.entity_count.clamp(1, 512) as usize;
+            let mut addrs = Vec::with_capacity(raw_exprs.len().min(count));
+            for expr in raw_exprs {
+                if let Some((_, addr)) = frame.resolve_address(pid, &expr, false) {
+                    if addr >= 0x10000 && addr < 0x7FFF_FFFF_0000 && !preset.entity_blacklisted_addresses.contains(&addr) {
+                        addrs.push(addr);
+                        if addrs.len() >= count {
+                            break;
+                        }
+                    }
+                }
+            }
+            return addrs;
+        }
         let root_expression = preset.entity_root.trim();
         if root_expression.is_empty() {
             return Vec::new();
@@ -26265,8 +26281,31 @@ mod windows_overlay {
         let count = preset.entity_count.clamp(1, 512);
         let stride = preset.entity_stride.max(1);
         let uses_hit_list = preset.scan_mode() != crate::model::EspAutoScanMode::Stride
+            && preset.scan_mode() != crate::model::EspAutoScanMode::ManualAddresses
             || preset.entity_auto_hit_order;
-        let (target_pid, entity_addresses) = if uses_hit_list {
+        let (target_pid, entity_addresses) = if preset.scan_mode() == crate::model::EspAutoScanMode::ManualAddresses {
+            let raw_exprs = crate::model::parse_multiple_address_expressions(&preset.entity_manual_addresses);
+            if raw_exprs.is_empty() {
+                return Err("No entity addresses entered".to_owned());
+            }
+            let mut addrs = Vec::with_capacity(raw_exprs.len().min(count as usize));
+            let mut target_pid = pid;
+            for expr in raw_exprs {
+                if let Some((t_pid, addr)) = frame.resolve_address(pid, &expr, false) {
+                    target_pid = t_pid;
+                    if addr >= 0x10000 && addr < 0x7FFF_FFFF_0000 && !preset.entity_blacklisted_addresses.contains(&addr) {
+                        addrs.push(addr);
+                        if addrs.len() >= count as usize {
+                            break;
+                        }
+                    }
+                }
+            }
+            if addrs.is_empty() {
+                return Err("All manual entity addresses failed to resolve or are invalid".to_owned());
+            }
+            (target_pid, addrs)
+        } else if uses_hit_list {
             if preset.entity_hit_order_addresses.is_empty() {
                 return Err("Entity list has not been captured".to_owned());
             }

@@ -52,6 +52,7 @@ pub enum EspAutoScanMode {
     MultiStride,
     HitOrder,
     AllHits,
+    ManualAddresses,
 }
 
 fn default_entity_auto_hit_step() -> u32 {
@@ -114,6 +115,8 @@ pub struct EspPreset {
     pub entity_auto_continuous_interval_secs: f32,
     #[serde(default)]
     pub entity_multi_strides: String,
+    #[serde(default)]
+    pub entity_manual_addresses: String,
     #[serde(default = "default_entity_auto_hit_step")]
     pub entity_auto_hit_step: u32,
     #[serde(default)]
@@ -257,6 +260,7 @@ impl EspPreset {
             entity_auto_scan_duration_secs: 1.0,
             entity_auto_continuous_interval_secs: 1.0,
             entity_multi_strides: String::new(),
+            entity_manual_addresses: String::new(),
             entity_auto_hit_step: 1,
             entity_hit_order_merge_pairs: false,
             entity_hit_order_drop_nearest: false,
@@ -686,6 +690,46 @@ pub fn parse_multi_strides(input: &str) -> Vec<usize> {
         }
     }
     strides
+}
+
+pub fn parse_multiple_address_expressions(input: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut current = String::new();
+    let mut bracket_depth: usize = 0;
+    let mut in_quotes = false;
+    let mut quote_char = '"';
+
+    for c in input.chars() {
+        if (c == '"' || c == '\'') && !in_quotes {
+            in_quotes = true;
+            quote_char = c;
+            current.push(c);
+        } else if in_quotes && c == quote_char {
+            in_quotes = false;
+            current.push(c);
+        } else if in_quotes {
+            current.push(c);
+        } else if c == '[' {
+            bracket_depth += 1;
+            current.push(c);
+        } else if c == ']' {
+            bracket_depth = bracket_depth.saturating_sub(1);
+            current.push(c);
+        } else if c == '\n' || c == '\r' || ((c == ',' || c == ';') && bracket_depth == 0) {
+            let trimmed = current.trim();
+            if !trimmed.is_empty() {
+                results.push(trimmed.to_string());
+            }
+            current.clear();
+        } else {
+            current.push(c);
+        }
+    }
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        results.push(trimmed.to_string());
+    }
+    results
 }
 
 pub(crate) fn entity_multi_stride_hit_progress(
@@ -2001,6 +2045,23 @@ mod tests {
     }
 
     #[test]
+    fn esp_auto_scan_mode_manual_addresses_serde() {
+        let mut preset = EspPreset::default();
+        preset.entity_auto_scan_mode = EspAutoScanMode::ManualAddresses;
+        preset.entity_manual_addresses = "0x111, 0x222; 0x333\n\"game.exe\"+0x10 [0x20]".to_string();
+        assert_eq!(preset.scan_mode(), EspAutoScanMode::ManualAddresses);
+
+        let json = serde_json::to_string(&preset).unwrap();
+        let loaded: EspPreset = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.entity_auto_scan_mode, EspAutoScanMode::ManualAddresses);
+        assert_eq!(loaded.scan_mode(), EspAutoScanMode::ManualAddresses);
+        assert_eq!(loaded.entity_manual_addresses, "0x111, 0x222; 0x333\n\"game.exe\"+0x10 [0x20]");
+
+        let parsed = parse_multiple_address_expressions(&loaded.entity_manual_addresses);
+        assert_eq!(parsed, vec!["0x111", "0x222", "0x333", "\"game.exe\"+0x10 [0x20]"]);
+    }
+
+    #[test]
     fn permutations_cover_inversion_of_both_direction_axes() {
         let perms = esp_debug_permutations();
         assert_eq!(perms.len(), 2048);
@@ -2224,6 +2285,27 @@ mod tests {
         let (none_dx, none_dy) = esp_distance_screen_position(&preset, None, 100, 200, 1.0, 2);
         assert_eq!(none_dx, 100);
         assert_eq!(none_dy, 218);
+    }
+
+    #[test]
+    fn test_parse_multiple_address_expressions() {
+        let input = "0x25B19B2E388, 0x25B19C5F100; 0x25B20A10400\n0x25B30000";
+        let addrs = super::parse_multiple_address_expressions(input);
+        assert_eq!(addrs, vec!["0x25B19B2E388", "0x25B19C5F100", "0x25B20A10400", "0x25B30000"]);
+
+        // Pointer expressions with commas inside brackets should not split inside []
+        let ptr_input = "\"game.exe\"+0x100 [0x20, 0x40], \"game.exe\"+0x200 [0x30, 0x50]";
+        let ptr_addrs = super::parse_multiple_address_expressions(ptr_input);
+        assert_eq!(ptr_addrs.len(), 2);
+        assert_eq!(ptr_addrs[0], "\"game.exe\"+0x100 [0x20, 0x40]");
+        assert_eq!(ptr_addrs[1], "\"game.exe\"+0x200 [0x30, 0x50]");
+
+        // Empty string
+        assert!(super::parse_multiple_address_expressions("").is_empty());
+
+        // Single address
+        let single = super::parse_multiple_address_expressions("0x12345678");
+        assert_eq!(single, vec!["0x12345678"]);
     }
 }
 

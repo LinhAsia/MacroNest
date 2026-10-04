@@ -142,6 +142,7 @@ impl CrosshairApp {
                     .unwrap_or((None, 0));
                 (cand, count, None)
             }
+            crate::model::EspAutoScanMode::ManualAddresses => (None, 0, None),
         };
 
         if capture.scan_mode == crate::model::EspAutoScanMode::HitOrder
@@ -665,6 +666,7 @@ impl CrosshairApp {
                         crate::model::EspAutoScanMode::Stride => {
                             "Debugger stopped before a complete Stride group was found".to_owned()
                         }
+                        crate::model::EspAutoScanMode::ManualAddresses => "Stopped".to_owned(),
                     })
                 }
                 WatchEvent::Stopped
@@ -713,6 +715,7 @@ impl CrosshairApp {
                     .unwrap_or((None, 0));
                 (cand, count, None)
             }
+            crate::model::EspAutoScanMode::ManualAddresses => (None, 0, None),
         };
 
         if capture.drop_nearest && !capture.self_dropped {
@@ -1144,86 +1147,108 @@ impl CrosshairApp {
                         });
                         ui.end_row();
                         if preset.entity_list_enabled {
-                            let root_step = *preset
-                                .entity_root_step
-                                .get_or_insert(preset.entity_stride.max(1));
-                            let root_step_multiplier = preset.entity_root_step_multiplier.max(1);
-                            let navigation_step = root_step.saturating_mul(root_step_multiplier);
-                            ui.label("Entity root");
-                            ui.scope(|ui| {
-                                ui.set_max_width(col1_max_width);
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.add(
-                                        TextEdit::singleline(&mut preset.entity_root)
-                                            .desired_width(col1_max_width.min(280.0))
-                                        .hint_text(
-                                            RichText::new(
-                                                "stable pointer to first entity X / @alias",
-                                            )
-                                            .color(ui.visuals().weak_text_color()),
-                                        ),
-                                );
-                                let can_shift = crate::model::shift_entity_root(
-                                    &preset.entity_root,
-                                    root_step,
-                                    0,
-                                    preset.entity_stride_level,
-                                )
-                                .is_some();
-                                if ui
-                                    .add_enabled(can_shift, egui::Button::new("▲"))
-                                    .on_hover_text(
-                                        "Shift root address or pointer offset - (Step x multiplier)",
-                                    )
-                                    .clicked()
-                                {
-                                    if let Some(root) = crate::model::shift_entity_root(
-                                        &preset.entity_root,
-                                        navigation_step,
-                                        -1,
-                                        preset.entity_stride_level,
-                                    ) {
-                                        preset.entity_root = root;
-                                    }
-                                }
-                                if ui
-                                    .add_enabled(can_shift, egui::Button::new("▼"))
-                                    .on_hover_text(
-                                        "Shift root address or pointer offset + (Step x multiplier)",
-                                    )
-                                    .clicked()
-                                {
-                                    if let Some(root) = crate::model::shift_entity_root(
-                                        &preset.entity_root,
-                                        navigation_step,
-                                        1,
-                                        preset.entity_stride_level,
-                                    ) {
-                                        preset.entity_root = root;
-                                    }
-                                }
-                                ui.label("Step");
-                                if let Some(step) = preset.entity_root_step.as_mut() {
-                                    ui.add(
-                                        DragValue::new(step)
-                                            .range(1..=0x10000)
-                                            .hexadecimal(1, false, false),
-                                    )
-                                        .on_hover_text(
-                                            "Raw-address navigation step in hexadecimal bytes; defaults to Stride.",
+                            let scan_mode = preset.scan_mode();
+                            if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
+                                ui.label(self.tr("Addresses", "Địa chỉ"));
+                                ui.scope(|ui| {
+                                    ui.set_max_width(col1_max_width);
+                                    ui.vertical(|ui| {
+                                        ui.add(
+                                            TextEdit::multiline(&mut preset.entity_manual_addresses)
+                                                .desired_width(col1_max_width.min(380.0))
+                                                .desired_rows(3)
+                                                .hint_text("0x25B19B2E388, 0x25B19C5F100\n\"game.exe\"+0x100 [0x20]"),
                                         );
-                                }
-                                ui.label("x");
-                                ui.add(
-                                    DragValue::new(&mut preset.entity_root_step_multiplier)
-                                        .range(1..=1_000_000),
-                                )
-                                .on_hover_text(
-                                    "Decimal multiplier. Each arrow moves Entity root by Step x this value.",
-                                );
+                                        let parsed_count = crate::model::parse_multiple_address_expressions(&preset.entity_manual_addresses).len();
+                                        ui.label(RichText::new(format!(
+                                            "{} address(es) configured (comma, semicolon, or newline separated)",
+                                            parsed_count
+                                        )).weak().size(11.0));
+                                    });
+                                });
+                                ui.end_row();
+                            } else {
+                                let root_step = *preset
+                                    .entity_root_step
+                                    .get_or_insert(preset.entity_stride.max(1));
+                                let root_step_multiplier = preset.entity_root_step_multiplier.max(1);
+                                let navigation_step = root_step.saturating_mul(root_step_multiplier);
+                                ui.label("Entity root");
+                                ui.scope(|ui| {
+                                    ui.set_max_width(col1_max_width);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.add(
+                                            TextEdit::singleline(&mut preset.entity_root)
+                                                .desired_width(col1_max_width.min(280.0))
+                                            .hint_text(
+                                                RichText::new(
+                                                    "stable pointer to first entity X / @alias",
+                                                )
+                                                .color(ui.visuals().weak_text_color()),
+                                            ),
+                                    );
+                                    let can_shift = crate::model::shift_entity_root(
+                                        &preset.entity_root,
+                                        root_step,
+                                        0,
+                                        preset.entity_stride_level,
+                                    )
+                                    .is_some();
+                                    if ui
+                                        .add_enabled(can_shift, egui::Button::new("▲"))
+                                        .on_hover_text(
+                                            "Shift root address or pointer offset - (Step x multiplier)",
+                                        )
+                                        .clicked()
+                                    {
+                                        if let Some(root) = crate::model::shift_entity_root(
+                                            &preset.entity_root,
+                                            navigation_step,
+                                            -1,
+                                            preset.entity_stride_level,
+                                        ) {
+                                            preset.entity_root = root;
+                                        }
+                                    }
+                                    if ui
+                                        .add_enabled(can_shift, egui::Button::new("▼"))
+                                        .on_hover_text(
+                                            "Shift root address or pointer offset + (Step x multiplier)",
+                                        )
+                                        .clicked()
+                                    {
+                                        if let Some(root) = crate::model::shift_entity_root(
+                                            &preset.entity_root,
+                                            navigation_step,
+                                            1,
+                                            preset.entity_stride_level,
+                                        ) {
+                                            preset.entity_root = root;
+                                        }
+                                    }
+                                    ui.label("Step");
+                                    if let Some(step) = preset.entity_root_step.as_mut() {
+                                        ui.add(
+                                            DragValue::new(step)
+                                                .range(1..=0x10000)
+                                                .hexadecimal(1, false, false),
+                                        )
+                                            .on_hover_text(
+                                                "Raw-address navigation step in hexadecimal bytes; defaults to Stride.",
+                                            );
+                                    }
+                                    ui.label("x");
+                                    ui.add(
+                                        DragValue::new(&mut preset.entity_root_step_multiplier)
+                                            .range(1..=1_000_000),
+                                    )
+                                    .on_hover_text(
+                                        "Decimal multiplier. Each arrow moves Entity root by Step x this value.",
+                                    );
+                                });
                             });
-                        });
-                        ui.end_row();
+                            ui.end_row();
+                        }
                         ui.label("Entity layout");
                         ui.scope(|ui| {
                             ui.set_max_width(col1_max_width);
@@ -1234,20 +1259,22 @@ impl CrosshairApp {
                                 ui.add(DragValue::new(&mut preset.entity_y_offset));
                                 ui.label("Z");
                                 ui.add(DragValue::new(&mut preset.entity_z_offset));
-                                ui.label("Stride");
-                                ui.add(
-                                    DragValue::new(&mut preset.entity_stride)
-                                        .range(1..=0x10000)
-                                        .hexadecimal(1, false, false),
-                                );
-                                ui.label("Level");
-                                ui.add(
-                                    DragValue::new(&mut preset.entity_stride_level)
-                                        .range(1..=8),
-                                )
-                                .on_hover_text(
-                                    "Pointer offset level to apply Stride to (1 = 1st offset, 2 = 2nd offset, etc.). Overridden if '*' is specified.",
-                                );
+                                if scan_mode != crate::model::EspAutoScanMode::ManualAddresses {
+                                    ui.label("Stride");
+                                    ui.add(
+                                        DragValue::new(&mut preset.entity_stride)
+                                            .range(1..=0x10000)
+                                            .hexadecimal(1, false, false),
+                                    );
+                                    ui.label("Level");
+                                    ui.add(
+                                        DragValue::new(&mut preset.entity_stride_level)
+                                            .range(1..=8),
+                                    )
+                                    .on_hover_text(
+                                        "Pointer offset level to apply Stride to (1 = 1st offset, 2 = 2nd offset, etc.). Overridden if '*' is specified.",
+                                    );
+                                }
                                 ui.label("Count");
                                 ui.add(
                                     DragValue::new(&mut preset.entity_count).range(1..=512),
@@ -1255,7 +1282,12 @@ impl CrosshairApp {
                             });
                         });
                         ui.end_row();
-                            ui.label("Auto root");
+                            let scan_mode = preset.scan_mode();
+                            ui.label(if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
+                                self.tr("Entity mode", "Chế độ thực thể")
+                            } else {
+                                "Auto root"
+                            });
                             ui.vertical(|ui| {
                                 ui.set_max_width(col1_max_width);
                                 let selected_code = self
@@ -1283,31 +1315,33 @@ impl CrosshairApp {
                                 // Sub-row 1: Instruction & Scan mode dropdowns
                                 ui.horizontal_wrapped(|ui| {
                                     ui.spacing_mut().item_spacing.x = 6.0;
-                                    let code_w = (col1_max_width - 120.0).clamp(140.0, 260.0);
-                                    ComboBox::from_id_salt(("esp_auto_root_code", preset.id))
-                                        .selected_text(selected_code.map_or(
-                                            "Select instruction".to_owned(),
-                                            format_code_label,
-                                        ))
-                                        .width(code_w)
-                                        .show_ui(ui, |ui| {
-                                            for code in &self.state.memory_code_list {
-                                                let selected = code.module.eq_ignore_ascii_case(
-                                                    &preset.entity_auto_code_module,
-                                                ) && code.offset == preset.entity_auto_code_offset;
-                                                if ui
-                                                    .selectable_label(
-                                                        selected,
-                                                        format_code_label(code),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    preset.entity_auto_code_module =
-                                                        code.module.clone();
-                                                    preset.entity_auto_code_offset = code.offset;
+                                    if scan_mode != crate::model::EspAutoScanMode::ManualAddresses {
+                                        let code_w = (col1_max_width - 120.0).clamp(140.0, 260.0);
+                                        ComboBox::from_id_salt(("esp_auto_root_code", preset.id))
+                                            .selected_text(selected_code.map_or(
+                                                "Select instruction".to_owned(),
+                                                format_code_label,
+                                            ))
+                                            .width(code_w)
+                                            .show_ui(ui, |ui| {
+                                                for code in &self.state.memory_code_list {
+                                                    let selected = code.module.eq_ignore_ascii_case(
+                                                        &preset.entity_auto_code_module,
+                                                    ) && code.offset == preset.entity_auto_code_offset;
+                                                    if ui
+                                                        .selectable_label(
+                                                            selected,
+                                                            format_code_label(code),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        preset.entity_auto_code_module =
+                                                            code.module.clone();
+                                                        preset.entity_auto_code_offset = code.offset;
+                                                    }
                                                 }
-                                            }
-                                        });
+                                            });
+                                    }
 
                                     let mut scan_mode = preset.scan_mode();
                                     let scan_mode_text = match scan_mode {
@@ -1315,10 +1349,11 @@ impl CrosshairApp {
                                         crate::model::EspAutoScanMode::MultiStride => "Multi Stride",
                                         crate::model::EspAutoScanMode::HitOrder => "Hit Order",
                                         crate::model::EspAutoScanMode::AllHits => "All Hits",
+                                        crate::model::EspAutoScanMode::ManualAddresses => "Manual Addresses",
                                     };
                                     ComboBox::from_id_salt(("esp_auto_scan_mode", preset.id))
                                         .selected_text(scan_mode_text)
-                                        .width(100.0)
+                                        .width(115.0)
                                         .show_ui(ui, |ui| {
                                             if ui
                                                 .selectable_value(
@@ -1368,144 +1403,198 @@ impl CrosshairApp {
                                                     crate::model::EspAutoScanMode::AllHits;
                                                 preset.entity_auto_hit_order = false;
                                             }
-                                        });
-                                });
-
-                                // Sub-row 2: Continuous & scan timing / counts
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 6.0;
-                                    let scan_mode = preset.scan_mode();
-                                    ui.checkbox(&mut preset.entity_auto_continuous, self.tr("Continuous", "Liên tục"))
-                                        .on_hover_text(self.tr(
-                                            "Keep scanning continuously with throttled duty-cycle without lag. Newly discovered entity addresses are immediately added and displayed in ESP.",
-                                            "Quét ngắt quãng liên tục không gây lag game. Các địa chỉ phân thân/đổi dạng mới được tự động thêm vào ESP.",
-                                        ));
-
-                                    if preset.entity_auto_continuous {
-                                        ui.label(self.tr("Interval", "Khoảng nghỉ"));
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_auto_continuous_interval_secs)
-                                                .range(0.2..=10.0)
-                                                .speed(0.1)
-                                                .suffix("s"),
-                                        )
-                                        .on_hover_text(self.tr(
-                                            "Pause interval between burst scans to eliminate game lag (default: 1.0s).",
-                                            "Khoảng nghỉ giữa các đợt quét ngắt quãng để triệt tiêu lag game (mặc định: 1.0s).",
-                                        ));
-                                    }
-
-                                    if scan_mode == crate::model::EspAutoScanMode::AllHits && !preset.entity_auto_continuous {
-                                        ui.label("Duration");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_auto_scan_duration_secs)
-                                                .range(0.1..=30.0)
-                                                .speed(0.1)
-                                                .suffix("s"),
-                                        )
-                                        .on_hover_text("Scan time duration in seconds (default: 1.0s).");
-                                    }
-
-                                    if scan_mode == crate::model::EspAutoScanMode::MultiStride {
-                                        ui.label("Strides");
-                                        ui.add(
-                                            egui::TextEdit::singleline(&mut preset.entity_multi_strides)
-                                                .desired_width(110.0)
-                                                .hint_text("e.g. 2260, 25D0"),
-                                        )
-                                        .on_hover_text(
-                                            "Comma-separated hex/dec strides for variable entity struct sizes (e.g. 2260, 25D0 or 0x2260, 0x25D0).",
-                                        );
-                                    }
-
-                                    if scan_mode != crate::model::EspAutoScanMode::AllHits
-                                        || preset.entity_hit_order_drop_nearest
-                                        || !preset.entity_auto_continuous
-                                    {
-                                        ui.label("Need");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_auto_capture_count)
-                                                .range(1..=512),
-                                        )
-                                        .on_hover_text(match scan_mode {
-                                            crate::model::EspAutoScanMode::HitOrder => {
-                                                "Stop after this many filtered entities are captured."
-                                            }
-                                            crate::model::EspAutoScanMode::MultiStride => {
-                                                "Stop after finding a chain of this many entities connected by allowed strides."
-                                            }
-                                            crate::model::EspAutoScanMode::Stride => {
-                                                "Stop only after this many addresses form one group at the configured Stride."
-                                            }
-                                            crate::model::EspAutoScanMode::AllHits => {
-                                                "Target count of entity addresses to capture before evaluating Drop Self."
-                                            }
-                                        });
-                                    }
-
-                                    if scan_mode == crate::model::EspAutoScanMode::HitOrder {
-                                        ui.label("Step");
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_auto_hit_step)
-                                                .range(1..=32),
-                                        )
-                                        .on_hover_text(
-                                            "Number of address hits per entity (e.g. 2 for AABB min/max pair). Automatically selects the smaller base address in each pair (even or odd index).",
-                                        );
-                                    }
-                                });
-
-                                // Sub-row 3: Filtering & HUD
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 6.0;
-                                    let scan_mode = preset.scan_mode();
-                                    if scan_mode == crate::model::EspAutoScanMode::HitOrder
-                                        || scan_mode == crate::model::EspAutoScanMode::MultiStride
-                                        || scan_mode == crate::model::EspAutoScanMode::AllHits
-                                    {
-                                        ui.checkbox(
-                                            &mut preset.entity_hit_order_merge_pairs,
-                                            "Merge pairs",
-                                        )
-                                        .on_hover_text(
-                                            "Merge captured addresses that share the same 3D world position into a single entity.",
-                                        );
-                                    }
-
-                                    ui.checkbox(
-                                        &mut preset.entity_hit_order_drop_nearest,
-                                        self.tr("Drop self", "Bỏ self"),
-                                    )
-                                    .on_hover_text(self.tr(
-                                        "After capturing the required number of entities, remove the entity with the smallest distance to camera (local player) and blacklist it.",
-                                        "Sau khi tìm đủ số lượng thực thể yêu cầu, loại bỏ thực thể gần camera nhất (nhân vật bản thân) và đưa vào blacklist.",
-                                    ));
-
-                                    ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
-                                    if preset.entity_auto_hud_enabled {
-                                        let hud_name = preset
-                                            .entity_auto_hud_preset_id
-                                            .and_then(|id| {
-                                                self.state
-                                                    .hud_presets
-                                                    .iter()
-                                                    .find(|hud| hud.id == id)
-                                            })
-                                            .map_or("Select HUD", |hud| hud.name.as_str());
-                                        ComboBox::from_id_salt(("esp_auto_root_hud", preset.id))
-                                            .selected_text(hud_name)
-                                            .width(110.0)
-                                            .show_ui(ui, |ui| {
-                                                for hud in &self.state.hud_presets {
-                                                    ui.selectable_value(
-                                                        &mut preset.entity_auto_hud_preset_id,
-                                                        Some(hud.id),
-                                                        &hud.name,
-                                                    );
+                                            if ui
+                                                .selectable_value(
+                                                    &mut scan_mode,
+                                                    crate::model::EspAutoScanMode::ManualAddresses,
+                                                    "Manual Addresses",
+                                                )
+                                                .clicked()
+                                            {
+                                                preset.entity_auto_scan_mode =
+                                                    crate::model::EspAutoScanMode::ManualAddresses;
+                                                preset.entity_auto_hit_order = false;
+                                                if preset.entity_manual_addresses.trim().is_empty()
+                                                    && !preset.entity_root.trim().is_empty()
+                                                {
+                                                    preset.entity_manual_addresses = preset.entity_root.clone();
                                                 }
-                                            });
+                                            }
+                                        });
+
+                                    if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
+                                        ui.label(RichText::new(self.tr(
+                                            "Common X/Y/Z offsets apply to each address.",
+                                            "Áp dụng chung offset X/Y/Z cho từng địa chỉ."
+                                        )).weak().size(11.0));
                                     }
                                 });
+
+                                if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                        ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
+                                        if preset.entity_auto_hud_enabled {
+                                            let hud_name = preset
+                                                .entity_auto_hud_preset_id
+                                                .and_then(|id| {
+                                                    self.state
+                                                        .hud_presets
+                                                        .iter()
+                                                        .find(|hud| hud.id == id)
+                                                })
+                                                .map_or("Select HUD", |hud| hud.name.as_str());
+                                            ComboBox::from_id_salt(("esp_auto_root_hud", preset.id))
+                                                .selected_text(hud_name)
+                                                .width(110.0)
+                                                .show_ui(ui, |ui| {
+                                                    for hud in &self.state.hud_presets {
+                                                        ui.selectable_value(
+                                                            &mut preset.entity_auto_hud_preset_id,
+                                                            Some(hud.id),
+                                                            &hud.name,
+                                                        );
+                                                    }
+                                                });
+                                        }
+                                    });
+                                } else {
+                                    // Sub-row 2: Continuous & scan timing / counts
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                        let scan_mode = preset.scan_mode();
+                                        ui.checkbox(&mut preset.entity_auto_continuous, self.tr("Continuous", "Liên tục"))
+                                            .on_hover_text(self.tr(
+                                                "Keep scanning continuously with throttled duty-cycle without lag. Newly discovered entity addresses are immediately added and displayed in ESP.",
+                                                "Quét ngắt quãng liên tục không gây lag game. Các địa chỉ phân thân/đổi dạng mới được tự động thêm vào ESP.",
+                                            ));
+
+                                        if preset.entity_auto_continuous {
+                                            ui.label(self.tr("Interval", "Khoảng nghỉ"));
+                                            ui.add(
+                                                DragValue::new(&mut preset.entity_auto_continuous_interval_secs)
+                                                    .range(0.2..=10.0)
+                                                    .speed(0.1)
+                                                    .suffix("s"),
+                                            )
+                                            .on_hover_text(self.tr(
+                                                "Pause interval between burst scans to eliminate game lag (default: 1.0s).",
+                                                "Khoảng nghỉ giữa các đợt quét ngắt quãng để triệt tiêu lag game (mặc định: 1.0s).",
+                                            ));
+                                        }
+
+                                        if scan_mode == crate::model::EspAutoScanMode::AllHits && !preset.entity_auto_continuous {
+                                            ui.label("Duration");
+                                            ui.add(
+                                                DragValue::new(&mut preset.entity_auto_scan_duration_secs)
+                                                    .range(0.1..=30.0)
+                                                    .speed(0.1)
+                                                    .suffix("s"),
+                                            )
+                                            .on_hover_text("Scan time duration in seconds (default: 1.0s).");
+                                        }
+
+                                        if scan_mode == crate::model::EspAutoScanMode::MultiStride {
+                                            ui.label("Strides");
+                                            ui.add(
+                                                egui::TextEdit::singleline(&mut preset.entity_multi_strides)
+                                                    .desired_width(110.0)
+                                                    .hint_text("e.g. 2260, 25D0"),
+                                            )
+                                            .on_hover_text(
+                                                "Comma-separated hex/dec strides for variable entity struct sizes (e.g. 2260, 25D0 or 0x2260, 0x25D0).",
+                                            );
+                                        }
+
+                                        if scan_mode != crate::model::EspAutoScanMode::AllHits
+                                            || preset.entity_hit_order_drop_nearest
+                                            || !preset.entity_auto_continuous
+                                        {
+                                            ui.label("Need");
+                                            ui.add(
+                                                DragValue::new(&mut preset.entity_auto_capture_count)
+                                                    .range(1..=512),
+                                            )
+                                            .on_hover_text(match scan_mode {
+                                                crate::model::EspAutoScanMode::HitOrder => {
+                                                    "Stop after this many filtered entities are captured."
+                                                }
+                                                crate::model::EspAutoScanMode::MultiStride => {
+                                                    "Stop after finding a chain of this many entities connected by allowed strides."
+                                                }
+                                                crate::model::EspAutoScanMode::Stride => {
+                                                    "Stop only after this many addresses form one group at the configured Stride."
+                                                }
+                                                crate::model::EspAutoScanMode::AllHits => {
+                                                    "Target count of entity addresses to capture before evaluating Drop Self."
+                                                }
+                                                crate::model::EspAutoScanMode::ManualAddresses => "",
+                                            });
+                                        }
+
+                                        if scan_mode == crate::model::EspAutoScanMode::HitOrder {
+                                            ui.label("Step");
+                                            ui.add(
+                                                DragValue::new(&mut preset.entity_auto_hit_step)
+                                                    .range(1..=32),
+                                            )
+                                            .on_hover_text(
+                                                "Number of address hits per entity (e.g. 2 for AABB min/max pair). Automatically selects the smaller base address in each pair (even or odd index).",
+                                            );
+                                        }
+                                    });
+
+                                    // Sub-row 3: Filtering & HUD
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                        let scan_mode = preset.scan_mode();
+                                        if scan_mode == crate::model::EspAutoScanMode::HitOrder
+                                            || scan_mode == crate::model::EspAutoScanMode::MultiStride
+                                            || scan_mode == crate::model::EspAutoScanMode::AllHits
+                                        {
+                                            ui.checkbox(
+                                                &mut preset.entity_hit_order_merge_pairs,
+                                                "Merge pairs",
+                                            )
+                                            .on_hover_text(
+                                                "Merge captured addresses that share the same 3D world position into a single entity.",
+                                            );
+                                        }
+
+                                        ui.checkbox(
+                                            &mut preset.entity_hit_order_drop_nearest,
+                                            self.tr("Drop self", "Bỏ self"),
+                                        )
+                                        .on_hover_text(self.tr(
+                                            "After capturing the required number of entities, remove the entity with the smallest distance to camera (local player) and blacklist it.",
+                                            "Sau khi tìm đủ số lượng thực thể yêu cầu, loại bỏ thực thể gần camera nhất (nhân vật bản thân) và đưa vào blacklist.",
+                                        ));
+
+                                        ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
+                                        if preset.entity_auto_hud_enabled {
+                                            let hud_name = preset
+                                                .entity_auto_hud_preset_id
+                                                .and_then(|id| {
+                                                    self.state
+                                                        .hud_presets
+                                                        .iter()
+                                                        .find(|hud| hud.id == id)
+                                                })
+                                                .map_or("Select HUD", |hud| hud.name.as_str());
+                                            ComboBox::from_id_salt(("esp_auto_root_hud", preset.id))
+                                                .selected_text(hud_name)
+                                                .width(110.0)
+                                                .show_ui(ui, |ui| {
+                                                    for hud in &self.state.hud_presets {
+                                                        ui.selectable_value(
+                                                            &mut preset.entity_auto_hud_preset_id,
+                                                            Some(hud.id),
+                                                            &hud.name,
+                                                        );
+                                                    }
+                                                });
+                                        }
+                                    });
 
                                     ui.add_space(4.0);
                                     ui.horizontal_wrapped(|ui| {
@@ -1524,7 +1613,8 @@ impl CrosshairApp {
                                             );
                                         }
                                     });
-                                });
+                                }
+                            });
                             ui.end_row();
                             ui.label("");
                             ui.label(
@@ -2631,7 +2721,9 @@ fn find_nearest_entity_to_preset(
                 .filter(|a| !other_preset.entity_blacklisted_addresses.contains(a))
                 .take(other_preset.entity_count.clamp(1, 64) as usize)
                 .collect()
-        } else if !other_preset.entity_root.trim().is_empty() {
+        } else if other_preset.scan_mode() == crate::model::EspAutoScanMode::ManualAddresses
+            || !other_preset.entity_root.trim().is_empty()
+        {
             crate::overlay::evaluate_esp_preset_entity_addresses(pid, other_preset)
         } else {
             Vec::new()
