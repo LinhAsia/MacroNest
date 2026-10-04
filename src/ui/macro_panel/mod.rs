@@ -19097,11 +19097,13 @@ if supports_move_mouse || show_detection_tuning {
                     .iter()
                     .map(|(name, _)| name.as_str())
                     .collect();
+                let table_vars = crate::overlay::REGISTERED_TABLE_VARIABLES.lock();
+                let table_vars_count = table_vars.len();
                 let mut vars_list: Vec<(String, String)> = Vec::new();
                 {
                     let runtime_vars = crate::overlay::RUNTIME_VARIABLES.lock();
                     for (name, value) in runtime_vars.iter() {
-                        if !constant_names.contains(name.as_str()) {
+                        if !constant_names.contains(name.as_str()) && !table_vars.contains(name) {
                             vars_list.push((name.clone(), value.to_string()));
                         }
                     }
@@ -19109,7 +19111,7 @@ if supports_move_mouse || show_detection_tuning {
                 {
                     let text_vars = crate::overlay::TEXT_VARIABLES.lock();
                     for (name, value) in text_vars.iter() {
-                        if !constant_names.contains(name.as_str()) {
+                        if !constant_names.contains(name.as_str()) && !table_vars.contains(name) {
                             vars_list.push((name.clone(), value.clone()));
                         }
                     }
@@ -19137,9 +19139,11 @@ if supports_move_mouse || show_detection_tuning {
                     }
                     ui.label(
                         RichText::new(format!(
-                            "{} {} • {} {}",
+                            "{} {} • {} {} • {} {}",
                             self.state.global_constants.len(),
                             Self::tr_lang(language, "fixed", "cố định"),
+                            table_vars_count,
+                            Self::tr_lang(language, "from tables", "từ bảng"),
                             vars_list.len(),
                             Self::tr_lang(language, "runtime", "runtime")
                         ))
@@ -19160,13 +19164,15 @@ if supports_move_mouse || show_detection_tuning {
                                 )
                                 .on_hover_text(Self::tr_lang(
                                     language,
-                                    "Clear all runtime & text variables currently stored in memory",
-                                    "Xóa toàn bộ các biến runtime và chuỗi văn bản đang lưu trong RAM",
+                                    "Clear all temporary runtime variables created during macro execution (table and fixed constants are preserved)",
+                                    "Xóa các biến tạm sinh ra khi chạy macro (giữ nguyên biến bảng và hằng số cố định)",
                                 ))
                                 .clicked()
                             {
-                                crate::overlay::RUNTIME_VARIABLES.lock().clear();
-                                crate::overlay::TEXT_VARIABLES.lock().clear();
+                                let mut run_vars = crate::overlay::RUNTIME_VARIABLES.lock();
+                                let mut text_vars = crate::overlay::TEXT_VARIABLES.lock();
+                                run_vars.retain(|k, _| table_vars.contains(k) || constant_names.contains(k.as_str()));
+                                text_vars.retain(|k, _| table_vars.contains(k) || constant_names.contains(k.as_str()));
                                 vars_list.clear();
                             }
                         }
@@ -19495,67 +19501,69 @@ if supports_move_mouse || show_detection_tuning {
                                                         .inner_margin(egui::Margin::symmetric(8, 5))
                                                         .show(ui, |ui| {
                                                             ui.set_width(card_w);
-                                                            ui.horizontal(|ui| {
-                                                                ui.with_layout(
-                                                                    egui::Layout::right_to_left(egui::Align::Center),
-                                                                    |ui| {
-                                                                        if ui
-                                                                            .small_button("×")
-                                                                            .on_hover_text(Self::tr_lang(
-                                                                                language,
-                                                                                "Delete variable",
-                                                                                "Xóa biến",
-                                                                            ))
-                                                                            .clicked()
-                                                                        {
-                                                                            to_remove_vars.push(name.clone());
-                                                                        }
+                                                            ui.vertical(|ui| {
+                                                                ui.horizontal(|ui| {
+                                                                    ui.with_layout(
+                                                                        egui::Layout::right_to_left(egui::Align::Center),
+                                                                        |ui| {
+                                                                            if ui
+                                                                                .small_button("×")
+                                                                                .on_hover_text(Self::tr_lang(
+                                                                                    language,
+                                                                                    "Delete variable",
+                                                                                    "Xóa biến",
+                                                                                ))
+                                                                                .clicked()
+                                                                            {
+                                                                                to_remove_vars.push(name.clone());
+                                                                            }
 
-                                                                        ui.with_layout(
-                                                                            egui::Layout::left_to_right(egui::Align::Center),
-                                                                            |ui| {
-                                                                                let name_label = ui.add(
-                                                                                    egui::Label::new(
-                                                                                        RichText::new(name)
-                                                                                            .monospace()
-                                                                                            .strong()
-                                                                                            .color(Color32::from_rgb(0, 180, 216)),
-                                                                                    )
-                                                                                    .truncate(),
-                                                                                );
-                                                                                name_label.on_hover_text(name);
-                                                                            },
-                                                                        );
-                                                                    },
-                                                                );
-                                                            });
-                                                            ui.horizontal(|ui| {
-                                                                let val_label = ui.add(
-                                                                    egui::Label::new(
-                                                                        RichText::new(value)
-                                                                            .monospace()
-                                                                            .size(11.5)
-                                                                            .color(val_color),
-                                                                    )
-                                                                    .sense(egui::Sense::click())
-                                                                    .truncate(),
-                                                                );
-                                                                if val_label.hovered() {
-                                                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                                                                }
-                                                                val_label.clone().on_hover_text(format!(
-                                                                    "{}\n{}",
-                                                                    value,
-                                                                    Self::tr_lang(
-                                                                        language,
-                                                                        "Click to copy",
-                                                                        "Nhấn để sao chép",
-                                                                    )
-                                                                ));
-                                                                if val_label.clicked() {
-                                                                    ui.ctx().copy_text(value.clone());
-                                                                    copied_val = Some(value.clone());
-                                                                }
+                                                                            ui.with_layout(
+                                                                                egui::Layout::left_to_right(egui::Align::Center),
+                                                                                |ui| {
+                                                                                    let name_label = ui.add(
+                                                                                        egui::Label::new(
+                                                                                            RichText::new(name)
+                                                                                                .monospace()
+                                                                                                .strong()
+                                                                                                .color(Color32::from_rgb(0, 180, 216)),
+                                                                                        )
+                                                                                        .truncate(),
+                                                                                    );
+                                                                                    name_label.on_hover_text(name);
+                                                                                },
+                                                                            );
+                                                                        },
+                                                                    );
+                                                                });
+                                                                ui.horizontal(|ui| {
+                                                                    let val_label = ui.add(
+                                                                        egui::Label::new(
+                                                                            RichText::new(value)
+                                                                                .monospace()
+                                                                                .size(11.5)
+                                                                                .color(val_color),
+                                                                        )
+                                                                        .sense(egui::Sense::click())
+                                                                        .truncate(),
+                                                                    );
+                                                                    if val_label.hovered() {
+                                                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                                                    }
+                                                                    val_label.clone().on_hover_text(format!(
+                                                                        "{}\n{}",
+                                                                        value,
+                                                                        Self::tr_lang(
+                                                                            language,
+                                                                            "Click to copy",
+                                                                            "Nhấn để sao chép",
+                                                                        )
+                                                                    ));
+                                                                    if val_label.clicked() {
+                                                                        ui.ctx().copy_text(value.clone());
+                                                                        copied_val = Some(value.clone());
+                                                                    }
+                                                                });
                                                             });
                                                         });
                                                 }
