@@ -1062,10 +1062,10 @@ impl CrosshairApp {
                 let mut tab: u8 = ui.data_mut(|d| *d.get_temp_mut_or(tab_id, 0u8));
                 ui.horizontal(|ui| {
                     for (i, (label, hint)) in [
-                        ("1. Targets", "Game window and the entities to mark."),
-                        ("2. Camera", "Camera position/rotation addresses and data format."),
-                        ("3. Calibration", "Fix markers that don't line up with targets."),
-                        ("4. Appearance", "Marker style, tracer, distance and sound."),
+                        ("1. Visuals (User)", "Game window, box marker styling, color, tracer, distance, and sound alert."),
+                        ("2. Target Memory", "Entity memory pointers, XYZ coordinate offsets, and auto-scan hooks."),
+                        ("3. Camera", "Camera position/rotation addresses and projection format."),
+                        ("4. Calibration", "3D alignment tuning, axis inversion, and debug matrix."),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1078,13 +1078,380 @@ impl CrosshairApp {
                 ui.add_space(4.0);
                 let col1_max_width = (card_width - 140.0).max(120.0);
                 if tab == 0 {
+                    section(ui, "Target Game", Color32::from_rgb(100, 200, 255), |ui| {
+                        Grid::new(("esp_game_window", preset.id))
+                            .num_columns(2)
+                            .spacing([8.0, 4.0])
+                            .max_col_width(col1_max_width)
+                            .show(ui, |ui| {
+                                ui.label("Target window");
+                                let matched_window = windows
+                                    .iter()
+                                    .find(|window| window.selector == preset.target_window)
+                                    .or_else(|| {
+                                        let title =
+                                            crate::window_list::selector_base_title(&preset.target_window)
+                                                .trim();
+                                        (!title.is_empty())
+                                            .then(|| {
+                                                windows.iter().find(|window| {
+                                                    let w_title = window.title.trim();
+                                                    w_title == title
+                                                        || w_title.eq_ignore_ascii_case(title)
+                                                        || crate::window_list::selector_base_title(w_title)
+                                                            == title
+                                                })
+                                            })
+                                            .flatten()
+                                    })
+                                    .cloned();
+                                if let Some(window) = &matched_window
+                                    && preset.target_window != window.selector
+                                {
+                                    preset.target_window = window.selector.clone();
+                                }
+                                let target_label = matched_window
+                                    .as_ref()
+                                    .map(|window| format!("{} [PID {}]", window.title, window.process_id))
+                                    .unwrap_or_else(|| {
+                                        if !preset.target_window.is_empty() {
+                                            let base = crate::window_list::selector_base_title(
+                                                &preset.target_window,
+                                            );
+                                            format!("{base} (Offline / Minimized)")
+                                        } else {
+                                            "Select window".to_string()
+                                        }
+                                    });
+                                ComboBox::from_id_salt(("esp_window", preset.id))
+                                    .selected_text(target_label)
+                                    .width(col1_max_width.min(320.0))
+                                    .show_ui(ui, |ui| {
+                                        if !preset.target_window.is_empty() {
+                                            let clear_label = "-- Clear / None --";
+                                            if ui.selectable_label(false, clear_label).clicked() {
+                                                preset.target_window.clear();
+                                            }
+                                            ui.separator();
+                                        }
+                                        for window in &windows {
+                                            ui.selectable_value(
+                                                &mut preset.target_window,
+                                                window.selector.clone(),
+                                                format!("{} [PID {}]", window.title, window.process_id),
+                                            );
+                                        }
+                                    });
+                                ui.end_row();
+
+                                ui.label("Gameplay filters");
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(
+                                        &mut preset.entity_hit_order_drop_nearest,
+                                        "Ignore self (Local player)",
+                                    )
+                                    .on_hover_text(
+                                        "Automatically hide the entity closest to camera (your own character).",
+                                    );
+
+                                    ui.add_space(8.0);
+                                    ui.checkbox(
+                                        &mut preset.entity_filter_motionless_enabled,
+                                        "Ignore motionless (AFK / Dead)",
+                                    )
+                                    .on_hover_text(
+                                        "Hide entities that have not moved for a set duration (removes corpses / static props).",
+                                    );
+                                    if preset.entity_filter_motionless_enabled {
+                                        ui.label("Timeout");
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_motionless_timeout_secs)
+                                                .range(0.1..=30.0)
+                                                .speed(0.05)
+                                                .suffix("s"),
+                                        );
+                                    }
+                                });
+                                ui.end_row();
+                            });
+                    });
+
+                    ui.add_space(4.0);
+
+                    ui.columns(2, |columns| {
+                        columns[0].vertical(|ui| {
+                            // --- BOX: Marker & Styling ---
+                            section(ui, "Marker & Style", Color32::from_rgb(180, 140, 255), |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label("Source:");
+                                    ComboBox::from_id_salt(("esp_marker_source", preset.id))
+                                        .selected_text(match preset.marker_source {
+                                            EspMarkerSource::Geometry => "Geometry",
+                                            EspMarkerSource::Text => "Text",
+                                            EspMarkerSource::Svg => "SVG",
+                                            EspMarkerSource::Image => "Image",
+                                            EspMarkerSource::None => "None",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Geometry, "Geometry");
+                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Text, "Text");
+                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Svg, "SVG");
+                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Image, "Image");
+                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::None, "None (Tracer / Audio only)");
+                                        });
+
+                                    if preset.marker_source == EspMarkerSource::Geometry {
+                                        ui.add_space(4.0);
+                                        ui.label("Shape:");
+                                        ComboBox::from_id_salt(("esp_marker", preset.id))
+                                            .selected_text(match preset.marker {
+                                                EspMarkerKind::Dot => "Dot",
+                                                EspMarkerKind::Box => "Box",
+                                                EspMarkerKind::None => "None",
+                                            })
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(&mut preset.marker, EspMarkerKind::Dot, "Dot");
+                                                ui.selectable_value(&mut preset.marker, EspMarkerKind::Box, "Box");
+                                                ui.selectable_value(&mut preset.marker, EspMarkerKind::None, "None");
+                                            });
+                                        match preset.marker {
+                                            EspMarkerKind::Dot => {
+                                                ui.label("Radius:");
+                                                ui.add(DragValue::new(&mut preset.dot_radius).speed(1.0).range(1.0..=100.0));
+                                            }
+                                            EspMarkerKind::Box => {
+                                                if preset.entity_aabb_draw_box {
+                                                    ui.label("(Auto from AABB)");
+                                                } else {
+                                                    ui.label("W:");
+                                                    ui.add(DragValue::new(&mut preset.box_width).speed(1.0).range(2.0..=1000.0));
+                                                    ui.label("H:");
+                                                    ui.add(DragValue::new(&mut preset.box_height).speed(1.0).range(2.0..=1000.0));
+                                                }
+                                            }
+                                            EspMarkerKind::None => {}
+                                        }
+                                        if preset.marker != EspMarkerKind::None {
+                                            ui.label("Thick:");
+                                            ui.add(DragValue::new(&mut preset.thickness).speed(1.0).range(1.0..=30.0));
+                                            ui.checkbox(&mut preset.filled, "Fill");
+                                        }
+                                    } else if preset.marker_source == EspMarkerSource::Text {
+                                        ui.add_space(4.0);
+                                        ui.label("Off X:");
+                                        ui.add(DragValue::new(&mut preset.text_offset_x).speed(1.0));
+                                        ui.label("Off Y:");
+                                        ui.add(DragValue::new(&mut preset.text_offset_y).speed(1.0));
+                                        ui.label("Size:");
+                                        ui.add(DragValue::new(&mut preset.text_font_size).speed(1.0).range(8.0..=256.0));
+                                        ui.label("Opacity:");
+                                        ui.add(DragValue::new(&mut preset.text_opacity).speed(0.01).range(0.0..=1.0));
+                                    } else {
+                                        ui.add_space(4.0);
+                                        let label = if preset.marker_source == EspMarkerSource::Svg { "Choose SVG" } else { "Import image" };
+                                        if ui.button(label).clicked() {
+                                            let mut dialog = rfd::FileDialog::new();
+                                            dialog = if preset.marker_source == EspMarkerSource::Svg {
+                                                dialog.add_filter("SVG", &["svg"])
+                                            } else {
+                                                dialog.add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "ico"])
+                                            };
+                                            if let Some(path) = dialog.pick_file() {
+                                                let path = path.to_string_lossy().into_owned();
+                                                if preset.marker_source == EspMarkerSource::Svg {
+                                                    preset.marker_svg_source = path;
+                                                } else {
+                                                    preset.marker_asset_path = path;
+                                                }
+                                            }
+                                        }
+                                        if preset.marker_source == EspMarkerSource::Image {
+                                            let hint = RichText::new("Image file").color(ui.visuals().weak_text_color());
+                                            let width = (ui.available_width() - 8.0).max(60.0);
+                                            ui.add_sized([width, 21.0], TextEdit::singleline(&mut preset.marker_asset_path).hint_text(hint));
+                                        }
+                                        if preset.marker_source == EspMarkerSource::Svg {
+                                            ui.label("W:");
+                                            ui.add(DragValue::new(&mut preset.svg_width).speed(1.0).range(2.0..=1000.0));
+                                            ui.label("H:");
+                                            ui.add(DragValue::new(&mut preset.svg_height).speed(1.0).range(2.0..=1000.0));
+                                        } else {
+                                            ui.label("W:");
+                                            ui.add(DragValue::new(&mut preset.image_width).speed(1.0).range(2.0..=1000.0));
+                                            ui.label("H:");
+                                            ui.add(DragValue::new(&mut preset.image_height).speed(1.0).range(2.0..=1000.0));
+                                        }
+                                        ui.checkbox(&mut preset.marker_billboard_3d, "Billboard 3D");
+                                    }
+                                });
+
+                                if preset.marker_source == EspMarkerSource::Text {
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label("Text:");
+                                        let text_id = ui.make_persistent_id(("esp_marker_text", preset.id));
+                                        let text_width = (ui.available_width() - 8.0).max(60.0);
+                                        Self::render_interpolated_text_edit(
+                                            ui,
+                                            &mut preset.marker_text,
+                                            text_id,
+                                            text_width,
+                                            text_width,
+                                            21.0,
+                                            54.0,
+                                            "Text with {variable}, e.g. Hunter: {health}",
+                                            true,
+                                        );
+                                    });
+                                }
+
+                                if preset.marker_source == EspMarkerSource::Svg {
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label("SVG:");
+                                        let hint = RichText::new("Paste <svg ...>...</svg> here")
+                                            .color(ui.visuals().weak_text_color());
+                                        egui::ScrollArea::vertical()
+                                            .id_salt(("esp_svg_source_scroll", preset.id))
+                                            .max_height(54.0)
+                                            .show(ui, |ui| {
+                                                ui.add_sized(
+                                                    [(ui.available_width() - 8.0).max(60.0), 54.0],
+                                                    TextEdit::multiline(&mut preset.marker_svg_source)
+                                                        .desired_rows(2)
+                                                        .hint_text(hint),
+                                                );
+                                            });
+                                    });
+                                }
+
+                                ui.add_space(2.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label("Marker off:");
+                                    ui.label("X");
+                                    ui.add(DragValue::new(&mut preset.marker_offset_x).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
+                                    ui.label("Y");
+                                    ui.add(DragValue::new(&mut preset.marker_offset_y).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
+                                    if ui.small_button("Reset").clicked() {
+                                        preset.marker_offset_x = 0.0;
+                                        preset.marker_offset_y = 0.0;
+                                    }
+                                });
+
+                                ui.add_space(2.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(&mut preset.scale_with_distance, "Dist Scale");
+                                    if preset.scale_with_distance {
+                                        ui.label("Ref:");
+                                        ui.add(DragValue::new(&mut preset.distance_reference).speed(1.0).range(0.01..=1_000_000.0));
+                                        ui.label("Str:");
+                                        ui.add(
+                                            DragValue::new(&mut preset.distance_scale_strength_percent)
+                                                .speed(1.0)
+                                                .range(0.0..=100.0)
+                                                .suffix("%"),
+                                        );
+                                        ui.label("Offset:");
+                                        ui.add(DragValue::new(&mut preset.marker_size_offset_percent).speed(1.0).range(-95.0..=1000.0).suffix("%"));
+                                    }
+                                });
+                            });
+                        });
+
+                        columns[1].vertical(|ui| {
+                            // --- BOX: Display & Overlay Effects ---
+                            section(ui, "Display & Overlay", Color32::from_rgb(120, 230, 180), |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    let mut color = Color32::from_rgba_unmultiplied(
+                                        preset.color.r, preset.color.g, preset.color.b, preset.color.a,
+                                    );
+                                    ui.label("Color:");
+                                    if ui.color_edit_button_srgba(&mut color).changed() {
+                                        preset.color = RgbaColor { r: color.r(), g: color.g(), b: color.b(), a: color.a() };
+                                    }
+
+                                    ui.add_space(4.0);
+                                    ui.checkbox(&mut preset.show_tracer, "Tracer");
+                                    if preset.show_tracer {
+                                        ui.checkbox(&mut preset.tracer_from_top, "From Top");
+                                        ui.checkbox(&mut preset.clamp_offscreen_tracer, "Clamp off-screen");
+                                    }
+                                });
+
+                                ui.add_space(2.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(&mut preset.show_distance, "Show distance");
+                                });
+
+                                ui.add_space(2.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label("Update:");
+                                    ui.add(DragValue::new(&mut preset.update_interval_ms).speed(1.0).range(1..=1000).suffix(" ms"));
+
+                                    ui.add_space(4.0);
+                                    let mut smooth_enabled = preset.motion_smoothing_ms > 0;
+                                    if ui.checkbox(&mut smooth_enabled, "Smooth").clicked() {
+                                        preset.motion_smoothing_ms = if smooth_enabled { 1 } else { 0 };
+                                    }
+                                    if smooth_enabled {
+                                        ui.add(
+                                            DragValue::new(&mut preset.motion_smoothing_ms)
+                                                .speed(1.0)
+                                                .range(1..=500)
+                                                .suffix(" ms"),
+                                        );
+                                    }
+                                });
+                            });
+
+                            ui.add_space(4.0);
+
+                            // --- BOX: Spatial Target Audio ---
+                            section(ui, "Sound Alert", Color32::from_rgb(255, 150, 150), |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(&mut preset.target_audio_enabled, "Enable sound");
+
+                                    if preset.target_audio_enabled {
+                                        if ui.button("Choose sound").clicked()
+                                            && let Some(path) = rfd::FileDialog::new()
+                                                .add_filter("Audio", &["wav", "mp3", "flac", "ogg", "m4a", "aac"])
+                                                .pick_file()
+                                        {
+                                            preset.target_audio_path = path.to_string_lossy().into_owned();
+                                        }
+                                        let hint = RichText::new("Audio file").color(ui.visuals().weak_text_color());
+                                        let audio_width = (ui.available_width() - 70.0).max(60.0);
+                                        ui.add_sized([audio_width, 21.0], TextEdit::singleline(&mut preset.target_audio_path).hint_text(hint));
+                                        ui.checkbox(&mut preset.target_audio_loop, "Loop");
+                                    }
+                                });
+
+                                if preset.target_audio_enabled {
+                                    ui.add_space(2.0);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label("Volume:");
+                                        ui.add(DragValue::new(&mut preset.target_audio_volume).speed(0.01).range(0.0..=2.0));
+                                        ui.add_space(4.0);
+                                        ui.label("Full vol in:");
+                                        ui.add(DragValue::new(&mut preset.target_audio_full_volume_distance).speed(1.0).range(0.0..=1_000_000.0));
+                                        ui.add_space(4.0);
+                                        ui.label("Silent after:");
+                                        ui.add(DragValue::new(&mut preset.target_audio_max_distance).speed(1.0).range(0.01..=1_000_000.0));
+                                    });
+                                }
+                            });
+                        });
+                    });
+                }
+
+                if tab == 1 {
                 section(ui, "Target", Color32::from_rgb(100, 200, 255), |ui| {
                 Grid::new(("esp_addresses", preset.id))
                     .num_columns(2)
                     .spacing([8.0, 4.0])
                     .max_col_width(col1_max_width)
                     .show(ui, |ui| {
-                        ui.label(self.tr("Target window", "Cửa sổ mục tiêu"));
+                        ui.label("Target window");
                         let matched_window = windows
                             .iter()
                             .find(|window| window.selector == preset.target_window)
@@ -1118,15 +1485,9 @@ impl CrosshairApp {
                                     let base = crate::window_list::selector_base_title(
                                         &preset.target_window,
                                     );
-                                    let is_vi = self.state.ui_language
-                                        == crate::model::UiLanguage::Vietnamese;
-                                    if is_vi {
-                                        format!("{base} (Không mở / Ẩn)")
-                                    } else {
-                                        format!("{base} (Offline / Minimized)")
-                                    }
+                                    format!("{base} (Offline / Minimized)")
                                 } else {
-                                    self.tr("Select window", "Chọn cửa sổ").to_string()
+                                    "Select window".to_string()
                                 }
                             });
                         ComboBox::from_id_salt(("esp_window", preset.id))
@@ -1134,8 +1495,7 @@ impl CrosshairApp {
                             .width(col1_max_width.min(320.0))
                             .show_ui(ui, |ui| {
                                 if !preset.target_window.is_empty() {
-                                    let clear_label =
-                                        self.tr("-- Clear / None --", "-- Bỏ chọn / Trống --");
+                                    let clear_label = "-- Clear / None --";
                                     if ui.selectable_label(false, clear_label).clicked() {
                                         preset.target_window.clear();
                                     }
@@ -1229,7 +1589,7 @@ impl CrosshairApp {
                             ui.end_row();
                             let scan_mode = preset.scan_mode();
                             if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
-                                ui.label(self.tr("Addresses", "Địa chỉ"));
+                                ui.label("Addresses");
                                 ui.scope(|ui| {
                                     ui.set_max_width(col1_max_width);
                                     ui.vertical(|ui| {
@@ -1256,112 +1616,124 @@ impl CrosshairApp {
                                 ui.label("Entity root");
                                 ui.scope(|ui| {
                                     ui.set_max_width(col1_max_width);
-                                    ui.horizontal_wrapped(|ui| {
+                                    ui.vertical(|ui| {
                                         ui.add(
                                             TextEdit::singleline(&mut preset.entity_root)
-                                                .desired_width(col1_max_width.min(280.0))
-                                            .hint_text(
-                                                RichText::new(
-                                                    "stable pointer to first entity X / @alias",
+                                                .desired_width(col1_max_width.min(380.0))
+                                                .hint_text(
+                                                    RichText::new(
+                                                        "stable pointer to first entity X / @alias",
+                                                    )
+                                                    .color(ui.visuals().weak_text_color()),
+                                                ),
+                                        );
+                                        let can_shift = crate::model::shift_entity_root(
+                                            &preset.entity_root,
+                                            root_step,
+                                            0,
+                                            preset.entity_stride_level,
+                                        )
+                                        .is_some();
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 4.0;
+                                            ui.label("Shift pointer:");
+                                            if ui
+                                                .add_enabled(can_shift, egui::Button::new("▲"))
+                                                .on_hover_text(
+                                                    "Shift root address or pointer offset - (Step x multiplier)",
                                                 )
-                                                .color(ui.visuals().weak_text_color()),
-                                            ),
-                                    );
-                                    let can_shift = crate::model::shift_entity_root(
-                                        &preset.entity_root,
-                                        root_step,
-                                        0,
-                                        preset.entity_stride_level,
-                                    )
-                                    .is_some();
-                                    if ui
-                                        .add_enabled(can_shift, egui::Button::new("▲"))
-                                        .on_hover_text(
-                                            "Shift root address or pointer offset - (Step x multiplier)",
-                                        )
-                                        .clicked()
-                                    {
-                                        if let Some(root) = crate::model::shift_entity_root(
-                                            &preset.entity_root,
-                                            navigation_step,
-                                            -1,
-                                            preset.entity_stride_level,
-                                        ) {
-                                            preset.entity_root = root;
-                                        }
-                                    }
-                                    if ui
-                                        .add_enabled(can_shift, egui::Button::new("▼"))
-                                        .on_hover_text(
-                                            "Shift root address or pointer offset + (Step x multiplier)",
-                                        )
-                                        .clicked()
-                                    {
-                                        if let Some(root) = crate::model::shift_entity_root(
-                                            &preset.entity_root,
-                                            navigation_step,
-                                            1,
-                                            preset.entity_stride_level,
-                                        ) {
-                                            preset.entity_root = root;
-                                        }
-                                    }
-                                    ui.label("Step");
-                                    if let Some(step) = preset.entity_root_step.as_mut() {
-                                        ui.add(
-                                            DragValue::new(step)
-                                                .range(1..=0x10000)
-                                                .hexadecimal(1, false, false),
-                                        )
+                                                .clicked()
+                                            {
+                                                if let Some(root) = crate::model::shift_entity_root(
+                                                    &preset.entity_root,
+                                                    navigation_step,
+                                                    -1,
+                                                    preset.entity_stride_level,
+                                                ) {
+                                                    preset.entity_root = root;
+                                                }
+                                            }
+                                            if ui
+                                                .add_enabled(can_shift, egui::Button::new("▼"))
+                                                .on_hover_text(
+                                                    "Shift root address or pointer offset + (Step x multiplier)",
+                                                )
+                                                .clicked()
+                                            {
+                                                if let Some(root) = crate::model::shift_entity_root(
+                                                    &preset.entity_root,
+                                                    navigation_step,
+                                                    1,
+                                                    preset.entity_stride_level,
+                                                ) {
+                                                    preset.entity_root = root;
+                                                }
+                                            }
+                                            ui.add_space(4.0);
+                                            ui.label("Step:");
+                                            if let Some(step) = preset.entity_root_step.as_mut() {
+                                                ui.add(
+                                                    DragValue::new(step)
+                                                        .range(1..=0x10000)
+                                                        .hexadecimal(1, false, false),
+                                                )
+                                                .on_hover_text(
+                                                    "Raw-address navigation step in hexadecimal bytes; defaults to Stride.",
+                                                );
+                                            }
+                                            ui.label("x");
+                                            ui.add(
+                                                DragValue::new(&mut preset.entity_root_step_multiplier)
+                                                    .range(1..=1_000_000),
+                                            )
                                             .on_hover_text(
-                                                "Raw-address navigation step in hexadecimal bytes; defaults to Stride.",
+                                                "Decimal multiplier. Each arrow moves Entity root by Step x this value.",
                                             );
-                                    }
-                                    ui.label("x");
-                                    ui.add(
-                                        DragValue::new(&mut preset.entity_root_step_multiplier)
-                                            .range(1..=1_000_000),
-                                    )
-                                    .on_hover_text(
-                                        "Decimal multiplier. Each arrow moves Entity root by Step x this value.",
-                                    );
+                                        });
+                                    });
+                                });
+                                ui.end_row();
+                            }
+                            ui.label("Coordinates");
+                            ui.scope(|ui| {
+                                ui.set_max_width(col1_max_width);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label("X offset:");
+                                    ui.add(DragValue::new(&mut preset.entity_x_offset));
+                                    ui.label("Y offset:");
+                                    ui.add(DragValue::new(&mut preset.entity_y_offset));
+                                    ui.label("Z offset:");
+                                    ui.add(DragValue::new(&mut preset.entity_z_offset));
                                 });
                             });
                             ui.end_row();
-                        }
-                        ui.label("Entity layout");
-                        ui.scope(|ui| {
-                            ui.set_max_width(col1_max_width);
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label("X");
-                                ui.add(DragValue::new(&mut preset.entity_x_offset));
-                                ui.label("Y");
-                                ui.add(DragValue::new(&mut preset.entity_y_offset));
-                                ui.label("Z");
-                                ui.add(DragValue::new(&mut preset.entity_z_offset));
-                                if scan_mode != crate::model::EspAutoScanMode::ManualAddresses {
-                                    ui.label("Stride");
-                                    ui.add(
-                                        DragValue::new(&mut preset.entity_stride)
-                                            .range(1..=0x10000)
-                                            .hexadecimal(1, false, false),
-                                    );
-                                    ui.label("Level");
-                                    ui.add(
-                                        DragValue::new(&mut preset.entity_stride_level)
-                                            .range(1..=8),
-                                    )
-                                    .on_hover_text(
-                                        "Pointer offset level to apply Stride to (1 = 1st offset, 2 = 2nd offset, etc.). Overridden if '*' is specified.",
-                                    );
-                                }
-                                ui.label("Count");
-                                ui.add(
-                                    DragValue::new(&mut preset.entity_count).range(1..=512),
-                                );
-                            });
-                        });
-                        ui.end_row();
+                            if scan_mode != crate::model::EspAutoScanMode::ManualAddresses {
+                                ui.label("Array structure");
+                                ui.scope(|ui| {
+                                    ui.set_max_width(col1_max_width);
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.label("Stride:");
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_stride)
+                                                .range(1..=0x10000)
+                                                .hexadecimal(1, false, false),
+                                        );
+                                        ui.label("Level:");
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_stride_level)
+                                                .range(1..=8),
+                                        )
+                                        .on_hover_text(
+                                            "Pointer offset level to apply Stride to (1 = 1st offset, 2 = 2nd offset, etc.). Overridden if '*' is specified.",
+                                        );
+                                        ui.label("Count:");
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_count).range(1..=512),
+                                        );
+                                    });
+                                });
+                                ui.end_row();
+                            }
                             let scan_mode = preset.scan_mode();
                             ui.label(if scan_mode == crate::model::EspAutoScanMode::ManualAddresses {
                                 "HUD"
@@ -1457,24 +1829,22 @@ impl CrosshairApp {
                                     ui.horizontal_wrapped(|ui| {
                                         ui.spacing_mut().item_spacing.x = 6.0;
                                         let scan_mode = preset.scan_mode();
-                                        ui.checkbox(&mut preset.entity_auto_continuous, self.tr("Continuous", "Liên tục"))
-                                            .on_hover_text(self.tr(
+                                        ui.checkbox(&mut preset.entity_auto_continuous, "Continuous")
+                                            .on_hover_text(
                                                 "Keep scanning continuously with throttled duty-cycle without lag. Newly discovered entity addresses are immediately added and displayed in ESP.",
-                                                "Quét ngắt quãng liên tục không gây lag game. Các địa chỉ phân thân/đổi dạng mới được tự động thêm vào ESP.",
-                                            ));
+                                            );
 
                                         if preset.entity_auto_continuous {
-                                            ui.label(self.tr("Interval", "Khoảng nghỉ"));
+                                            ui.label("Interval");
                                             ui.add(
                                                 DragValue::new(&mut preset.entity_auto_continuous_interval_secs)
                                                     .range(0.2..=10.0)
                                                     .speed(0.1)
                                                     .suffix("s"),
                                             )
-                                            .on_hover_text(self.tr(
+                                            .on_hover_text(
                                                 "Pause interval between burst scans to eliminate game lag (default: 1.0s).",
-                                                "Khoảng nghỉ giữa các đợt quét ngắt quãng để triệt tiêu lag game (mặc định: 1.0s).",
-                                            ));
+                                            );
                                         }
 
                                         if scan_mode == crate::model::EspAutoScanMode::AllHits && !preset.entity_auto_continuous {
@@ -1557,12 +1927,11 @@ impl CrosshairApp {
 
                                         ui.checkbox(
                                             &mut preset.entity_hit_order_drop_nearest,
-                                            self.tr("Drop self", "Bỏ self"),
+                                            "Drop self",
                                         )
-                                        .on_hover_text(self.tr(
+                                        .on_hover_text(
                                             "After capturing the required number of entities, remove the entity with the smallest distance to camera (local player) and blacklist it.",
-                                            "Sau khi tìm đủ số lượng thực thể yêu cầu, loại bỏ thực thể gần camera nhất (nhân vật bản thân) và đưa vào blacklist.",
-                                        ));
+                                        );
 
                                         ui.checkbox(&mut preset.entity_auto_hud_enabled, "HUD");
                                         if preset.entity_auto_hud_enabled {
@@ -1635,12 +2004,11 @@ impl CrosshairApp {
                                     ui.checkbox(&mut preset.entity_aabb_center, "AABB center");
                                     ui.checkbox(
                                         &mut preset.entity_aabb_draw_box,
-                                        self.tr("Box from coords", "Vẽ box theo tọa độ"),
+                                        "Box from coords",
                                     )
-                                    .on_hover_text(self.tr(
+                                    .on_hover_text(
                                         "Draw ESP box directly from AABB coordinate bounds, ignoring manual box width/height settings.",
-                                        "Vẽ khung bao theo tọa độ AABB thực tế của đối tượng, bỏ qua kích thước box thủ công.",
-                                    ));
+                                    );
                                     if preset.entity_aabb_center || preset.entity_aabb_draw_box {
                                         ui.label("Pair delta");
                                         ui.add(
@@ -1658,12 +2026,11 @@ impl CrosshairApp {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.checkbox(
                                         &mut preset.entity_exclude_near_preset_enabled,
-                                        self.tr("Drop near preset", "Bỏ box gần preset"),
+                                        "Drop near preset",
                                     )
-                                    .on_hover_text(self.tr(
+                                    .on_hover_text(
                                         "Hide entities that match or are closest to entities in another active ESP preset (avoids duplicate overlapping boxes).",
-                                        "Ẩn các thực thể trùng hoặc gần nhất với thực thể trong một preset ESP khác đang bật (tránh bị 2 box đè nhau).",
-                                    ));
+                                    );
 
                                     if preset.entity_exclude_near_preset_enabled {
                                         let other_name = preset
@@ -1674,7 +2041,7 @@ impl CrosshairApp {
                                                     .iter()
                                                     .find(|p| p.id == id)
                                             })
-                                            .map_or(self.tr("Select preset", "Chọn preset"), |p| p.name.as_str());
+                                            .map_or("Select preset", |p| p.name.as_str());
                                         ComboBox::from_id_salt(("esp_exclude_near_preset", preset.id))
                                             .selected_text(other_name)
                                             .width(col1_max_width.min(130.0))
@@ -1682,7 +2049,7 @@ impl CrosshairApp {
                                                 ui.selectable_value(
                                                     &mut preset.entity_exclude_near_preset_id,
                                                     None,
-                                                    self.tr("-- None --", "-- Không --"),
+                                                    "-- None --",
                                                 );
                                                 for other in &self.state.esp_presets {
                                                     if other.id != preset.id {
@@ -1694,30 +2061,6 @@ impl CrosshairApp {
                                                     }
                                                 }
                                             });
-                                    }
-                                });
-                            });
-                            ui.end_row();
-                            ui.label("Idle targets");
-                            ui.scope(|ui| {
-                                ui.set_max_width(col1_max_width);
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(
-                                        &mut preset.entity_filter_motionless_enabled,
-                                        self.tr("Filter motionless", "Lọc đối tượng đứng yên"),
-                                    )
-                                    .on_hover_text(self.tr(
-                                        "Hide entities that have not moved for a set duration (removes static objects / eliminated players).",
-                                        "Ẩn thực thể không cử động/đứng im quá thời gian cài đặt (loại bỏ vật thể tĩnh hoặc người chơi đã bị loại).",
-                                    ));
-                                    if preset.entity_filter_motionless_enabled {
-                                        ui.label(self.tr("Timeout", "Thời gian"));
-                                        ui.add(
-                                            DragValue::new(&mut preset.entity_motionless_timeout_secs)
-                                                .range(0.1..=30.0)
-                                                .speed(0.05)
-                                                .suffix("s"),
-                                        );
                                     }
                                 });
                             });
@@ -1815,7 +2158,7 @@ impl CrosshairApp {
                 }
                 }
 
-                if tab == 1 {
+                if tab == 2 {
                 section(ui, "Camera addresses", Color32::from_rgb(100, 200, 255), |ui| {
                 ui.label(RichText::new("Where the game stores the camera position and rotation.").weak().size(11.0));
                 ui.columns(2, |columns| {
@@ -1942,7 +2285,7 @@ impl CrosshairApp {
                                 });
                             });
                 }
-                if tab == 2 {
+                if tab == 3 {
                 ui.label(RichText::new("Only needed if markers don't line up with targets. Try \"Calibration helpers\" first.").weak());
                 ui.add_space(2.0);
                 ui.columns(2, |columns| {
@@ -2213,282 +2556,7 @@ impl CrosshairApp {
                     });
                 });
                 }
-                if tab == 3 {
-                ui.columns(2, |columns| {
-                    columns[0].vertical(|ui| {
-                        // --- BOX 3: Marker & Styling ---
-                        section(ui, "Marker", Color32::from_rgb(180, 140, 255), |ui| {
 
-                                // Marker source & Shape settings
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label("Source:");
-                                    ComboBox::from_id_salt(("esp_marker_source", preset.id))
-                                        .selected_text(match preset.marker_source {
-                                            EspMarkerSource::Geometry => "Geometry",
-                                            EspMarkerSource::Text => "Text",
-                                            EspMarkerSource::Svg => "SVG",
-                                            EspMarkerSource::Image => "Image",
-                                            EspMarkerSource::None => "None",
-                                        })
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Geometry, "Geometry");
-                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Text, "Text");
-                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Svg, "SVG");
-                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::Image, "Image");
-                                            ui.selectable_value(&mut preset.marker_source, EspMarkerSource::None, "None (Tracer / Audio only)");
-                                        });
-
-                                    if preset.marker_source == EspMarkerSource::Geometry {
-                                        ui.add_space(4.0);
-                                        ui.label("Shape:");
-                                        ComboBox::from_id_salt(("esp_marker", preset.id))
-                                            .selected_text(match preset.marker {
-                                                EspMarkerKind::Dot => "Dot",
-                                                EspMarkerKind::Box => "Box",
-                                                EspMarkerKind::None => "None",
-                                            })
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(&mut preset.marker, EspMarkerKind::Dot, "Dot");
-                                                ui.selectable_value(&mut preset.marker, EspMarkerKind::Box, "Box");
-                                                ui.selectable_value(&mut preset.marker, EspMarkerKind::None, "None");
-                                            });
-                                        match preset.marker {
-                                            EspMarkerKind::Dot => {
-                                                ui.label("Radius:");
-                                                ui.add(DragValue::new(&mut preset.dot_radius).speed(1.0).range(1.0..=100.0));
-                                            }
-                                            EspMarkerKind::Box => {
-                                                if preset.entity_aabb_draw_box {
-                                                    ui.label(self.tr("(Auto from AABB)", "(Tự động theo AABB)"));
-                                                } else {
-                                                    ui.label("W:");
-                                                    ui.add(DragValue::new(&mut preset.box_width).speed(1.0).range(2.0..=1000.0));
-                                                    ui.label("H:");
-                                                    ui.add(DragValue::new(&mut preset.box_height).speed(1.0).range(2.0..=1000.0));
-                                                }
-                                            }
-                                            EspMarkerKind::None => {}
-                                        }
-                                        if preset.marker != EspMarkerKind::None {
-                                            ui.label("Thick:");
-                                            ui.add(DragValue::new(&mut preset.thickness).speed(1.0).range(1.0..=30.0));
-                                            ui.checkbox(&mut preset.filled, "Fill");
-                                        }
-                                    } else if preset.marker_source == EspMarkerSource::Text {
-                                        ui.add_space(4.0);
-                                        ui.label("Off X:");
-                                        ui.add(DragValue::new(&mut preset.text_offset_x).speed(1.0));
-                                        ui.label("Off Y:");
-                                        ui.add(DragValue::new(&mut preset.text_offset_y).speed(1.0));
-                                        ui.label("Size:");
-                                        ui.add(DragValue::new(&mut preset.text_font_size).speed(1.0).range(8.0..=256.0));
-                                        ui.label("Opacity:");
-                                        ui.add(DragValue::new(&mut preset.text_opacity).speed(0.01).range(0.0..=1.0));
-                                    } else {
-                                        ui.add_space(4.0);
-                                        let label = if preset.marker_source == EspMarkerSource::Svg { "Choose SVG" } else { "Import image" };
-                                        if ui.button(label).clicked() {
-                                            let mut dialog = rfd::FileDialog::new();
-                                            dialog = if preset.marker_source == EspMarkerSource::Svg {
-                                                dialog.add_filter("SVG", &["svg"])
-                                            } else {
-                                                dialog.add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp", "ico"])
-                                            };
-                                            if let Some(path) = dialog.pick_file() {
-                                                let path = path.to_string_lossy().into_owned();
-                                                if preset.marker_source == EspMarkerSource::Svg {
-                                                    preset.marker_svg_source = path;
-                                                } else {
-                                                    preset.marker_asset_path = path;
-                                                }
-                                            }
-                                        }
-                                        if preset.marker_source == EspMarkerSource::Image {
-                                            let hint = RichText::new("Image file").color(ui.visuals().weak_text_color());
-                                            let width = (ui.available_width() - 8.0).max(60.0);
-                                            ui.add_sized([width, 21.0], TextEdit::singleline(&mut preset.marker_asset_path).hint_text(hint));
-                                        }
-                                        if preset.marker_source == EspMarkerSource::Svg {
-                                            ui.label("W:");
-                                            ui.add(DragValue::new(&mut preset.svg_width).speed(1.0).range(2.0..=1000.0));
-                                            ui.label("H:");
-                                            ui.add(DragValue::new(&mut preset.svg_height).speed(1.0).range(2.0..=1000.0));
-                                        } else {
-                                            ui.label("W:");
-                                            ui.add(DragValue::new(&mut preset.image_width).speed(1.0).range(2.0..=1000.0));
-                                            ui.label("H:");
-                                            ui.add(DragValue::new(&mut preset.image_height).speed(1.0).range(2.0..=1000.0));
-                                        }
-                                        ui.checkbox(&mut preset.marker_billboard_3d, "Billboard 3D");
-                                    }
-                                });
-
-                                // Text content editor (if Text source)
-                                if preset.marker_source == EspMarkerSource::Text {
-                                    ui.add_space(2.0);
-                                    ui.horizontal(|ui| {
-                                        ui.label("Text:");
-                                        let text_id = ui.make_persistent_id(("esp_marker_text", preset.id));
-                                        let text_width = (ui.available_width() - 8.0).max(60.0);
-                                        Self::render_interpolated_text_edit(
-                                            ui,
-                                            &mut preset.marker_text,
-                                            text_id,
-                                            text_width,
-                                            text_width,
-                                            21.0,
-                                            54.0,
-                                            "Text with {variable}, e.g. Hunter: {health}",
-                                            true,
-                                        );
-                                    });
-                                }
-
-                                // SVG source editor (if SVG source)
-                                if preset.marker_source == EspMarkerSource::Svg {
-                                    ui.add_space(2.0);
-                                    ui.horizontal(|ui| {
-                                        ui.label("SVG:");
-                                        let hint = RichText::new("Paste <svg ...>...</svg> here")
-                                            .color(ui.visuals().weak_text_color());
-                                        egui::ScrollArea::vertical()
-                                            .id_salt(("esp_svg_source_scroll", preset.id))
-                                            .max_height(54.0)
-                                            .show(ui, |ui| {
-                                                ui.add_sized(
-                                                    [(ui.available_width() - 8.0).max(60.0), 54.0],
-                                                    TextEdit::multiline(&mut preset.marker_svg_source)
-                                                        .desired_rows(2)
-                                                        .hint_text(hint),
-                                                );
-                                            });
-                                    });
-                                }
-
-                                ui.add_space(2.0);
-
-                                // Marker screen offset & Distance scaling
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label("Marker off:");
-                                    ui.label("X");
-                                    ui.add(DragValue::new(&mut preset.marker_offset_x).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
-                                    ui.label("Y");
-                                    ui.add(DragValue::new(&mut preset.marker_offset_y).speed(1.0).range(-10000.0..=10000.0).suffix(" px"));
-                                    if ui.small_button("Reset").clicked() {
-                                        preset.marker_offset_x = 0.0;
-                                        preset.marker_offset_y = 0.0;
-                                    }
-                                });
-
-                                ui.add_space(2.0);
-
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(&mut preset.scale_with_distance, "Dist Scale");
-                                    if preset.scale_with_distance {
-                                        ui.label("Ref:");
-                                        ui.add(DragValue::new(&mut preset.distance_reference).speed(1.0).range(0.01..=1_000_000.0));
-                                        ui.label("Str:");
-                                        ui.add(
-                                            DragValue::new(&mut preset.distance_scale_strength_percent)
-                                                .speed(1.0)
-                                                .range(0.0..=100.0)
-                                                .suffix("%"),
-                                        );
-                                        ui.label("Offset:");
-                                        ui.add(DragValue::new(&mut preset.marker_size_offset_percent).speed(1.0).range(-95.0..=1000.0).suffix("%"));
-                                    }
-                                });
-                            });
-                    });
-                    columns[1].vertical(|ui| {
-                        // --- BOX 4: Display & Overlay Effects ---
-                        section(ui, "Display", Color32::from_rgb(120, 230, 180), |ui| {
-
-                                ui.horizontal_wrapped(|ui| {
-                                    let mut color = Color32::from_rgba_unmultiplied(
-                                        preset.color.r, preset.color.g, preset.color.b, preset.color.a,
-                                    );
-                                    ui.label("Color:");
-                                    if ui.color_edit_button_srgba(&mut color).changed() {
-                                        preset.color = RgbaColor { r: color.r(), g: color.g(), b: color.b(), a: color.a() };
-                                    }
-
-                                    ui.add_space(4.0);
-                                    ui.checkbox(&mut preset.show_tracer, "Tracer");
-                                    if preset.show_tracer {
-                                        ui.checkbox(&mut preset.tracer_from_top, "From Top");
-                                        ui.checkbox(&mut preset.clamp_offscreen_tracer, "Clamp off-screen");
-                                    }
-                                });
-
-                                ui.add_space(2.0);
-
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(&mut preset.show_distance, "Show distance");
-                                });
-
-                                ui.add_space(2.0);
-
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.label("Update:");
-                                    ui.add(DragValue::new(&mut preset.update_interval_ms).speed(1.0).range(1..=1000).suffix(" ms"));
-
-                                    ui.add_space(4.0);
-                                    let mut smooth_enabled = preset.motion_smoothing_ms > 0;
-                                    if ui.checkbox(&mut smooth_enabled, "Smooth").clicked() {
-                                        preset.motion_smoothing_ms = if smooth_enabled { 1 } else { 0 };
-                                    }
-                                    if smooth_enabled {
-                                        ui.add(
-                                            DragValue::new(&mut preset.motion_smoothing_ms)
-                                                .speed(1.0)
-                                                .range(1..=500)
-                                                .suffix(" ms"),
-                                        );
-                                    }
-                                });
-                            });
-
-                        ui.add_space(4.0);
-
-                        // --- BOX 5: Spatial Target Audio ---
-                        section(ui, "Sound alert", Color32::from_rgb(255, 150, 150), |ui| {
-
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.checkbox(&mut preset.target_audio_enabled, "Enable sound");
-
-                                    if preset.target_audio_enabled {
-                                        if ui.button("Choose sound").clicked()
-                                            && let Some(path) = rfd::FileDialog::new()
-                                                .add_filter("Audio", &["wav", "mp3", "flac", "ogg", "m4a", "aac"])
-                                                .pick_file()
-                                        {
-                                            preset.target_audio_path = path.to_string_lossy().into_owned();
-                                        }
-                                        let hint = RichText::new("Audio file").color(ui.visuals().weak_text_color());
-                                        let audio_width = (ui.available_width() - 70.0).max(60.0);
-                                        ui.add_sized([audio_width, 21.0], TextEdit::singleline(&mut preset.target_audio_path).hint_text(hint));
-                                        ui.checkbox(&mut preset.target_audio_loop, "Loop");
-                                    }
-                                });
-
-                                if preset.target_audio_enabled {
-                                    ui.add_space(2.0);
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label("Volume:");
-                                        ui.add(DragValue::new(&mut preset.target_audio_volume).speed(0.01).range(0.0..=2.0));
-                                        ui.add_space(4.0);
-                                        ui.label("Full vol in:");
-                                        ui.add(DragValue::new(&mut preset.target_audio_full_volume_distance).speed(1.0).range(0.0..=1_000_000.0));
-                                        ui.add_space(4.0);
-                                        ui.label("Silent after:");
-                                        ui.add(DragValue::new(&mut preset.target_audio_max_distance).speed(1.0).range(0.01..=1_000_000.0));
-                                    });
-                                }
-                            });
-                    });
-                });
-                }
             });
             if copy_preset_index == Some(index) {
                 self.preset_clipboard = Some(crate::ui::PresetClipboard::Esp(preset.clone()));
