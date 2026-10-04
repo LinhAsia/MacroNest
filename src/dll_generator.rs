@@ -37,10 +37,10 @@ pub enum DllPatchMode {
 impl DllPatchMode {
     pub fn label(&self) -> &'static str {
         match self {
-            Self::Freeze => "Khóa liên tục (Freeze)",
-            Self::WriteOnce => "Ghi 1 lần khi tiêm (Write Once)",
-            Self::NopInstruction => "Vô hiệu hóa lệnh (NOP Instruction)",
-            Self::HotkeyToggle => "Bật/Tắt bằng Phím tắt (Hotkey Toggle)",
+            Self::Freeze => "Continuous Freeze",
+            Self::WriteOnce => "Write Once",
+            Self::NopInstruction => "NOP Instruction",
+            Self::HotkeyToggle => "Hotkey Toggle",
         }
     }
 }

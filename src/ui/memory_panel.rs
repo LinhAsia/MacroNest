@@ -1712,7 +1712,7 @@ impl CrosshairApp {
                         ui.close();
                     }
                     if ui
-                        .button(self.tr("Auto DLL Studio", "Auto DLL Studio"))
+                        .button("Auto DLL Studio")
                         .clicked()
                     {
                         self.memory_panel.show_dll_studio = true;
@@ -5854,10 +5854,7 @@ impl CrosshairApp {
         }
 
         let mut open = self.memory_panel.show_dll_studio;
-        let title = self.tr(
-            "Auto DLL Studio - Generator & Injector",
-            "Auto DLL Studio - Trình Tạo & Tiêm DLL",
-        );
+        let title = "Auto DLL Studio - Generator & Injector";
         egui::Window::new(title)
             .open(&mut open)
             .default_size([740.0, 540.0])
@@ -5874,10 +5871,7 @@ impl CrosshairApp {
                     );
                     ui.separator();
                     ui.label(
-                        egui::RichText::new(self.tr(
-                            "Generate C++ DLL project or inject memory scripts without coding",
-                            "Tạo file DLL hoặc Inject script memory không cần C++",
-                        ))
+                        egui::RichText::new("Generate C++ DLL project or inject memory scripts without coding")
                         .small()
                         .weak(),
                     );
@@ -5888,24 +5882,21 @@ impl CrosshairApp {
                     // Section 1: Project Settings
                     ui.group(|ui| {
                         ui.label(
-                            egui::RichText::new(self.tr(
-                                "1. Project Configuration",
-                                "1. Cấu hình Dự án (Project Config)",
-                            ))
+                            egui::RichText::new("1. Project Configuration")
                             .strong(),
                         );
                         egui::Grid::new("dll-proj-grid")
                             .num_columns(2)
                             .spacing([10.0, 6.0])
                             .show(ui, |ui| {
-                                ui.label(self.tr("Project Name:", "Tên DLL (Project Name):"));
+                                ui.label("Project Name:");
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.memory_panel.dll_config.project_name)
                                         .desired_width(200.0),
                                 );
                                 ui.end_row();
 
-                                ui.label(self.tr("Target Process:", "Tiến trình Mục tiêu (Target Process):"));
+                                ui.label("Target Process:");
                                 ui.horizontal(|ui| {
                                     ui.add(
                                         egui::TextEdit::singleline(&mut self.memory_panel.dll_config.target_process)
@@ -5914,7 +5905,7 @@ impl CrosshairApp {
                                     if let Some(proc_name) = &self.memory_panel.process_selector.split('(').next() {
                                         let clean_name = proc_name.trim().to_string();
                                         if !clean_name.is_empty()
-                                            && ui.button(self.tr("Get Current Process", "Lấy Process Hiện tại")).clicked()
+                                            && ui.button("Get Current Process").clicked()
                                         {
                                             self.memory_panel.dll_config.target_process = clean_name;
                                         }
@@ -5922,11 +5913,8 @@ impl CrosshairApp {
                                 });
                                 ui.end_row();
 
-                                ui.label(self.tr("Debug Console Window:", "Cửa sổ Console Debug:"));
-                                let console_label = self.tr(
-                                    "AllocConsole (Show debug console log window)",
-                                    "AllocConsole (Hiện cửa sổ đen Debug log)",
-                                );
+                                ui.label("Debug Console Window:");
+                                let console_label = "AllocConsole (Show debug console log window)";
                                 ui.checkbox(
                                     &mut self.memory_panel.dll_config.alloc_console_for_debug,
                                     console_label,
@@ -5941,15 +5929,12 @@ impl CrosshairApp {
                     ui.group(|ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(self.tr(
-                                    "2. RAM Address & Patch Config",
-                                    "2. Danh sách Địa chỉ RAM / Patch Config",
-                                ))
+                                egui::RichText::new("2. RAM Address & Patch Config")
                                 .strong(),
                             );
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui
-                                    .button(self.tr("+ Add New Address", "+ Thêm địa chỉ mới"))
+                                    .button("+ Add New Address")
                                     .clicked()
                                 {
                                     self.memory_panel
@@ -5958,7 +5943,7 @@ impl CrosshairApp {
                                         .push(crate::dll_generator::DllMemoryEntry::default());
                                 }
                                 if ui
-                                    .button(self.tr("Import Saved Addresses", "Import từ Địa chỉ Đã lưu"))
+                                    .button("Import Saved Addresses")
                                     .clicked()
                                 {
                                     let saved_list = self.memory_panel.saved.clone();
@@ -5992,10 +5977,7 @@ impl CrosshairApp {
                                         };
                                         self.memory_panel.dll_config.entries.push(entry);
                                     }
-                                    let msg_template = self.tr(
-                                        "Imported {} addresses from saved list!",
-                                        "Đã import {} địa chỉ từ danh sách đã lưu!",
-                                    );
+                                    let msg_template = "Imported {} addresses from saved list!";
                                     self.memory_panel.dll_status_msg =
                                         msg_template.replace("{}", &count.to_string());
                                 }
@@ -6008,18 +5990,11 @@ impl CrosshairApp {
 
                         if entries_len == 0 {
                             ui.label(
-                                egui::RichText::new(self.tr(
-                                    "No RAM addresses added. Click '+ Add New Address' or 'Import Saved Addresses'.",
-                                    "Chưa có địa chỉ RAM nào. Hãy bấm '+ Thêm địa chỉ mới' hoặc 'Import từ Địa chỉ Đã lưu'.",
-                                ))
+                                egui::RichText::new("No RAM addresses added. Click '+ Add New Address' or 'Import Saved Addresses'.")
                                 .weak(),
                             );
                         }
 
-                        let is_vietnamese = self.state.ui_language == crate::model::UiLanguage::Vietnamese;
-                        let tr_func = |en: &'static str, vi: &'static str| -> &'static str {
-                            if is_vietnamese { vi } else { en }
-                        };
 
                         for (idx, entry) in self.memory_panel.dll_config.entries.iter_mut().enumerate() {
                             ui.push_id(idx, |ui| {
@@ -6028,17 +6003,17 @@ impl CrosshairApp {
                                     ui.add(
                                         egui::TextEdit::singleline(&mut entry.name)
                                             .desired_width(120.0)
-                                            .hint_text(tr_func("Name", "Tên")),
+                                            .hint_text("Name"),
                                     );
                                     ui.add(
                                         egui::TextEdit::singleline(&mut entry.address)
                                             .desired_width(110.0)
-                                            .hint_text(tr_func("Address 0x...", "Địa chỉ 0x...")),
+                                            .hint_text("Address 0x..."),
                                     );
                                     ui.add(
                                         egui::TextEdit::singleline(&mut entry.value_to_write)
                                             .desired_width(70.0)
-                                            .hint_text(tr_func("Value", "Giá trị")),
+                                            .hint_text("Value"),
                                     );
 
                                     egui::ComboBox::from_id_salt(format!("valtype-{}", idx))
@@ -6079,26 +6054,26 @@ impl CrosshairApp {
                                             ui.selectable_value(
                                                 &mut entry.mode,
                                                 crate::dll_generator::DllPatchMode::HotkeyToggle,
-                                                tr_func("Hotkey Toggle", "Phím tắt Toggle"),
+                                                "Hotkey Toggle",
                                             );
                                             ui.selectable_value(
                                                 &mut entry.mode,
                                                 crate::dll_generator::DllPatchMode::Freeze,
-                                                tr_func("Continuous Freeze", "Khóa liên tục"),
+                                                "Continuous Freeze",
                                             );
                                             ui.selectable_value(
                                                 &mut entry.mode,
                                                 crate::dll_generator::DllPatchMode::WriteOnce,
-                                                tr_func("Write Once", "Ghi 1 lần"),
+                                                "Write Once",
                                             );
                                             ui.selectable_value(
                                                 &mut entry.mode,
                                                 crate::dll_generator::DllPatchMode::NopInstruction,
-                                                tr_func("NOP Instruction", "NOP Instruction"),
+                                                "NOP Instruction",
                                             );
                                         });
 
-                                    if ui.button(tr_func("Delete", "Xóa")).clicked() {
+                                    if ui.button("Delete").clicked() {
                                         to_delete = Some(idx);
                                     }
                                 });
@@ -6115,7 +6090,7 @@ impl CrosshairApp {
                     // Section 3: Action Buttons & Output
                     ui.group(|ui| {
                         ui.label(
-                            egui::RichText::new(self.tr("3. Export & Inject", "3. Xuất & Tiêm (Export & Inject)"))
+                            egui::RichText::new("3. Export & Inject")
                                 .strong(),
                         );
                         if let Some(session) = &self.memory_panel.frida_session {
@@ -6135,10 +6110,7 @@ impl CrosshairApp {
 
                         ui.horizontal(|ui| {
                             if ui
-                                .button(self.tr(
-                                    "Export C++ Project & Frida Script",
-                                    "Xuất Dự án C++ & Frida Script",
-                                ))
+                                .button("Export C++ Project & Frida Script")
                                 .clicked()
                             {
                                 let export_dir =
@@ -6148,21 +6120,18 @@ impl CrosshairApp {
                                     &export_dir,
                                 ) {
                                     Ok(path) => {
-                                        let prefix = self.tr(
-                                            "[OK] Project exported successfully to: ",
-                                            "[OK] Đã xuất thành công dự án vào: ",
-                                        );
+                                        let prefix = "[OK] Project exported successfully to: ";
                                         self.memory_panel.dll_status_msg = format!("{}{}", prefix, path.display());
                                     }
                                     Err(err) => {
-                                        let prefix = self.tr("[Error] Export failed: ", "[Lỗi] Lỗi xuất dự án: ");
+                                        let prefix = "[Error] Export failed: ";
                                         self.memory_panel.dll_status_msg = format!("{}{}", prefix, err);
                                     }
                                 }
                             }
 
                             if ui
-                                .button(self.tr("Inject Frida Script Directly", "Inject Frida Script trực tiếp"))
+                                .button("Inject Frida Script Directly")
                                 .clicked()
                             {
                                 if let Some(pid) = self.memory_panel.process_pid {
@@ -6174,17 +6143,10 @@ impl CrosshairApp {
                                         pid,
                                         script,
                                     ));
-                                    let prefix = self.tr(
-                                        "[OK] Frida Agent started for PID ",
-                                        "[OK] Đã khởi chạy Frida Agent thành công cho PID ",
-                                    );
+                                    let prefix = "[OK] Frida Agent started for PID ";
                                     self.memory_panel.dll_status_msg = format!("{}{}", prefix, pid);
                                 } else {
-                                    self.memory_panel.dll_status_msg = self
-                                        .tr(
-                                            "[!] Please select a Target Process in Memory Scanner first!",
-                                            "[!] Hãy chọn một Tiến trình (Process) trong Memory Scanner trước!",
-                                        )
+                                    self.memory_panel.dll_status_msg = "[!] Please select a Target Process in Memory Scanner first!"
                                         .to_string();
                                 }
                             }
@@ -6192,46 +6154,35 @@ impl CrosshairApp {
 
                         ui.separator();
                         ui.horizontal(|ui| {
-                            ui.label(self.tr("DLL File Path:", "Đường dẫn file DLL:"));
+                            ui.label("DLL File Path:");
                             ui.add(
                                 egui::TextEdit::singleline(&mut self.memory_panel.inject_dll_file_path)
                                     .desired_width(260.0)
                                     .hint_text("C:\\path\\to\\file.dll"),
                             );
                             if ui
-                                .button(self.tr("Inject DLL File into Process", "Inject DLL File vào Process"))
+                                .button("Inject DLL File into Process")
                                 .clicked()
                             {
                                 if let Some(pid) = self.memory_panel.process_pid {
                                     let path = std::path::PathBuf::from(&self.memory_panel.inject_dll_file_path);
                                     if !path.exists() {
-                                        self.memory_panel.dll_status_msg = self
-                                            .tr("[Error] DLL file does not exist!", "[Lỗi] Tệp DLL không tồn tại!")
+                                        self.memory_panel.dll_status_msg = "[Error] DLL file does not exist!"
                                             .to_string();
                                     } else {
                                         match crate::dll_generator::inject_dll_into_process(pid, &path) {
                                             Ok(_) => {
-                                                let prefix = self.tr(
-                                                    "[OK] Injected DLL successfully into PID ",
-                                                    "[OK] Đã Inject DLL thành công vào PID ",
-                                                );
+                                                let prefix = "[OK] Injected DLL successfully into PID ";
                                                 self.memory_panel.dll_status_msg = format!("{}{}", prefix, pid);
                                             }
                                             Err(err) => {
-                                                let prefix = self.tr(
-                                                    "[Error] Injection failed: ",
-                                                    "[Lỗi] Lỗi Inject DLL: ",
-                                                );
+                                                let prefix = "[Error] Injection failed: ";
                                                 self.memory_panel.dll_status_msg = format!("{}{}", prefix, err);
                                             }
                                         }
                                     }
                                 } else {
-                                    self.memory_panel.dll_status_msg = self
-                                        .tr(
-                                            "[!] Please select a Target Process in Memory Scanner first!",
-                                            "[!] Hãy chọn một Tiến trình (Process) trong Memory Scanner trước!",
-                                        )
+                                    self.memory_panel.dll_status_msg = "[!] Please select a Target Process in Memory Scanner first!"
                                         .to_string();
                                 }
                             }
