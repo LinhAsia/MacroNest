@@ -10867,14 +10867,19 @@ if supports_move_mouse || show_detection_tuning {
                                                                   live_sync |= response.changed();
                                                                   ui.label(" = ");
                                                                   let var_val_id = ui.id().with("hold-stop-set-var-val");
+                                                                  let is_long_expr = step.key.chars().count() > 20 || step.key.contains('\n');
+                                                                  let exp_w = if is_long_expr { 300.0 } else { 180.0 };
+                                                                  let exp_h = if is_long_expr { 54.0 } else { 21.0 };
                                                                   let response2 = Self::render_interpolated_text_edit(
                                                                       ui,
                                                                       &mut step.key,
                                                                       var_val_id,
                                                                       76.0,
-                                                                      180.0,   21.0, 21.0,
+                                                                      exp_w,
+                                                                      21.0,
+                                                                      exp_h,
                                                                       Self::tr_lang(language, "value/expr", "value/expr"),
-                                                                      false,
+                                                                      is_long_expr,
                                                                   );
                                                                   Self::apply_vietnamese_input_if_changed(
                                                                       &response2,
@@ -13189,14 +13194,19 @@ if supports_move_mouse || show_detection_tuning {
                                                                   live_sync |= response.changed();
                                                                   ui.label(" = ");
                                                                   let var_val_id = ui.id().with("press-stop-set-var-val");
+                                                                  let is_long_expr = step.key.chars().count() > 20 || step.key.contains('\n');
+                                                                  let exp_w = if is_long_expr { 300.0 } else { 180.0 };
+                                                                  let exp_h = if is_long_expr { 54.0 } else { 21.0 };
                                                                   let response2 = Self::render_interpolated_text_edit(
                                                                       ui,
                                                                       &mut step.key,
                                                                       var_val_id,
                                                                       76.0,
-                                                                      180.0,   21.0, 21.0,
+                                                                      exp_w,
+                                                                      21.0,
+                                                                      exp_h,
                                                                       Self::tr_lang(language, "value/expr", "value/expr"),
-                                                                      false,
+                                                                      is_long_expr,
                                                                   );
                                                                   Self::apply_vietnamese_input_if_changed(
                                                                       &response2,
@@ -16721,14 +16731,19 @@ if supports_move_mouse || show_detection_tuning {
                                                                   live_sync |= response.changed();
                                                                   ui.label(" = ");
                                                                   let var_val_id = ui.id().with((step_index, "regular-set-var-val"));
+                                                                  let is_long_expr = step.key.chars().count() > 20 || step.key.contains('\n');
+                                                                  let exp_w = if is_long_expr { 300.0 } else { 180.0 };
+                                                                  let exp_h = if is_long_expr { 54.0 } else { 21.0 };
                                                                   let response2 = Self::render_interpolated_text_edit(
                                                                       ui,
                                                                       &mut step.key,
                                                                       var_val_id,
                                                                       76.0,
-                                                                      180.0,   21.0, 21.0,
+                                                                      exp_w,
+                                                                      21.0,
+                                                                      exp_h,
                                                                       Self::tr_lang(language, "value/expr", "value/expr"),
-                                                                      false,
+                                                                      is_long_expr,
                                                                   );
                                                                   Self::apply_vietnamese_input_if_changed(
                                                                       &response2,
@@ -18817,6 +18832,9 @@ if supports_move_mouse || show_detection_tuning {
                 | "clamp"
                 | "concat"
                 | "contains"
+                | "charat"
+                | "indexof"
+                | "replace"
                 | "div"
                 | "len"
                 | "lower"
@@ -18843,6 +18861,8 @@ if supports_move_mouse || show_detection_tuning {
                 | "floor"
                 | "degrees"
                 | "radians"
+                | "deg"
+                | "rad"
                 | "factorial"
                 | "gcd"
                 | "lcm"
@@ -18859,6 +18879,29 @@ if supports_move_mouse || show_detection_tuning {
                 | "trim"
                 | "upper"
                 | "tostring"
+                | "table_nearest_dist"
+                | "nearest_dist"
+                | "table_nearest_x"
+                | "table_nearest_y"
+                | "table_nearest_z"
+                | "table_nearest_name"
+                | "nearest_name"
+                | "table_cell"
+                | "dist"
+                | "dist2d"
+                | "dist3d"
+                | "lerp"
+                | "norm"
+                | "sign"
+                | "hypot"
+                | "true"
+                | "false"
+                | "null"
+                | "nan"
+                | "inf"
+                | "and"
+                | "or"
+                | "not"
         )
     }
 
@@ -18887,27 +18930,57 @@ if supports_move_mouse || show_detection_tuning {
     }
 
     fn extract_vars_from_expression(expr: &str, vars: &mut std::collections::HashSet<String>) {
-        let mut current_var = String::new();
-        for c in expr.chars() {
-            if c.is_alphanumeric() || c == '_' || c == '.' {
-                current_var.push(c);
-            } else {
-                let trimmed = current_var.trim().trim_matches('.');
+        let chars: Vec<char> = expr.chars().collect();
+        let len = chars.len();
+        let mut i = 0;
+
+        while i < len {
+            let c = chars[i];
+
+            // 1. Skip string literals in double or single quotes
+            if c == '"' || c == '\'' {
+                let quote = c;
+                i += 1;
+                while i < len {
+                    if chars[i] == '\\' {
+                        i += 2; // skip escaped char
+                    } else if chars[i] == quote {
+                        i += 1;
+                        break;
+                    } else {
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+
+            // 2. Identifier start
+            if c.is_alphabetic() || c == '_' {
+                let start = i;
+                while i < len && (chars[i].is_alphanumeric() || chars[i] == '_' || chars[i] == '.') {
+                    i += 1;
+                }
+                let token: String = chars[start..i].iter().collect();
+                let trimmed = token.trim_matches('.');
+
+                // Peek ahead (skipping whitespace) to check if followed by '(' -> function call
+                let mut peek_idx = i;
+                while peek_idx < len && chars[peek_idx].is_whitespace() {
+                    peek_idx += 1;
+                }
+                let is_func_call = peek_idx < len && chars[peek_idx] == '(';
+
                 if !trimmed.is_empty()
+                    && !is_func_call
                     && !trimmed.chars().next().unwrap().is_ascii_digit()
                     && !Self::is_builtin_expression_identifier(trimmed)
                 {
                     vars.insert(trimmed.to_string());
                 }
-                current_var.clear();
+                continue;
             }
-        }
-        let trimmed = current_var.trim().trim_matches('.');
-        if !trimmed.is_empty()
-            && !trimmed.chars().next().unwrap().is_ascii_digit()
-            && !Self::is_builtin_expression_identifier(trimmed)
-        {
-            vars.insert(trimmed.to_string());
+
+            i += 1;
         }
     }
 
@@ -19043,7 +19116,103 @@ if supports_move_mouse || show_detection_tuning {
                 }
                 vars_list.sort_by(|a, b| a.0.cmp(&b.0));
 
+                let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
+
+                // Shared Top Search & Actions Bar
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.variable_inspector_search)
+                            .hint_text(Self::tr_lang(
+                                language,
+                                "Search variables...",
+                                "Tìm kiếm biến...",
+                            ))
+                            .desired_width(180.0),
+                    );
+                    if !self.variable_inspector_search.is_empty() {
+                        if ui.small_button("×").clicked() {
+                            self.variable_inspector_search.clear();
+                        }
+                    }
+                    ui.label(
+                        RichText::new(format!(
+                            "{} {} • {} {}",
+                            self.state.global_constants.len(),
+                            Self::tr_lang(language, "fixed", "cố định"),
+                            vars_list.len(),
+                            Self::tr_lang(language, "runtime", "runtime")
+                        ))
+                        .size(11.0)
+                        .weak(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if !vars_list.is_empty() {
+                            if ui
+                                .button(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "Clear All Runtime",
+                                        "Xóa hết biến Runtime",
+                                    ))
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(255, 120, 120)),
+                                )
+                                .on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Clear all runtime & text variables currently stored in memory",
+                                    "Xóa toàn bộ các biến runtime và chuỗi văn bản đang lưu trong RAM",
+                                ))
+                                .clicked()
+                            {
+                                crate::overlay::RUNTIME_VARIABLES.lock().clear();
+                                crate::overlay::TEXT_VARIABLES.lock().clear();
+                                vars_list.clear();
+                            }
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                let search_query = self.variable_inspector_search.trim().to_lowercase();
+                let filtered_constants: Vec<(usize, String, String, bool)> = self
+                    .state
+                    .global_constants
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (name, val))| {
+                        if search_query.is_empty() {
+                            true
+                        } else {
+                            name.to_lowercase().contains(&search_query)
+                                || val.to_lowercase().contains(&search_query)
+                        }
+                    })
+                    .map(|(idx, (name, val))| {
+                        let is_enabled =
+                            !self.state.disabled_global_constants.contains(name);
+                        (idx, name.clone(), val.clone(), is_enabled)
+                    })
+                    .collect();
+
+                let filtered_runtime_vars: Vec<(String, String)> = vars_list
+                    .into_iter()
+                    .filter(|(name, val)| {
+                        if search_query.is_empty() {
+                            true
+                        } else {
+                            name.to_lowercase().contains(&search_query)
+                                || val.to_lowercase().contains(&search_query)
+                        }
+                    })
+                    .collect();
+
+                let mut copied_val: Option<String> = None;
+
                 ui.columns(2, |columns| {
+                    // Left Column: Fixed Variables
                     columns[0].vertical(|ui| {
                         ui.horizontal(|ui| {
                             ui.label(
@@ -19054,17 +19223,11 @@ if supports_move_mouse || show_detection_tuning {
                                 ))
                                 .strong(),
                             );
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.variable_inspector_search)
-                                        .hint_text(Self::tr_lang(
-                                            language,
-                                            "Search...",
-                                            "Tìm kiếm...",
-                                        ))
-                                        .desired_width(110.0),
-                                );
-                            });
+                            ui.label(
+                                RichText::new(format!("({})", filtered_constants.len()))
+                                    .size(11.0)
+                                    .weak(),
+                            );
                         });
                         ui.add_space(4.0);
                         let id_const_name = ui.id().with("new_const_name");
@@ -19079,7 +19242,6 @@ if supports_move_mouse || show_detection_tuning {
                                 .get_temp::<String>(id_const_val)
                                 .unwrap_or_default()
                         });
-                        let is_dark_theme = self.state.ui_theme == UiThemeMode::Dark;
                         let hint_color = if is_dark_theme {
                             Color32::from_rgba_premultiplied(140, 140, 140, 150)
                         } else {
@@ -19146,28 +19308,8 @@ if supports_move_mouse || show_detection_tuning {
                         });
 
                         ui.add_space(6.0);
-                        let search_query = self.variable_inspector_search.trim().to_lowercase();
-                        let filtered_constants: Vec<(usize, String, String, bool)> = self
-                            .state
-                            .global_constants
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, (name, val))| {
-                                if search_query.is_empty() {
-                                    true
-                                } else {
-                                    name.to_lowercase().contains(&search_query)
-                                        || val.to_lowercase().contains(&search_query)
-                                }
-                            })
-                            .map(|(idx, (name, val))| {
-                                let is_enabled =
-                                    !self.state.disabled_global_constants.contains(name);
-                                (idx, name.clone(), val.clone(), is_enabled)
-                            })
-                            .collect();
 
-                        if !self.state.global_constants.is_empty() {
+                        if !filtered_constants.is_empty() {
                             egui::ScrollArea::vertical()
                                 .id_salt("global_constants_scroll")
                                 .max_height(340.0)
@@ -19180,41 +19322,55 @@ if supports_move_mouse || show_detection_tuning {
                                             let mut to_remove_idx = None;
                                             let mut to_toggle: Option<(String, bool)> = None;
 
-                                            for (orig_idx, name, val, is_enabled) in filtered_constants {
-                                                let mut enabled_check = is_enabled;
+                                            for (orig_idx, name, val, is_enabled) in &filtered_constants {
+                                                let mut enabled_check = *is_enabled;
                                                 if ui.checkbox(&mut enabled_check, "").changed() {
                                                     to_toggle = Some((name.clone(), enabled_check));
                                                 }
 
-                                                let name_text = if is_enabled {
-                                                    RichText::new(&name)
+                                                let name_text = if *is_enabled {
+                                                    RichText::new(name)
                                                         .monospace()
                                                         .color(Color32::from_rgb(0, 180, 216))
                                                 } else {
-                                                    RichText::new(&name)
+                                                    RichText::new(name)
                                                         .monospace()
                                                         .color(Color32::from_rgb(120, 120, 120))
                                                         .strikethrough()
                                                 };
                                                 ui.label(name_text);
 
-                                                let val_text = if is_enabled {
-                                                    RichText::new(&val).monospace()
+                                                let val_text = if *is_enabled {
+                                                    RichText::new(val).monospace()
                                                 } else {
-                                                    RichText::new(&val)
+                                                    RichText::new(val)
                                                         .monospace()
                                                         .color(Color32::from_rgb(120, 120, 120))
                                                 };
-                                                ui.add_sized(
+                                                let val_resp = ui.add_sized(
                                                     [130.0, 20.0],
-                                                    egui::Label::new(val_text),
+                                                    egui::Label::new(val_text)
+                                                        .sense(egui::Sense::click())
+                                                        .truncate(),
                                                 );
+                                                if val_resp.hovered() {
+                                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                                }
+                                                val_resp.clone().on_hover_text(format!(
+                                                    "{}\n{}",
+                                                    val,
+                                                    Self::tr_lang(language, "Click to copy", "Nhấn để sao chép")
+                                                ));
+                                                if val_resp.clicked() {
+                                                    ui.ctx().copy_text(val.clone());
+                                                    copied_val = Some(val.clone());
+                                                }
 
                                                 if ui
                                                     .button(Self::tr_lang(language, "Del", "Xóa"))
                                                     .clicked()
                                                 {
-                                                    to_remove_idx = Some((orig_idx, name));
+                                                    to_remove_idx = Some((*orig_idx, name.clone()));
                                                 }
                                                 ui.end_row();
                                             }
@@ -19243,26 +19399,45 @@ if supports_move_mouse || show_detection_tuning {
                                         });
                                 });
                         } else {
-                            ui.label(
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "No fixed variables yet.",
-                                    "Chưa có biến cố định nào.",
-                                ))
-                                .weak(),
-                            );
+                            if self.state.global_constants.is_empty() {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "No fixed variables yet.",
+                                        "Chưa có biến cố định nào.",
+                                    ))
+                                    .weak(),
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "No fixed variables match your search.",
+                                        "Không có biến cố định nào khớp với tìm kiếm.",
+                                    ))
+                                    .weak(),
+                                );
+                            }
                         }
                     });
 
+                    // Right Column: Runtime Variables (responsive multi-column cards)
                     columns[1].vertical(|ui| {
-                        ui.label(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "Runtime Variables",
-                                "Biến Runtime (Runtime Variables)",
-                            ))
-                            .strong(),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Runtime Variables",
+                                    "Biến Runtime (Runtime Variables)",
+                                ))
+                                .strong(),
+                            );
+                            ui.label(
+                                RichText::new(format!("({})", filtered_runtime_vars.len()))
+                                    .size(11.0)
+                                    .weak(),
+                            );
+                        });
                         ui.label(
                             RichText::new(Self::tr_lang(
                                 language,
@@ -19272,55 +19447,159 @@ if supports_move_mouse || show_detection_tuning {
                             .size(11.0)
                             .weak(),
                         );
-                        ui.add_space(6.0);
-                        if !vars_list.is_empty() {
+                        ui.add_space(4.0);
+
+                        if !filtered_runtime_vars.is_empty() {
+                            let avail_w = ui.available_width();
+                            let cols_count = if avail_w < 320.0 {
+                                1
+                            } else if avail_w >= 650.0 {
+                                3
+                            } else {
+                                2
+                            };
+                            let spacing = 8.0;
+                            let card_w = ((avail_w - (cols_count as f32 - 1.0) * spacing - 16.0) / (cols_count as f32)).max(120.0);
+                            let card_bg = if is_dark_theme {
+                                Color32::from_rgba_premultiplied(32, 35, 44, 220)
+                            } else {
+                                Color32::from_rgba_premultiplied(242, 244, 248, 255)
+                            };
+                            let card_border = if is_dark_theme {
+                                Color32::from_rgba_premultiplied(60, 65, 80, 160)
+                            } else {
+                                Color32::from_rgba_premultiplied(210, 215, 225, 220)
+                            };
+                            let val_color = if is_dark_theme {
+                                Color32::from_rgb(220, 225, 235)
+                            } else {
+                                Color32::from_rgb(30, 35, 45)
+                            };
+
+                            let mut to_remove_vars = Vec::new();
+
                             egui::ScrollArea::vertical()
                                 .id_salt("macro_vars_scroll")
                                 .max_height(340.0)
                                 .show(ui, |ui| {
-                                    egui::Grid::new("macro_vars_grid")
-                                        .num_columns(3)
-                                        .spacing([8.0, 6.0])
-                                        .striped(true)
+                                    egui::Grid::new("macro_vars_cards_grid")
+                                        .num_columns(cols_count)
+                                        .spacing([spacing, 6.0])
                                         .show(ui, |ui| {
-                                            let mut to_remove_var = None;
-                                            for (name, value) in &vars_list {
-                                                ui.label(
-                                                    RichText::new(name)
-                                                        .monospace(),
-                                                );
-                                                ui.add_sized(
-                                                    [150.0, 20.0],
-                                                    egui::Label::new(RichText::new(value).monospace()),
-                                                );
-                                                if ui
-                                                    .button(Self::tr_lang(language, "Del", "Xóa"))
-                                                    .clicked()
-                                                {
-                                                    to_remove_var = Some(name.clone());
+                                            for chunk in filtered_runtime_vars.chunks(cols_count) {
+                                                for (name, value) in chunk {
+                                                    egui::Frame::none()
+                                                        .fill(card_bg)
+                                                        .stroke(egui::Stroke::new(1.0, card_border))
+                                                        .corner_radius(egui::CornerRadius::same(4))
+                                                        .inner_margin(egui::Margin::symmetric(8, 5))
+                                                        .show(ui, |ui| {
+                                                            ui.set_width(card_w);
+                                                            ui.horizontal(|ui| {
+                                                                ui.with_layout(
+                                                                    egui::Layout::right_to_left(egui::Align::Center),
+                                                                    |ui| {
+                                                                        if ui
+                                                                            .small_button("×")
+                                                                            .on_hover_text(Self::tr_lang(
+                                                                                language,
+                                                                                "Delete variable",
+                                                                                "Xóa biến",
+                                                                            ))
+                                                                            .clicked()
+                                                                        {
+                                                                            to_remove_vars.push(name.clone());
+                                                                        }
+
+                                                                        ui.with_layout(
+                                                                            egui::Layout::left_to_right(egui::Align::Center),
+                                                                            |ui| {
+                                                                                let name_label = ui.add(
+                                                                                    egui::Label::new(
+                                                                                        RichText::new(name)
+                                                                                            .monospace()
+                                                                                            .strong()
+                                                                                            .color(Color32::from_rgb(0, 180, 216)),
+                                                                                    )
+                                                                                    .truncate(),
+                                                                                );
+                                                                                name_label.on_hover_text(name);
+                                                                            },
+                                                                        );
+                                                                    },
+                                                                );
+                                                            });
+                                                            ui.horizontal(|ui| {
+                                                                let val_label = ui.add(
+                                                                    egui::Label::new(
+                                                                        RichText::new(value)
+                                                                            .monospace()
+                                                                            .size(11.5)
+                                                                            .color(val_color),
+                                                                    )
+                                                                    .sense(egui::Sense::click())
+                                                                    .truncate(),
+                                                                );
+                                                                if val_label.hovered() {
+                                                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                                                }
+                                                                val_label.clone().on_hover_text(format!(
+                                                                    "{}\n{}",
+                                                                    value,
+                                                                    Self::tr_lang(
+                                                                        language,
+                                                                        "Click to copy",
+                                                                        "Nhấn để sao chép",
+                                                                    )
+                                                                ));
+                                                                if val_label.clicked() {
+                                                                    ui.ctx().copy_text(value.clone());
+                                                                    copied_val = Some(value.clone());
+                                                                }
+                                                            });
+                                                        });
+                                                }
+                                                for _ in 0..(cols_count - chunk.len()) {
+                                                    ui.allocate_space(egui::vec2(card_w, 1.0));
                                                 }
                                                 ui.end_row();
                                             }
-                                            if let Some(var_name) = to_remove_var {
-                                                crate::overlay::RUNTIME_VARIABLES
-                                                    .lock()
-                                                    .remove(&var_name);
-                                                crate::overlay::TEXT_VARIABLES.lock().remove(&var_name);
-                                            }
                                         });
+
+                                    for var_name in to_remove_vars {
+                                        crate::overlay::RUNTIME_VARIABLES
+                                            .lock()
+                                            .remove(&var_name);
+                                        crate::overlay::TEXT_VARIABLES.lock().remove(&var_name);
+                                    }
                                 });
                         } else {
-                            ui.label(
-                                RichText::new(Self::tr_lang(
-                                    language,
-                                    "No runtime variables yet.",
-                                    "Chưa có biến runtime nào.",
-                                ))
-                                .weak(),
-                            );
+                            if search_query.is_empty() {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "No runtime variables yet.",
+                                        "Chưa có biến runtime nào.",
+                                    ))
+                                    .weak(),
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "No runtime variables match your search.",
+                                        "Không có biến runtime nào khớp với tìm kiếm.",
+                                    ))
+                                    .weak(),
+                                );
+                            }
                         }
                     });
                 });
+
+                if let Some(val) = copied_val {
+                    self.status = format!("Copied '{val}' to clipboard");
+                }
             } else {
                 // Tab 1: Custom Data Tables
                 if Self::is_copy_feedback_active(self.custom_table_copy_feedback_until) {
@@ -25846,6 +26125,23 @@ mod tests {
             }
             assert_eq!(is_inside_loop[step_index], inside, "Mismatch at step {}", step_index);
         }
+    }
+
+    #[test]
+    fn extract_vars_from_expression_ignores_strings_and_functions() {
+        let mut vars = std::collections::HashSet::new();
+        CrosshairApp::extract_vars_from_expression(
+            r#"table_nearest_dist("Benh vien", g, h) + dist(x, y)"#,
+            &mut vars,
+        );
+        assert!(!vars.contains("table_nearest_dist"), "function name should be ignored");
+        assert!(!vars.contains("Benh"), "string literal word 1 should be ignored");
+        assert!(!vars.contains("vien"), "string literal word 2 should be ignored");
+        assert!(!vars.contains("dist"), "function name should be ignored");
+        assert!(vars.contains("g"), "variable g should be extracted");
+        assert!(vars.contains("h"), "variable h should be extracted");
+        assert!(vars.contains("x"), "variable x should be extracted");
+        assert!(vars.contains("y"), "variable y should be extracted");
     }
 }
 
