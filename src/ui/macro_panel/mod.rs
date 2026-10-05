@@ -8572,6 +8572,22 @@ impl CrosshairApp {
                                                 )
                                                 .to_owned();
                                             }
+                                            let show_preset_import = self.show_share_buttons
+                                                || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset;
+                                            if show_preset_import {
+                                                if ui
+                                                    .add_enabled(
+                                                        self.macro_share_clipboard_kind
+                                                            == crate::ui::MacroShareCodeKind::Preset,
+                                                        Button::new(Self::tr_lang(language, "Imp", "Imp"))
+                                                            .min_size(egui::vec2(46.0, 24.0)),
+                                                    )
+                                                    .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
+                                                    .clicked()
+                                                {
+                                                    import_preset_to_group = Some((group.id, Some(preset.id)));
+                                                }
+                                            }
                                             if self.show_share_buttons {
                                                 let preset_export_feedback =
                                                     self.macro_preset_export_feedback_target
@@ -8584,45 +8600,29 @@ impl CrosshairApp {
                                                 } else {
                                                     Self::tr_lang(language, "Exp", "Exp")
                                                 };
-                                              let preset_export_button = ui.add_sized(
-                                                  [60.0, 24.0],
-                                                  Button::new(preset_export_label).fill(if preset_export_feedback {
-                                                      Color32::from_rgba_premultiplied(72, 156, 116, 140)
-                                                  } else {
-                                                      ui.visuals().widgets.inactive.bg_fill
-                                                  })
-                                                  .stroke(egui::Stroke::new(
-                                                      1.0,
-                                                      if preset_export_feedback {
-                                                          Color32::from_rgb(126, 224, 182)
-                                                      } else {
-                                                          ui.visuals().widgets.inactive.bg_stroke.color
-                                                      },
-                                                  )),
-                                              );
-                                              if preset_export_button
-                                                  .on_hover_text(Self::tr_lang(language, "Export Preset Code", "Export Preset Code"))
-                                                  .clicked()
-                                              {
-                                                  export_preset = Some(preset.id);
-                                              }
-                                             }
-                                             let show_preset_import = self.show_share_buttons
-                                                 || self.macro_share_clipboard_kind == crate::ui::MacroShareCodeKind::Preset;
-                                             if show_preset_import {
-                                                 if ui
-                                                     .add_enabled(
-                                                         self.macro_share_clipboard_kind
-                                                             == crate::ui::MacroShareCodeKind::Preset,
-                                                         Button::new(Self::tr_lang(language, "Imp", "Imp"))
-                                                             .min_size(egui::vec2(46.0, 24.0)),
-                                                     )
-                                                     .on_hover_text(Self::tr_lang(language, "Import Preset from Clipboard", "Import Preset from Clipboard"))
-                                                     .clicked()
-                                                 {
-                                                     import_preset_to_group = Some((group.id, Some(preset.id)));
-                                                 }
-                                             }
+                                                let preset_export_button = ui.add_sized(
+                                                    [60.0, 24.0],
+                                                    Button::new(preset_export_label).fill(if preset_export_feedback {
+                                                        Color32::from_rgba_premultiplied(72, 156, 116, 140)
+                                                    } else {
+                                                        ui.visuals().widgets.inactive.bg_fill
+                                                    })
+                                                    .stroke(egui::Stroke::new(
+                                                        1.0,
+                                                        if preset_export_feedback {
+                                                            Color32::from_rgb(126, 224, 182)
+                                                        } else {
+                                                            ui.visuals().widgets.inactive.bg_stroke.color
+                                                        },
+                                                    )),
+                                                );
+                                                if preset_export_button
+                                                    .on_hover_text(Self::tr_lang(language, "Export Preset Code", "Export Preset Code"))
+                                                    .clicked()
+                                                {
+                                                    export_preset = Some(preset.id);
+                                                }
+                                            }
                                             if preset.trigger_mode != MacroTriggerMode::WindowFocus {
                                                 let capture_target = CaptureRequest::MacroPresetHotkey(
                                                     group.id, preset.id,

@@ -5,10 +5,10 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::io::{Read, Write};
 
 use crate::model::{
-    AudioSensePreset, CommandPreset, EspPreset, GeometryPreset, HudPreset, MacroGroup, MacroPreset,
-    MacroStep, MemoryCodeEntry, MousePathPreset, MouseSensitivityPreset, OcrPreset, PinPreset,
-    ProfileRecord, TimerPreset, VisionPreset, WindowFocusPreset, WindowLayout, WindowPreset,
-    ZoomPreset,
+    AudioSensePreset, CommandPreset, CustomTable, EspPreset, GeometryPreset, HudPreset, MacroGroup,
+    MacroPreset, MacroStep, MemoryCodeEntry, MousePathPreset, MouseSensitivityPreset, OcrPreset,
+    PinPreset, ProfileRecord, TimerPreset, VisionPreset, WindowFocusPreset, WindowLayout,
+    WindowPreset, ZoomPreset,
 };
 
 const PREFIX_STEP: &str = "MN_STEP:";
@@ -220,6 +220,8 @@ pub struct MacroShareResources {
     pub esp_presets: Vec<EspPreset>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub memory_code_list: Vec<MemoryCodeEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_tables: Vec<CustomTable>,
 }
 
 impl MacroShareResources {
@@ -241,6 +243,7 @@ impl MacroShareResources {
             && self.timer_presets.is_empty()
             && self.esp_presets.is_empty()
             && self.memory_code_list.is_empty()
+            && self.custom_tables.is_empty()
     }
 }
 
@@ -1118,6 +1121,11 @@ mod tests {
 
         res.memory_code_list.push(MemoryCodeEntry::default());
         assert!(!res.is_empty());
+        res.memory_code_list.clear();
+        assert!(res.is_empty());
+
+        res.custom_tables.push(CustomTable::default());
+        assert!(!res.is_empty());
     }
 
     #[test]
@@ -1230,5 +1238,54 @@ mod tests {
         let enc = encode_timer_preset(&timer).expect("encode timer");
         assert!(enc.starts_with(PREFIX_TIMER));
         assert_eq!(decode_timer_preset(&enc).expect("decode timer"), timer);
+    }
+
+    #[test]
+    fn shared_preset_with_custom_tables_round_trip() {
+        let table = CustomTable {
+            id: 10,
+            name: "Nha tho do".to_string(),
+            enabled: true,
+            collapsed: false,
+            value_type: crate::model::MemoryValueType::F32,
+            columns: vec!["x".to_string(), "y".to_string(), "z".to_string()],
+            column_offsets: vec!["0x0".to_string(), "0x4".to_string(), "0x8".to_string()],
+            rows: vec![crate::model::CustomTableRow {
+                id: 1,
+                enabled: true,
+                name: "PointA".to_string(),
+                base_address: "0x1234".to_string(),
+                values: vec!["100.0".to_string(), "200.0".to_string(), "300.0".to_string()],
+            }],
+            row_prefix: "p".to_string(),
+        };
+
+        let step = MacroStep {
+            action: crate::model::MacroAction::SetVariable,
+            if_variable_name: "g".to_string(),
+            key: "table_nearest_dist(\"Nha tho do\", g, h)".to_string(),
+            ..MacroStep::default()
+        };
+
+        let shared = SharedMacroPreset {
+            preset: crate::model::MacroPreset {
+                id: 5,
+                steps: vec![step],
+                ..crate::model::MacroPreset::default()
+            },
+            resources: MacroShareResources {
+                custom_tables: vec![table.clone()],
+                ..MacroShareResources::default()
+            },
+        };
+
+        let encoded = encode_shared_preset(&shared).expect("encode shared preset with table");
+        let decoded = decode_shared_preset(&encoded).expect("decode shared preset with table");
+
+        assert_eq!(decoded.resources.custom_tables.len(), 1);
+        let restored = &decoded.resources.custom_tables[0];
+        assert_eq!(restored.name, "Nha tho do");
+        assert_eq!(restored.rows.len(), 1);
+        assert_eq!(restored.rows[0].values, vec!["100.0", "200.0", "300.0"]);
     }
 }

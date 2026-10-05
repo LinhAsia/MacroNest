@@ -292,6 +292,7 @@ struct MacroShareCollectSeen {
     timer_presets: HashSet<u32>,
     esp_presets: HashSet<u32>,
     memory_code_list: HashSet<(String, usize)>,
+    custom_tables: HashSet<u32>,
 }
 
 #[derive(Default)]
@@ -312,6 +313,8 @@ struct ImportedMacroShareMaps {
     audio_sense_presets: HashMap<u32, u32>,
     timer_presets: HashMap<u32, u32>,
     esp_presets: HashMap<u32, u32>,
+    custom_tables: HashMap<u32, u32>,
+    custom_table_names: HashMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -1003,6 +1006,10 @@ impl CrosshairApp {
         crate::overlay::sync_custom_tables_to_runtime(&self.state.custom_tables);
     }
 
+    pub(crate) fn sync_custom_tables(&mut self) {
+        self.sync_custom_tables_to_overlay();
+    }
+
     pub fn new(
         paths: AppPaths,
         state: AppState,
@@ -1389,6 +1396,24 @@ impl CrosshairApp {
                 .profiles
                 .iter()
                 .all(|profile| profile.name != candidate)
+            {
+                return candidate;
+            }
+            counter += 1;
+        }
+    }
+
+    fn unique_custom_table_name(&self, base: &str) -> String {
+        let trimmed = base.trim();
+        let base = if trimmed.is_empty() { "Table" } else { trimmed };
+        let mut counter = self.state.custom_tables.len().max(1) + 1;
+        loop {
+            let candidate = format!("{base} {counter}");
+            if self
+                .state
+                .custom_tables
+                .iter()
+                .all(|table| !Self::trimmed_eq_ignore_ascii_case(&table.name, &candidate))
             {
                 return candidate;
             }
@@ -1869,6 +1894,125 @@ impl CrosshairApp {
                 }
             }
         }
+
+        if let Some(table_id) = step.data_table_id {
+            if let Some(table) = self.state.custom_tables.iter().find(|t| t.id == table_id) {
+                if seen.custom_tables.insert(table.id) {
+                    resources.custom_tables.push(table.clone());
+                }
+            }
+        }
+
+        if step.action == MacroAction::SetDataTable {
+            let trimmed = step.key.trim();
+            if let Ok(id) = trimmed.parse::<u32>() {
+                if let Some(table) = self.state.custom_tables.iter().find(|t| t.id == id) {
+                    if seen.custom_tables.insert(table.id) {
+                        resources.custom_tables.push(table.clone());
+                    }
+                }
+            } else if let Some(table) = self.state.custom_tables.iter().find(|t| {
+                Self::trimmed_eq_ignore_ascii_case(&t.name, trimmed)
+            }) {
+                if seen.custom_tables.insert(table.id) {
+                    resources.custom_tables.push(table.clone());
+                }
+            }
+        }
+
+        let mut text_fields: Vec<&str> = vec![
+            &step.key,
+            &step.delay_expr,
+            &step.x_expr,
+            &step.y_expr,
+            &step.duration_expr,
+            &step.mouse_speed_expr,
+            &step.text_override,
+            &step.memory_write_value,
+        ];
+        for extra in &step.extra_conditions {
+            text_fields.push(&extra.expression);
+        }
+
+        for text in text_fields {
+            if text.trim().is_empty() {
+                continue;
+            }
+            let extracted_names = Self::extract_table_names_from_text(text);
+            for table in &self.state.custom_tables {
+                let trimmed_name = table.name.trim();
+                if trimmed_name.is_empty() {
+                    continue;
+                }
+                let mut matched = extracted_names.iter().any(|n| n.eq_ignore_ascii_case(trimmed_name));
+                if !matched {
+                    let quoted_double = format!("\"{trimmed_name}\"");
+                    let quoted_single = format!("'{trimmed_name}'");
+                    let lower_text = text.to_ascii_lowercase();
+                    matched = lower_text.contains(&quoted_double.to_ascii_lowercase())
+                        || lower_text.contains(&quoted_single.to_ascii_lowercase());
+                }
+                if matched && seen.custom_tables.insert(table.id) {
+                    resources.custom_tables.push(table.clone());
+                }
+            }
+        }
+    }
+
+    fn extract_table_names_from_text(text: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        let lower = text.to_ascii_lowercase();
+        const FUNCS: &[&str] = &[
+            "table_nearest_dist",
+            "table_nearest_name",
+            "table_nearest_x",
+            "table_nearest_y",
+            "table_nearest_z",
+            "nearest_dist",
+            "nearest_name",
+            "table_cell",
+        ];
+
+        for &func in FUNCS {
+            let mut search_from = 0;
+            while let Some(pos) = lower[search_from..].find(func) {
+                let actual_pos = search_from + pos;
+                search_from = actual_pos + func.len();
+
+                // Boundary check: must not be part of a larger identifier (e.g. table_nearest_dist)
+                if actual_pos > 0 {
+                    let prev_char = text[..actual_pos].chars().last().unwrap_or(' ');
+                    if prev_char.is_ascii_alphanumeric() || prev_char == '_' {
+                        continue;
+                    }
+                }
+
+                let after_func = &text[actual_pos + func.len()..];
+                let trimmed_after = after_func.trim_start();
+                if let Some(paren_inner) = trimmed_after.strip_prefix('(') {
+                    let arg_start = paren_inner.trim_start();
+                    if let Some(first_char) = arg_start.chars().next() {
+                        let extracted = if first_char == '"' || first_char == '\'' {
+                            let quote = first_char;
+                            arg_start[1..].find(quote).map(|end_quote| &arg_start[1..1 + end_quote])
+                        } else {
+                            let end = arg_start.find([',', ')']).unwrap_or(arg_start.len());
+                            Some(&arg_start[..end])
+                        };
+
+                        if let Some(raw_name) = extracted {
+                            let name = raw_name.trim();
+                            if !name.is_empty()
+                                && !names.iter().any(|existing: &String| existing.eq_ignore_ascii_case(name))
+                            {
+                                names.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        names
     }
 
     fn import_macro_share_resources(
@@ -2242,6 +2386,36 @@ impl CrosshairApp {
         }
         crate::overlay::set_memory_code_entries(&self.state.memory_code_list);
 
+        for mut table in resources.custom_tables {
+            let old_id = table.id;
+            let old_name = table.name.clone();
+            if let Some(existing) = self.state.custom_tables.iter().find(|existing| {
+                let mut test = table.clone();
+                test.id = existing.id;
+                test.collapsed = existing.collapsed;
+                test == **existing
+            }) {
+                maps.custom_tables.insert(old_id, existing.id);
+                maps.custom_table_names.insert(old_name, existing.name.clone());
+                continue;
+            }
+            if self.state.custom_tables.iter().any(|existing| {
+                Self::trimmed_eq_ignore_ascii_case(&existing.name, &table.name)
+            }) {
+                table.name = self.unique_custom_table_name(&table.name);
+            }
+            table.id = Self::allocate_next_id(
+                &self.state.custom_tables,
+                &mut self.state.next_custom_table_id,
+                |item| item.id,
+            );
+            table.collapsed = true;
+            maps.custom_tables.insert(old_id, table.id);
+            maps.custom_table_names.insert(old_name, table.name.clone());
+            self.state.custom_tables.push(table);
+        }
+        self.sync_custom_tables_to_overlay();
+
         maps
     }
 
@@ -2365,7 +2539,27 @@ impl CrosshairApp {
                     step.esp_preset_id = Some(*new_id);
                 }
             }
+            MacroAction::SetDataTable => {
+                Self::remap_macro_share_refs_in_key(&mut step.key, &maps.custom_tables, None);
+                if let Some((_, new_name)) = maps.custom_table_names.iter().find(|(old_name, _)| {
+                    Self::trimmed_eq_ignore_ascii_case(old_name, step.key.trim())
+                }) {
+                    step.key = new_name.clone();
+                }
+            }
             _ => {}
+        }
+
+        if let Some(old_id) = step.data_table_id
+            && let Some(new_id) = maps.custom_tables.get(&old_id)
+        {
+            step.data_table_id = Some(*new_id);
+        }
+
+        for (old_name, new_name) in &maps.custom_table_names {
+            if old_name != new_name && !old_name.trim().is_empty() {
+                Self::replace_table_name_in_step(step, old_name, new_name);
+            }
         }
 
         if let Some(old_id) = step.if_vision_preset_id
@@ -2389,6 +2583,25 @@ impl CrosshairApp {
             {
                 extra.ocr_preset_id = Some(*new_id);
             }
+        }
+    }
+
+    fn replace_table_name_in_step(step: &mut MacroStep, old_name: &str, new_name: &str) {
+        let replace_in_string = |s: &mut String| {
+            if s.contains(old_name) {
+                *s = s.replace(old_name, new_name);
+            }
+        };
+        replace_in_string(&mut step.key);
+        replace_in_string(&mut step.delay_expr);
+        replace_in_string(&mut step.x_expr);
+        replace_in_string(&mut step.y_expr);
+        replace_in_string(&mut step.duration_expr);
+        replace_in_string(&mut step.mouse_speed_expr);
+        replace_in_string(&mut step.text_override);
+        replace_in_string(&mut step.memory_write_value);
+        for extra in &mut step.extra_conditions {
+            replace_in_string(&mut extra.expression);
         }
     }
 
@@ -2462,6 +2675,7 @@ impl CrosshairApp {
                         Self::sync_audio_sense_presets,
                         Self::sync_timer_presets,
                         Self::sync_esp_presets,
+                        Self::sync_custom_tables,
                         Self::sync_macro_presets,
                     ]);
                     self.status = Self::tr_lang(
@@ -2543,6 +2757,7 @@ impl CrosshairApp {
                         Self::sync_audio_sense_presets,
                         Self::sync_timer_presets,
                         Self::sync_esp_presets,
+                        Self::sync_custom_tables,
                         Self::sync_reconciled_macro_presets,
                     ]);
                     self.status = Self::tr_lang(
@@ -2649,6 +2864,7 @@ impl CrosshairApp {
                     Self::sync_audio_sense_presets,
                     Self::sync_timer_presets,
                     Self::sync_esp_presets,
+                    Self::sync_custom_tables,
                     Self::sync_reconciled_macro_presets,
                 ]);
                 self.status = Self::tr_lang(
@@ -18012,6 +18228,27 @@ mod tests {
         assert_eq!(list, "Shift");
         assert!(!CrosshairApp::remove_key_list_value(&mut list, "Alt"));
         assert_eq!(list, "Shift");
+    }
+
+    #[test]
+    fn test_extract_table_names_from_text() {
+        let text1 = "table_nearest_dist(\"Nha tho do\", g, h)";
+        assert_eq!(CrosshairApp::extract_table_names_from_text(text1), vec!["Nha tho do"]);
+
+        let text2 = "nearest_dist('Point_A', 10, 20)";
+        assert_eq!(CrosshairApp::extract_table_names_from_text(text2), vec!["Point_A"]);
+
+        let text3 = "table_cell(Table_1, 1, 2)";
+        assert_eq!(CrosshairApp::extract_table_names_from_text(text3), vec!["Table_1"]);
+
+        let text4 = "{table_nearest_dist(\"Nha tho do\", g, h)} + {table_nearest_x(\"Nha tho do\", g, h)}";
+        assert_eq!(CrosshairApp::extract_table_names_from_text(text4), vec!["Nha tho do"]);
+
+        let text5 = "table_nearest_dist(\"Table A\", 1, 2) + table_nearest_dist(\"Table B\", 3, 4)";
+        assert_eq!(CrosshairApp::extract_table_names_from_text(text5), vec!["Table A", "Table B"]);
+
+        let text6 = "table_nearest_dist ( \"Space Table\" , x , y )";
+        assert_eq!(CrosshairApp::extract_table_names_from_text(text6), vec!["Space Table"]);
     }
 }
 
