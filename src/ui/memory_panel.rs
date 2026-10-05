@@ -1219,6 +1219,10 @@ pub(crate) struct MemoryPanelState {
     #[cfg(windows)]
     code_access_dialog: Option<CodeAccessDialog>,
     #[cfg(windows)]
+    code_access_last_pos: Option<egui::Pos2>,
+    #[cfg(windows)]
+    code_access_last_size: Option<egui::Vec2>,
+    #[cfg(windows)]
     code_compare_dialog: Option<CodeCompareDialog>,
     aob_compare_dialog: Option<AobCompareDialog>,
     pub(super) show_proximity_finder: bool,
@@ -1363,6 +1367,10 @@ impl Default for MemoryPanelState {
             disassembler_dialog: None,
             #[cfg(windows)]
             code_access_dialog: None,
+            #[cfg(windows)]
+            code_access_last_pos: None,
+            #[cfg(windows)]
+            code_access_last_size: None,
             #[cfg(windows)]
             code_compare_dialog: None,
             aob_compare_dialog: None,
@@ -14841,19 +14849,44 @@ impl CrosshairApp {
         let mut apply_esp = None;
         if dialog.pinned {
             let scale = self.state.memory_pinned_ui_scale;
-            let builder = egui::ViewportBuilder::default()
+            let mut builder = egui::ViewportBuilder::default()
                 .with_title(&title)
-                .with_position(egui::pos2(0.0, 0.0))
-                .with_inner_size(vec2(620.0, 520.0) * scale)
                 .with_min_inner_size(vec2(420.0, 280.0) * scale)
                 .with_clamp_size_to_monitor_size(true)
                 .with_decorations(false)
                 .with_resizable(true)
                 .with_always_on_top();
+            if let Some(pos) = self.memory_panel.code_access_last_pos {
+                builder = builder.with_position(pos);
+            } else {
+                builder = builder.with_position(egui::pos2(0.0, 0.0));
+            }
+            if let Some(size) = self.memory_panel.code_access_last_size {
+                builder = builder.with_inner_size(size);
+            } else {
+                builder = builder.with_inner_size(vec2(620.0, 520.0) * scale);
+            }
+            let mut current_pos = None;
+            let mut current_size = None;
             ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of(("memory-code-access", dialog.code_index)),
+                egui::ViewportId::from_hash_of("memory-code-access"),
                 builder,
                 |ctx, _| {
+                    if let Some(pos) = ctx.input(|i| i.viewport().outer_rect.map(|r| r.min)) {
+                        if pos.x.is_finite() && pos.y.is_finite() {
+                            current_pos = Some(pos);
+                        }
+                    }
+                    if let Some(size) = ctx.input(|i| {
+                        i.viewport()
+                            .inner_rect
+                            .map(|r| r.size())
+                            .or_else(|| i.viewport().outer_rect.map(|r| r.size()))
+                    }) {
+                        if size.x > 50.0 && size.y > 50.0 && size.x.is_finite() && size.y.is_finite() {
+                            current_size = Some(size);
+                        }
+                    }
                     Self::sync_pinned_viewport_scale(ctx, "memory-code-access", scale);
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
@@ -14888,6 +14921,12 @@ impl CrosshairApp {
                     Self::render_memory_popup_resize_handles(ctx);
                 },
             );
+            if let Some(pos) = current_pos {
+                self.memory_panel.code_access_last_pos = Some(pos);
+            }
+            if let Some(size) = current_size {
+                self.memory_panel.code_access_last_size = Some(size);
+            }
             if unpin {
                 dialog.pinned = false;
             }
@@ -25850,5 +25889,21 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
 
         let second = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
         assert!(!second, "Second call in same frame must NOT see the consumed key");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_code_access_pinned_position_and_size_retention() {
+        let mut state = MemoryPanelState::default();
+        assert_eq!(state.code_access_last_pos, None);
+        assert_eq!(state.code_access_last_size, None);
+
+        let saved_pos = egui::pos2(350.0, 180.0);
+        let saved_size = egui::vec2(750.0, 600.0);
+        state.code_access_last_pos = Some(saved_pos);
+        state.code_access_last_size = Some(saved_size);
+
+        assert_eq!(state.code_access_last_pos, Some(saved_pos));
+        assert_eq!(state.code_access_last_size, Some(saved_size));
     }
 }
