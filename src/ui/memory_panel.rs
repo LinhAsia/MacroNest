@@ -3842,7 +3842,7 @@ impl CrosshairApp {
             if !pinned
                 && !self.memory_panel.saved_list_active
                 && !has_kb_focus
-                && ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::A))
+                && ui.input(|input| (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(egui::Key::A))
             {
                 self.memory_panel.selected_results = (0..visible_count).collect();
             }
@@ -4049,6 +4049,11 @@ impl CrosshairApp {
     }
 
     fn select_memory_result(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
+        ui.ctx().memory_mut(|mem| {
+            if let Some(id) = mem.focused() {
+                mem.surrender_focus(id);
+            }
+        });
         self.memory_panel.saved_list_active = false;
         let (shift, additive) = ui.input(|input| {
             (
@@ -4094,6 +4099,11 @@ impl CrosshairApp {
     }
 
     fn select_saved_memory_row(&mut self, index: usize, selected: bool, ui: &egui::Ui) {
+        ui.ctx().memory_mut(|mem| {
+            if let Some(id) = mem.focused() {
+                mem.surrender_focus(id);
+            }
+        });
         self.memory_panel.saved_list_active = true;
         let (shift, additive) = ui.input(|input| {
             (
@@ -4209,13 +4219,19 @@ impl CrosshairApp {
                 ui.separator();
                 let editing = self.memory_panel.edit_value_index.is_some()
                     || self.memory_panel.edit_description_index.is_some();
+                let has_kb_focus = ui.ctx().memory(|memory| memory.focused().is_some())
+                    || ui.ctx().wants_keyboard_input();
+                if has_kb_focus {
+                    self.memory_panel.saved_list_active = false;
+                }
                 if self.memory_panel.saved_list_active
                     && !editing
-                    && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A))
+                    && !has_kb_focus
+                    && ui.input(|input| (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(egui::Key::A))
                 {
                     self.memory_panel.selected_saved = (0..self.memory_panel.saved.len()).collect();
                 }
-                if self.memory_panel.saved_list_active && !editing {
+                if self.memory_panel.saved_list_active && !editing && !has_kb_focus {
                     let arrow_up = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
                     let arrow_down = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
                     if arrow_up || arrow_down {
@@ -4670,6 +4686,11 @@ impl CrosshairApp {
                                 }
                             }
                             if response.secondary_clicked() {
+                                ui.ctx().memory_mut(|mem| {
+                                    if let Some(id) = mem.focused() {
+                                        mem.surrender_focus(id);
+                                    }
+                                });
                                 self.memory_panel.saved_list_active = true;
                                 if !self.memory_panel.selected_saved.contains(&index) {
                                     self.memory_panel.selected_saved.clear();
@@ -4678,6 +4699,11 @@ impl CrosshairApp {
                                 }
                             }
                             if response.clicked_by(egui::PointerButton::Middle) {
+                                ui.ctx().memory_mut(|mem| {
+                                    if let Some(id) = mem.focused() {
+                                        mem.surrender_focus(id);
+                                    }
+                                });
                                 self.memory_panel.saved_list_active = true;
                                 self.memory_panel.selected_saved.clear();
                                 self.memory_panel.selected_saved.insert(index);
@@ -11472,7 +11498,10 @@ impl CrosshairApp {
                         }
                     });
                 }
-                if ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::A)) {
+                if !ui.ctx().wants_keyboard_input()
+                    && !ui.ctx().memory(|m| m.focused().is_some())
+                    && ui.input(|input| (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(egui::Key::A))
+                {
                     dialog.selected = visible_indices.iter().copied().collect();
                 }
                 let refresh_visible_values = dialog.validation_rx.is_none()
@@ -12506,9 +12535,12 @@ impl CrosshairApp {
                 }
             });
         }
-        if ui.input(|input| {
-            input.modifiers.command && input.key_pressed(egui::Key::A)
-        }) {
+        if !ui.ctx().wants_keyboard_input()
+            && !ui.ctx().memory(|m| m.focused().is_some())
+            && ui.input(|input| {
+                (input.modifiers.command || input.modifiers.ctrl) && input.key_pressed(egui::Key::A)
+            })
+        {
             dialog.selected = visible_indices.iter().copied().collect();
         }
         let total_row_width = (if show_target_col { TARGET_WIDTH } else { 0.0 }
@@ -15064,7 +15096,10 @@ impl CrosshairApp {
         }
         let display_orig_indices: Vec<usize> =
             display_addresses.iter().map(|(orig, _)| *orig).collect();
-        if ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::A)) {
+        if !ui.ctx().wants_keyboard_input()
+            && !ui.ctx().memory(|m| m.focused().is_some())
+            && ui.input(|input| (input.modifiers.ctrl || input.modifiers.command) && input.key_pressed(egui::Key::A))
+        {
             dialog.selected_indices = display_orig_indices.iter().copied().collect();
             dialog.selected = display_orig_indices.first().copied();
             dialog.selection_anchor = Some(0);
@@ -15526,10 +15561,13 @@ impl CrosshairApp {
         };
         let mut open = true;
         let mut nav_delta = 0isize;
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
-            nav_delta = -1;
-        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
-            nav_delta = 1;
+        let mem_has_kb = ctx.wants_keyboard_input() || ctx.memory(|m| m.focused().is_some());
+        if !mem_has_kb {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                nav_delta = -1;
+            } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                nav_delta = 1;
+            }
         }
         if dialog.pinned {
             let scale = self.state.memory_pinned_ui_scale;
@@ -15558,10 +15596,13 @@ impl CrosshairApp {
                     if fit_columns {
                         ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(target_view_width, 820.0) * scale));
                     }
-                    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
-                        nav_delta = -1;
-                    } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
-                        nav_delta = 1;
+                    let mem_has_kb = ctx.wants_keyboard_input() || ctx.memory(|m| m.focused().is_some());
+                    if !mem_has_kb {
+                        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                            nav_delta = -1;
+                        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                            nav_delta = 1;
+                        }
                     }
                     Self::constrain_memory_popup_to_monitor(ctx);
                     if ctx.input(|input| input.viewport().close_requested()) {
@@ -15623,10 +15664,13 @@ impl CrosshairApp {
             .collapsible(false)
             .open(&mut open)
             .show(ctx, |ui| {
-                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
-                    nav_delta = -1;
-                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
-                    nav_delta = 1;
+                let mem_has_kb = ui.ctx().wants_keyboard_input() || ui.ctx().memory(|m| m.focused().is_some());
+                if !mem_has_kb {
+                    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                        nav_delta = -1;
+                    } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                        nav_delta = 1;
+                    }
                 }
                 let pin_label = self.tr("Pin", "Ghim");
                 if ui.button(pin_label).clicked() {
@@ -21628,7 +21672,7 @@ impl CrosshairApp {
             }
             return;
         }
-        let is_any_focused = ctx.memory(|m| m.focused().is_some());
+        let is_any_focused = ctx.memory(|m| m.focused().is_some()) || ctx.wants_keyboard_input();
         let target_matches = Self::memory_hotkey_should_trigger(
             self.state.memory_hotkey_require_target_focus,
             self.memory_panel.process_pid,
@@ -25763,5 +25807,30 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
 
         assert_eq!(state.code_access_last_pos, Some(saved_pos));
         assert_eq!(state.code_access_last_size, Some(saved_size));
+    }
+
+    #[test]
+    fn test_saved_address_shortcuts_disabled_when_keyboard_input_focused() {
+        let ctx = egui::Context::default();
+        let text_id = egui::Id::new("scan_value_box");
+        ctx.memory_mut(|mem| mem.request_focus(text_id));
+        let has_kb_focus = ctx.memory(|mem| mem.focused().is_some()) || ctx.wants_keyboard_input();
+        assert!(has_kb_focus, "Widget focus must register as active keyboard input");
+
+        let mut panel = MemoryPanelState::default();
+        panel.saved.push(SavedMemoryAddress {
+            address: 0x12EF14CA477,
+            value_type: ScanValueType::I32,
+            ..Default::default()
+        });
+        panel.saved_list_active = true;
+        panel.selected_saved.insert(0);
+
+        if has_kb_focus {
+            panel.saved_list_active = false;
+        }
+
+        assert!(!panel.saved_list_active, "saved_list_active must be cleared when text input is focused");
+        assert!(panel.edit_value_index.is_none(), "Value editing must not be triggered");
     }
 }
