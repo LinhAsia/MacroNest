@@ -379,13 +379,14 @@ mod windows_overlay {
     }
     static ESP_TARGET_SNAPSHOTS: Lazy<Mutex<HashMap<u32, EspTargetSnapshot>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     struct EspDebugBoxHit {
         min_x: i32,
         min_y: i32,
         max_x: i32,
         max_y: i32,
         address: usize,
+        pointer_expr: Option<String>,
     }
     static ESP_DEBUG_BOX_HITS: Lazy<Mutex<Vec<EspDebugBoxHit>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
@@ -5312,24 +5313,35 @@ mod windows_overlay {
             record_mouse_event(message, &info);
             record_macro_mouse_event(message, &info);
             if message == WM_LBUTTONDOWN {
-                let pt_x = info.pt.x;
-                let pt_y = info.pt.y;
-                let hit = ESP_DEBUG_BOX_HITS
+                let is_esp_debug_active = HOOK_STATE
                     .lock()
+                    .esp_presets
                     .iter()
-                    .find(|h| pt_x >= h.min_x && pt_x <= h.max_x && pt_y >= h.min_y && pt_y <= h.max_y)
-                    .copied();
-                if let Some(hit) = hit {
-                    let addr = hit.address;
-                    let text = format!("0x{addr:X}");
-                    if let Ok(mut clipboard) = Clipboard::new() {
-                        let _ = clipboard.set_text(text.clone());
+                    .any(|p| p.enabled && p.debug_mode);
+                if !is_esp_debug_active {
+                    let mut hits = ESP_DEBUG_BOX_HITS.lock();
+                    if !hits.is_empty() {
+                        hits.clear();
                     }
-                    *ESP_DEBUG_CLICK_TOAST.lock() =
-                        Some((Instant::now(), format!("Copied {text} to Clipboard")));
-                    show_ocr_copy_toast_async(None, format!("Copied {text} to Clipboard"), false);
-                    wake_command_queue();
-                    return LRESULT(1);
+                } else {
+                    let pt_x = info.pt.x;
+                    let pt_y = info.pt.y;
+                    let hit = ESP_DEBUG_BOX_HITS
+                        .lock()
+                        .iter()
+                        .find(|h| pt_x >= h.min_x && pt_x <= h.max_x && pt_y >= h.min_y && pt_y <= h.max_y)
+                        .cloned();
+                    if let Some(hit) = hit {
+                        let text = hit.pointer_expr.unwrap_or_else(|| format!("0x{:X}", hit.address));
+                        if let Ok(mut clipboard) = Clipboard::new() {
+                            let _ = clipboard.set_text(text.clone());
+                        }
+                        *ESP_DEBUG_CLICK_TOAST.lock() =
+                            Some((Instant::now(), format!("Copied {text} to Clipboard")));
+                        show_ocr_copy_toast_async(None, format!("Copied {text} to Clipboard"), false);
+                        wake_command_queue();
+                        return LRESULT(1);
+                    }
                 }
             }
             let active_mouse_path_draw_capture = HOOK_STATE.lock().mouse_path_draw_capture.clone();
@@ -9970,9 +9982,14 @@ mod windows_overlay {
 
                 OverlayCommand::UpdateEspPresets(presets) => {
                     let any_enabled = presets.iter().any(|p| p.enabled);
+                    let any_debug = presets.iter().any(|p| p.enabled && p.debug_mode);
                     HOOK_STATE.lock().esp_presets = presets;
                     ESP_PRESET_REVISION.fetch_add(1, Ordering::Release);
+                    if !any_debug {
+                        ESP_DEBUG_BOX_HITS.lock().clear();
+                    }
                     if !any_enabled {
+                        ESP_TARGET_SNAPSHOTS.lock().clear();
                         if let Some(render_tx) = GPU_OVERLAY_RENDER_SENDER.lock().as_ref() {
                             let _ = render_tx.try_send(Vec::new());
                         }
@@ -25501,6 +25518,7 @@ mod windows_overlay {
                     if presets.is_empty() {
                         read_frame = EspReadFrame::default();
                         ESP_TARGET_SNAPSHOTS.lock().clear();
+                        ESP_DEBUG_BOX_HITS.lock().clear();
                         crate::audio::update_esp_spatial_audio(Vec::new());
                         had_shapes = false;
                         let _ = send_latest(Vec::new());
@@ -25795,6 +25813,7 @@ mod windows_overlay {
         resolved_addresses: HashMap<u32, HashMap<String, EspResolvedAddress>>,
         motionless_trackers: HashMap<(u32, usize), crate::model::MotionlessTrack>,
         aabb_bounds: HashMap<(u32, usize), ([f32; 3], [f32; 3])>,
+        entity_pointer_exprs: HashMap<(u32, usize), String>,
     }
 
     impl EspReadFrame {
@@ -25802,6 +25821,7 @@ mod windows_overlay {
             self.values.clear();
             self.memory_blocks.clear();
             self.aabb_bounds.clear();
+            self.entity_pointer_exprs.clear();
             if self.failed_addresses.len() > 1024 {
                 self.failed_addresses
                     .retain(|_, at| at.elapsed() < Duration::from_millis(1000));
@@ -26262,20 +26282,24 @@ mod windows_overlay {
         pid: u32,
     ) -> Result<Vec<([f32; 3], usize, usize)>, String> {
         if !preset.entity_list_enabled {
-            let mut read = |label: &str, expression: &str| {
+            let target = [
                 frame
-                    .read_value(pid, expression, preset.value_type)
-                    .map_err(|error| format!("{label}: {error}"))
-            };
-            return Ok(vec![(
-                [
-                    read("Target X", &preset.target_x)?,
-                    read("Target Y", &preset.target_y)?,
-                    read("Target Z", &preset.target_z)?,
-                ],
-                0,
-                0,
-            )]);
+                    .read_value(pid, &preset.target_x, preset.value_type)
+                    .map_err(|error| format!("Target X: {error}"))?,
+                frame
+                    .read_value(pid, &preset.target_y, preset.value_type)
+                    .map_err(|error| format!("Target Y: {error}"))?,
+                frame
+                    .read_value(pid, &preset.target_z, preset.value_type)
+                    .map_err(|error| format!("Target Z: {error}"))?,
+            ];
+            let expr = preset.target_x.trim();
+            if !expr.is_empty() {
+                frame
+                    .entity_pointer_exprs
+                    .insert((preset.id, 0), expr.to_owned());
+            }
+            return Ok(vec![(target, 0, 0)]);
         }
 
         let count = preset.entity_count.clamp(1, 512);
@@ -26294,7 +26318,7 @@ mod windows_overlay {
                 if let Some((t_pid, addr)) = frame.resolve_address(pid, &expr, false) {
                     target_pid = t_pid;
                     if addr >= 0x10000 && addr < 0x7FFF_FFFF_0000 && !preset.entity_blacklisted_addresses.contains(&addr) {
-                        addrs.push(addr);
+                        addrs.push((addr, Some(expr)));
                         if addrs.len() >= count as usize {
                             break;
                         }
@@ -26321,6 +26345,7 @@ mod windows_overlay {
                             && !preset.entity_blacklisted_addresses.contains(addr)
                     })
                     .take(count as usize)
+                    .map(|addr| (addr, None))
                     .collect::<Vec<_>>(),
             )
         } else {
@@ -26373,7 +26398,7 @@ mod windows_overlay {
                     if let Some((t_pid, addr)) = frame.resolve_address(pid, &expr, false) {
                         target_pid = t_pid;
                         if addr >= 0x10000 && addr < 0x7FFF_FFFF_0000 && !preset.entity_blacklisted_addresses.contains(&addr) {
-                            addrs.push(addr);
+                            addrs.push((addr, Some(expr)));
                         }
                     }
                 }
@@ -26392,8 +26417,16 @@ mod windows_overlay {
                 (
                     target_pid,
                     (0..count)
-                        .map(|index| root + (index as usize) * (stride as usize))
-                        .filter(|addr| {
+                        .map(|index| {
+                            let addr = root + (index as usize) * (stride as usize);
+                            let expr = if index == 0 {
+                                root_expression.to_owned()
+                            } else {
+                                format!("{root_expression} + 0x{:X}", (index as usize) * (stride as usize))
+                            };
+                            (addr, Some(expr))
+                        })
+                        .filter(|(addr, _)| {
                             *addr >= 0x10000
                                 && *addr < 0x7FFF_FFFF_0000
                                 && !preset.entity_blacklisted_addresses.contains(addr)
@@ -26403,7 +26436,7 @@ mod windows_overlay {
             }
         };
         let mut targets = Vec::with_capacity(count.min(64) as usize);
-        for (entity_index, entity_address) in entity_addresses.into_iter().enumerate() {
+        for (entity_index, (entity_address, pointer_expr_opt)) in entity_addresses.into_iter().enumerate() {
             if let Some(failed_at) = frame.failed_addresses.get(&entity_address) {
                 if failed_at.elapsed() < Duration::from_millis(500) {
                     continue;
@@ -26476,6 +26509,11 @@ mod windows_overlay {
                 && target.iter().any(|value| value.abs() > f32::EPSILON)
                 && target.iter().all(|value| value.abs() < 1.0e9)
             {
+                if let Some(expr) = pointer_expr_opt {
+                    frame
+                        .entity_pointer_exprs
+                        .insert((preset.id, entity_index), expr);
+                }
                 targets.push((target, entity_address, entity_index));
             }
         }
@@ -26634,11 +26672,13 @@ mod windows_overlay {
         let mut best_snapshot = None;
         for (target, entity_address, entity_index) in targets {
             let aabb_bounds = frame.aabb_bounds.get(&(preset.id, entity_index)).copied();
+            let pointer_expr = frame.entity_pointer_exprs.get(&(preset.id, entity_index)).cloned();
             let (mut target_shapes, snapshot) = esp_shapes_for_target(
                 preset,
                 marker_asset,
                 target,
                 aabb_bounds,
+                pointer_expr,
                 entity_address,
                 entity_index,
                 camera,
@@ -26941,6 +26981,7 @@ mod windows_overlay {
         marker_asset: Option<&Arc<str>>,
         target: [f32; 3],
         aabb_bounds: Option<([f32; 3], [f32; 3])>,
+        pointer_expr: Option<String>,
         entity_address: usize,
         entity_index: usize,
         camera: [f32; 3],
@@ -27169,6 +27210,7 @@ mod windows_overlay {
                     max_x: x + btn_hw + 4,
                     max_y: btn_y + btn_hh + 4,
                     address: entity_address,
+                    pointer_expr: pointer_expr.clone(),
                 });
             }
         };
@@ -33382,6 +33424,7 @@ mod windows_overlay {
                 None,
                 [10.0, 2.0, 2.0],
                 None,
+                Some("neox_engine.dll+87BAB10 [0, 28, 274]".to_string()),
                 0x12345678,
                 0,
                 [0.0; 3],
@@ -33397,7 +33440,39 @@ mod windows_overlay {
                 _ => false,
             }));
             let hits = ESP_DEBUG_BOX_HITS.lock();
-            assert!(hits.iter().any(|h| h.address == 0x12345678));
+            assert!(hits.iter().any(|h| {
+                h.address == 0x12345678
+                    && h.pointer_expr.as_deref()
+                        == Some("neox_engine.dll+87BAB10 [0, 28, 274]")
+            }));
+        }
+
+        #[test]
+        fn esp_disabled_debug_mode_does_not_intercept_or_retain_hits() {
+            let _lock = TEST_MUTEX.lock();
+            ESP_DEBUG_BOX_HITS.lock().push(EspDebugBoxHit {
+                min_x: 10,
+                min_y: 10,
+                max_x: 50,
+                max_y: 50,
+                address: 0x1234,
+                pointer_expr: Some("test_ptr".to_string()),
+            });
+            let mut preset = crate::model::EspPreset::default();
+            preset.enabled = false;
+            preset.debug_mode = true;
+            HOOK_STATE.lock().esp_presets = vec![preset];
+
+            let is_esp_debug_active = HOOK_STATE
+                .lock()
+                .esp_presets
+                .iter()
+                .any(|p| p.enabled && p.debug_mode);
+            assert!(!is_esp_debug_active);
+            if !is_esp_debug_active {
+                ESP_DEBUG_BOX_HITS.lock().clear();
+            }
+            assert!(ESP_DEBUG_BOX_HITS.lock().is_empty());
         }
 
         #[test]
@@ -40293,6 +40368,7 @@ mod windows_overlay {
         };
         if !enabled {
             ESP_TARGET_SNAPSHOTS.lock().remove(&preset_id);
+            ESP_DEBUG_BOX_HITS.lock().clear();
             if let Some(render_tx) = GPU_OVERLAY_RENDER_SENDER.lock().as_ref() {
                 let _ = render_tx.try_send(Vec::new());
             }
