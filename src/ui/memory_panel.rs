@@ -2293,6 +2293,34 @@ impl CrosshairApp {
                                 if ui.small_button(self.tr("Add +", "Thêm +")).clicked() {
                                     self.add_selected_memory_results();
                                 }
+                                let has_results = !self.memory_panel.candidates.is_empty()
+                                    || !self.memory_panel.text_candidates.is_empty();
+                                if ui
+                                    .add_enabled(
+                                        has_results,
+                                        egui::Button::new(self.tr("Copy all", "Sao chép tất cả")).small(),
+                                    )
+                                    .on_hover_text(self.tr(
+                                        "Copy all addresses and values to clipboard (auto-saves to scan_results.txt if >1000)",
+                                        "Sao chép toàn bộ địa chỉ và giá trị vào clipboard (tự lưu file scan_results.txt nếu >1000)",
+                                    ))
+                                    .clicked()
+                                {
+                                    self.copy_all_memory_scan_results(ctx);
+                                }
+                                if ui
+                                    .add_enabled(
+                                        has_results,
+                                        egui::Button::new(self.tr("Save .txt", "Lưu .txt")).small(),
+                                    )
+                                    .on_hover_text(self.tr(
+                                        "Save all scan results to a .txt file",
+                                        "Lưu toàn bộ kết quả quét ra file .txt",
+                                    ))
+                                    .clicked()
+                                {
+                                    self.save_all_memory_scan_results_file();
+                                }
                             });
                         });
                         ui.separator();
@@ -3771,6 +3799,34 @@ impl CrosshairApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button(self.tr("Add +", "Thêm +")).clicked() {
                             self.add_selected_memory_results();
+                        }
+                        let has_results = !self.memory_panel.candidates.is_empty()
+                            || !self.memory_panel.text_candidates.is_empty();
+                        if ui
+                            .add_enabled(
+                                has_results,
+                                egui::Button::new(self.tr("Copy all", "Sao chép tất cả")).small(),
+                            )
+                            .on_hover_text(self.tr(
+                                "Copy all addresses and values to clipboard (auto-saves to scan_results.txt if >1000)",
+                                "Sao chép toàn bộ địa chỉ và giá trị vào clipboard (tự lưu file scan_results.txt nếu >1000)",
+                            ))
+                            .clicked()
+                        {
+                            self.copy_all_memory_scan_results(ui.ctx());
+                        }
+                        if ui
+                            .add_enabled(
+                                has_results,
+                                egui::Button::new(self.tr("Save .txt", "Lưu .txt")).small(),
+                            )
+                            .on_hover_text(self.tr(
+                                "Save all scan results to a .txt file",
+                                "Lưu toàn bộ kết quả quét ra file .txt",
+                            ))
+                            .clicked()
+                        {
+                            self.save_all_memory_scan_results_file();
                         }
                     });
                 });
@@ -19644,6 +19700,66 @@ impl CrosshairApp {
         };
     }
 
+    fn export_all_memory_scan_results(&self) -> (String, usize) {
+        format_memory_scan_results_export(
+            &self.memory_panel.process_selector,
+            self.memory_panel.process_pid,
+            &self.memory_panel.text_candidates,
+            self.memory_panel.text_encoding,
+            &self.memory_panel.candidates,
+            self.memory_panel.value_type,
+            self.memory_panel.hex,
+            &self.memory_panel.live_candidate_values,
+            |addr| self.resolve_static_module_address(addr),
+        )
+    }
+
+    fn copy_all_memory_scan_results(&mut self, ctx: &egui::Context) {
+        let (text, count) = self.export_all_memory_scan_results();
+        if count == 0 {
+            return;
+        }
+        ctx.copy_text(text.clone());
+        let saved_txt = if count > 1000 {
+            let _ = std::fs::write("scan_results.txt", &text);
+            true
+        } else {
+            false
+        };
+        self.memory_panel.status = match (self.state.ui_language == UiLanguage::Vietnamese, saved_txt) {
+            (true, true) => format!("Đã sao chép {} kết quả vào clipboard (và lưu file scan_results.txt)", count),
+            (true, false) => format!("Đã sao chép {} kết quả vào clipboard", count),
+            (false, true) => format!("Copied {} results to clipboard (and saved to scan_results.txt)", count),
+            (false, false) => format!("Copied {} results to clipboard", count),
+        };
+    }
+
+    fn save_all_memory_scan_results_file(&mut self) {
+        let (text, count) = self.export_all_memory_scan_results();
+        if count == 0 {
+            return;
+        }
+        let default_name = format!("scan_results_{}_items.txt", count);
+        let save_path = rfd::FileDialog::new()
+            .add_filter("Text files (*.txt)", &["txt"])
+            .set_file_name(&default_name)
+            .save_file();
+        if let Some(path) = save_path {
+            match std::fs::write(&path, &text) {
+                Ok(_) => {
+                    self.memory_panel.status = if self.state.ui_language == UiLanguage::Vietnamese {
+                        format!("Đã lưu {} kết quả vào file: {}", count, path.display())
+                    } else {
+                        format!("Saved {} results to {}", count, path.display())
+                    };
+                }
+                Err(e) => {
+                    self.memory_panel.status = format!("Save error: {e}");
+                }
+            }
+        }
+    }
+
     fn generate_memory_range_dump(&self, indices: &[usize]) -> Result<String, String> {
         let pid = self.memory_panel.process_pid.ok_or_else(|| {
             if self.state.ui_language == UiLanguage::Vietnamese {
@@ -23225,6 +23341,70 @@ fn format_prefixed_memory_address(address: usize) -> String {
     format!("0x{address:08X}")
 }
 
+pub(crate) fn format_memory_scan_results_export(
+    process_selector: &str,
+    process_pid: Option<u32>,
+    text_candidates: &[TextScanCandidate],
+    text_encoding: Option<TextEncoding>,
+    candidates: &[ScanCandidate],
+    value_type: ScanValueType,
+    hex: bool,
+    live_candidate_values: &HashMap<usize, ScanValue>,
+    resolve_module: impl Fn(usize) -> Option<(String, usize)>,
+) -> (String, usize) {
+    let count = if !text_candidates.is_empty() {
+        text_candidates.len()
+    } else {
+        candidates.len()
+    };
+    if count == 0 {
+        return (String::new(), 0);
+    }
+    let mut output = String::with_capacity(count.saturating_mul(48));
+    let proc_name = if process_selector.is_empty() {
+        "Unknown Process"
+    } else {
+        process_selector
+    };
+    let pid_str = process_pid
+        .map(|p| format!("PID {p}"))
+        .unwrap_or_else(|| "No PID".to_string());
+    output.push_str(&format!(
+        "# MacroNest Scan Results Export\n# Target: {proc_name} ({pid_str})\n# Total: {count} results\n"
+    ));
+
+    if !text_candidates.is_empty() {
+        let enc_str = match text_encoding {
+            Some(TextEncoding::Utf16) => "Text (UTF-16)",
+            _ => "Text (UTF-8)",
+        };
+        output.push_str(&format!("# Type: {enc_str}\n# Address | Current | Module\n"));
+        for cand in text_candidates {
+            let addr_str = format_prefixed_memory_address(cand.address);
+            if let Some((m_name, m_off)) = resolve_module(cand.address) {
+                output.push_str(&format!("{addr_str} | {} | {m_name}+0x{m_off:X}\n", cand.current));
+            } else {
+                output.push_str(&format!("{addr_str} | {}\n", cand.current));
+            }
+        }
+    } else {
+        output.push_str(&format!("# Type: {value_type:?}\n# Address | Current | Module\n"));
+        for (idx, cand) in candidates.iter().enumerate() {
+            let initial = cand.current(value_type);
+            let current = live_candidate_values.get(&idx).copied().unwrap_or(initial);
+            let val_str = format_scan_value(current, hex);
+            let addr_str = format_prefixed_memory_address(cand.address);
+            if let Some((m_name, m_off)) = resolve_module(cand.address) {
+                output.push_str(&format!("{addr_str} | {val_str} | {m_name}+0x{m_off:X}\n"));
+            } else {
+                output.push_str(&format!("{addr_str} | {val_str}\n"));
+            }
+        }
+    }
+
+    (output, count)
+}
+
 fn parse_hex_offset(text: &str) -> Option<usize> {
     let text = text.trim();
     let digits = text
@@ -25408,6 +25588,46 @@ neox_engine.dll+87BAB10 [A0, DB0, E60]";
 
         let res = panel.resolve_static_module(0x00000286042C9180);
         assert_eq!(res, None);
+    }
+
+    #[test]
+    fn test_format_memory_scan_results_export() {
+        let text_candidates = vec![
+            TextScanCandidate {
+                address: 0xCAD323EA85,
+                previous: String::new(),
+                current: "POSITION".to_string(),
+            },
+            TextScanCandidate {
+                address: 0x2B403D4AA38,
+                previous: String::new(),
+                current: "position".to_string(),
+            },
+        ];
+        let dummy_live = HashMap::new();
+        let (output, count) = format_memory_scan_results_export(
+            "IdentityV",
+            Some(1234),
+            &text_candidates,
+            Some(TextEncoding::Utf8),
+            &[],
+            ScanValueType::I32,
+            false,
+            &dummy_live,
+            |addr| {
+                if addr == 0xCAD323EA85 {
+                    Some(("neox_engine.dll".to_string(), 0x323EA85))
+                } else {
+                    None
+                }
+            },
+        );
+
+        assert_eq!(count, 2);
+        assert!(output.contains("# Target: IdentityV (PID 1234)"));
+        assert!(output.contains("# Total: 2 results"));
+        assert!(output.contains("0xCAD323EA85 | POSITION | neox_engine.dll+0x323EA85"));
+        assert!(output.contains("0x2B403D4AA38 | position\n"));
     }
 
     #[test]
