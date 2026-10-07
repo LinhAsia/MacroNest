@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crossbeam_channel::{Receiver, Sender, unbounded};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;

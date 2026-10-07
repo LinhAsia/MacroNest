@@ -1236,10 +1236,6 @@ pub(crate) struct MemoryPanelState {
     last_scan_result_click: Option<(usize, bool, Instant)>,
     pending_write_checks: Vec<PendingWriteCheck>,
     freeze_worker: MemoryFreezeWorker,
-    pub(crate) dll_config: crate::dll_generator::DllProjectConfig,
-    pub(crate) show_dll_studio: bool,
-    pub(crate) dll_status_msg: String,
-    pub(crate) inject_dll_file_path: String,
     pub(crate) frida_session: Option<crate::frida_injector::Session>,
     global_aob_sample_1: Option<(Vec<u8>, usize)>,
     pub(crate) batch_replace_open: bool,
@@ -1385,10 +1381,6 @@ impl Default for MemoryPanelState {
             last_scan_result_click: None,
             pending_write_checks: Vec::new(),
             freeze_worker: MemoryFreezeWorker::default(),
-            dll_config: crate::dll_generator::DllProjectConfig::default(),
-            show_dll_studio: false,
-            dll_status_msg: String::new(),
-            inject_dll_file_path: String::new(),
             frida_session: None,
             global_aob_sample_1: None,
             batch_replace_open: false,
@@ -1720,13 +1712,6 @@ impl CrosshairApp {
                         ui.close();
                     }
                     if ui
-                        .button("Auto DLL Studio")
-                        .clicked()
-                    {
-                        self.memory_panel.show_dll_studio = true;
-                        ui.close();
-                    }
-                    if ui
                         .button(self.tr("Advanced options (Code list)", "Tùy chọn nâng cao (Code list)"))
                         .clicked()
                     {
@@ -1935,7 +1920,6 @@ impl CrosshairApp {
         #[cfg(windows)]
         self.render_code_relocate_choice_dialog(ui.ctx());
         self.render_code_compare_dialog(ui.ctx());
-        self.render_dll_studio_window(ui.ctx());
         self.sync_memory_freeze_targets();
     }
 
@@ -2198,7 +2182,6 @@ impl CrosshairApp {
         #[cfg(windows)]
         self.render_code_relocate_choice_dialog(ctx);
         self.render_code_compare_dialog(ctx);
-        self.render_dll_studio_window(ctx);
         self.sync_memory_freeze_targets();
     }
 
@@ -5856,351 +5839,6 @@ impl CrosshairApp {
         }
     }
 
-    fn render_dll_studio_window(&mut self, ctx: &egui::Context) {
-        if !self.memory_panel.show_dll_studio {
-            return;
-        }
-
-        let mut open = self.memory_panel.show_dll_studio;
-        let title = "Auto DLL Studio - Generator & Injector";
-        egui::Window::new(title)
-            .open(&mut open)
-            .default_size([740.0, 540.0])
-            .min_size([580.0, 420.0])
-            .resizable(true)
-            .collapsible(true)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("Auto DLL Generator & Injector")
-                            .strong()
-                            .size(16.0)
-                            .color(egui::Color32::from_rgb(100, 200, 255)),
-                    );
-                    ui.separator();
-                    ui.label(
-                        egui::RichText::new("Generate C++ DLL project or inject memory scripts without coding")
-                        .small()
-                        .weak(),
-                    );
-                });
-                ui.separator();
-
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    // Section 1: Project Settings
-                    ui.group(|ui| {
-                        ui.label(
-                            egui::RichText::new("1. Project Configuration")
-                            .strong(),
-                        );
-                        egui::Grid::new("dll-proj-grid")
-                            .num_columns(2)
-                            .spacing([10.0, 6.0])
-                            .show(ui, |ui| {
-                                ui.label("Project Name:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut self.memory_panel.dll_config.project_name)
-                                        .desired_width(200.0),
-                                );
-                                ui.end_row();
-
-                                ui.label("Target Process:");
-                                ui.horizontal(|ui| {
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut self.memory_panel.dll_config.target_process)
-                                            .desired_width(180.0),
-                                    );
-                                    if let Some(proc_name) = &self.memory_panel.process_selector.split('(').next() {
-                                        let clean_name = proc_name.trim().to_string();
-                                        if !clean_name.is_empty()
-                                            && ui.button("Get Current Process").clicked()
-                                        {
-                                            self.memory_panel.dll_config.target_process = clean_name;
-                                        }
-                                    }
-                                });
-                                ui.end_row();
-
-                                ui.label("Debug Console Window:");
-                                let console_label = "AllocConsole (Show debug console log window)";
-                                ui.checkbox(
-                                    &mut self.memory_panel.dll_config.alloc_console_for_debug,
-                                    console_label,
-                                );
-                                ui.end_row();
-                            });
-                    });
-
-                    ui.add_space(8.0);
-
-                    // Section 2: Memory Entries Table
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("2. RAM Address & Patch Config")
-                                .strong(),
-                            );
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui
-                                    .button("+ Add New Address")
-                                    .clicked()
-                                {
-                                    self.memory_panel
-                                        .dll_config
-                                        .entries
-                                        .push(crate::dll_generator::DllMemoryEntry::default());
-                                }
-                                if ui
-                                    .button("Import Saved Addresses")
-                                    .clicked()
-                                {
-                                    let saved_list = self.memory_panel.saved.clone();
-                                    let count = saved_list.len();
-                                    for saved in &saved_list {
-                                        let addr_str = format!("0x{:X}", saved.address);
-                                        let val_str = saved
-                                            .current
-                                            .as_ref()
-                                            .map(|v| format_scan_value(*v, false))
-                                            .or_else(|| saved.current_text.clone())
-                                            .unwrap_or_else(|| "0".to_string());
-                                        let offsets_vec = saved
-                                            .pointer
-                                            .as_ref()
-                                            .map(|p| p.offsets.clone())
-                                            .unwrap_or_default();
-                                        let entry = crate::dll_generator::DllMemoryEntry {
-                                            enabled: true,
-                                            name: if saved.description.is_empty() {
-                                                format!("RAM_0x{:X}", saved.address)
-                                            } else {
-                                                saved.description.clone()
-                                            },
-                                            address: addr_str,
-                                            offsets: offsets_vec,
-                                            value_type: crate::dll_generator::DllValueType::Float,
-                                            value_to_write: val_str,
-                                            mode: crate::dll_generator::DllPatchMode::HotkeyToggle,
-                                            hotkey_vk: Some(0x70),
-                                        };
-                                        self.memory_panel.dll_config.entries.push(entry);
-                                    }
-                                    let msg_template = "Imported {} addresses from saved list!";
-                                    self.memory_panel.dll_status_msg =
-                                        msg_template.replace("{}", &count.to_string());
-                                }
-                            });
-                        });
-                        ui.separator();
-
-                        let mut to_delete = None;
-                        let entries_len = self.memory_panel.dll_config.entries.len();
-
-                        if entries_len == 0 {
-                            ui.label(
-                                egui::RichText::new("No RAM addresses added. Click '+ Add New Address' or 'Import Saved Addresses'.")
-                                .weak(),
-                            );
-                        }
-
-
-                        for (idx, entry) in self.memory_panel.dll_config.entries.iter_mut().enumerate() {
-                            ui.push_id(idx, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.checkbox(&mut entry.enabled, "");
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut entry.name)
-                                            .desired_width(120.0)
-                                            .hint_text("Name"),
-                                    );
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut entry.address)
-                                            .desired_width(110.0)
-                                            .hint_text("Address 0x..."),
-                                    );
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut entry.value_to_write)
-                                            .desired_width(70.0)
-                                            .hint_text("Value"),
-                                    );
-
-                                    egui::ComboBox::from_id_salt(format!("valtype-{}", idx))
-                                        .width(100.0)
-                                        .selected_text(entry.value_type.label())
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut entry.value_type,
-                                                crate::dll_generator::DllValueType::Float,
-                                                "Float (f32)",
-                                            );
-                                            ui.selectable_value(
-                                                &mut entry.value_type,
-                                                crate::dll_generator::DllValueType::Double,
-                                                "Double (f64)",
-                                            );
-                                            ui.selectable_value(
-                                                &mut entry.value_type,
-                                                crate::dll_generator::DllValueType::Int32,
-                                                "Int32 (i32)",
-                                            );
-                                            ui.selectable_value(
-                                                &mut entry.value_type,
-                                                crate::dll_generator::DllValueType::Int64,
-                                                "Int64 (i64)",
-                                            );
-                                            ui.selectable_value(
-                                                &mut entry.value_type,
-                                                crate::dll_generator::DllValueType::Bytes,
-                                                "Bytes (NOP)",
-                                            );
-                                        });
-
-                                    egui::ComboBox::from_id_salt(format!("mode-{}", idx))
-                                        .width(140.0)
-                                        .selected_text(entry.mode.label())
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut entry.mode,
-                                                crate::dll_generator::DllPatchMode::HotkeyToggle,
-                                                "Hotkey Toggle",
-                                            );
-                                            ui.selectable_value(
-                                                &mut entry.mode,
-                                                crate::dll_generator::DllPatchMode::Freeze,
-                                                "Continuous Freeze",
-                                            );
-                                            ui.selectable_value(
-                                                &mut entry.mode,
-                                                crate::dll_generator::DllPatchMode::WriteOnce,
-                                                "Write Once",
-                                            );
-                                            ui.selectable_value(
-                                                &mut entry.mode,
-                                                crate::dll_generator::DllPatchMode::NopInstruction,
-                                                "NOP Instruction",
-                                            );
-                                        });
-
-                                    if ui.button("Delete").clicked() {
-                                        to_delete = Some(idx);
-                                    }
-                                });
-                            });
-                        }
-
-                        if let Some(idx) = to_delete {
-                            self.memory_panel.dll_config.entries.remove(idx);
-                        }
-                    });
-
-                    ui.add_space(8.0);
-
-                    // Section 3: Action Buttons & Output
-                    ui.group(|ui| {
-                        ui.label(
-                            egui::RichText::new("3. Export & Inject")
-                                .strong(),
-                        );
-                        if let Some(session) = &self.memory_panel.frida_session {
-                            while let Ok(event) = session.events.try_recv() {
-                                match event {
-                                    crate::frida_injector::Event::Status(s) => self.memory_panel.dll_status_msg = s,
-                                    crate::frida_injector::Event::Log(l) => self.memory_panel.dll_status_msg = l,
-                                }
-                            }
-                        }
-                        if !self.memory_panel.dll_status_msg.is_empty() {
-                            ui.label(
-                                egui::RichText::new(&self.memory_panel.dll_status_msg)
-                                    .color(egui::Color32::from_rgb(255, 215, 0)),
-                            );
-                        }
-
-                        ui.horizontal(|ui| {
-                            if ui
-                                .button("Export C++ Project & Frida Script")
-                                .clicked()
-                            {
-                                let export_dir =
-                                    std::path::PathBuf::from("exports").join(&self.memory_panel.dll_config.project_name);
-                                match crate::dll_generator::export_dll_project(
-                                    &self.memory_panel.dll_config,
-                                    &export_dir,
-                                ) {
-                                    Ok(path) => {
-                                        let prefix = "[OK] Project exported successfully to: ";
-                                        self.memory_panel.dll_status_msg = format!("{}{}", prefix, path.display());
-                                    }
-                                    Err(err) => {
-                                        let prefix = "[Error] Export failed: ";
-                                        self.memory_panel.dll_status_msg = format!("{}{}", prefix, err);
-                                    }
-                                }
-                            }
-
-                            if ui
-                                .button("Inject Frida Script Directly")
-                                .clicked()
-                            {
-                                if let Some(pid) = self.memory_panel.process_pid {
-                                    let script =
-                                        crate::dll_generator::generate_frida_js_script(&self.memory_panel.dll_config);
-                                    let frida_helper = self.paths.frida_helper_exe.clone();
-                                    self.memory_panel.frida_session = Some(crate::frida_injector::Session::attach(
-                                        frida_helper,
-                                        pid,
-                                        script,
-                                    ));
-                                    let prefix = "[OK] Frida Agent started for PID ";
-                                    self.memory_panel.dll_status_msg = format!("{}{}", prefix, pid);
-                                } else {
-                                    self.memory_panel.dll_status_msg = "[!] Please select a Target Process in Memory Scanner first!"
-                                        .to_string();
-                                }
-                            }
-                        });
-
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            ui.label("DLL File Path:");
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.memory_panel.inject_dll_file_path)
-                                    .desired_width(260.0)
-                                    .hint_text("C:\\path\\to\\file.dll"),
-                            );
-                            if ui
-                                .button("Inject DLL File into Process")
-                                .clicked()
-                            {
-                                if let Some(pid) = self.memory_panel.process_pid {
-                                    let path = std::path::PathBuf::from(&self.memory_panel.inject_dll_file_path);
-                                    if !path.exists() {
-                                        self.memory_panel.dll_status_msg = "[Error] DLL file does not exist!"
-                                            .to_string();
-                                    } else {
-                                        match crate::dll_generator::inject_dll_into_process(pid, &path) {
-                                            Ok(_) => {
-                                                let prefix = "[OK] Injected DLL successfully into PID ";
-                                                self.memory_panel.dll_status_msg = format!("{}{}", prefix, pid);
-                                            }
-                                            Err(err) => {
-                                                let prefix = "[Error] Injection failed: ";
-                                                self.memory_panel.dll_status_msg = format!("{}{}", prefix, err);
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    self.memory_panel.dll_status_msg = "[!] Please select a Target Process in Memory Scanner first!"
-                                        .to_string();
-                                }
-                            }
-                        });
-                    });
-                });
-            });
-
-        self.memory_panel.show_dll_studio = open;
-    }
 
     fn render_batch_replace_dialog(&mut self, ui: &mut egui::Ui) {
         if !self.memory_panel.batch_replace_open {
