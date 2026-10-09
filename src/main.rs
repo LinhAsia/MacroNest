@@ -25,6 +25,8 @@ mod window_list;
 mod game_capture;
 #[cfg(windows)]
 pub mod nvenc;
+#[cfg(windows)]
+pub mod speedhack;
 
 use anyhow::Result;
 use crossbeam_channel::unbounded;

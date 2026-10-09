@@ -1187,6 +1187,10 @@ pub(crate) struct MemoryPanelState {
     pub(super) aob_wildcard_source_input: String,
     hotkeys: HashMap<MemoryScanAction, HotkeyBinding>,
     pub(super) capturing_hotkey: Option<MemoryScanAction>,
+    #[cfg(windows)]
+    pub(crate) speedhack: crate::speedhack::SpeedhackSession,
+    pub(crate) speedhack_speed: f64,
+    pub(crate) speedhack_status: String,
     edit_value_index: Option<usize>,
     edit_value_input: String,
     edit_value_position: Option<egui::Pos2>,
@@ -1332,6 +1336,10 @@ impl Default for MemoryPanelState {
             aob_wildcard_source_input: String::new(),
             hotkeys: HashMap::new(),
             capturing_hotkey: None,
+            #[cfg(windows)]
+            speedhack: crate::speedhack::SpeedhackSession::new(),
+            speedhack_speed: 1.0,
+            speedhack_status: String::new(),
             edit_value_index: None,
             edit_value_input: String::new(),
             edit_value_position: None,
@@ -1459,6 +1467,11 @@ impl CrosshairApp {
             self.memory_panel.code_list_actions_validated = false;
             self.memory_panel.selected_code.clear();
             self.memory_panel.code_selection_anchor = None;
+            #[cfg(windows)]
+            {
+                self.memory_panel.speedhack.disable();
+                self.memory_panel.speedhack_status.clear();
+            }
         }
         crate::memory_debugger::debugger::invalidate_process_modules_cache();
         self.memory_panel.process_pid = pid;
@@ -3292,6 +3305,66 @@ impl CrosshairApp {
                     &mut self.memory_panel.pause_while_scanning,
                     pause_label,
                 );
+                #[cfg(windows)]
+                {
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        let mut is_enabled = self.memory_panel.speedhack.is_enabled();
+                        let cb = ui.checkbox(&mut is_enabled, self.tr("Speedhack", "Speedhack"));
+                        if cb.changed() {
+                            if is_enabled {
+                                if let Some(pid) = self.memory_panel.process_pid {
+                                    match self.memory_panel.speedhack.enable(pid, self.memory_panel.speedhack_speed) {
+                                        Ok(()) => {
+                                            self.memory_panel.speedhack_status = format!("{:.2}x", self.memory_panel.speedhack_speed);
+                                        }
+                                        Err(e) => {
+                                            self.memory_panel.speedhack_status = format!("Error: {}", e);
+                                        }
+                                    }
+                                } else {
+                                    self.memory_panel.speedhack_status = self.tr("No process", "No process").to_string();
+                                }
+                            } else {
+                                self.memory_panel.speedhack.disable();
+                                self.memory_panel.speedhack_status = self.tr("Off", "Off").to_string();
+                            }
+                        }
+
+                        let speed_drag = ui.add(
+                            egui::DragValue::new(&mut self.memory_panel.speedhack_speed)
+                                .speed(0.1)
+                                .clamp_range(0.01..=50.0)
+                                .suffix("x"),
+                        );
+                        if speed_drag.changed() && self.memory_panel.speedhack.is_enabled() {
+                            let _ = self.memory_panel.speedhack.set_speed(self.memory_panel.speedhack_speed);
+                            self.memory_panel.speedhack_status = format!("{:.2}x", self.memory_panel.speedhack_speed);
+                        }
+
+                        for preset in [0.5f64, 1.0, 2.0, 5.0] {
+                            if ui.button(format!("{:.1}x", preset)).clicked() {
+                                self.memory_panel.speedhack_speed = preset;
+                                if self.memory_panel.speedhack.is_enabled() {
+                                    let _ = self.memory_panel.speedhack.set_speed(preset);
+                                    self.memory_panel.speedhack_status = format!("{:.2}x", preset);
+                                }
+                            }
+                        }
+
+                        if !self.memory_panel.speedhack_status.is_empty() {
+                            ui.label(
+                                RichText::new(&self.memory_panel.speedhack_status)
+                                    .color(if self.memory_panel.speedhack.is_enabled() {
+                                        Color32::from_rgb(100, 220, 100)
+                                    } else {
+                                        Color32::from_rgb(200, 100, 100)
+                                    })
+                                    .small(),
+                            );
+                        }
+                    });
+                }
                 ui.add_space(5.0);
                 ui.horizontal(|ui| {
                     let addr_hint = self.tr("address / module+offset [offsets]", "address / module+offset [offsets]");
