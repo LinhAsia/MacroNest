@@ -1596,6 +1596,85 @@ pub fn filter_motionless_targets(
     });
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EspRuntimeDropSelfState {
+    pub armed: bool,
+    pub dropped_address: Option<usize>,
+    pub dropped_index: Option<usize>,
+    pub dropped_pointer_expr: Option<String>,
+}
+
+impl EspRuntimeDropSelfState {
+    pub fn arm(&mut self) {
+        self.armed = true;
+        self.dropped_address = None;
+        self.dropped_index = None;
+        self.dropped_pointer_expr = None;
+    }
+
+    pub fn clear(&mut self) {
+        self.armed = false;
+        self.dropped_address = None;
+        self.dropped_index = None;
+        self.dropped_pointer_expr = None;
+    }
+}
+
+/// Evaluates and drops the nearest entity (local player / self) from targets when armed.
+/// Once dropped, the dropped entity (by address, pointer expression, or index) remains excluded
+/// throughout sampling until re-armed or cleared.
+pub fn filter_runtime_drop_self(
+    targets: &mut Vec<([f32; 3], usize, usize)>,
+    camera: [f32; 3],
+    pointer_expr_lookup: impl Fn(usize) -> Option<String>,
+    state: &mut EspRuntimeDropSelfState,
+) {
+    if state.armed && targets.len() > 1 {
+        let mut min_dist_sq = f32::MAX;
+        let mut min_idx = None;
+        for (i, (pos, _, _)) in targets.iter().enumerate() {
+            let dx = pos[0] - camera[0];
+            let dy = pos[1] - camera[1];
+            let dz = pos[2] - camera[2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+            if d2 < min_dist_sq {
+                min_dist_sq = d2;
+                min_idx = Some(i);
+            }
+        }
+        if let Some(i) = min_idx {
+            let (_, addr, entity_idx) = targets[i];
+            let ptr_expr = pointer_expr_lookup(entity_idx);
+            state.armed = false;
+            state.dropped_address = Some(addr);
+            state.dropped_index = Some(entity_idx);
+            state.dropped_pointer_expr = ptr_expr;
+        }
+    }
+
+    if let Some(dropped_addr) = state.dropped_address {
+        let d_idx = state.dropped_index;
+        let d_ptr = state.dropped_pointer_expr.as_deref();
+        targets.retain(|(_, addr, idx)| {
+            if *addr == dropped_addr {
+                return false;
+            }
+            if let (Some(target_idx), Some(target_ptr)) = (d_idx, d_ptr) {
+                if *idx == target_idx
+                    && pointer_expr_lookup(*idx).as_deref() == Some(target_ptr)
+                {
+                    return false;
+                }
+            } else if let Some(target_idx) = d_idx {
+                if *idx == target_idx {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+}
+
 /// Projects the 8 corners of a 3D AABB bounding box defined by `min_pt` and `max_pt`
 /// to 2D screen coordinates, returning `(min_x, min_y, max_x, max_y)`.
 pub fn project_aabb_box(
@@ -2306,6 +2385,58 @@ mod tests {
         // Single address
         let single = super::parse_multiple_address_expressions("0x12345678");
         assert_eq!(single, vec!["0x12345678"]);
+    }
+
+    #[test]
+    fn test_filter_runtime_drop_self_drops_nearest_and_persists_throughout() {
+        let camera = [0.0, 0.0, 0.0];
+        let mut targets = vec![
+            ([50.0, 50.0, 0.0], 0x1000, 0),
+            ([0.0, 0.0, 1.0], 0x2000, 1),
+            ([20.0, 0.0, 0.0], 0x3000, 2),
+        ];
+
+        let mut state = super::EspRuntimeDropSelfState::default();
+        state.arm();
+
+        let lookup = |idx: usize| Some(format!("ptr_{idx}"));
+
+        // Frame 1: armed, should drop Entity 1 (nearest to camera at [0,0,1])
+        super::filter_runtime_drop_self(&mut targets, camera, lookup, &mut state);
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].1, 0x1000);
+        assert_eq!(targets[1].1, 0x3000);
+        assert!(!state.armed);
+        assert_eq!(state.dropped_address, Some(0x2000));
+        assert_eq!(state.dropped_index, Some(1));
+        assert_eq!(state.dropped_pointer_expr, Some("ptr_1".to_string()));
+
+        // Frame 2: Entity 0 moves very close to camera.
+        // Entity 1 must STILL be dropped throughout.
+        let mut targets2 = vec![
+            ([0.1, 0.1, 0.0], 0x1000, 0),
+            ([0.0, 0.0, 1.0], 0x2000, 1),
+            ([20.0, 0.0, 0.0], 0x3000, 2),
+        ];
+        super::filter_runtime_drop_self(&mut targets2, camera, lookup, &mut state);
+        assert_eq!(targets2.len(), 2);
+        assert_eq!(targets2[0].1, 0x1000);
+        assert_eq!(targets2[1].1, 0x3000);
+
+        // Frame 3: Re-arm (macro triggered EnableEspPreset)
+        state.arm();
+        assert!(state.armed);
+        let mut targets3 = vec![
+            ([0.1, 0.1, 0.0], 0x1000, 0),
+            ([0.0, 0.0, 1.0], 0x2000, 1),
+            ([20.0, 0.0, 0.0], 0x3000, 2),
+        ];
+        // Now Entity 0 is closest, so Entity 0 gets dropped
+        super::filter_runtime_drop_self(&mut targets3, camera, lookup, &mut state);
+        assert_eq!(targets3.len(), 2);
+        assert_eq!(targets3[0].1, 0x2000);
+        assert_eq!(targets3[1].1, 0x3000);
+        assert_eq!(state.dropped_address, Some(0x1000));
     }
 }
 
