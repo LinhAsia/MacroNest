@@ -423,6 +423,9 @@ mod windows_overlay {
 
     static ESP_RUNTIME_DROPPED_SELF: Lazy<Mutex<HashMap<u32, RuntimeDropSelfRecord>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
+    static ESP_MOTIONLESS_TRACKERS: Lazy<
+        Mutex<HashMap<(u32, usize), crate::model::MotionlessTrack>>,
+    > = Lazy::new(|| Mutex::new(HashMap::new()));
 
     pub(crate) fn arm_esp_runtime_drop_self(preset_id: u32) {
         let mut map = ESP_RUNTIME_DROPPED_SELF.lock();
@@ -10035,6 +10038,8 @@ mod windows_overlay {
                 OverlayCommand::UpdateEspPresets(presets) => {
                     let any_enabled = presets.iter().any(|p| p.enabled);
                     let any_debug = presets.iter().any(|p| p.enabled && p.debug_mode);
+                    let active_ids: HashSet<u32> = presets.iter().map(|p| p.id).collect();
+                    ESP_MOTIONLESS_TRACKERS.lock().retain(|(id, _), _| active_ids.contains(id));
                     sync_esp_runtime_drop_self(&presets);
                     HOOK_STATE.lock().esp_presets = presets;
                     ESP_PRESET_REVISION.fetch_add(1, Ordering::Release);
@@ -25659,10 +25664,19 @@ mod windows_overlay {
                             let timeout = Duration::from_secs_f32(
                                 preset.entity_motionless_timeout_secs.max(0.05),
                             );
+                            let mut motionless_trackers = ESP_MOTIONLESS_TRACKERS.lock();
+                            if motionless_trackers.len() > 1024 {
+                                let now = Instant::now();
+                                motionless_trackers.retain(|_, track| {
+                                    now.checked_duration_since(track.last_moved_at)
+                                        .unwrap_or_default()
+                                        < Duration::from_secs(60)
+                                });
+                            }
                             crate::model::filter_motionless_targets(
                                 preset.id,
                                 &mut targets,
-                                &mut read_frame.motionless_trackers,
+                                &mut motionless_trackers,
                                 timeout,
                                 Instant::now(),
                             );
@@ -25895,7 +25909,6 @@ mod windows_overlay {
         memory_blocks: HashMap<(u32, usize), Option<Vec<u8>>>,
         failed_addresses: HashMap<usize, Instant>,
         resolved_addresses: HashMap<u32, HashMap<String, EspResolvedAddress>>,
-        motionless_trackers: HashMap<(u32, usize), crate::model::MotionlessTrack>,
         aabb_bounds: HashMap<(u32, usize), ([f32; 3], [f32; 3])>,
         entity_pointer_exprs: HashMap<(u32, usize), String>,
     }
@@ -25909,14 +25922,6 @@ mod windows_overlay {
             if self.failed_addresses.len() > 1024 {
                 self.failed_addresses
                     .retain(|_, at| at.elapsed() < Duration::from_millis(1000));
-            }
-            if self.motionless_trackers.len() > 1024 {
-                let now = Instant::now();
-                self.motionless_trackers.retain(|_, track| {
-                    now.checked_duration_since(track.last_moved_at)
-                        .unwrap_or_default()
-                        < Duration::from_secs(10)
-                });
             }
         }
 

@@ -2317,8 +2317,19 @@ impl CrosshairApp {
 
                                 ui.add_space(2.0);
 
-                                // Row 4: Yaw offset & Direction B/A ratio
+                                // Row 4: Yaw controls & Direction B/A ratio
                                 ui.horizontal_wrapped(|ui| {
+                                    ui.label("Yaw scale:").on_hover_text("Calibrate when ESP turns faster or slower than entity when rotating camera.");
+                                    ui.add(
+                                        DragValue::new(&mut preset.yaw_multiplier)
+                                            .speed(0.01)
+                                            .range(0.0..=10.0),
+                                    );
+                                    if ui.small_button("Reset").clicked() {
+                                        preset.yaw_multiplier = 1.0;
+                                    }
+
+                                    ui.add_space(4.0);
                                     ui.label("Yaw offset:").on_hover_text("Use this when marker is consistently rotated left/right.");
                                     ui.add(
                                         DragValue::new(&mut preset.yaw_offset_degrees)
@@ -2395,8 +2406,19 @@ impl CrosshairApp {
 
                                 ui.add_space(2.0);
 
-                                // Row 6: Vertical projection scale, Target height, World height scale
+                                // Row 6: Projection scales, Target height, World height scale
                                 ui.horizontal_wrapped(|ui| {
+                                    ui.label("Horizontal proj scale:");
+                                    ui.add(
+                                        DragValue::new(&mut preset.horizontal_projection_multiplier)
+                                            .speed(0.01)
+                                            .range(0.0..=10.0),
+                                    );
+                                    if ui.small_button("Reset").clicked() {
+                                        preset.horizontal_projection_multiplier = 1.0;
+                                    }
+
+                                    ui.add_space(4.0);
                                     ui.label("Vertical proj scale:");
                                     ui.add(
                                         DragValue::new(&mut preset.vertical_projection_multiplier)
@@ -2455,6 +2477,7 @@ impl CrosshairApp {
                                         preset.pitch_unit = EspAngleUnit::Radians;
                                         preset.pitch_input = EspPitchInput::Angle;
                                         preset.pitch_multiplier = 1.0;
+                                        preset.yaw_multiplier = 1.0;
                                         preset.direction_multiplier = 1.0;
                                         preset.invert_camera_yaw = false;
                                         preset.invert_yaw = false;
@@ -2466,6 +2489,7 @@ impl CrosshairApp {
                                         preset.screen_offset_y = 0.0;
                                         preset.horizontal_fov = 90.0;
                                         preset.vertical_projection_multiplier = 1.0;
+                                        preset.horizontal_projection_multiplier = 1.0;
                                     }
                                     if ui.button("Capture direction").clicked() {
                                         self.esp_calibration_feedback

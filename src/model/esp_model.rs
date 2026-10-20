@@ -166,6 +166,7 @@ pub struct EspPreset {
     pub pitch_unit: EspAngleUnit,
     pub pitch_input: EspPitchInput,
     pub pitch_multiplier: f32,
+    pub yaw_multiplier: f32,
     pub invert_camera_yaw: bool,
     pub invert_camera_pitch: bool,
     pub invert_vertical: bool,
@@ -179,6 +180,7 @@ pub struct EspPreset {
     pub screen_offset_y: f32,
     pub horizontal_fov: f32,
     pub vertical_projection_multiplier: f32,
+    pub horizontal_projection_multiplier: f32,
     pub marker_source: EspMarkerSource,
     pub marker: EspMarkerKind,
     /// Image file path. Kept under its original key for saved-preset compatibility.
@@ -294,6 +296,7 @@ impl EspPreset {
             pitch_unit: EspAngleUnit::Radians,
             pitch_input: EspPitchInput::Angle,
             pitch_multiplier: 1.0,
+            yaw_multiplier: 1.0,
             invert_camera_yaw: false,
             invert_camera_pitch: false,
             invert_vertical: false,
@@ -307,6 +310,7 @@ impl EspPreset {
             screen_offset_y: 0.0,
             horizontal_fov: 90.0,
             vertical_projection_multiplier: 1.0,
+            horizontal_projection_multiplier: 1.0,
             marker_source: EspMarkerSource::Geometry,
             marker: EspMarkerKind::Dot,
             marker_asset_path: String::new(),
@@ -1050,7 +1054,7 @@ pub(crate) fn esp_spatial_audio_pan(
     if forward_a.hypot(forward_b) <= f32::EPSILON {
         return 0.0;
     }
-    let mut camera_yaw = esp_angle_to_radians(yaw, preset.yaw_unit);
+    let mut camera_yaw = esp_yaw_to_radians(preset, yaw);
     if preset.invert_camera_yaw {
         camera_yaw = -camera_yaw;
     }
@@ -1094,6 +1098,15 @@ fn esp_angle_from_radians(value: f32, unit: EspAngleUnit) -> f32 {
         EspAngleUnit::Degrees => value.to_degrees(),
         EspAngleUnit::Radians => value,
     }
+}
+
+fn esp_yaw_to_radians(preset: &EspPreset, yaw: f32) -> f32 {
+    let multiplier = if preset.yaw_multiplier.is_finite() && preset.yaw_multiplier != 0.0 {
+        preset.yaw_multiplier
+    } else {
+        1.0
+    };
+    esp_angle_to_radians(yaw, preset.yaw_unit) * multiplier
 }
 
 fn esp_pitch_to_radians(preset: &EspPreset, pitch: f32) -> f32 {
@@ -1277,7 +1290,7 @@ pub(crate) fn esp_calibration_sample(
     (horizontal_distance > f32::EPSILON).then_some(EspCalibrationSample {
         bearing_yaw: forward_b.atan2(forward_a),
         bearing_pitch: vertical.atan2(horizontal_distance),
-        camera_yaw: esp_angle_to_radians(yaw, preset.yaw_unit),
+        camera_yaw: esp_yaw_to_radians(preset, yaw),
         camera_pitch: esp_pitch_to_radians(preset, pitch),
     })
 }
@@ -1410,7 +1423,7 @@ pub(crate) fn project_esp(
     if distance <= f32::EPSILON {
         return None;
     }
-    let mut yaw = esp_angle_to_radians(yaw, preset.yaw_unit);
+    let mut yaw = esp_yaw_to_radians(preset, yaw);
     let mut pitch = esp_pitch_to_radians(preset, pitch);
     if preset.invert_camera_yaw {
         yaw = -yaw;
@@ -1434,7 +1447,12 @@ pub(crate) fn project_esp(
     }
     let half_fov_x = (preset.horizontal_fov.clamp(1.0, 179.0).to_radians() * 0.5).max(0.001);
     let half_fov_y = (half_fov_x.tan() / aspect.max(0.01)).atan();
-    let x = camera_right / (camera_depth * half_fov_x.tan());
+    let horizontal_projection_multiplier = if preset.horizontal_projection_multiplier.is_finite() {
+        preset.horizontal_projection_multiplier.max(0.0)
+    } else {
+        1.0
+    };
+    let x = camera_right / (camera_depth * half_fov_x.tan()) * horizontal_projection_multiplier;
     let vertical_projection_multiplier = if preset.vertical_projection_multiplier.is_finite() {
         preset.vertical_projection_multiplier.max(0.0)
     } else {
@@ -2068,6 +2086,26 @@ mod tests {
             (esp_pitch_to_radians(&preset, 1.0) - std::f32::consts::FRAC_PI_4).abs()
                 < 0.001
         );
+    }
+
+    #[test]
+    fn yaw_multiplier_scales_a_presets_raw_yaw() {
+        let mut preset = EspPreset::default();
+        preset.yaw_unit = EspAngleUnit::Degrees;
+        preset.yaw_multiplier = 0.5;
+        assert!((esp_yaw_to_radians(&preset, 180.0) - std::f32::consts::FRAC_PI_2).abs() < 0.001);
+        preset.yaw_multiplier = f32::NAN;
+        assert!((esp_yaw_to_radians(&preset, 180.0) - std::f32::consts::PI).abs() < 0.001);
+    }
+
+    #[test]
+    fn horizontal_projection_scale_scales_screen_x() {
+        let mut preset = EspPreset::default();
+        let normal = project_esp(&preset, [10.0, 2.0, 2.0], [0.0; 3], 0.0, 0.0, 16.0 / 9.0).unwrap();
+        preset.horizontal_projection_multiplier = 0.5;
+        let scaled = project_esp(&preset, [10.0, 2.0, 2.0], [0.0; 3], 0.0, 0.0, 16.0 / 9.0).unwrap();
+        assert!((normal.normalized_x * 0.5 - scaled.normalized_x).abs() < 0.001);
+        assert!((normal.normalized_y - scaled.normalized_y).abs() < 0.001);
     }
 
     #[test]
