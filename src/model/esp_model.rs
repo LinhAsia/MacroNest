@@ -71,6 +71,10 @@ fn default_entity_motionless_timeout_secs() -> f32 {
     3.0
 }
 
+fn default_entity_distance_max() -> f32 {
+    100.0
+}
+
 fn default_selected_permutation() -> usize {
     1
 }
@@ -136,6 +140,14 @@ pub struct EspPreset {
     pub entity_filter_motionless_enabled: bool,
     #[serde(default = "default_entity_motionless_timeout_secs")]
     pub entity_motionless_timeout_secs: f32,
+    #[serde(default)]
+    pub entity_filter_motionless_permanent: bool,
+    #[serde(default)]
+    pub entity_distance_filter_enabled: bool,
+    #[serde(default)]
+    pub entity_distance_min: f32,
+    #[serde(default = "default_entity_distance_max")]
+    pub entity_distance_max: f32,
     pub entity_auto_hud_enabled: bool,
     pub entity_auto_hud_preset_id: Option<u32>,
     pub entity_aabb_center: bool,
@@ -273,6 +285,10 @@ impl EspPreset {
             entity_exclude_near_max_distance: 0.0,
             entity_filter_motionless_enabled: false,
             entity_motionless_timeout_secs: 3.0,
+            entity_filter_motionless_permanent: false,
+            entity_distance_filter_enabled: false,
+            entity_distance_min: 0.0,
+            entity_distance_max: 100.0,
             entity_auto_hud_enabled: false,
             entity_auto_hud_preset_id: None,
             entity_aabb_center: false,
@@ -1054,7 +1070,7 @@ pub(crate) fn esp_spatial_audio_pan(
     if forward_a.hypot(forward_b) <= f32::EPSILON {
         return 0.0;
     }
-    let mut camera_yaw = esp_yaw_to_radians(preset, yaw);
+    let mut camera_yaw = esp_angle_to_radians(yaw, preset.yaw_unit);
     if preset.invert_camera_yaw {
         camera_yaw = -camera_yaw;
     }
@@ -1098,15 +1114,6 @@ fn esp_angle_from_radians(value: f32, unit: EspAngleUnit) -> f32 {
         EspAngleUnit::Degrees => value.to_degrees(),
         EspAngleUnit::Radians => value,
     }
-}
-
-fn esp_yaw_to_radians(preset: &EspPreset, yaw: f32) -> f32 {
-    let multiplier = if preset.yaw_multiplier.is_finite() && preset.yaw_multiplier != 0.0 {
-        preset.yaw_multiplier
-    } else {
-        1.0
-    };
-    esp_angle_to_radians(yaw, preset.yaw_unit) * multiplier
 }
 
 fn esp_pitch_to_radians(preset: &EspPreset, pitch: f32) -> f32 {
@@ -1290,7 +1297,7 @@ pub(crate) fn esp_calibration_sample(
     (horizontal_distance > f32::EPSILON).then_some(EspCalibrationSample {
         bearing_yaw: forward_b.atan2(forward_a),
         bearing_pitch: vertical.atan2(horizontal_distance),
-        camera_yaw: esp_yaw_to_radians(preset, yaw),
+        camera_yaw: esp_angle_to_radians(yaw, preset.yaw_unit),
         camera_pitch: esp_pitch_to_radians(preset, pitch),
     })
 }
@@ -1423,7 +1430,7 @@ pub(crate) fn project_esp(
     if distance <= f32::EPSILON {
         return None;
     }
-    let mut yaw = esp_yaw_to_radians(preset, yaw);
+    let mut yaw = esp_angle_to_radians(yaw, preset.yaw_unit);
     let mut pitch = esp_pitch_to_radians(preset, pitch);
     if preset.invert_camera_yaw {
         yaw = -yaw;
@@ -1572,29 +1579,38 @@ pub struct MotionlessTrack {
     pub last_pos: [f32; 3],
     pub last_moved_at: std::time::Instant,
     pub last_address: usize,
+    pub permanently_dropped: bool,
 }
 
-/// Filters out entities that have remained motionless (all coordinates change <= 0.001)
-/// for longer than `timeout`.
+/// Filters out entities that have remained motionless (all coordinates change <= 0.015)
+/// for longer than `timeout`. If `permanent_drop` is true, once timed out, entity stays dropped permanently.
 pub fn filter_motionless_targets(
     preset_id: u32,
     targets: &mut Vec<([f32; 3], usize, usize)>,
     trackers: &mut std::collections::HashMap<(u32, usize), MotionlessTrack>,
     timeout: std::time::Duration,
+    permanent_drop: bool,
     now: std::time::Instant,
 ) {
     targets.retain(|&(pos, addr, idx)| {
-        let key = (preset_id, idx);
+        let key_id = if addr != 0 { addr } else { idx };
+        let key = (preset_id, key_id);
         let track = trackers.entry(key).or_insert_with(|| MotionlessTrack {
             last_pos: pos,
             last_moved_at: now,
             last_address: addr,
+            permanently_dropped: false,
         });
+
+        if track.permanently_dropped && permanent_drop {
+            return false;
+        }
 
         if track.last_address != addr {
             track.last_address = addr;
             track.last_pos = pos;
             track.last_moved_at = now;
+            track.permanently_dropped = false;
             return true;
         }
 
@@ -1602,15 +1618,46 @@ pub fn filter_motionless_targets(
         let dy = (pos[1] - track.last_pos[1]).abs();
         let dz = (pos[2] - track.last_pos[2]).abs();
 
-        if dx > 0.001 || dy > 0.001 || dz > 0.001 {
+        // 0.015m (1.5cm) tolerance filters out physics noise, bone breathing & float jitter
+        if dx > 0.015 || dy > 0.015 || dz > 0.015 {
             track.last_pos = pos;
             track.last_moved_at = now;
             true
         } else {
-            now.checked_duration_since(track.last_moved_at)
-                .unwrap_or(std::time::Duration::ZERO)
-                < timeout
+            let motionless_time = now.checked_duration_since(track.last_moved_at)
+                .unwrap_or(std::time::Duration::ZERO);
+            if motionless_time >= timeout {
+                if permanent_drop {
+                    track.permanently_dropped = true;
+                }
+                false
+            } else {
+                true
+            }
         }
+    });
+}
+
+/// Filters out entities whose 3D distance to camera is outside `[min_distance, max_distance]`.
+/// If `max_distance <= 0.0`, no upper bound is enforced.
+pub fn filter_distance_targets(
+    targets: &mut Vec<([f32; 3], usize, usize)>,
+    camera: [f32; 3],
+    min_distance: f32,
+    max_distance: f32,
+) {
+    let min_sq = min_distance.max(0.0).powi(2);
+    let max_sq = if max_distance > 0.0 {
+        max_distance.max(min_distance).powi(2)
+    } else {
+        f32::INFINITY
+    };
+    targets.retain(|&(pos, _, _)| {
+        let dx = pos[0] - camera[0];
+        let dy = pos[1] - camera[1];
+        let dz = pos[2] - camera[2];
+        let dist_sq = dx * dx + dy * dy + dz * dz;
+        dist_sq >= min_sq && dist_sq <= max_sq
     });
 }
 
@@ -2089,16 +2136,6 @@ mod tests {
     }
 
     #[test]
-    fn yaw_multiplier_scales_a_presets_raw_yaw() {
-        let mut preset = EspPreset::default();
-        preset.yaw_unit = EspAngleUnit::Degrees;
-        preset.yaw_multiplier = 0.5;
-        assert!((esp_yaw_to_radians(&preset, 180.0) - std::f32::consts::FRAC_PI_2).abs() < 0.001);
-        preset.yaw_multiplier = f32::NAN;
-        assert!((esp_yaw_to_radians(&preset, 180.0) - std::f32::consts::PI).abs() < 0.001);
-    }
-
-    #[test]
     fn horizontal_projection_scale_scales_screen_x() {
         let mut preset = EspPreset::default();
         let normal = project_esp(&preset, [10.0, 2.0, 2.0], [0.0; 3], 0.0, 0.0, 16.0 / 9.0).unwrap();
@@ -2279,14 +2316,14 @@ mod tests {
         ];
 
         // Frame 1: at t0, both targets should be kept.
-        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t0);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, false, t0);
         assert_eq!(targets.len(), 2);
 
         // Frame 2: at t0 + 200ms, target 0 moved, target 1 stayed still.
         // Both still within timeout (200ms < 500ms).
         let t1 = t0 + Duration::from_millis(200);
         targets[0].0 = [10.05, 20.0, 30.0]; // moved
-        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t1);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, false, t1);
         assert_eq!(targets.len(), 2);
 
         // Frame 3: at t0 + 600ms.
@@ -2294,14 +2331,14 @@ mod tests {
         // Target 1 has NOT moved since t0 (600ms >= 500ms timeout) -> Should be dropped!
         let t2 = t0 + Duration::from_millis(600);
         targets[0].0 = [10.10, 20.0, 30.0]; // moved
-        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t2);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, false, t2);
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].1, 0x1000);
 
         // Frame 4: at t0 + 700ms, target 1 starts moving again!
         let t3 = t0 + Duration::from_millis(700);
         targets.push(([55.0, 60.0, 70.0], 0x2000, 1)); // target 1 moves
-        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t3);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, false, t3);
         assert_eq!(targets.len(), 2);
     }
 
@@ -2316,18 +2353,64 @@ mod tests {
         let mut targets = vec![([10.0, 20.0, 30.0], 0x1000, 0)];
 
         // Initial appearance at t0: target is tracked
-        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t0);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, false, t0);
         assert_eq!(targets.len(), 1);
 
         // Standing still for 1s: kept (1s < 3s)
         let t1 = t0 + Duration::from_secs(1);
-        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t1);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, false, t1);
         assert_eq!(targets.len(), 1);
 
         // Motionless for 3.1s: dropped (3.1s >= 3.0s timeout)
         let t2 = t0 + Duration::from_millis(3100);
-        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, t2);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, false, t2);
         assert_eq!(targets.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_distance_targets() {
+        let camera = [0.0, 0.0, 0.0];
+        let mut targets = vec![
+            ([5.0, 0.0, 0.0], 0x1000, 0),
+            ([15.0, 0.0, 0.0], 0x2000, 1),
+            ([50.0, 0.0, 0.0], 0x3000, 2),
+            ([150.0, 0.0, 0.0], 0x4000, 3),
+        ];
+        filter_distance_targets(&mut targets, camera, 10.0, 100.0);
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].1, 0x2000);
+        assert_eq!(targets[1].1, 0x3000);
+
+        // Unlimited max (0.0)
+        let mut targets2 = vec![
+            ([5.0, 0.0, 0.0], 0x1000, 0),
+            ([150.0, 0.0, 0.0], 0x4000, 3),
+        ];
+        filter_distance_targets(&mut targets2, camera, 10.0, 0.0);
+        assert_eq!(targets2.len(), 1);
+        assert_eq!(targets2[0].1, 0x4000);
+    }
+
+    #[test]
+    fn test_filter_motionless_targets_permanent_drop() {
+        use std::time::{Duration, Instant};
+        let mut trackers = HashMap::new();
+        let t0 = Instant::now();
+        let timeout = Duration::from_secs(3);
+        let mut targets = vec![([10.0, 20.0, 30.0], 0x1000, 0)];
+
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, true, t0);
+        assert_eq!(targets.len(), 1);
+
+        let t1 = t0 + Duration::from_millis(3500);
+        filter_motionless_targets(1, &mut targets, &mut trackers, timeout, true, t1);
+        assert_eq!(targets.len(), 0);
+
+        // Subsequent frame with small movement: still permanently dropped!
+        let t2 = t0 + Duration::from_millis(5000);
+        let mut targets_after = vec![([10.05, 20.0, 30.0], 0x1000, 0)];
+        filter_motionless_targets(1, &mut targets_after, &mut trackers, timeout, true, t2);
+        assert_eq!(targets_after.len(), 0);
     }
 
     #[test]

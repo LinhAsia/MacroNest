@@ -1170,6 +1170,41 @@ impl CrosshairApp {
                                                 .speed(0.05)
                                                 .suffix("s"),
                                         );
+                                        ui.checkbox(
+                                            &mut preset.entity_filter_motionless_permanent,
+                                            "Drop permanently",
+                                        )
+                                        .on_hover_text(
+                                            "Once an entity is motionless for the timeout period, drop it completely and never show it again (eliminates flickering).",
+                                        );
+                                        if ui.small_button("Clear dropped").on_hover_text("Reset motionless trackers so dropped entities can be detected again.").clicked() {
+                                            crate::overlay::clear_esp_motionless_trackers(preset.id);
+                                        }
+                                    }
+
+                                    ui.add_space(8.0);
+                                    ui.checkbox(
+                                        &mut preset.entity_distance_filter_enabled,
+                                        "Distance limit",
+                                    )
+                                    .on_hover_text(
+                                        "Only show ESP for entities within a specific distance range (in meters).",
+                                    );
+                                    if preset.entity_distance_filter_enabled {
+                                        ui.label("Min:");
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_distance_min)
+                                                .range(0.0..=10000.0)
+                                                .speed(1.0)
+                                                .suffix("m"),
+                                        );
+                                        ui.label("Max:");
+                                        ui.add(
+                                            DragValue::new(&mut preset.entity_distance_max)
+                                                .range(0.0..=10000.0)
+                                                .speed(1.0)
+                                                .suffix("m"),
+                                        );
                                     }
                                 });
                                 ui.end_row();
@@ -2317,19 +2352,8 @@ impl CrosshairApp {
 
                                 ui.add_space(2.0);
 
-                                // Row 4: Yaw controls & Direction B/A ratio
+                                // Row 4: Yaw offset & Direction B/A ratio
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label("Yaw scale:").on_hover_text("Calibrate when ESP turns faster or slower than entity when rotating camera.");
-                                    ui.add(
-                                        DragValue::new(&mut preset.yaw_multiplier)
-                                            .speed(0.01)
-                                            .range(0.0..=10.0),
-                                    );
-                                    if ui.small_button("Reset").clicked() {
-                                        preset.yaw_multiplier = 1.0;
-                                    }
-
-                                    ui.add_space(4.0);
                                     ui.label("Yaw offset:").on_hover_text("Use this when marker is consistently rotated left/right.");
                                     ui.add(
                                         DragValue::new(&mut preset.yaw_offset_degrees)
@@ -2408,7 +2432,7 @@ impl CrosshairApp {
 
                                 // Row 6: Projection scales, Target height, World height scale
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label("Horizontal proj scale:");
+                                    ui.label("Horizontal proj scale:").on_hover_text("Calibrate when ESP moves faster or slower than entity when rotating camera horizontally (symmetric from screen center).");
                                     ui.add(
                                         DragValue::new(&mut preset.horizontal_projection_multiplier)
                                             .speed(0.01)
@@ -2490,6 +2514,10 @@ impl CrosshairApp {
                                         preset.horizontal_fov = 90.0;
                                         preset.vertical_projection_multiplier = 1.0;
                                         preset.horizontal_projection_multiplier = 1.0;
+                                        preset.entity_distance_filter_enabled = false;
+                                        preset.entity_distance_min = 0.0;
+                                        preset.entity_distance_max = 100.0;
+                                        preset.entity_filter_motionless_permanent = false;
                                     }
                                     if ui.button("Capture direction").clicked() {
                                         self.esp_calibration_feedback

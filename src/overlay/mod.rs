@@ -427,6 +427,10 @@ mod windows_overlay {
         Mutex<HashMap<(u32, usize), crate::model::MotionlessTrack>>,
     > = Lazy::new(|| Mutex::new(HashMap::new()));
 
+    pub(crate) fn clear_esp_motionless_trackers(preset_id: u32) {
+        ESP_MOTIONLESS_TRACKERS.lock().retain(|(id, _), _| *id != preset_id);
+    }
+
     pub(crate) fn arm_esp_runtime_drop_self(preset_id: u32) {
         let mut map = ESP_RUNTIME_DROPPED_SELF.lock();
         let record = map.entry(preset_id).or_default();
@@ -25678,8 +25682,21 @@ mod windows_overlay {
                                 &mut targets,
                                 &mut motionless_trackers,
                                 timeout,
+                                preset.entity_filter_motionless_permanent,
                                 Instant::now(),
                             );
+                        }
+                        if preset.entity_distance_filter_enabled {
+                            if let Ok((_, camera, _, _, _)) =
+                                read_esp_view_inputs(preset, &mut read_frame)
+                            {
+                                crate::model::filter_distance_targets(
+                                    &mut targets,
+                                    camera,
+                                    preset.entity_distance_min,
+                                    preset.entity_distance_max,
+                                );
+                            }
                         }
                         let (shapes, snapshot) = esp_shapes_for_preset(
                             preset,
