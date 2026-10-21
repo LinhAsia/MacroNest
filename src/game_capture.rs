@@ -232,6 +232,93 @@ impl Drop for GameCaptureSession {
 
 static OFFSETS_64_CACHE: std::sync::OnceLock<GraphicsOffsets> = std::sync::OnceLock::new();
 static OFFSETS_32_CACHE: std::sync::OnceLock<GraphicsOffsets> = std::sync::OnceLock::new();
+#[cfg(windows)]
+static CACHED_D3D_DEVICE: parking_lot::Mutex<Option<(ID3D11Device, ID3D11DeviceContext)>> =
+    parking_lot::Mutex::new(None);
+
+#[cfg(windows)]
+unsafe fn is_hook_already_injected(pid: u32, dll_filename: &str) -> bool {
+    unsafe {
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Module32FirstW, Module32NextW, MODULEENTRY32W,
+            TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32,
+        };
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+        if snap == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+            return false;
+        }
+        let mut entry: MODULEENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<MODULEENTRY32W>() as u32;
+        let mut found = false;
+        if Module32FirstW(snap, &mut entry) != 0 {
+            loop {
+                let name_len = entry.szModule.iter().position(|&c| c == 0).unwrap_or(entry.szModule.len());
+                let mod_name = String::from_utf16_lossy(&entry.szModule[..name_len]);
+                if mod_name.eq_ignore_ascii_case(dll_filename) {
+                    found = true;
+                    break;
+                }
+                if Module32NextW(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        windows_sys::Win32::Foundation::CloseHandle(snap);
+        found
+    }
+}
+
+#[cfg(windows)]
+pub fn prewarm_d3d_device() {
+    if CACHED_D3D_DEVICE.lock().is_some() {
+        return;
+    }
+    std::thread::spawn(|| {
+        unsafe {
+            use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter};
+            use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
+            use windows::core::Interface;
+
+            if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() {
+                let mut i = 0;
+                let mut adapters = Vec::new();
+                while let Ok(adapter) = factory.EnumAdapters1(i) {
+                    i += 1;
+                    let is_dgpu = if let Ok(desc1) = adapter.GetDesc1() {
+                        desc1.VendorId == 0x10DE || desc1.DedicatedVideoMemory > 1024 * 1024 * 1024
+                    } else {
+                        false
+                    };
+                    adapters.push((adapter, is_dgpu));
+                }
+                adapters.sort_by_key(|(_, is_dgpu)| if *is_dgpu { 0 } else { 1 });
+
+                for (adapter, _) in adapters {
+                    if let Ok(adapter0) = adapter.cast::<IDXGIAdapter>() {
+                        let mut dev: Option<ID3D11Device> = None;
+                        let mut ctx: Option<ID3D11DeviceContext> = None;
+                        if D3D11CreateDevice(
+                            Some(&adapter0),
+                            D3D_DRIVER_TYPE_UNKNOWN,
+                            HMODULE::default(),
+                            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                            None,
+                            D3D11_SDK_VERSION,
+                            Some(&mut dev),
+                            None,
+                            Some(&mut ctx),
+                        ).is_ok() {
+                            if let (Some(d), Some(c)) = (dev, ctx) {
+                                *CACHED_D3D_DEVICE.lock() = Some((d, c));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
 
 pub fn get_graphics_offsets(offsets_exe: &Path, is_32bit: bool) -> GraphicsOffsets {
     let cache = if is_32bit {
@@ -311,6 +398,16 @@ unsafe fn open_shared_texture_on_best_device(
 
         let handle = HANDLE(tex_handle as usize as *mut _);
 
+        // Try existing cached GPU device first (0ms, prevents driver stall on active game)
+        if let Some((d, c)) = CACHED_D3D_DEVICE.lock().clone() {
+            let mut shared_tex: Option<ID3D11Texture2D> = None;
+            if d.OpenSharedResource(handle, &mut shared_tex).is_ok() {
+                if let Some(tex) = shared_tex {
+                    return Ok((d, c, tex));
+                }
+            }
+        }
+
         // 1. Enumerate adapters and prioritize discrete / NVIDIA GPU first
         if let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() {
             let mut i = 0;
@@ -346,6 +443,7 @@ unsafe fn open_shared_texture_on_best_device(
                             let mut shared_tex: Option<ID3D11Texture2D> = None;
                             if d.OpenSharedResource(handle, &mut shared_tex).is_ok() {
                                 if let Some(tex) = shared_tex {
+                                    *CACHED_D3D_DEVICE.lock() = Some((d.clone(), c.clone()));
                                     return Ok((d, c, tex));
                                 }
                             }
@@ -373,6 +471,7 @@ unsafe fn open_shared_texture_on_best_device(
                 let mut shared_tex: Option<ID3D11Texture2D> = None;
                 if d.OpenSharedResource(handle, &mut shared_tex).is_ok() {
                     if let Some(tex) = shared_tex {
+                        *CACHED_D3D_DEVICE.lock() = Some((d.clone(), c.clone()));
                         return Ok((d, c, tex));
                     }
                 }
@@ -480,31 +579,39 @@ impl GameCaptureSession {
             hi.offsets = offsets;
             hi.allow_srgb_alias = true;
 
-            // Spawn inject-helper to inject graphics-hook into the game
-            let inject_status = Command::new(&inject_helper)
-                .creation_flags(0x0800_0000)
-                .args([
-                    hook_dll.to_str().unwrap_or_default(),
-                    "0",
-                    &pid.to_string(),
-                ])
-                .status();
+            // Only spawn inject-helper if graphics-hook is not already resident in the process.
+            // Re-running inject-helper on an already-hooked game causes remote thread loader locks and 1-2s freezes.
+            let dll_filename = hook_dll.file_name().and_then(|n| n.to_str()).unwrap_or("graphics-hook64.dll");
+            let already_injected = is_hook_already_injected(pid, dll_filename);
+            let mut inject_status = None;
 
-            let inject_ok = match &inject_status {
-                Ok(s) => s.success(),
-                Err(_) => false,
-            };
-
-            if !inject_ok {
-                // Try safe injection with thread_id (SetWindowsHookEx)
-                let _ = Command::new(&inject_helper)
+            if !already_injected {
+                let status = Command::new(&inject_helper)
                     .creation_flags(0x0800_0000)
                     .args([
                         hook_dll.to_str().unwrap_or_default(),
-                        "1",
-                        &thread_id.to_string(),
+                        "0",
+                        &pid.to_string(),
                     ])
                     .status();
+
+                let inject_ok = match &status {
+                    Ok(s) => s.success(),
+                    Err(_) => false,
+                };
+
+                if !inject_ok {
+                    // Try safe injection with thread_id (SetWindowsHookEx)
+                    let _ = Command::new(&inject_helper)
+                        .creation_flags(0x0800_0000)
+                        .args([
+                            hook_dll.to_str().unwrap_or_default(),
+                            "1",
+                            &thread_id.to_string(),
+                        ])
+                        .status();
+                }
+                inject_status = status.ok();
             }
 
             // Signal both hook_init (starts capture loop) and hook_restart (authorizes capture_should_init)
@@ -528,7 +635,7 @@ impl GameCaptureSession {
                 }
             }
             if !ready {
-                if let Ok(status) = &inject_status {
+                if let Some(status) = &inject_status {
                     let code = status.code().unwrap_or(0);
                     if code == -3 || code == 253 || code == 0xFFFFFFFD_u32 as i32 {
                         bail!("Game process access denied. Please run MacroNest as Administrator to hook this game.");

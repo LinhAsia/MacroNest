@@ -648,18 +648,32 @@ fn export_trim(
     let mut command = Command::new(ffmpeg_exe);
     command
         .creation_flags(CREATE_NO_WINDOW)
-        .args(["-y", "-hide_banner", "-loglevel", "error", "-threads", "0", "-ss"])
-        .arg(format!("{:.3}", start_seconds.max(0.0)))
-        .args(["-i"])
-        .arg(input_path)
-        .args([
-            "-t",
-            &format!("{duration:.3}"),
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a?",
-        ]);
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-threads", "0"]);
+
+    // ponytail: For long clips (> 20s), coarse seek before -i skips scanning gigabytes of data instantly,
+    // then fine seek after -i and -avoid_negative_ts make_zero ensures exact keyframe alignment and zero audio desync.
+    if start_seconds > 20.0 {
+        let coarse_seek = start_seconds - 15.0;
+        let fine_seek = 15.0;
+        command
+            .args(["-ss", &format!("{coarse_seek:.3}"), "-i"])
+            .arg(input_path)
+            .args(["-ss", &format!("{fine_seek:.3}")]);
+    } else {
+        command
+            .arg("-i")
+            .arg(input_path)
+            .args(["-ss", &format!("{:.3}", start_seconds.max(0.0))]);
+    }
+
+    command.args([
+        "-t",
+        &format!("{duration:.3}"),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+    ]);
     if let Some(target_size_mb) = target_size_mb {
         command.args([
             "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "96k",
@@ -680,7 +694,15 @@ fn export_trim(
         command.args(["-c", "copy"]);
     }
     let mut child = command
-        .args(["-movflags", "+faststart", "-progress", "pipe:1", "-nostats"])
+        .args([
+            "-avoid_negative_ts",
+            "make_zero",
+            "-movflags",
+            "+faststart",
+            "-progress",
+            "pipe:1",
+            "-nostats",
+        ])
         .arg(&output_path)
         .stdout(Stdio::piped())
         .spawn()

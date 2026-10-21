@@ -866,6 +866,7 @@ pub struct CrosshairApp {
     frida_download_progress: Arc<AtomicU32>,
     frida_installed: bool,
     video_library_open: bool,
+    video_library_preview_maximized: bool,
     video_library_selected: Option<PathBuf>,
     video_library_preview: Option<crate::video_recorder::VideoLibraryPreview>,
     video_library_preview_texture: Option<TextureHandle>,
@@ -1035,6 +1036,9 @@ impl CrosshairApp {
         let opencv_installed = paths.opencv_dll.exists();
         let ffmpeg_installed = paths.ffmpeg_exe.exists();
         let game_capture_installed = crate::game_capture::is_game_capture_available(&paths);
+        if game_capture_installed {
+            crate::game_capture::prewarm_d3d_device();
+        }
         let frida_installed = paths.frida_helper_exe.exists();
         let interception_pending_marker = paths.bin_dir.join("interception.install.pending");
         if interception_pending_marker.exists() {
@@ -1247,6 +1251,7 @@ impl CrosshairApp {
             frida_download_progress: Arc::new(AtomicU32::new(0)),
             frida_installed,
             video_library_open: false,
+            video_library_preview_maximized: false,
             video_library_selected: None,
             video_library_preview: None,
             video_library_preview_texture: None,
@@ -8061,6 +8066,7 @@ impl CrosshairApp {
         let mut close_library = false;
         let mut select_video = None;
         let mut toggle_playback = None;
+        let mut replay_from_start = false;
         let mut reveal_video = None;
         let mut copy_video = None;
         let mut delete_video = None;
@@ -8072,6 +8078,13 @@ impl CrosshairApp {
             && self.video_library_preview.is_some()
         {
             toggle_playback = Some(path.clone());
+        }
+        if ctx.input(|input| input.key_pressed(egui::Key::S))
+            && !ctx.wants_keyboard_input()
+            && self.video_library_selected.is_some()
+            && self.video_library_preview.is_some()
+        {
+            replay_from_start = true;
         }
         let library_bounds = ctx.content_rect().shrink2(vec2(24.0, 18.0));
         // Window::fixed_size is the content size; leave room for the frame margins too.
@@ -8158,38 +8171,47 @@ impl CrosshairApp {
                     });
                     ui.separator();
                     let content_rect = ui.available_rect_before_wrap();
-                    let divider_width = 10.0;
-                    let left_width = (content_rect.width() * 0.52)
-                        .clamp(320.0, (content_rect.width() - 300.0).max(320.0));
-                    let left_rect = egui::Rect::from_min_max(
-                        content_rect.min,
-                        pos2(content_rect.left() + left_width, content_rect.bottom()),
-                    );
-                    let right_rect = egui::Rect::from_min_max(
-                        pos2(left_rect.right() + divider_width, content_rect.top()),
-                        content_rect.max,
-                    );
+                    let is_maximized = self.video_library_preview_maximized && self.video_library_selected.is_some();
+                    let divider_width = if is_maximized { 0.0 } else { 10.0 };
+                    let left_width = if is_maximized {
+                        0.0
+                    } else {
+                        (content_rect.width() * 0.52)
+                            .clamp(320.0, (content_rect.width() - 300.0).max(320.0))
+                    };
+                    let left_rect = if is_maximized {
+                        egui::Rect::from_min_max(content_rect.min, pos2(content_rect.left(), content_rect.bottom()))
+                    } else {
+                        egui::Rect::from_min_max(
+                            content_rect.min,
+                            pos2(content_rect.left() + left_width, content_rect.bottom()),
+                        )
+                    };
+                    let right_rect = if is_maximized {
+                        content_rect
+                    } else {
+                        egui::Rect::from_min_max(
+                            pos2(left_rect.right() + divider_width, content_rect.top()),
+                            content_rect.max,
+                        )
+                    };
                     ui.allocate_rect(content_rect, Sense::hover());
-                    let mut left_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(left_rect)
-                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                    );
-                    let mut right_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(right_rect)
-                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                    );
-                    ui.painter().line_segment(
-                        [
-                            pos2(left_rect.right() + divider_width * 0.5, content_rect.top()),
-                            pos2(left_rect.right() + divider_width * 0.5, content_rect.bottom()),
-                        ],
-                        Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
-                    );
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(&mut left_ui, |ui| {
+                    if !is_maximized {
+                        let mut left_ui = ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(left_rect)
+                                .layout(egui::Layout::top_down(egui::Align::Min)),
+                        );
+                        ui.painter().line_segment(
+                            [
+                                pos2(left_rect.right() + divider_width * 0.5, content_rect.top()),
+                                pos2(left_rect.right() + divider_width * 0.5, content_rect.bottom()),
+                            ],
+                            Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+                        );
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false, false])
+                            .show(&mut left_ui, |ui| {
                             ui.set_width(left_rect.width());
                             if videos.is_empty() {
                                 ui.label(
@@ -8353,8 +8375,14 @@ impl CrosshairApp {
                                 }
                             });
                         });
+                    }
 
-                        right_ui.vertical_centered(|ui| {
+                    let mut right_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(right_rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    right_ui.vertical_centered(|ui| {
                             let Some(selected_path) = self.video_library_selected.as_ref().cloned() else {
                                 ui.add_space(100.0);
                                 ui.label(
@@ -8367,16 +8395,48 @@ impl CrosshairApp {
                                 );
                                 return;
                             };
-                            ui.label(
-                                RichText::new(selected_path.file_name().and_then(|name| name.to_str()).unwrap_or("video"))
-                                    .strong(),
-                            );
-                            ui.add_space(6.0);
-                            if let Some(texture) = &self.video_library_preview_texture {
-                                let preview_size = vec2(
-                                    ui.available_width().max(1.0),
-                                    (ui.available_width() * 9.0 / 16.0).min(270.0),
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(selected_path.file_name().and_then(|name| name.to_str()).unwrap_or("video"))
+                                        .strong()
+                                        .size(if is_maximized { 15.0 } else { 13.0 }),
                                 );
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    let max_tooltip = if is_maximized {
+                                        Self::tr_lang(language, "Restore list view", "Thu nhỏ xem trước")
+                                    } else {
+                                        Self::tr_lang(language, "Maximize preview", "Phóng to xem trước")
+                                    };
+                                    let max_icon = if is_maximized { 0xe5d1 } else { 0xe5d0 };
+                                    if ui
+                                        .add_sized(
+                                            [30.0, 24.0],
+                                            Button::new(Self::material_icon_text(max_icon, 16.0))
+                                                .fill(if is_maximized {
+                                                    Color32::from_rgb(37, 107, 82)
+                                                } else {
+                                                    Color32::from_rgba_premultiplied(40, 45, 55, 180)
+                                                })
+                                                .corner_radius(6.0),
+                                        )
+                                        .on_hover_text(max_tooltip)
+                                        .clicked()
+                                    {
+                                        self.video_library_preview_maximized = !self.video_library_preview_maximized;
+                                    }
+                                });
+                            });
+                            ui.add_space(4.0);
+                            if let Some(texture) = &self.video_library_preview_texture {
+                                let max_h = if is_maximized {
+                                    (ui.available_height() - 170.0).max(270.0)
+                                } else {
+                                    270.0
+                                };
+                                let aspect_w = ui.available_width().max(1.0);
+                                let target_h = (aspect_w * 9.0 / 16.0).min(max_h);
+                                let target_w = (target_h * 16.0 / 9.0).min(aspect_w);
+                                let preview_size = vec2(target_w, target_h);
                                 ui.add(Image::new(texture).fit_to_exact_size(preview_size));
                             } else if self.video_library_preview_rx.is_some() {
                                 ui.add(egui::Spinner::new());
@@ -8445,6 +8505,17 @@ impl CrosshairApp {
                                     .clicked()
                                 {
                                     toggle_playback = Some(selected_path.clone());
+                                }
+                                if ui
+                                    .button(Self::tr_lang(language, "Replay (S)", "Phát lại (S)"))
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Replay from left trim (Key S)",
+                                        "Phát lại từ điểm bắt đầu cắt (Phím S)",
+                                    ))
+                                    .clicked()
+                                {
+                                    replay_from_start = true;
                                 }
                                 if ui
                                     .button(Self::tr_lang(
@@ -8581,7 +8652,11 @@ impl CrosshairApp {
             });
 
         if close_library || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-            open = false;
+            if self.video_library_preview_maximized {
+                self.video_library_preview_maximized = false;
+            } else {
+                open = false;
+            }
         }
         self.video_library_open = open;
         if !open {
@@ -8662,6 +8737,35 @@ impl CrosshairApp {
                         playback_end,
                     )
                 });
+                match playback {
+                    Ok(playback) => {
+                        audio::play_video_audio_preview_async(
+                            path.to_string_lossy().into_owned(),
+                            (playback_start * 1000.0).round().max(0.0) as u64,
+                            (self.video_library_trim_end_seconds * 1000.0)
+                                .round()
+                                .max(1.0) as u64,
+                        );
+                        self.video_library_playback = Some(playback);
+                        self.video_library_playback_path = Some(path);
+                        self.video_library_playback_position_seconds = playback_start;
+                    }
+                    Err(error) => self.status = format!("Could not play video: {error}"),
+                }
+            }
+        }
+        if replay_from_start {
+            if let Some(path) = self.video_library_selected.as_ref().cloned() {
+                self.stop_video_library_playback();
+                self.video_library_preloaded_playback = None;
+                let playback_start = self.video_library_trim_start_seconds;
+                let playback_end = self.video_library_trim_end_seconds;
+                let playback = crate::video_recorder::start_video_library_playback(
+                    self.paths.ffmpeg_exe.clone(),
+                    path.clone(),
+                    playback_start,
+                    playback_end,
+                );
                 match playback {
                     Ok(playback) => {
                         audio::play_video_audio_preview_async(
@@ -8815,11 +8919,16 @@ impl CrosshairApp {
         *playhead = playhead.clamp(*start, *end);
         let start_x = to_x(*start);
         let end_x = to_x(*end);
-        const TRIM_HANDLE_HITBOX: f32 = 14.0;
+        let playhead_x = to_x(*playhead);
+        let trim_span = (end_x - start_x).abs();
+        let handle_hitbox = (trim_span * 0.2).clamp(2.5, 6.0);
         let mut playhead_changed = false;
         if let Some(pointer) = response.hover_pos() {
-            let over_trim_handle =
-                (pointer.x - start_x).abs().min((pointer.x - end_x).abs()) <= TRIM_HANDLE_HITBOX;
+            let playhead_dist = (pointer.x - playhead_x).abs();
+            let start_dist = (pointer.x - start_x).abs();
+            let end_dist = (pointer.x - end_x).abs();
+            let over_playhead = playhead_dist <= 7.0;
+            let over_trim_handle = !over_playhead && (start_dist <= handle_hitbox || end_dist <= handle_hitbox);
             ui.ctx().set_cursor_icon(if over_trim_handle {
                 egui::CursorIcon::ResizeHorizontal
             } else {
@@ -8828,7 +8937,7 @@ impl CrosshairApp {
             response.clone().on_hover_text(if over_trim_handle {
                 "Drag this green handle to change the trim range."
             } else {
-                "Click or drag to move the playhead. Press Space to play or stop."
+                "Click or drag to move the playhead. Press Space to play or stop. Press S to replay from start."
             });
         }
         let active_handle = ui
@@ -8839,14 +8948,17 @@ impl CrosshairApp {
                 .input(|input| input.pointer.press_origin())
                 .or_else(|| response.interact_pointer_pos())
             {
+                let playhead_dist = (pointer.x - playhead_x).abs();
                 let start_distance = (pointer.x - start_x).abs();
                 let end_distance = (pointer.x - end_x).abs();
-                let handle = if start_distance.min(end_distance) > TRIM_HANDLE_HITBOX {
+                let handle = if playhead_dist <= 7.0 {
                     VideoTrimHandle::Playhead
-                } else if start_distance <= end_distance {
+                } else if start_distance <= handle_hitbox && start_distance <= end_distance {
                     VideoTrimHandle::Start
-                } else {
+                } else if end_distance <= handle_hitbox {
                     VideoTrimHandle::End
+                } else {
+                    VideoTrimHandle::Playhead
                 };
                 if handle == VideoTrimHandle::Playhead {
                     *playhead = to_seconds(pointer.x).clamp(*start, *end);
@@ -8858,10 +8970,14 @@ impl CrosshairApp {
         }
         if response.clicked()
             && let Some(pointer) = response.interact_pointer_pos()
-            && (pointer.x - start_x).abs().min((pointer.x - end_x).abs()) > TRIM_HANDLE_HITBOX
         {
-            *playhead = to_seconds(pointer.x).clamp(*start, *end);
-            playhead_changed = true;
+            let playhead_dist = (pointer.x - playhead_x).abs();
+            let start_dist = (pointer.x - start_x).abs();
+            let end_dist = (pointer.x - end_x).abs();
+            if playhead_dist <= 7.0 || (start_dist > handle_hitbox && end_dist > handle_hitbox) {
+                *playhead = to_seconds(pointer.x).clamp(*start, *end);
+                playhead_changed = true;
+            }
         }
         if response.dragged() {
             if let (Some(handle), Some(pointer)) = (
@@ -8900,14 +9016,26 @@ impl CrosshairApp {
             3.0,
             Color32::from_rgb(56, 153, 106),
         );
-        for x in [start_x, end_x] {
+        for (is_start, x) in [(true, start_x), (false, end_x)] {
             painter.line_segment(
-                [pos2(x, rect.top() + 6.0), pos2(x, rect.bottom() - 8.0)],
+                [pos2(x, rect.top() + 8.0), pos2(x, rect.bottom() - 10.0)],
                 Stroke::new(2.0, Color32::from_rgb(113, 214, 162)),
             );
+            // Sleek 3.5px wide trim caps facing outward to keep interior 100% open for playhead
+            let cap_rect = if is_start {
+                egui::Rect::from_min_size(
+                    pos2(x - 3.5, rect.center().y - 8.0),
+                    vec2(3.5, 16.0),
+                )
+            } else {
+                egui::Rect::from_min_size(
+                    pos2(x, rect.center().y - 8.0),
+                    vec2(3.5, 16.0),
+                )
+            };
             painter.rect_filled(
-                egui::Rect::from_center_size(pos2(x, rect.center().y), vec2(10.0, 22.0)),
-                3.0,
+                cap_rect,
+                2.0,
                 Color32::from_rgb(113, 214, 162),
             );
         }
