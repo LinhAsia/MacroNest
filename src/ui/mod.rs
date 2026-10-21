@@ -7885,6 +7885,8 @@ impl CrosshairApp {
                 match event {
                     crate::video_recorder::VideoPlaybackEvent::Frame {
                         rgba,
+                        width,
+                        height,
                         position_seconds,
                     } => {
                         if self.video_library_trim_end_seconds > 0.0
@@ -7895,7 +7897,7 @@ impl CrosshairApp {
                             playback_finished = true;
                             continue;
                         }
-                        let image = ColorImage::from_rgba_unmultiplied([640, 360], &rgba);
+                        let image = ColorImage::from_rgba_unmultiplied([width, height], &rgba);
                         if let Some(texture) = &mut self.video_library_preview_texture {
                             texture.set(image, TextureOptions::LINEAR);
                         } else {
@@ -7939,9 +7941,11 @@ impl CrosshairApp {
                 match event {
                     crate::video_recorder::VideoPlaybackEvent::Frame {
                         rgba,
+                        width,
+                        height,
                         position_seconds,
                     } => {
-                        let image = ColorImage::from_rgba_unmultiplied([640, 360], &rgba);
+                        let image = ColorImage::from_rgba_unmultiplied([width, height], &rgba);
                         if let Some(texture) = &mut self.video_library_preview_texture {
                             texture.set(image, TextureOptions::LINEAR);
                         } else {
@@ -8497,7 +8501,7 @@ impl CrosshairApp {
                                     (vid_w * scale).floor().max(1.0),
                                     (vid_h * scale).floor().max(1.0),
                                 );
-                                ui.add(Image::new(texture).fit_to_exact_size(preview_size));
+                                ui.add(Image::new(texture).fit_to_exact_size(preview_size).maintain_aspect_ratio(false));
                             } else if self.video_library_preview_rx.is_some() {
                                 ui.add_space(40.0);
                                 ui.add(egui::Spinner::new());
@@ -8750,11 +8754,13 @@ impl CrosshairApp {
             self.video_library_pending_preview = Some((path.clone(), 0.5));
 
             // Immediately start playing the selected video
+            let target_dim = self.video_library_preview.as_ref().map(|p| (p.width, p.height));
             let playback = crate::video_recorder::start_video_library_playback(
                 self.paths.ffmpeg_exe.clone(),
                 path.clone(),
                 0.0,
                 0.0,
+                target_dim,
             );
             match playback {
                 Ok(playback) => {
@@ -8798,12 +8804,14 @@ impl CrosshairApp {
                         playback.play();
                         playback
                     });
+                let target_dim = self.video_library_preview.as_ref().map(|p| (p.width, p.height));
                 let playback = prepared.map(Ok).unwrap_or_else(|| {
                     crate::video_recorder::start_video_library_playback(
                         self.paths.ffmpeg_exe.clone(),
                         path.clone(),
                         playback_start,
                         playback_end,
+                        target_dim,
                     )
                 });
                 match playback {
@@ -8829,11 +8837,13 @@ impl CrosshairApp {
                 self.video_library_preloaded_playback = None;
                 let playback_start = self.video_library_trim_start_seconds;
                 let playback_end = self.video_library_trim_end_seconds;
+                let target_dim = self.video_library_preview.as_ref().map(|p| (p.width, p.height));
                 let playback = crate::video_recorder::start_video_library_playback(
                     self.paths.ffmpeg_exe.clone(),
                     path.clone(),
                     playback_start,
                     playback_end,
+                    target_dim,
                 );
                 match playback {
                     Ok(playback) => {
@@ -8924,12 +8934,14 @@ impl CrosshairApp {
             // ponytail: keep the decoder warm through the source duration; trim end is enforced
             // by the UI so resizing either trim handle does not destroy the playback buffer.
             let end = preview.duration_seconds;
+            let target_dim = Some((preview.width, preview.height));
             if end > start
                 && let Ok(playback) = crate::video_recorder::prepare_video_library_playback(
                     self.paths.ffmpeg_exe.clone(),
                     path.clone(),
                     start,
                     end,
+                    target_dim,
                 )
             {
                 self.video_library_preloaded_playback = Some((path.clone(), start, end, playback));

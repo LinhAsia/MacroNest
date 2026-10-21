@@ -109,8 +109,6 @@ static PREPARED_FFMPEG: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(No
 static VIDEO_EDIT_BUSY: AtomicBool = AtomicBool::new(false);
 static VIDEO_EDIT_PROGRESS: AtomicU64 = AtomicU64::new(0);
 static VIDEO_EDIT_STATUS: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("Ready".to_owned()));
-const LIBRARY_PLAYBACK_WIDTH: usize = 640;
-const LIBRARY_PLAYBACK_HEIGHT: usize = 360;
 const LIBRARY_PLAYBACK_FPS: u64 = 60;
 
 #[derive(Clone)]
@@ -125,6 +123,8 @@ pub struct VideoLibraryPreview {
 pub enum VideoPlaybackEvent {
     Frame {
         rgba: Vec<u8>,
+        width: usize,
+        height: usize,
         position_seconds: f64,
     },
     Finished,
@@ -380,13 +380,61 @@ pub fn inspect_recorded_video_thumbnail(
     })
 }
 
+pub fn compute_playback_size(width: u32, height: u32) -> (usize, usize) {
+    let w = width.max(1) as f32;
+    let h = height.max(1) as f32;
+    let aspect = w / h;
+    let (pw, ph) = if aspect >= 1.0 {
+        let pw = (720.0 * aspect).clamp(480.0, 960.0);
+        let ph = pw / aspect;
+        (pw, ph)
+    } else {
+        let ph = (720.0 / aspect).clamp(480.0, 960.0);
+        let pw = ph * aspect;
+        (pw, ph)
+    };
+    let mut pw = (pw.round() as usize).max(2);
+    let mut ph = (ph.round() as usize).max(2);
+    if pw % 2 != 0 {
+        pw += 1;
+    }
+    if ph % 2 != 0 {
+        ph += 1;
+    }
+    (pw, ph)
+}
+
+pub fn probe_video_dimensions(ffmpeg_exe: &Path, video_path: &Path) -> Option<(u32, u32)> {
+    let output = Command::new(ffmpeg_exe)
+        .creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS)
+        .args(["-hide_banner", "-i"])
+        .arg(video_path)
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stderr);
+    let video_line = text.lines().find(|line| line.contains("Video:"))?;
+    for part in video_line.split(',') {
+        for token in part.trim().split_whitespace() {
+            if let Some((w_str, h_str)) = token.split_once('x') {
+                if let (Ok(w), Ok(h)) = (w_str.parse::<u32>(), h_str.parse::<u32>()) {
+                    if w >= 16 && h >= 16 && w <= 16384 && h <= 16384 {
+                        return Some((w, h));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn start_video_library_playback(
     ffmpeg_exe: PathBuf,
     video_path: PathBuf,
     start_seconds: f64,
     end_seconds: f64,
+    target_dimensions: Option<(u32, u32)>,
 ) -> Result<VideoPlaybackSession, String> {
-    start_video_library_playback_inner(ffmpeg_exe, video_path, start_seconds, end_seconds, true)
+    start_video_library_playback_inner(ffmpeg_exe, video_path, start_seconds, end_seconds, target_dimensions, true)
 }
 
 pub fn prepare_video_library_playback(
@@ -394,8 +442,9 @@ pub fn prepare_video_library_playback(
     video_path: PathBuf,
     start_seconds: f64,
     end_seconds: f64,
+    target_dimensions: Option<(u32, u32)>,
 ) -> Result<VideoPlaybackSession, String> {
-    start_video_library_playback_inner(ffmpeg_exe, video_path, start_seconds, end_seconds, false)
+    start_video_library_playback_inner(ffmpeg_exe, video_path, start_seconds, end_seconds, target_dimensions, false)
 }
 
 fn start_video_library_playback_inner(
@@ -403,6 +452,7 @@ fn start_video_library_playback_inner(
     video_path: PathBuf,
     start_seconds: f64,
     end_seconds: f64,
+    target_dimensions: Option<(u32, u32)>,
     play_immediately: bool,
 ) -> Result<VideoPlaybackSession, String> {
     if !ffmpeg_exe.exists() {
@@ -411,6 +461,10 @@ fn start_video_library_playback_inner(
     if !video_path.is_file() {
         return Err("Video file was not found.".to_owned());
     }
+    let (dim_w, dim_h) = target_dimensions
+        .or_else(|| probe_video_dimensions(&ffmpeg_exe, &video_path))
+        .unwrap_or((640, 360));
+    let (playback_w, playback_h) = compute_playback_size(dim_w, dim_h);
     let has_duration_limit = end_seconds > start_seconds;
     let duration = end_seconds - start_seconds;
     let (sender, receiver) = sync_channel(2);
@@ -444,10 +498,11 @@ fn start_video_library_playback_inner(
             if has_duration_limit {
                 cmd.args(["-t", &format!("{duration:.3}")]);
             }
+            let vf = format!("scale={playback_w}:{playback_h},fps=60");
             cmd.args([
                 "-an",
                 "-vf",
-                "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=60",
+                &vf,
                 "-pix_fmt",
                 "rgba",
                 "-f",
@@ -464,7 +519,7 @@ fn start_video_library_playback_inner(
                 .take()
                 .ok_or_else(|| "FFmpeg playback output was unavailable.".to_owned())?;
             *worker_child.lock() = Some(child);
-            let mut frame = vec![0_u8; LIBRARY_PLAYBACK_WIDTH * LIBRARY_PLAYBACK_HEIGHT * 4];
+            let mut frame = vec![0_u8; playback_w * playback_h * 4];
             let mut frame_index = 0_u64;
             let mut started_at = None;
             loop {
@@ -485,6 +540,8 @@ fn start_video_library_playback_inner(
                     if sender
                         .send(VideoPlaybackEvent::Frame {
                             rgba: frame.clone(),
+                            width: playback_w,
+                            height: playback_h,
                             position_seconds: start_seconds,
                         })
                         .is_err()
@@ -517,6 +574,8 @@ fn start_video_library_playback_inner(
                 }
                 let event = VideoPlaybackEvent::Frame {
                     rgba: frame.clone(),
+                    width: playback_w,
+                    height: playback_h,
                     position_seconds: start_seconds
                         + frame_index as f64 / LIBRARY_PLAYBACK_FPS as f64,
                 };
@@ -2418,5 +2477,14 @@ mod tests {
         });
         assert!(!process_hotkey(&binding, true, false));
         assert!(!process_hotkey(&binding, false, false));
+    }
+
+    #[test]
+    fn test_compute_playback_size_aspect_ratios() {
+        assert_eq!(compute_playback_size(1080, 1080), (720, 720));
+        assert_eq!(compute_playback_size(1920, 1080), (960, 540));
+        assert_eq!(compute_playback_size(1280, 720), (960, 540));
+        assert_eq!(compute_playback_size(1080, 1920), (540, 960));
+        assert_eq!(compute_playback_size(640, 480), (960, 720));
     }
 }
