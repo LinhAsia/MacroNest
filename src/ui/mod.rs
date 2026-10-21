@@ -8086,9 +8086,11 @@ impl CrosshairApp {
         {
             replay_from_start = true;
         }
-        let library_bounds = ctx.content_rect().shrink2(vec2(24.0, 18.0));
+        let is_maximized = self.video_library_preview_maximized && self.video_library_selected.is_some();
+        let shrink = if is_maximized { vec2(4.0, 4.0) } else { vec2(24.0, 18.0) };
+        let library_bounds = ctx.content_rect().shrink2(shrink);
         // Window::fixed_size is the content size; leave room for the frame margins too.
-        let library_content_size = library_bounds.size() - vec2(24.0, 20.0);
+        let library_content_size = library_bounds.size() - if is_maximized { vec2(12.0, 10.0) } else { vec2(24.0, 20.0) };
         egui::Window::new("video-library")
             .order(Order::Foreground)
             .fixed_pos(library_bounds.min)
@@ -8097,7 +8099,7 @@ impl CrosshairApp {
             .resizable(false)
             .collapsible(false)
             .title_bar(false)
-            .frame(Frame::window(ctx.style().as_ref()).corner_radius(14.0))
+            .frame(Frame::window(ctx.style().as_ref()).corner_radius(if is_maximized { 8.0 } else { 14.0 }))
             .show(ctx, |ui| {
                 ui.scope(|ui| {
                     ui.style_mut()
@@ -8106,72 +8108,126 @@ impl CrosshairApp {
                     ui.style_mut()
                         .text_styles
                         .insert(egui::TextStyle::Button, egui::FontId::proportional(13.0));
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "Video library",
-                                "Thư viện video",
-                            ))
-                            .strong()
-                            .size(18.0),
-                        );
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
+                    if is_maximized {
+                        let selected_path = self.video_library_selected.as_ref().unwrap();
+                        let file_name = selected_path.file_name().and_then(|n| n.to_str()).unwrap_or("video");
+                        let file_size_mb = self.video_library_preview.as_ref().map(|p| p.file_size as f64 / 1_048_576.0).unwrap_or_else(|| fs::metadata(selected_path).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0));
+                        let duration = self.video_library_preview.as_ref().map(|p| p.duration_seconds).unwrap_or(0.0);
+
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button(Self::tr_lang(language, "⮌ Back to list", "⮌ Danh sách"))
+                                .on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Restore side-by-side list view",
+                                    "Thu nhỏ về danh sách video",
+                                ))
+                                .clicked()
+                            {
+                                self.video_library_preview_maximized = false;
+                            }
+
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(file_name).strong().size(13.0));
+
+                            ui.label(
+                                RichText::new(format!(
+                                    "•  {}  •  {:.1} MB",
+                                    Self::format_video_seconds(duration),
+                                    file_size_mb
+                                ))
+                                .size(11.0)
+                                .weak(),
+                            );
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui
                                     .add_sized(
-                                        [36.0, 30.0],
-                                        Button::new(RichText::new("×").strong().size(20.0))
+                                        [32.0, 26.0],
+                                        Button::new(RichText::new("×").strong().size(18.0))
                                             .fill(Color32::from_rgb(174, 55, 76))
-                                            .corner_radius(7.0),
+                                            .corner_radius(6.0),
                                     )
-                                    .on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Close video library",
-                                        "Đóng thư viện video",
-                                    ))
+                                    .on_hover_text(Self::tr_lang(language, "Close", "Đóng"))
                                     .clicked()
                                 {
                                     close_library = true;
                                 }
-                            },
-                        );
-                    });
-                    ui.separator();
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(Self::tr_lang(
-                                language,
-                                "Recorded videos",
-                                "Video đã quay",
-                            ))
-                            .strong(),
-                        );
-                        ui.label(
-                            RichText::new(format!(
-                                "{} {}",
-                                videos.len(),
-                                Self::tr_lang(language, "videos", "video")
-                            ))
-                            .size(12.0)
-                            .weak(),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .button(Self::tr_lang(language, "Open folder", "Mở thư mục"))
-                                .clicked()
-                            {
-                                let _ = fs::create_dir_all(&output_dir);
-                                if let Err(error) = crate::platform::open_folder_in_explorer(&output_dir) {
-                                    self.status = format!("Could not open video folder: {error}");
+
+                                if ui.button(Self::tr_lang(language, "Open folder", "Mở thư mục")).clicked() {
+                                    let _ = fs::create_dir_all(&output_dir);
+                                    let _ = crate::platform::open_folder_in_explorer(&output_dir);
                                 }
-                            }
+                            });
                         });
-                    });
-                    ui.separator();
+                        ui.separator();
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Video library",
+                                    "Thư viện video",
+                                ))
+                                .strong()
+                                .size(18.0),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add_sized(
+                                            [36.0, 30.0],
+                                            Button::new(RichText::new("×").strong().size(20.0))
+                                                .fill(Color32::from_rgb(174, 55, 76))
+                                                .corner_radius(7.0),
+                                        )
+                                        .on_hover_text(Self::tr_lang(
+                                            language,
+                                            "Close video library",
+                                            "Đóng thư viện video",
+                                        ))
+                                        .clicked()
+                                    {
+                                        close_library = true;
+                                    }
+                                },
+                            );
+                        });
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(Self::tr_lang(
+                                    language,
+                                    "Recorded videos",
+                                    "Video đã quay",
+                                ))
+                                .strong(),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} {}",
+                                    videos.len(),
+                                    Self::tr_lang(language, "videos", "video")
+                                ))
+                                .size(12.0)
+                                .weak(),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui
+                                    .button(Self::tr_lang(language, "Open folder", "Mở thư mục"))
+                                    .clicked()
+                                {
+                                    let _ = fs::create_dir_all(&output_dir);
+                                    if let Err(error) = crate::platform::open_folder_in_explorer(&output_dir) {
+                                        self.status = format!("Could not open video folder: {error}");
+                                    }
+                                }
+                            });
+                        });
+                        ui.separator();
+                    }
                     let content_rect = ui.available_rect_before_wrap();
-                    let is_maximized = self.video_library_preview_maximized && self.video_library_selected.is_some();
                     let divider_width = if is_maximized { 0.0 } else { 10.0 };
                     let left_width = if is_maximized {
                         0.0
@@ -8395,50 +8451,55 @@ impl CrosshairApp {
                                 );
                                 return;
                             };
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(selected_path.file_name().and_then(|name| name.to_str()).unwrap_or("video"))
-                                        .strong()
-                                        .size(if is_maximized { 15.0 } else { 13.0 }),
-                                );
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    let max_tooltip = if is_maximized {
-                                        Self::tr_lang(language, "Restore list view", "Thu nhỏ xem trước")
-                                    } else {
-                                        Self::tr_lang(language, "Maximize preview", "Phóng to xem trước")
-                                    };
-                                    let max_icon = if is_maximized { 0xe5d1 } else { 0xe5d0 };
-                                    if ui
-                                        .add_sized(
-                                            [30.0, 24.0],
-                                            Button::new(Self::material_icon_text(max_icon, 16.0))
-                                                .fill(if is_maximized {
-                                                    Color32::from_rgb(37, 107, 82)
-                                                } else {
-                                                    Color32::from_rgba_premultiplied(40, 45, 55, 180)
-                                                })
-                                                .corner_radius(6.0),
-                                        )
-                                        .on_hover_text(max_tooltip)
-                                        .clicked()
-                                    {
-                                        self.video_library_preview_maximized = !self.video_library_preview_maximized;
-                                    }
+                            if !is_maximized {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(selected_path.file_name().and_then(|name| name.to_str()).unwrap_or("video"))
+                                            .strong()
+                                            .size(13.0),
+                                    );
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui
+                                            .add_sized(
+                                                [28.0, 22.0],
+                                                Button::new(Self::material_icon_text(0xe5d0, 15.0))
+                                                    .fill(Color32::from_rgba_premultiplied(40, 45, 55, 180))
+                                                    .corner_radius(5.0),
+                                            )
+                                            .on_hover_text(Self::tr_lang(language, "Maximize preview", "Phóng to xem trước"))
+                                            .clicked()
+                                        {
+                                            self.video_library_preview_maximized = true;
+                                        }
+                                    });
                                 });
-                            });
-                            ui.add_space(4.0);
+                                ui.add_space(2.0);
+                            }
                             if let Some(texture) = &self.video_library_preview_texture {
-                                let max_h = if is_maximized {
-                                    (ui.available_height() - 170.0).max(270.0)
+                                let (vid_w, vid_h) = if let Some(preview) = &self.video_library_preview {
+                                    if preview.width > 0 && preview.height > 0 {
+                                        (preview.width as f32, preview.height as f32)
+                                    } else {
+                                        (texture.size_vec2().x.max(1.0), texture.size_vec2().y.max(1.0))
+                                    }
                                 } else {
-                                    270.0
+                                    (texture.size_vec2().x.max(1.0), texture.size_vec2().y.max(1.0))
                                 };
-                                let aspect_w = ui.available_width().max(1.0);
-                                let target_h = (aspect_w * 9.0 / 16.0).min(max_h);
-                                let target_w = (target_h * 16.0 / 9.0).min(aspect_w);
-                                let preview_size = vec2(target_w, target_h);
+                                let reserved_bottom = if is_maximized { 74.0 } else { 96.0 };
+                                let avail_w = ui.available_width().max(1.0);
+                                let max_h = if is_maximized {
+                                    (ui.available_height() - reserved_bottom).max(180.0)
+                                } else {
+                                    (ui.available_height() - reserved_bottom).clamp(160.0, 320.0)
+                                };
+                                let scale = (avail_w / vid_w).min(max_h / vid_h);
+                                let preview_size = vec2(
+                                    (vid_w * scale).floor().max(1.0),
+                                    (vid_h * scale).floor().max(1.0),
+                                );
                                 ui.add(Image::new(texture).fit_to_exact_size(preview_size));
                             } else if self.video_library_preview_rx.is_some() {
+                                ui.add_space(40.0);
                                 ui.add(egui::Spinner::new());
                                 ui.label(
                                     RichText::new(Self::tr_lang(
@@ -8449,6 +8510,7 @@ impl CrosshairApp {
                                     .weak(),
                                 );
                             } else {
+                                ui.add_space(40.0);
                                 ui.label(
                                     RichText::new(Self::tr_lang(
                                         language,
@@ -8469,100 +8531,33 @@ impl CrosshairApp {
                                     path == &selected_path && !playback.is_ready()
                                 });
                             let video_buffering = playback_buffering || seek_buffering;
-                            let (loading_rect, _) = ui.allocate_exact_size(
-                                vec2(ui.available_width(), 24.0),
-                                Sense::hover(),
-                            );
                             if video_buffering {
-                                let mut loading_ui = ui.new_child(
-                                    egui::UiBuilder::new()
-                                        .max_rect(loading_rect)
-                                        .layout(egui::Layout::left_to_right(
-                                            egui::Align::Center,
-                                        )),
-                                );
-                                loading_ui.add(egui::Spinner::new());
-                                loading_ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "Loading preview...",
-                                        "Đang tải xem trước...",
-                                    ))
-                                    .weak(),
-                                );
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Spinner::new().size(13.0));
+                                    ui.label(
+                                        RichText::new(Self::tr_lang(
+                                            language,
+                                            "Buffering...",
+                                            "Đang tải...",
+                                        ))
+                                        .size(11.0)
+                                        .weak(),
+                                    );
+                                });
                             }
-                            ui.horizontal_wrapped(|ui| {
-                                let playing = self.video_library_playback_path.as_ref()
-                                    == Some(&selected_path);
-                                if ui
-                                    .button(if playing && video_buffering {
-                                        Self::tr_lang(language, "Stop loading", "Dừng tải")
-                                    } else if playing {
-                                        Self::tr_lang(language, "Stop video", "Dừng video")
-                                    } else {
-                                        Self::tr_lang(language, "Play video", "Phát video")
-                                    })
-                                    .clicked()
-                                {
-                                    toggle_playback = Some(selected_path.clone());
-                                }
-                                if ui
-                                    .button(Self::tr_lang(language, "Replay (S)", "Phát lại (S)"))
-                                    .on_hover_text(Self::tr_lang(
-                                        language,
-                                        "Replay from left trim (Key S)",
-                                        "Phát lại từ điểm bắt đầu cắt (Phím S)",
-                                    ))
-                                    .clicked()
-                                {
-                                    replay_from_start = true;
-                                }
-                                if ui
-                                    .button(Self::tr_lang(
-                                        language,
-                                        "Open file location",
-                                        "Mở vị trí tệp",
-                                    ))
-                                    .clicked()
-                                {
-                                    reveal_video = Some(selected_path.clone());
-                                    self.status = "Opening file location\u{2026}".to_owned();
-                                }
-                            });
                             if let Some(preview) = &self.video_library_preview {
                                 let duration = preview.duration_seconds.max(0.1);
                                 self.video_library_trim_end_seconds = self
                                     .video_library_trim_end_seconds
                                     .clamp(self.video_library_trim_start_seconds, duration);
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{}  -  {:.1} MB{}",
-                                        Self::format_video_seconds(preview.duration_seconds),
-                                        preview.file_size as f64 / 1_048_576.0,
-                                        if self.video_library_playback_path.as_ref()
-                                            == Some(&selected_path)
-                                        {
-                                            format!(
-                                                "  -  Playing {}",
-                                                Self::format_video_seconds(
-                                                    self.video_library_playback_position_seconds,
-                                                )
-                                            )
-                                        } else {
-                                            String::new()
-                                        },
-                                    ))
-                                    .size(12.0)
-                                    .weak(),
-                                );
                                 let (playhead_changed, timeline_interacting) =
                                     Self::render_video_trim_timeline(
-                                    ui,
-                                    duration,
-                                    &mut self.video_library_trim_start_seconds,
-                                    &mut self.video_library_trim_end_seconds,
-                                    &mut self.video_library_playback_position_seconds,
-                                );
+                                        ui,
+                                        duration,
+                                        &mut self.video_library_trim_start_seconds,
+                                        &mut self.video_library_trim_end_seconds,
+                                        &mut self.video_library_playback_position_seconds,
+                                    );
                                 if timeline_interacting
                                     && self.video_library_playback.is_some()
                                 {
@@ -8585,7 +8580,57 @@ impl CrosshairApp {
                                         self.video_library_preloaded_playback = None;
                                     }
                                 }
+                                ui.add_space(2.0);
                                 ui.horizontal_wrapped(|ui| {
+                                    ui.spacing_mut().item_spacing = vec2(6.0, 3.0);
+                                    let playing = self.video_library_playback_path.as_ref()
+                                        == Some(&selected_path);
+                                    let play_text = if playing && video_buffering {
+                                        Self::tr_lang(language, "⏹ Stop loading", "⏹ Dừng tải")
+                                    } else if playing {
+                                        Self::tr_lang(language, "⏹ Stop", "⏹ Dừng")
+                                    } else {
+                                        Self::tr_lang(language, "▶ Play", "▶ Phát")
+                                    };
+                                    if ui
+                                        .button(play_text)
+                                        .on_hover_text(Self::tr_lang(
+                                            language,
+                                            "Play / stop video (Space)",
+                                            "Phát / dừng video (Phím Space)",
+                                        ))
+                                        .clicked()
+                                    {
+                                        toggle_playback = Some(selected_path.clone());
+                                    }
+                                    if ui
+                                        .button(Self::tr_lang(language, "⟲ Replay (S)", "⟲ Phát lại (S)"))
+                                        .on_hover_text(Self::tr_lang(
+                                            language,
+                                            "Replay from left trim (Key S)",
+                                            "Phát lại từ điểm bắt đầu cắt (Phím S)",
+                                        ))
+                                        .clicked()
+                                    {
+                                        replay_from_start = true;
+                                    }
+
+                                    let current_pos = self.video_library_playback_position_seconds;
+                                    let trim_len = (self.video_library_trim_end_seconds - self.video_library_trim_start_seconds).max(0.0);
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} / {} (✂ {:.1}s)",
+                                            Self::format_video_seconds(current_pos),
+                                            Self::format_video_seconds(duration),
+                                            trim_len,
+                                        ))
+                                        .size(12.0)
+                                        .monospace()
+                                        .weak(),
+                                    );
+
+                                    ui.separator();
+
                                     if ui.add_enabled(
                                         !crate::video_recorder::is_editing(),
                                         Button::new(Self::tr_lang(
@@ -8593,7 +8638,13 @@ impl CrosshairApp {
                                             "Export trim",
                                             "Xuất đoạn cắt",
                                         )),
-                                    ).clicked() {
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Fast lossless cut at nearest keyframe",
+                                        "Cắt nhanh không giảm chất lượng (bắt đầu ở keyframe gần nhất)",
+                                    ))
+                                    .clicked() {
                                         export_request = Some((
                                             selected_path.clone(),
                                             self.video_library_trim_start_seconds,
@@ -8601,16 +8652,16 @@ impl CrosshairApp {
                                             None,
                                         ));
                                     }
-                                    ui.label(Self::tr_lang(
+                                    ui.label(RichText::new(Self::tr_lang(
                                         language,
-                                        "Compress to",
-                                        "Nén xuống",
-                                    ));
+                                        "Compress:",
+                                        "Nén:",
+                                    )).size(12.0));
                                     ui.add_sized(
-                                        [70.0, 22.0],
+                                        [60.0, 20.0],
                                         egui::DragValue::new(&mut self.video_library_target_size_mb)
                                             .range(1..=2048)
-                                            .suffix(" MB"),
+                                            .suffix("MB"),
                                     );
                                     if ui.add_enabled(
                                         !crate::video_recorder::is_editing(),
@@ -8619,34 +8670,52 @@ impl CrosshairApp {
                                             "Compress",
                                             "Nén",
                                         )),
-                                    ).clicked() {
+                                    )
+                                    .on_hover_text(Self::tr_lang(
+                                        language,
+                                        "Re-encode to target size (slower)",
+                                        "Mã hóa lại theo dung lượng chỉ định (chậm hơn)",
+                                    ))
+                                    .clicked() {
                                         export_request = Some((
-                                            selected_path,
+                                            selected_path.clone(),
                                             self.video_library_trim_start_seconds,
                                             self.video_library_trim_end_seconds,
                                             Some(self.video_library_target_size_mb),
                                         ));
                                     }
+                                    if !is_maximized {
+                                        if ui
+                                            .button(Self::tr_lang(
+                                                language,
+                                                "Folder",
+                                                "Thư mục",
+                                            ))
+                                            .on_hover_text(Self::tr_lang(
+                                                language,
+                                                "Open file location",
+                                                "Mở vị trí tệp",
+                                            ))
+                                            .clicked()
+                                        {
+                                            reveal_video = Some(selected_path.clone());
+                                            self.status = "Opening file location\u{2026}".to_owned();
+                                        }
+                                    }
                                 });
-                                ui.label(
-                                    RichText::new(Self::tr_lang(
-                                        language,
-                                        "Export trim is fast but starts at the nearest keyframe. Compress re-encodes and is slower.",
-                                        "Xuất đoạn cắt nhanh nhưng bắt đầu ở keyframe gần nhất. Nén sẽ mã hóa lại nên chậm hơn.",
-                                    ))
-                                        .size(11.0)
-                                        .weak(),
-                                );
                             }
-                            if let Some(progress) = crate::video_recorder::edit_progress() {
-                                ui.add(
-                                    egui::ProgressBar::new(progress)
-                                        .show_percentage()
-                                        .animate(true)
-                                        .desired_width(ui.available_width()),
-                                );
+                            if crate::video_recorder::is_editing() {
+                                ui.add_space(2.0);
+                                if let Some(progress) = crate::video_recorder::edit_progress() {
+                                    ui.add(
+                                        egui::ProgressBar::new(progress)
+                                            .show_percentage()
+                                            .animate(true)
+                                            .desired_width(ui.available_width()),
+                                    );
+                                }
+                                ui.label(RichText::new(crate::video_recorder::edit_status()).size(11.0).weak());
                             }
-                            ui.label(RichText::new(crate::video_recorder::edit_status()).size(11.0).weak());
                         });
                 });
             });
@@ -8909,7 +8978,7 @@ impl CrosshairApp {
         playhead: &mut f64,
     ) -> (bool, bool) {
         let (rect, response) =
-            ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click_and_drag());
+            ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::click_and_drag());
         let handle_id = ui.make_persistent_id("video-library-trim-handle");
         let track_rect = rect.shrink2(vec2(7.0, 0.0));
         let width = track_rect.width().max(1.0);
@@ -9012,25 +9081,25 @@ impl CrosshairApp {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 4.0, Color32::from_rgb(41, 45, 54));
         painter.rect_filled(
-            egui::Rect::from_x_y_ranges(start_x..=end_x, rect.top() + 12.0..=rect.bottom() - 14.0),
+            egui::Rect::from_x_y_ranges(start_x..=end_x, rect.top() + 10.0..=rect.bottom() - 6.0),
             3.0,
             Color32::from_rgb(56, 153, 106),
         );
         for (is_start, x) in [(true, start_x), (false, end_x)] {
             painter.line_segment(
-                [pos2(x, rect.top() + 8.0), pos2(x, rect.bottom() - 10.0)],
+                [pos2(x, rect.top() + 7.0), pos2(x, rect.bottom() - 4.0)],
                 Stroke::new(2.0, Color32::from_rgb(113, 214, 162)),
             );
             // Sleek 3.5px wide trim caps facing outward to keep interior 100% open for playhead
             let cap_rect = if is_start {
                 egui::Rect::from_min_size(
-                    pos2(x - 3.5, rect.center().y - 8.0),
-                    vec2(3.5, 16.0),
+                    pos2(x - 3.5, rect.center().y + 1.0 - 7.0),
+                    vec2(3.5, 14.0),
                 )
             } else {
                 egui::Rect::from_min_size(
-                    pos2(x, rect.center().y - 8.0),
-                    vec2(3.5, 16.0),
+                    pos2(x, rect.center().y + 1.0 - 7.0),
+                    vec2(3.5, 14.0),
                 )
             };
             painter.rect_filled(
@@ -9042,29 +9111,29 @@ impl CrosshairApp {
         let playhead_x = to_x(*playhead);
         painter.line_segment(
             [
-                pos2(playhead_x, rect.top() + 4.0),
-                pos2(playhead_x, rect.bottom() - 6.0),
+                pos2(playhead_x, rect.top() + 2.0),
+                pos2(playhead_x, rect.bottom() - 3.0),
             ],
             Stroke::new(2.0, Color32::WHITE),
         );
         painter.add(egui::Shape::convex_polygon(
             vec![
-                pos2(playhead_x - 5.0, rect.top() + 4.0),
-                pos2(playhead_x + 5.0, rect.top() + 4.0),
-                pos2(playhead_x, rect.top() + 11.0),
+                pos2(playhead_x - 4.0, rect.top() + 2.0),
+                pos2(playhead_x + 4.0, rect.top() + 2.0),
+                pos2(playhead_x, rect.top() + 8.0),
             ],
             Color32::WHITE,
             Stroke::NONE,
         ));
         painter.text(
-            pos2(rect.left() + 6.0, rect.top() + 2.0),
+            pos2(rect.left() + 6.0, rect.top() + 0.0),
             egui::Align2::LEFT_TOP,
             Self::format_video_seconds(*start),
             egui::TextStyle::Small.resolve(ui.style()),
             Color32::WHITE,
         );
         painter.text(
-            pos2(rect.right() - 6.0, rect.top() + 2.0),
+            pos2(rect.right() - 6.0, rect.top() + 0.0),
             egui::Align2::RIGHT_TOP,
             Self::format_video_seconds(*end),
             egui::TextStyle::Small.resolve(ui.style()),
