@@ -96,14 +96,6 @@ pub struct VisionPreset {
     #[serde(default)]
     pub color_scan_average_centroid: bool,
     #[serde(default)]
-    pub color_scan_leftmost: bool,
-    #[serde(default)]
-    pub color_scan_rightmost: bool,
-    #[serde(default)]
-    pub color_scan_topmost: bool,
-    #[serde(default)]
-    pub color_scan_bottommost: bool,
-    #[serde(default)]
     pub is_pixel_counter: bool,
     #[serde(default)]
     pub pixel_counter_variable_name: String,
@@ -154,10 +146,6 @@ impl VisionPreset {
             dual_color_scan_midpoint: false,
             require_connected_target_colors: false,
             color_scan_average_centroid: false,
-            color_scan_leftmost: false,
-            color_scan_rightmost: false,
-            color_scan_topmost: false,
-            color_scan_bottommost: false,
             is_pixel_counter: false,
             pixel_counter_variable_name: String::new(),
             search_region_is_single_pixel: false,

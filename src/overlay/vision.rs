@@ -1368,11 +1368,7 @@ pub(crate) fn run_vision_once_with_options(
                 .context("Failed to capture the screen")?
         };
 
-        let needs_extremes = preset.color_scan_leftmost
-            || preset.color_scan_rightmost
-            || preset.color_scan_topmost
-            || preset.color_scan_bottommost
-            || extremes_vars.map(|v| v.is_any_set()).unwrap_or(false);
+        let needs_extremes = extremes_vars.map(|v| v.is_any_set()).unwrap_or(false);
 
         let extremes = if needs_extremes {
             find_color_extremes(
@@ -1396,38 +1392,6 @@ pub(crate) fn run_vision_once_with_options(
                 relative_anchor_y,
                 configured_region.as_ref(),
             )
-        } else if preset.color_scan_leftmost {
-            extremes.leftmost.map(|(x, y)| ColorMatchHit {
-                x,
-                y,
-                score: 0,
-                distance_sq: 0,
-                matched_color: target_colors[0],
-            })
-        } else if preset.color_scan_rightmost {
-            extremes.rightmost.map(|(x, y)| ColorMatchHit {
-                x,
-                y,
-                score: 0,
-                distance_sq: 0,
-                matched_color: target_colors[0],
-            })
-        } else if preset.color_scan_topmost {
-            extremes.topmost.map(|(x, y)| ColorMatchHit {
-                x,
-                y,
-                score: 0,
-                distance_sq: 0,
-                matched_color: target_colors[0],
-            })
-        } else if preset.color_scan_bottommost {
-            extremes.bottommost.map(|(x, y)| ColorMatchHit {
-                x,
-                y,
-                score: 0,
-                distance_sq: 0,
-                matched_color: target_colors[0],
-            })
         } else if preset.color_scan_average_centroid {
             find_color_average_centroid_match(
                 &screen,
@@ -1539,26 +1503,6 @@ pub(crate) fn run_vision_once_with_options(
             status: if anchor.is_some() {
                 format!(
                     "Matched colors from priority point at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
-                )
-            } else if preset.color_scan_leftmost {
-                format!(
-                    "Matched leftmost color at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
-                )
-            } else if preset.color_scan_rightmost {
-                format!(
-                    "Matched rightmost color at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
-                )
-            } else if preset.color_scan_topmost {
-                format!(
-                    "Matched topmost color at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
-                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
-                )
-            } else if preset.color_scan_bottommost {
-                format!(
-                    "Matched bottommost color at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
                     effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
                 )
             } else if preset.color_scan_average_centroid {

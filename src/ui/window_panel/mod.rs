@@ -2982,7 +2982,12 @@ impl CrosshairApp {
         layout.cols = cols;
 
         if layout.row_ratios.len() != rows {
-            layout.row_ratios.resize(rows, 1.0);
+            let avg = if !layout.row_ratios.is_empty() {
+                layout.row_ratios.iter().sum::<f32>() / layout.row_ratios.len() as f32
+            } else {
+                1.0
+            };
+            layout.row_ratios.resize(rows, avg);
         }
         for val in &mut layout.row_ratios {
             if *val <= 0.0 {
@@ -2991,7 +2996,12 @@ impl CrosshairApp {
         }
 
         if layout.col_ratios.len() != cols {
-            layout.col_ratios.resize(cols, 1.0);
+            let avg = if !layout.col_ratios.is_empty() {
+                layout.col_ratios.iter().sum::<f32>() / layout.col_ratios.len() as f32
+            } else {
+                1.0
+            };
+            layout.col_ratios.resize(cols, avg);
         }
         for val in &mut layout.col_ratios {
             if *val <= 0.0 {
@@ -3627,6 +3637,10 @@ impl CrosshairApp {
                             let mut rows = layout.rows;
                             if ui.add(DragValue::new(&mut rows).range(1..=6)).changed() {
                                 layout.rows = rows;
+                                for cell in &mut layout.cells {
+                                    cell.adjust_top = 0.0;
+                                    cell.adjust_bottom = 0.0;
+                                }
                                 Self::sanitize_layout(layout);
                                 live_sync = true;
                             }
@@ -3634,6 +3648,10 @@ impl CrosshairApp {
                             let mut cols = layout.cols;
                             if ui.add(DragValue::new(&mut cols).range(1..=6)).changed() {
                                 layout.cols = cols;
+                                for cell in &mut layout.cells {
+                                    cell.adjust_left = 0.0;
+                                    cell.adjust_right = 0.0;
+                                }
                                 Self::sanitize_layout(layout);
                                 live_sync = true;
                             }
@@ -3840,75 +3858,93 @@ impl CrosshairApp {
                                             ui.interact(empty_rect, empty_id, egui::Sense::click());
                                         let is_hovered = empty_resp.hovered();
 
-                                        let fill = if is_hovered {
-                                            Color32::from_rgba_premultiplied(0, 150, 230, 35)
-                                        } else {
-                                            Color32::from_rgba_premultiplied(35, 38, 44, 45)
-                                        };
                                         let stroke_color = if is_hovered {
-                                            Color32::from_rgb(0, 180, 255)
+                                            Color32::from_rgb(0, 190, 255)
                                         } else {
-                                            Color32::from_rgba_premultiplied(85, 90, 100, 90)
+                                            Color32::from_rgba_unmultiplied(0, 150, 240, 150)
+                                        };
+                                        let fill = if is_hovered {
+                                            Color32::from_rgba_unmultiplied(0, 140, 230, 45)
+                                        } else {
+                                            Color32::from_rgba_unmultiplied(0, 100, 180, 20)
                                         };
 
                                         Self::draw_dashed_line(
                                             ui.painter(),
                                             empty_rect.left_top(),
                                             empty_rect.right_top(),
-                                            egui::Stroke::new(1.0, stroke_color),
-                                            5.0,
-                                            3.0,
+                                            egui::Stroke::new(1.5, stroke_color),
+                                            6.0,
+                                            4.0,
                                         );
                                         Self::draw_dashed_line(
                                             ui.painter(),
                                             empty_rect.right_top(),
                                             empty_rect.right_bottom(),
-                                            egui::Stroke::new(1.0, stroke_color),
-                                            5.0,
-                                            3.0,
+                                            egui::Stroke::new(1.5, stroke_color),
+                                            6.0,
+                                            4.0,
                                         );
                                         Self::draw_dashed_line(
                                             ui.painter(),
                                             empty_rect.right_bottom(),
                                             empty_rect.left_bottom(),
-                                            egui::Stroke::new(1.0, stroke_color),
-                                            5.0,
-                                            3.0,
+                                            egui::Stroke::new(1.5, stroke_color),
+                                            6.0,
+                                            4.0,
                                         );
                                         Self::draw_dashed_line(
                                             ui.painter(),
                                             empty_rect.left_bottom(),
                                             empty_rect.left_top(),
-                                            egui::Stroke::new(1.0, stroke_color),
-                                            5.0,
-                                            3.0,
+                                            egui::Stroke::new(1.5, stroke_color),
+                                            6.0,
+                                            4.0,
                                         );
 
-                                        ui.painter().rect_filled(empty_rect, 2.0, fill);
+                                        ui.painter().rect_filled(empty_rect, 3.0, fill);
 
-                                        let btn_size = 28.0f32
-                                            .min(empty_rect.width() - 6.0)
-                                            .min(empty_rect.height() - 6.0)
-                                            .max(14.0);
+                                        let btn_size = 38.0f32
+                                            .min(empty_rect.width() - 8.0)
+                                            .min(empty_rect.height() - 8.0)
+                                            .max(18.0);
                                         let plus_rect = egui::Rect::from_center_size(
                                             empty_rect.center(),
                                             egui::vec2(btn_size, btn_size),
                                         );
-                                        let plus_bg = if is_hovered {
-                                            Color32::from_rgba_premultiplied(0, 120, 215, 200)
+                                        let add_btn = egui::Button::new(Self::material_icon_text(
+                                            0xe145,
+                                            (btn_size * 0.58).clamp(14.0, 22.0),
+                                        ))
+                                        .fill(if is_hovered {
+                                            Color32::from_rgb(0, 140, 240)
                                         } else {
-                                            Color32::from_rgba_premultiplied(60, 64, 72, 160)
-                                        };
-                                        ui.painter().rect_filled(plus_rect, 4.0, plus_bg);
-                                        ui.painter().text(
-                                            plus_rect.center(),
-                                            egui::Align2::CENTER_CENTER,
-                                            "+",
-                                            egui::FontId::proportional(16.0),
-                                            Color32::WHITE,
+                                            Color32::from_rgb(0, 110, 200)
+                                        })
+                                        .rounding(6.0);
+                                        let add_resp = ui.put(plus_rect, add_btn).on_hover_text(
+                                            Self::tr_lang(
+                                                language,
+                                                "Click to add window in this empty area",
+                                                "Nhấn để thêm cửa sổ vào vùng trống này",
+                                            ),
                                         );
 
-                                        if empty_resp.clicked() {
+                                        if is_hovered || add_resp.hovered() {
+                                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                        }
+
+                                        if empty_rect.height() >= 65.0 && empty_rect.width() >= 65.0 {
+                                            ui.painter().text(
+                                                empty_rect.center() + egui::vec2(0.0, btn_size * 0.5 + 11.0),
+                                                egui::Align2::CENTER_CENTER,
+                                                Self::tr_lang(language, "Add Window", "Thêm cửa sổ"),
+                                                egui::FontId::proportional(11.5),
+                                                Color32::from_rgb(180, 215, 255),
+                                            );
+                                        }
+
+                                        if empty_resp.clicked() || add_resp.clicked() {
                                             add_cell = Some((r, c));
                                         }
 
@@ -5445,6 +5481,6 @@ mod tests {
         assert_eq!(layout.col_ratios.len(), 3);
         assert_eq!(layout.col_ratios[0], 0.3);
         assert_eq!(layout.col_ratios[1], 0.7);
-        assert_eq!(layout.col_ratios[2], 1.0);
+        assert_eq!(layout.col_ratios[2], 0.5);
     }
 }

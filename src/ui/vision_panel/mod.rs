@@ -742,10 +742,6 @@ impl CrosshairApp {
                                         if preset.require_connected_target_colors {
                                             preset.dual_color_scan_midpoint = false;
                                             preset.color_scan_average_centroid = false;
-                                            preset.color_scan_leftmost = false;
-                                            preset.color_scan_rightmost = false;
-                                            preset.color_scan_topmost = false;
-                                            preset.color_scan_bottommost = false;
                                         }
                                         live_sync = true;
                                     }
@@ -779,10 +775,6 @@ impl CrosshairApp {
                                         if preset.color_scan_average_centroid {
                                             preset.require_connected_target_colors = false;
                                             preset.dual_color_scan_midpoint = false;
-                                            preset.color_scan_leftmost = false;
-                                            preset.color_scan_rightmost = false;
-                                            preset.color_scan_topmost = false;
-                                            preset.color_scan_bottommost = false;
                                         }
                                         live_sync = true;
                                     }
@@ -801,98 +793,6 @@ impl CrosshairApp {
                                         if preset.dual_color_scan_midpoint {
                                             preset.require_connected_target_colors = false;
                                             preset.color_scan_average_centroid = false;
-                                            preset.color_scan_leftmost = false;
-                                            preset.color_scan_rightmost = false;
-                                            preset.color_scan_topmost = false;
-                                            preset.color_scan_bottommost = false;
-                                        }
-                                        live_sync = true;
-                                    }
-
-                                    if ui
-                                        .checkbox(
-                                            &mut preset.color_scan_leftmost,
-                                            Self::tr_lang(
-                                                language,
-                                                "Leftmost",
-                                                "Trái cùng",
-                                            ),
-                                        )
-                                        .changed()
-                                    {
-                                        if preset.color_scan_leftmost {
-                                            preset.require_connected_target_colors = false;
-                                            preset.color_scan_average_centroid = false;
-                                            preset.dual_color_scan_midpoint = false;
-                                            preset.color_scan_rightmost = false;
-                                            preset.color_scan_topmost = false;
-                                            preset.color_scan_bottommost = false;
-                                        }
-                                        live_sync = true;
-                                    }
-
-                                    if ui
-                                        .checkbox(
-                                            &mut preset.color_scan_rightmost,
-                                            Self::tr_lang(
-                                                language,
-                                                "Rightmost",
-                                                "Phải cùng",
-                                            ),
-                                        )
-                                        .changed()
-                                    {
-                                        if preset.color_scan_rightmost {
-                                            preset.require_connected_target_colors = false;
-                                            preset.color_scan_average_centroid = false;
-                                            preset.dual_color_scan_midpoint = false;
-                                            preset.color_scan_leftmost = false;
-                                            preset.color_scan_topmost = false;
-                                            preset.color_scan_bottommost = false;
-                                        }
-                                        live_sync = true;
-                                    }
-
-                                    if ui
-                                        .checkbox(
-                                            &mut preset.color_scan_topmost,
-                                            Self::tr_lang(
-                                                language,
-                                                "Topmost",
-                                                "Trên cùng",
-                                            ),
-                                        )
-                                        .changed()
-                                    {
-                                        if preset.color_scan_topmost {
-                                            preset.require_connected_target_colors = false;
-                                            preset.color_scan_average_centroid = false;
-                                            preset.dual_color_scan_midpoint = false;
-                                            preset.color_scan_leftmost = false;
-                                            preset.color_scan_rightmost = false;
-                                            preset.color_scan_bottommost = false;
-                                        }
-                                        live_sync = true;
-                                    }
-
-                                    if ui
-                                        .checkbox(
-                                            &mut preset.color_scan_bottommost,
-                                            Self::tr_lang(
-                                                language,
-                                                "Bottommost",
-                                                "Dưới cùng",
-                                            ),
-                                        )
-                                        .changed()
-                                    {
-                                        if preset.color_scan_bottommost {
-                                            preset.require_connected_target_colors = false;
-                                            preset.color_scan_average_centroid = false;
-                                            preset.dual_color_scan_midpoint = false;
-                                            preset.color_scan_leftmost = false;
-                                            preset.color_scan_rightmost = false;
-                                            preset.color_scan_topmost = false;
                                         }
                                         live_sync = true;
                                     }
