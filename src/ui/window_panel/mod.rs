@@ -2982,7 +2982,7 @@ impl CrosshairApp {
         layout.cols = cols;
 
         if layout.row_ratios.len() != rows {
-            layout.row_ratios = vec![1.0; rows];
+            layout.row_ratios.resize(rows, 1.0);
         }
         for val in &mut layout.row_ratios {
             if *val <= 0.0 {
@@ -2991,7 +2991,7 @@ impl CrosshairApp {
         }
 
         if layout.col_ratios.len() != cols {
-            layout.col_ratios = vec![1.0; cols];
+            layout.col_ratios.resize(cols, 1.0);
         }
         for val in &mut layout.col_ratios {
             if *val <= 0.0 {
@@ -2999,10 +2999,9 @@ impl CrosshairApp {
             }
         }
 
-        layout
-            .cells
-            .retain(|cell| cell.row < rows && cell.col < cols);
         for cell in &mut layout.cells {
+            cell.row = cell.row.min(rows - 1);
+            cell.col = cell.col.min(cols - 1);
             cell.row_span = cell.row_span.max(1).min(rows - cell.row);
             cell.col_span = cell.col_span.max(1).min(cols - cell.col);
         }
@@ -3049,21 +3048,6 @@ impl CrosshairApp {
         }
 
         layout.cells = sanitized_cells;
-
-        // Simplify to 1x1 if there is only one cell that covers the entire grid
-        if layout.cells.len() == 1 {
-            let cell = &layout.cells[0];
-            if cell.row == 0 && cell.col == 0 && cell.row_span == rows && cell.col_span == cols {
-                if rows > 1 || cols > 1 {
-                    layout.rows = 1;
-                    layout.cols = 1;
-                    layout.row_ratios = vec![1.0];
-                    layout.col_ratios = vec![1.0];
-                    layout.cells[0].row_span = 1;
-                    layout.cells[0].col_span = 1;
-                }
-            }
-        }
     }
 
     fn get_monitor_layout_metrics() -> MonitorLayoutMetrics {
@@ -3820,9 +3804,122 @@ impl CrosshairApp {
                             }
 
                             let mut delete_cell = None;
+                            let mut add_cell = None;
                             let mut snap_preview = None;
                             let mut merge_action = None;
                             let cells_to_draw = layout.cells.clone();
+                            let mut occupied = vec![vec![false; layout.cols]; layout.rows];
+                            for cell in &cells_to_draw {
+                                if cell.row < layout.rows && cell.col < layout.cols {
+                                    let end_r = (cell.row + cell.row_span).min(layout.rows);
+                                    let end_c = (cell.col + cell.col_span).min(layout.cols);
+                                    for r in cell.row..end_r {
+                                        for c in cell.col..end_c {
+                                            occupied[r][c] = true;
+                                        }
+                                    }
+                                }
+                            }
+
+                            for r in 0..layout.rows {
+                                for c in 0..layout.cols {
+                                    if !occupied[r][c] {
+                                        let x1 = grid_rect.min.x + col_starts[c] * grid_w;
+                                        let y1 = grid_rect.min.y + row_starts[r] * grid_h;
+                                        let x2 = grid_rect.min.x + col_starts[c + 1] * grid_w;
+                                        let y2 = grid_rect.min.y + row_starts[r + 1] * grid_h;
+                                        let empty_rect = egui::Rect::from_min_max(
+                                            egui::pos2(x1, y1),
+                                            egui::pos2(x2, y2),
+                                        )
+                                        .shrink(2.0);
+
+                                        let empty_id =
+                                            ui.make_persistent_id((layout.id, "empty_slot", r, c));
+                                        let empty_resp =
+                                            ui.interact(empty_rect, empty_id, egui::Sense::click());
+                                        let is_hovered = empty_resp.hovered();
+
+                                        let fill = if is_hovered {
+                                            Color32::from_rgba_premultiplied(0, 150, 230, 35)
+                                        } else {
+                                            Color32::from_rgba_premultiplied(35, 38, 44, 45)
+                                        };
+                                        let stroke_color = if is_hovered {
+                                            Color32::from_rgb(0, 180, 255)
+                                        } else {
+                                            Color32::from_rgba_premultiplied(85, 90, 100, 90)
+                                        };
+
+                                        Self::draw_dashed_line(
+                                            ui.painter(),
+                                            empty_rect.left_top(),
+                                            empty_rect.right_top(),
+                                            egui::Stroke::new(1.0, stroke_color),
+                                            5.0,
+                                            3.0,
+                                        );
+                                        Self::draw_dashed_line(
+                                            ui.painter(),
+                                            empty_rect.right_top(),
+                                            empty_rect.right_bottom(),
+                                            egui::Stroke::new(1.0, stroke_color),
+                                            5.0,
+                                            3.0,
+                                        );
+                                        Self::draw_dashed_line(
+                                            ui.painter(),
+                                            empty_rect.right_bottom(),
+                                            empty_rect.left_bottom(),
+                                            egui::Stroke::new(1.0, stroke_color),
+                                            5.0,
+                                            3.0,
+                                        );
+                                        Self::draw_dashed_line(
+                                            ui.painter(),
+                                            empty_rect.left_bottom(),
+                                            empty_rect.left_top(),
+                                            egui::Stroke::new(1.0, stroke_color),
+                                            5.0,
+                                            3.0,
+                                        );
+
+                                        ui.painter().rect_filled(empty_rect, 2.0, fill);
+
+                                        let btn_size = 28.0f32
+                                            .min(empty_rect.width() - 6.0)
+                                            .min(empty_rect.height() - 6.0)
+                                            .max(14.0);
+                                        let plus_rect = egui::Rect::from_center_size(
+                                            empty_rect.center(),
+                                            egui::vec2(btn_size, btn_size),
+                                        );
+                                        let plus_bg = if is_hovered {
+                                            Color32::from_rgba_premultiplied(0, 120, 215, 200)
+                                        } else {
+                                            Color32::from_rgba_premultiplied(60, 64, 72, 160)
+                                        };
+                                        ui.painter().rect_filled(plus_rect, 4.0, plus_bg);
+                                        ui.painter().text(
+                                            plus_rect.center(),
+                                            egui::Align2::CENTER_CENTER,
+                                            "+",
+                                            egui::FontId::proportional(16.0),
+                                            Color32::WHITE,
+                                        );
+
+                                        if empty_resp.clicked() {
+                                            add_cell = Some((r, c));
+                                        }
+
+                                        empty_resp.on_hover_text(Self::tr_lang(
+                                            language,
+                                            "Click to add window in this empty area",
+                                            "Nhấn để thêm cửa sổ vào vùng trống này",
+                                        ));
+                                    }
+                                }
+                            }
                             let merge_preview_bounds = self.drag_start_layout_cell.and_then(
                                 |(drag_layout, drag_row, drag_col)| {
                                     if drag_layout != layout.id
@@ -4808,6 +4905,25 @@ impl CrosshairApp {
                                 live_sync = true;
                             }
 
+                            if let Some((r, c)) = add_cell {
+                                layout.cells.push(WindowLayoutCell {
+                                    row: r,
+                                    col: c,
+                                    row_span: 1,
+                                    col_span: 1,
+                                    target_window_title: None,
+                                    extra_target_window_titles: Vec::new(),
+                                    match_duplicate_window_titles: true,
+                                    adjust_left: 0.0,
+                                    adjust_right: 0.0,
+                                    adjust_top: 0.0,
+                                    adjust_bottom: 0.0,
+                                });
+                                Self::sanitize_layout(layout);
+                                self.selected_layout_cell = Some((layout.id, r, c));
+                                live_sync = true;
+                            }
+
                             if let Some((start_row, start_col, end_row, end_col)) = merge_action {
                                 let cell_a = layout
                                     .cells
@@ -5264,5 +5380,71 @@ impl CrosshairApp {
         for preset in &self.state.pin_presets {
             self.zoom_preview_cache.remove(&(100_000 + preset.id));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{WindowLayout, WindowLayoutCell};
+
+    #[test]
+    fn test_sanitize_layout_preserves_grid_size_and_clamps_cells() {
+        let mut layout = WindowLayout {
+            id: 1,
+            name: "Test Layout".to_owned(),
+            enabled: true,
+            collapsed: false,
+            rows: 1,
+            cols: 5,
+            row_ratios: vec![1.0],
+            col_ratios: vec![0.2, 0.2, 0.2, 0.2, 0.2],
+            cells: vec![WindowLayoutCell {
+                row: 0,
+                col: 4,
+                row_span: 1,
+                col_span: 1,
+                target_window_title: Some("Game Window".to_owned()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        // Reduce cols from 5 to 4: the cell at col 4 must be clamped to col 3 instead of deleted
+        layout.cols = 4;
+        CrosshairApp::sanitize_layout(&mut layout);
+
+        assert_eq!(layout.rows, 1);
+        assert_eq!(layout.cols, 4);
+        assert_eq!(layout.cells.len(), 1);
+        assert_eq!(layout.cells[0].col, 3);
+        assert_eq!(layout.cells[0].target_window_title.as_deref(), Some("Game Window"));
+    }
+
+    #[test]
+    fn test_sanitize_layout_resizes_ratios_without_wiping() {
+        let mut layout = WindowLayout {
+            id: 2,
+            name: "Ratio Test".to_owned(),
+            rows: 1,
+            cols: 2,
+            row_ratios: vec![1.0],
+            col_ratios: vec![0.3, 0.7],
+            cells: vec![WindowLayoutCell {
+                row: 0,
+                col: 0,
+                row_span: 1,
+                col_span: 1,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        layout.cols = 3;
+        CrosshairApp::sanitize_layout(&mut layout);
+        assert_eq!(layout.col_ratios.len(), 3);
+        assert_eq!(layout.col_ratios[0], 0.3);
+        assert_eq!(layout.col_ratios[1], 0.7);
+        assert_eq!(layout.col_ratios[2], 1.0);
     }
 }

@@ -10217,7 +10217,12 @@ mod windows_overlay {
 
                     drop(hook_state);
                     let _ = update_tray_icon(hwnd, enabled);
-                    if enabled {
+                    if !enabled {
+                        stop_all_active_macros_and_overlays();
+                        reset_window_focus_dispatch_guard();
+                    } else {
+                        reset_window_focus_dispatch_guard();
+                        SUPPRESSED_MACRO_HOTKEYS.lock().clear();
                         trigger_window_focus_macros(None);
                     }
                 }
@@ -29200,6 +29205,40 @@ mod windows_overlay {
             STOP_REQUESTED_MACRO_PRESETS.lock().insert(preset_id);
         }
         stop_follow_3d_target_for_preset(Some(preset_id));
+
+        let mut geometry_changed = false;
+        {
+            let mut hook_state = HOOK_STATE.lock();
+            let before = hook_state.active_geometry_steps.len();
+            hook_state.active_geometry_steps.retain(|(pid, _), _| *pid != preset_id);
+            hook_state.rendered_geometry_steps.retain(|(pid, _), _| *pid != preset_id);
+            hook_state.active_geometry_steps_expires.retain(|(pid, _), _| *pid != preset_id);
+            if hook_state.active_geometry_steps.len() != before {
+                hook_state.geometry_overlay_dirty = true;
+                geometry_changed = true;
+            }
+        }
+        if geometry_changed {
+            send_overlay_command(OverlayCommand::RefreshSearchAreaOverlay);
+        }
+
+        hide_toolbox_for_owner(preset_id);
+
+        let preset_opt = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state
+                .macro_groups
+                .iter()
+                .flat_map(|g| g.presets.iter())
+                .find(|p| p.id == preset_id)
+                .cloned()
+        };
+        if let Some(preset) = preset_opt {
+            stop_macro_started_vision_searches(&preset);
+        }
+
+        let hotkey_id = MACRO_PRESET_BASE_ID + preset_id as i32;
+        SUPPRESSED_MACRO_HOTKEYS.lock().remove(&hotkey_id);
     }
 
     fn execute_stop_macro_step(step: &MacroStep) {
@@ -29497,6 +29536,7 @@ mod windows_overlay {
                         Some(&step.vision_pos_var_x),
                         Some(&step.vision_pos_var_y),
                         Some(&step.vision_found_var),
+                        Some(step.vision_extremes_vars()),
                         step.vision_move_axis_lock,
                         step.vision_move_relative,
                         step.vision_move_offset_x,
@@ -29776,6 +29816,17 @@ mod windows_overlay {
             if !bypass_enabled
                 && !is_macro_preset_enabled_with_pending(preset_id, pending_macro_preset_changes)
             {
+                return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
+            }
+
+            {
+                let hook_state = HOOK_STATE.lock();
+                if !hook_state.macros_master_enabled {
+                    return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
+                }
+            }
+
+            if is_ui_in_foreground() {
                 return finish_macro_run(MacroRunFlow::StopExecution, pending_macro_preset_changes);
             }
 
@@ -30315,6 +30366,7 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_x),
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
+                            Some(step.vision_extremes_vars()),
                             step.vision_move_axis_lock,
                             step.vision_move_relative,
                             step.vision_move_offset_x,
@@ -31172,6 +31224,7 @@ mod windows_overlay {
                             Some(&step.vision_pos_var_x),
                             Some(&step.vision_pos_var_y),
                             Some(&step.vision_found_var),
+                            Some(step.vision_extremes_vars()),
                             step.vision_move_axis_lock,
                             step.vision_move_relative,
                             step.vision_move_offset_x,
@@ -31552,6 +31605,9 @@ mod windows_overlay {
         bypass_enabled: bool,
     ) -> bool {
         if delay_ms == 0 {
+            if is_ui_in_foreground() {
+                return true;
+            }
             // Only abort due to window focus if a specific target was configured.
             // Without a target window, global macros should always run to completion
             // even if focus changes during long-running steps (e.g. AiResponse).
@@ -31575,6 +31631,10 @@ mod windows_overlay {
             {
                 let hook_state = HOOK_STATE.lock();
                 if !hook_state.macros_master_enabled {
+                    return true;
+                }
+
+                if is_ui_in_foreground() {
                     return true;
                 }
 
@@ -31970,6 +32030,7 @@ mod windows_overlay {
                             &preset,
                             false,
                             false,
+                            None,
                             None,
                             None,
                             None,
@@ -38438,6 +38499,71 @@ mod windows_overlay {
         if root.0.is_null() { hwnd } else { root }
     }
 
+    fn stop_all_active_macros_and_overlays() {
+        let active_ids: Vec<u32> = ACTIVE_MACRO_PRESETS.lock().iter().copied().collect();
+        for id in active_ids {
+            stop_macro_preset_by_id(id);
+        }
+
+        let hold_ids: Vec<u32> = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state.active_hold_macros.keys().copied().collect()
+        };
+        for id in hold_ids {
+            deactivate_hold_macro(id);
+        }
+
+        let focus_ids: Vec<u32> = {
+            let hook_state = HOOK_STATE.lock();
+            hook_state
+                .macro_groups
+                .iter()
+                .flat_map(|g| g.presets.iter())
+                .filter(|p| p.trigger_mode == MacroTriggerMode::WindowFocus)
+                .map(|p| p.id)
+                .collect()
+        };
+        for id in focus_ids {
+            stop_macro_preset_by_id(id);
+        }
+
+        stop_follow_3d_target_for_preset(None);
+        clear_geometry_overlay();
+        SUPPRESSED_MACRO_HOTKEYS.lock().clear();
+    }
+
+    fn stop_non_matching_window_focus_macros(_current_hwnd: HWND) {
+        let presets_to_stop: Vec<u32> = {
+            let hook_state = HOOK_STATE.lock();
+            let mut ids = Vec::new();
+            for group in &hook_state.macro_groups {
+                for preset in &group.presets {
+                    if preset.trigger_mode == MacroTriggerMode::WindowFocus {
+                        let target_title = preset
+                            .event_target_window_title
+                            .as_deref()
+                            .or(group.target_window_title.as_deref());
+                        let extra_titles = if !preset.event_extra_target_window_titles.is_empty() {
+                            &preset.event_extra_target_window_titles
+                        } else {
+                            &group.extra_target_window_titles
+                        };
+                        let match_dups = preset.event_match_duplicate_window_titles;
+                        let matches = window_focus_matches(target_title, extra_titles, match_dups);
+                        if !matches {
+                            ids.push(preset.id);
+                        }
+                    }
+                }
+            }
+            ids
+        };
+
+        for id in presets_to_stop {
+            stop_macro_preset_by_id(id);
+        }
+    }
+
     fn handle_window_focus_event(controller_hwnd: HWND, hwnd: HWND) {
         let hwnd = normalize_focus_window(hwnd);
         if !tracks_macro_foreground_window(hwnd) {
@@ -38446,11 +38572,14 @@ mod windows_overlay {
                 let _ = KillTimer(Some(controller_hwnd), FOCUS_TRIGGER_TIMER_ID);
             }
             update_foreground_window(hwnd);
+            stop_all_active_macros_and_overlays();
             return;
         }
         if !update_foreground_window(hwnd) {
             return;
         }
+
+        stop_non_matching_window_focus_macros(hwnd);
 
         {
             let mut hook_state = HOOK_STATE.lock();
@@ -38557,11 +38686,23 @@ mod windows_overlay {
                         continue;
                     }
 
+                    let target_window_title = preset
+                        .event_target_window_title
+                        .clone()
+                        .or_else(|| group.target_window_title.clone());
+                    let extra_target_window_titles =
+                        if !preset.event_extra_target_window_titles.is_empty() {
+                            preset.event_extra_target_window_titles.clone()
+                        } else {
+                            group.extra_target_window_titles.clone()
+                        };
+                    let match_duplicate_window_titles = preset.event_match_duplicate_window_titles;
+
                     matches.push((
                         preset.clone(),
-                        group.target_window_title.clone(),
-                        group.extra_target_window_titles.clone(),
-                        group.match_duplicate_window_titles,
+                        target_window_title,
+                        extra_target_window_titles,
+                        match_duplicate_window_titles,
                     ));
                 }
             }

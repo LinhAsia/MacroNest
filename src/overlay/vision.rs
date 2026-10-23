@@ -17,7 +17,7 @@ use super::{
     send_mouse_left_click_backend, set_text_variable_value, set_variable_value,
     settle_image_search_mouse_move,
 };
-use crate::model::{RgbaColor, VisionMoveAxisLock, VisionPreset};
+use crate::model::{RgbaColor, VisionExtremesVars, VisionMoveAxisLock, VisionPreset};
 use crate::window_list;
 use windows::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
 
@@ -1015,6 +1015,69 @@ pub(crate) fn find_color_average_centroid_match(
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ColorExtremes {
+    pub(crate) leftmost: Option<(i32, i32)>,
+    pub(crate) rightmost: Option<(i32, i32)>,
+    pub(crate) topmost: Option<(i32, i32)>,
+    pub(crate) bottommost: Option<(i32, i32)>,
+}
+
+pub(crate) fn find_color_extremes(
+    screen: &window_list::ScreenCaptureFrame,
+    targets: &[RgbaColor],
+    tolerance: u8,
+    region: Option<&VisionRegion>,
+) -> ColorExtremes {
+    let width = screen.width as i32;
+    let height = screen.height as i32;
+    let mut extremes = ColorExtremes::default();
+    if width <= 0 || height <= 0 || targets.is_empty() {
+        return extremes;
+    }
+
+    let tolerance = tolerance as i16;
+    for y in 0..height {
+        for x in 0..width {
+            if !image_search_region_contains_point(region, screen.screen_x + x, screen.screen_y + y) {
+                continue;
+            }
+
+            let index = ((y as usize) * screen.width + (x as usize)) * 4;
+            if index + 3 >= screen.rgba.len() {
+                continue;
+            }
+
+            let r = screen.rgba[index] as i16;
+            let g = screen.rgba[index + 1] as i16;
+            let b = screen.rgba[index + 2] as i16;
+
+            for target in targets {
+                let dr = (r - target.r as i16).abs();
+                let dg = (g - target.g as i16).abs();
+                let db = (b - target.b as i16).abs();
+                if dr <= tolerance && dg <= tolerance && db <= tolerance {
+                    if extremes.leftmost.is_none() || x < extremes.leftmost.unwrap().0 {
+                        extremes.leftmost = Some((x, y));
+                    }
+                    if extremes.rightmost.is_none() || x > extremes.rightmost.unwrap().0 {
+                        extremes.rightmost = Some((x, y));
+                    }
+                    if extremes.topmost.is_none() || y < extremes.topmost.unwrap().1 {
+                        extremes.topmost = Some((x, y));
+                    }
+                    if extremes.bottommost.is_none() || y > extremes.bottommost.unwrap().1 {
+                        extremes.bottommost = Some((x, y));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    extremes
+}
+
 pub(crate) fn find_color_match_from_anchor(
     screen: &window_list::ScreenCaptureFrame,
     targets: &[RgbaColor],
@@ -1150,6 +1213,7 @@ pub(crate) fn run_vision_once_with_options(
     pos_var_x: Option<&str>,
     pos_var_y: Option<&str>,
     found_var: Option<&str>,
+    extremes_vars: Option<VisionExtremesVars<'_>>,
     axis_lock: VisionMoveAxisLock,
     relative_move: bool,
     step_offset_x: i32,
@@ -1304,6 +1368,23 @@ pub(crate) fn run_vision_once_with_options(
                 .context("Failed to capture the screen")?
         };
 
+        let needs_extremes = preset.color_scan_leftmost
+            || preset.color_scan_rightmost
+            || preset.color_scan_topmost
+            || preset.color_scan_bottommost
+            || extremes_vars.map(|v| v.is_any_set()).unwrap_or(false);
+
+        let extremes = if needs_extremes {
+            find_color_extremes(
+                &screen,
+                &target_colors,
+                effective_tolerance,
+                configured_region.as_ref(),
+            )
+        } else {
+            ColorExtremes::default()
+        };
+
         let hit = if let Some((anchor_x, anchor_y)) = anchor {
             let relative_anchor_x = anchor_x - screen.screen_x;
             let relative_anchor_y = anchor_y - screen.screen_y;
@@ -1315,6 +1396,38 @@ pub(crate) fn run_vision_once_with_options(
                 relative_anchor_y,
                 configured_region.as_ref(),
             )
+        } else if preset.color_scan_leftmost {
+            extremes.leftmost.map(|(x, y)| ColorMatchHit {
+                x,
+                y,
+                score: 0,
+                distance_sq: 0,
+                matched_color: target_colors[0],
+            })
+        } else if preset.color_scan_rightmost {
+            extremes.rightmost.map(|(x, y)| ColorMatchHit {
+                x,
+                y,
+                score: 0,
+                distance_sq: 0,
+                matched_color: target_colors[0],
+            })
+        } else if preset.color_scan_topmost {
+            extremes.topmost.map(|(x, y)| ColorMatchHit {
+                x,
+                y,
+                score: 0,
+                distance_sq: 0,
+                matched_color: target_colors[0],
+            })
+        } else if preset.color_scan_bottommost {
+            extremes.bottommost.map(|(x, y)| ColorMatchHit {
+                x,
+                y,
+                score: 0,
+                distance_sq: 0,
+                matched_color: target_colors[0],
+            })
         } else if preset.color_scan_average_centroid {
             find_color_average_centroid_match(
                 &screen,
@@ -1370,6 +1483,40 @@ pub(crate) fn run_vision_once_with_options(
         if let Some(var_y) = pos_var_y.filter(|s| !s.trim().is_empty()) {
             set_variable_value(var_y, target_y as f64);
         }
+        if let Some(vars) = extremes_vars {
+            if let Some((lx, ly)) = extremes.leftmost {
+                if let Some(var_x) = vars.left_x.filter(|s| !s.trim().is_empty()) {
+                    set_variable_value(var_x.trim(), (screen.screen_x + lx + step_offset_x) as f64);
+                }
+                if let Some(var_y) = vars.left_y.filter(|s| !s.trim().is_empty()) {
+                    set_variable_value(var_y.trim(), (screen.screen_y + ly + step_offset_y) as f64);
+                }
+            }
+            if let Some((rx, ry)) = extremes.rightmost {
+                if let Some(var_x) = vars.right_x.filter(|s| !s.trim().is_empty()) {
+                    set_variable_value(var_x.trim(), (screen.screen_x + rx + step_offset_x) as f64);
+                }
+                if let Some(var_y) = vars.right_y.filter(|s| !s.trim().is_empty()) {
+                    set_variable_value(var_y.trim(), (screen.screen_y + ry + step_offset_y) as f64);
+                }
+            }
+            if let Some((tx, ty)) = extremes.topmost {
+                if let Some(var_x) = vars.top_x.filter(|s| !s.trim().is_empty()) {
+                    set_variable_value(var_x.trim(), (screen.screen_x + tx + step_offset_x) as f64);
+                }
+                if let Some(var_y) = vars.top_y.filter(|s| !s.trim().is_empty()) {
+                    set_variable_value(var_y.trim(), (screen.screen_y + ty + step_offset_y) as f64);
+                }
+            }
+            if let Some((bx, by)) = extremes.bottommost {
+                if let Some(var_x) = vars.bottom_x.filter(|s| !s.trim().is_empty()) {
+                    set_variable_value(var_x.trim(), (screen.screen_x + bx + step_offset_x) as f64);
+                }
+                if let Some(var_y) = vars.bottom_y.filter(|s| !s.trim().is_empty()) {
+                    set_variable_value(var_y.trim(), (screen.screen_y + by + step_offset_y) as f64);
+                }
+            }
+        }
         set_found_var(true);
 
         if move_cursor {
@@ -1392,6 +1539,26 @@ pub(crate) fn run_vision_once_with_options(
             status: if anchor.is_some() {
                 format!(
                     "Matched colors from priority point at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
+                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
+                )
+            } else if preset.color_scan_leftmost {
+                format!(
+                    "Matched leftmost color at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
+                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
+                )
+            } else if preset.color_scan_rightmost {
+                format!(
+                    "Matched rightmost color at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
+                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
+                )
+            } else if preset.color_scan_topmost {
+                format!(
+                    "Matched topmost color at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
+                    effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
+                )
+            } else if preset.color_scan_bottommost {
+                format!(
+                    "Matched bottommost color at {target_x}, {target_y} with tolerance {} and offset {:+}, {:+}.{}",
                     effective_tolerance, step_offset_x, step_offset_y, move_status_suffix
                 )
             } else if preset.color_scan_average_centroid {
@@ -1587,6 +1754,43 @@ pub(crate) fn run_vision_once_with_options(
     if let Some(var_y) = pos_var_y.filter(|s| !s.trim().is_empty()) {
         set_variable_value(var_y, target_y as f64);
     }
+    if let Some(vars) = extremes_vars {
+        let left_x_val = screen.screen_x + hit.x + step_offset_x;
+        let right_x_val = screen.screen_x + hit.x + hit.width + step_offset_x;
+        let mid_x_val = screen.screen_x + hit.x + (hit.width / 2) + step_offset_x;
+
+        let top_y_val = screen.screen_y + hit.y + step_offset_y;
+        let bottom_y_val = screen.screen_y + hit.y + hit.height + step_offset_y;
+        let mid_y_val = screen.screen_y + hit.y + (hit.height / 2) + step_offset_y;
+
+        if let Some(var_x) = vars.left_x.filter(|s| !s.trim().is_empty()) {
+            set_variable_value(var_x.trim(), left_x_val as f64);
+        }
+        if let Some(var_y) = vars.left_y.filter(|s| !s.trim().is_empty()) {
+            set_variable_value(var_y.trim(), mid_y_val as f64);
+        }
+
+        if let Some(var_x) = vars.right_x.filter(|s| !s.trim().is_empty()) {
+            set_variable_value(var_x.trim(), right_x_val as f64);
+        }
+        if let Some(var_y) = vars.right_y.filter(|s| !s.trim().is_empty()) {
+            set_variable_value(var_y.trim(), mid_y_val as f64);
+        }
+
+        if let Some(var_x) = vars.top_x.filter(|s| !s.trim().is_empty()) {
+            set_variable_value(var_x.trim(), mid_x_val as f64);
+        }
+        if let Some(var_y) = vars.top_y.filter(|s| !s.trim().is_empty()) {
+            set_variable_value(var_y.trim(), top_y_val as f64);
+        }
+
+        if let Some(var_x) = vars.bottom_x.filter(|s| !s.trim().is_empty()) {
+            set_variable_value(var_x.trim(), mid_x_val as f64);
+        }
+        if let Some(var_y) = vars.bottom_y.filter(|s| !s.trim().is_empty()) {
+            set_variable_value(var_y.trim(), bottom_y_val as f64);
+        }
+    }
     set_found_var(true);
 
     if move_cursor {
@@ -1618,6 +1822,7 @@ pub(crate) fn run_vision_once(preset: &VisionPreset) -> Result<String> {
         preset,
         true,
         preset.click_after_move,
+        None,
         None,
         None,
         None,
@@ -1702,6 +1907,7 @@ pub(crate) fn run_image_search_follow_loop(
             None,
             None,
             None,
+            None,
             axis_lock,
             relative_move,
             offset_x,
@@ -1758,6 +1964,57 @@ mod tests {
             apply_move_axis_lock(120, 240, VisionMoveAxisLock::None, Some((15, 25))),
             (120, 240)
         );
+    }
+
+    #[test]
+    fn test_find_color_extremes_identifies_all_four_directions() {
+        use super::find_color_extremes;
+        use crate::model::RgbaColor;
+        use crate::window_list::ScreenCaptureFrame;
+
+        let width = 10;
+        let height = 10;
+        let mut rgba = vec![0u8; width * height * 4];
+
+        let target = RgbaColor {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        };
+
+        let mut set_pixel = |x: usize, y: usize| {
+            let idx = (y * width + x) * 4;
+            rgba[idx] = 255;
+            rgba[idx + 1] = 0;
+            rgba[idx + 2] = 0;
+            rgba[idx + 3] = 255;
+        };
+
+        // Set matching pixels:
+        // Leftmost at (1, 5)
+        // Rightmost at (8, 4)
+        // Topmost at (5, 0)
+        // Bottommost at (4, 9)
+        set_pixel(1, 5);
+        set_pixel(8, 4);
+        set_pixel(5, 0);
+        set_pixel(4, 9);
+        set_pixel(3, 3); // inner point
+
+        let frame = ScreenCaptureFrame {
+            rgba,
+            width,
+            height,
+            screen_x: 100,
+            screen_y: 200,
+        };
+
+        let extremes = find_color_extremes(&frame, &[target], 0, None);
+        assert_eq!(extremes.leftmost, Some((1, 5)));
+        assert_eq!(extremes.rightmost, Some((8, 4)));
+        assert_eq!(extremes.topmost, Some((5, 0)));
+        assert_eq!(extremes.bottommost, Some((4, 9)));
     }
 }
 

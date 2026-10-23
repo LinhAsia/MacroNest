@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 use super::audio_model::AudioSenseSpec;
 use super::geometry_model::{GeometrySpec, HideGeometryMode, SetVariableSource};
 use super::settings_model::AiResponseProvider;
+use super::vision_model::VisionExtremesVars;
 use super::window_model::HotkeyBinding;
 use super::{
     default_condition_join_operator, default_false, default_if_color_tolerance,
@@ -506,6 +507,22 @@ pub struct MacroStep {
     #[serde(default)]
     pub vision_found_var: String,
     #[serde(default)]
+    pub vision_left_var_x: String,
+    #[serde(default)]
+    pub vision_left_var_y: String,
+    #[serde(default)]
+    pub vision_right_var_x: String,
+    #[serde(default)]
+    pub vision_right_var_y: String,
+    #[serde(default)]
+    pub vision_top_var_x: String,
+    #[serde(default)]
+    pub vision_top_var_y: String,
+    #[serde(default)]
+    pub vision_bottom_var_x: String,
+    #[serde(default)]
+    pub vision_bottom_var_y: String,
+    #[serde(default)]
     pub audio_sense_preset_id: Option<u32>,
     #[serde(default)]
     pub audio_sense_spec: AudioSenseSpec,
@@ -701,6 +718,14 @@ impl Default for MacroStep {
             vision_pos_var_x: String::new(),
             vision_pos_var_y: String::new(),
             vision_found_var: String::new(),
+            vision_left_var_x: String::new(),
+            vision_left_var_y: String::new(),
+            vision_right_var_x: String::new(),
+            vision_right_var_y: String::new(),
+            vision_top_var_x: String::new(),
+            vision_top_var_y: String::new(),
+            vision_bottom_var_x: String::new(),
+            vision_bottom_var_y: String::new(),
             audio_sense_preset_id: None,
             audio_sense_spec: AudioSenseSpec::default(),
             audio_sense_collapsed: true,
@@ -805,6 +830,19 @@ impl DerefMut for LazyMacroStep {
 }
 
 impl MacroStep {
+    pub fn vision_extremes_vars(&self) -> VisionExtremesVars<'_> {
+        VisionExtremesVars {
+            left_x: Some(&self.vision_left_var_x),
+            left_y: Some(&self.vision_left_var_y),
+            right_x: Some(&self.vision_right_var_x),
+            right_y: Some(&self.vision_right_var_y),
+            top_x: Some(&self.vision_top_var_x),
+            top_y: Some(&self.vision_top_var_y),
+            bottom_x: Some(&self.vision_bottom_var_x),
+            bottom_y: Some(&self.vision_bottom_var_y),
+        }
+    }
+
     pub fn get_break_loop_mode(&self) -> &str {
         if self.break_loop_mode.is_empty() {
             if self.break_loop_by_variable {

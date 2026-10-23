@@ -96,6 +96,14 @@ pub struct VisionPreset {
     #[serde(default)]
     pub color_scan_average_centroid: bool,
     #[serde(default)]
+    pub color_scan_leftmost: bool,
+    #[serde(default)]
+    pub color_scan_rightmost: bool,
+    #[serde(default)]
+    pub color_scan_topmost: bool,
+    #[serde(default)]
+    pub color_scan_bottommost: bool,
+    #[serde(default)]
     pub is_pixel_counter: bool,
     #[serde(default)]
     pub pixel_counter_variable_name: String,
@@ -146,6 +154,10 @@ impl VisionPreset {
             dual_color_scan_midpoint: false,
             require_connected_target_colors: false,
             color_scan_average_centroid: false,
+            color_scan_leftmost: false,
+            color_scan_rightmost: false,
+            color_scan_topmost: false,
+            color_scan_bottommost: false,
             is_pixel_counter: false,
             pixel_counter_variable_name: String::new(),
             search_region_is_single_pixel: false,
@@ -208,5 +220,30 @@ impl OcrPreset {
 impl Default for OcrPreset {
     fn default() -> Self {
         Self::new(1)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VisionExtremesVars<'a> {
+    pub left_x: Option<&'a str>,
+    pub left_y: Option<&'a str>,
+    pub right_x: Option<&'a str>,
+    pub right_y: Option<&'a str>,
+    pub top_x: Option<&'a str>,
+    pub top_y: Option<&'a str>,
+    pub bottom_x: Option<&'a str>,
+    pub bottom_y: Option<&'a str>,
+}
+
+impl<'a> VisionExtremesVars<'a> {
+    pub fn is_any_set(&self) -> bool {
+        self.left_x.map_or(false, |s| !s.trim().is_empty())
+            || self.left_y.map_or(false, |s| !s.trim().is_empty())
+            || self.right_x.map_or(false, |s| !s.trim().is_empty())
+            || self.right_y.map_or(false, |s| !s.trim().is_empty())
+            || self.top_x.map_or(false, |s| !s.trim().is_empty())
+            || self.top_y.map_or(false, |s| !s.trim().is_empty())
+            || self.bottom_x.map_or(false, |s| !s.trim().is_empty())
+            || self.bottom_y.map_or(false, |s| !s.trim().is_empty())
     }
 }
