@@ -85,12 +85,13 @@ impl CrosshairApp {
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Ocr(_))
         );
+        let mut hovered_ocr_preset: Option<(u32, Vec<crate::overlay::VisionRegion>)> = None;
         // Render card-based presets list
         for index in 0..self.state.ocr_presets.len() {
             let preset = &mut self.state.ocr_presets[index];
             preset.enabled = true; // Always enabled for macros
 
-            Self::show_preset_card(ui, false, |ui| {
+            let (_, card_response) = Self::show_preset_card_with_response(ui, false, |ui| {
                 ui.horizontal(|ui| {
                     // Editable Name
                     let name_width = Self::preset_header_name_width(ui);
@@ -473,6 +474,39 @@ impl CrosshairApp {
                     }
                 }
             });
+
+            if card_response.hovered() {
+                let r = crate::overlay::VisionRegion {
+                    left: preset.x,
+                    top: preset.y,
+                    width: preset.width.max(10),
+                    height: preset.height.max(10),
+                    is_circle: false,
+                    angle_offset_deg: None,
+                    angle_span_deg: None,
+                };
+                hovered_ocr_preset = Some((preset.id, vec![r]));
+            }
+        }
+
+        {
+            const OCR_PANEL_TAG: usize = 102;
+            let mut hook_state = crate::overlay::HOOK_STATE.lock();
+            if let Some((pid, regions)) = hovered_ocr_preset {
+                if hook_state.vision_capture_preview_regions != regions {
+                    hook_state.vision_capture_preview_regions = regions;
+                    hook_state.vision_preview_source = Some((pid, OCR_PANEL_TAG));
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                }
+            } else if let Some((_, tag)) = hook_state.vision_preview_source {
+                if tag == OCR_PANEL_TAG {
+                    hook_state.vision_capture_preview_regions.clear();
+                    hook_state.vision_preview_source = None;
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                }
+            }
         }
 
         if let Some(preset) = copy_ocr_preset {

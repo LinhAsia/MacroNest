@@ -769,23 +769,25 @@ impl CrosshairApp {
             ui.data_mut(|d| d.get_temp(anchor_id).unwrap_or(egui::Pos2::ZERO));
 
         let pick_selection_drag_handle = |pointer_pos: egui::Pos2, rect: egui::Rect| {
+            let min_dim = rect.width().min(rect.height());
+            let corner_limit = if min_dim < 40.0 { (min_dim * 0.28).max(3.0) } else { 14.0 };
+            let edge_threshold = if min_dim < 40.0 { (min_dim * 0.2).max(2.0) } else { 10.0 };
             let dist_tl = pointer_pos.distance(rect.left_top());
             let dist_tr = pointer_pos.distance(rect.right_top());
             let dist_bl = pointer_pos.distance(rect.left_bottom());
             let dist_br = pointer_pos.distance(rect.right_bottom());
-            let edge_threshold = 10.0;
             let vertical_hit_min = rect.top() - edge_threshold;
             let vertical_hit_max = rect.bottom() + edge_threshold;
             let horizontal_hit_min = rect.left() - edge_threshold;
             let horizontal_hit_max = rect.right() + edge_threshold;
 
-            if dist_tl < 14.0 {
+            if dist_tl < corner_limit {
                 SelectionDragHandle::TopLeft
-            } else if dist_tr < 14.0 {
+            } else if dist_tr < corner_limit {
                 SelectionDragHandle::TopRight
-            } else if dist_bl < 14.0 {
+            } else if dist_bl < corner_limit {
                 SelectionDragHandle::BottomLeft
-            } else if dist_br < 14.0 {
+            } else if dist_br < corner_limit {
                 SelectionDragHandle::BottomRight
             } else if (pointer_pos.x - rect.left()).abs() < edge_threshold
                 && pointer_pos.y >= vertical_hit_min

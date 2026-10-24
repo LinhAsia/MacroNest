@@ -828,25 +828,51 @@ unsafe fn InvalidateRect(hwnd: HWND, rect: Option<&RECT>, erase: bool) {
 const ADJUST_HANDLE_RADIUS: i32 = 10;
 
 fn adjust_hit_test(r: &RECT, rx: i32, ry: i32) -> AdjustDragKind {
+    let rw = (r.right - r.left).abs();
+    let rh = (r.bottom - r.top).abs();
+    let min_dim = rw.min(rh);
+
+    // Corner handle radius scales down for small rectangles so they never engulf the area
+    let hr = if min_dim < 30 {
+        (min_dim / 4).max(2)
+    } else if min_dim < 60 {
+        6
+    } else {
+        ADJUST_HANDLE_RADIUS
+    };
+
     let cx = (r.left + r.right) / 2;
     let cy = (r.top + r.bottom) / 2;
-    let hr = ADJUST_HANDLE_RADIUS;
-    // Check 8 handles in priority order: corners first, then edges
-    let handles = [
+
+    // Check 4 corners first:
+    let corners = [
         (r.left, r.top, AdjustDragKind::NW),
         (r.right, r.top, AdjustDragKind::NE),
         (r.right, r.bottom, AdjustDragKind::SE),
         (r.left, r.bottom, AdjustDragKind::SW),
-        (cx, r.top, AdjustDragKind::N),
-        (r.right, cy, AdjustDragKind::E),
-        (cx, r.bottom, AdjustDragKind::S),
-        (r.left, cy, AdjustDragKind::W),
     ];
-    for (hx, hy, kind) in handles {
+    for (hx, hy, kind) in corners {
         if (rx - hx).abs() <= hr && (ry - hy).abs() <= hr {
             return kind;
         }
     }
+
+    // Only check 4 intermediate edge handles if rectangle is reasonably large (min_dim >= 48)
+    // On small areas, intermediate handles crowd the interior and block Move!
+    if min_dim >= 48 {
+        let edge_handles = [
+            (cx, r.top, AdjustDragKind::N),
+            (r.right, cy, AdjustDragKind::E),
+            (cx, r.bottom, AdjustDragKind::S),
+            (r.left, cy, AdjustDragKind::W),
+        ];
+        for (hx, hy, kind) in edge_handles {
+            if (rx - hx).abs() <= hr && (ry - hy).abs() <= hr {
+                return kind;
+            }
+        }
+    }
+
     AdjustDragKind::Move
 }
 
@@ -968,20 +994,32 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
     let _ = SelectObject(mem_dc, old_brush);
     let _ = DeleteObject(HGDIOBJ(pen.0));
 
-    // Draw 8 resize handles (filled squares with blue border)
-    let hr = ADJUST_HANDLE_RADIUS as i32;
+    // Draw resize handles (filled squares with blue border)
+    let rw = (ar.right - ar.left).abs();
+    let rh = (ar.bottom - ar.top).abs();
+    let min_dim = rw.min(rh);
+
+    let hr = if min_dim < 30 {
+        (min_dim / 4).max(3)
+    } else if min_dim < 60 {
+        6
+    } else {
+        ADJUST_HANDLE_RADIUS as i32
+    };
     let cx = (ar.left + ar.right) / 2;
     let cy = (ar.top + ar.bottom) / 2;
-    let handle_centers = [
+    let mut handle_centers = vec![
         (ar.left, ar.top),
-        (cx, ar.top),
         (ar.right, ar.top),
-        (ar.right, cy),
         (ar.right, ar.bottom),
-        (cx, ar.bottom),
         (ar.left, ar.bottom),
-        (ar.left, cy),
     ];
+    if min_dim >= 48 {
+        handle_centers.push((cx, ar.top));
+        handle_centers.push((ar.right, cy));
+        handle_centers.push((cx, ar.bottom));
+        handle_centers.push((ar.left, cy));
+    }
     let h_fill = CreateSolidBrush(rgb(220, 238, 255));
     let h_pen = CreatePen(PS_SOLID, 2, rgb(0, 130, 220));
     let old_pen = SelectObject(mem_dc, HGDIOBJ(h_pen.0));
@@ -991,8 +1029,8 @@ unsafe fn draw_region_adjust_to_dc(hdc: HDC, state: &mut CaptureState) -> anyhow
             mem_dc,
             hx - hr / 2,
             hy - hr / 2,
-            hx + hr / 2,
-            hy + hr / 2,
+            hx + hr / 2 + 1,
+            hy + hr / 2 + 1,
         );
     }
     let _ = SelectObject(mem_dc, old_pen);

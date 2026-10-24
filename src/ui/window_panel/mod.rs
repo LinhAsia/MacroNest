@@ -133,6 +133,7 @@ impl CrosshairApp {
         ui.add_space(4.0);
         let active_capture_target = self.capture_target.clone();
         let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
+        let mut hovered_window_preset: Option<(u32, Vec<crate::overlay::VisionRegion>)> = None;
         for index in 0..self.state.window_presets.len() {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
@@ -154,7 +155,7 @@ impl CrosshairApp {
             {
                 let preset = &mut self.state.window_presets[index];
                 preset.enabled = preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
-                Self::show_preset_card(ui, preset.enabled, |ui| {
+                let (_, card_response) = Self::show_preset_card_with_response(ui, preset.enabled, |ui| {
                     egui::Grid::new((preset.id, "window-preset-header"))
                         .num_columns(2)
                         .spacing([14.0, 8.0])
@@ -516,6 +517,19 @@ impl CrosshairApp {
                         }
                     });
                 });
+                if card_response.hovered() {
+                    let (wx, wy) = Self::window_anchor_preview_position(preset).unwrap_or((preset.x, preset.y));
+                    let r = crate::overlay::VisionRegion {
+                        left: wx,
+                        top: wy,
+                        width: preset.width.max(10),
+                        height: preset.height.max(10),
+                        is_circle: false,
+                        angle_offset_deg: None,
+                        angle_span_deg: None,
+                    };
+                    hovered_window_preset = Some((preset.id, vec![r]));
+                }
             }
             if let Some((target, status)) = next_capture_target.take() {
                 self.begin_capture(target, status);
@@ -538,6 +552,26 @@ impl CrosshairApp {
                             self.state.window_presets[index].name, error
                         );
                     }
+                }
+            }
+        }
+
+        {
+            const WINDOW_PANEL_TAG: usize = 103;
+            let mut hook_state = crate::overlay::HOOK_STATE.lock();
+            if let Some((pid, regions)) = hovered_window_preset {
+                if hook_state.vision_capture_preview_regions != regions {
+                    hook_state.vision_capture_preview_regions = regions;
+                    hook_state.vision_preview_source = Some((pid, WINDOW_PANEL_TAG));
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                }
+            } else if let Some((_, tag)) = hook_state.vision_preview_source {
+                if tag == WINDOW_PANEL_TAG {
+                    hook_state.vision_capture_preview_regions.clear();
+                    hook_state.vision_preview_source = None;
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
                 }
             }
         }
@@ -647,6 +681,7 @@ impl CrosshairApp {
                 .input(|input| input.viewport().focused != Some(false));
         let active_capture_target = self.capture_target.clone();
         let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
+        let mut hovered_pin_preset: Option<(u32, Vec<crate::overlay::VisionRegion>)> = None;
         for index in 0..self.state.pin_presets.len() {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
@@ -676,7 +711,7 @@ impl CrosshairApp {
             let preset = &mut self.state.pin_presets[index];
             preset.use_source_crop = true;
             preset.enabled = preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
-            Self::show_preset_card(ui, preset.enabled, |ui| {
+            let (_, card_response) = Self::show_preset_card_with_response(ui, preset.enabled, |ui| {
                 ui.horizontal(|ui| {
                     let name_width = Self::preset_header_name_width(ui);
                     let response =
@@ -1365,6 +1400,34 @@ impl CrosshairApp {
                     });
                 }
             });
+            if card_response.hovered() {
+                let mut regions = Vec::new();
+                if preset.use_source_crop {
+                    regions.push(crate::overlay::VisionRegion {
+                        left: preset.source_x,
+                        top: preset.source_y,
+                        width: preset.source_width.max(10),
+                        height: preset.source_height.max(10),
+                        is_circle: false,
+                        angle_offset_deg: None,
+                        angle_span_deg: None,
+                    });
+                }
+                if preset.use_custom_bounds {
+                    regions.push(crate::overlay::VisionRegion {
+                        left: preset.x,
+                        top: preset.y,
+                        width: preset.width.max(10),
+                        height: preset.height.max(10),
+                        is_circle: false,
+                        angle_offset_deg: None,
+                        angle_span_deg: None,
+                    });
+                }
+                if !regions.is_empty() {
+                    hovered_pin_preset = Some((preset.id, regions));
+                }
+            }
             if let Some(pid) = begin_color_picker_preset_id {
                 self.begin_color_pick_capture(ui.ctx(), VisionCaptureTarget::PinPresetColor(pid));
             }
@@ -1396,6 +1459,26 @@ impl CrosshairApp {
                                 format!("Failed to start pin preset {}: {}", preset_name, error);
                         }
                     }
+                }
+            }
+        }
+
+        {
+            const PIN_PANEL_TAG: usize = 104;
+            let mut hook_state = crate::overlay::HOOK_STATE.lock();
+            if let Some((pid, regions)) = hovered_pin_preset {
+                if hook_state.vision_capture_preview_regions != regions {
+                    hook_state.vision_capture_preview_regions = regions;
+                    hook_state.vision_preview_source = Some((pid, PIN_PANEL_TAG));
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                }
+            } else if let Some((_, tag)) = hook_state.vision_preview_source {
+                if tag == PIN_PANEL_TAG {
+                    hook_state.vision_capture_preview_regions.clear();
+                    hook_state.vision_preview_source = None;
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
                 }
             }
         }
@@ -1512,23 +1595,25 @@ impl CrosshairApp {
         let mut active_handle: DragHandle =
             ui.data_mut(|d| d.get_temp(drag_id).unwrap_or(DragHandle::None));
         let pick_window_drag_handle = |pointer_pos: egui::Pos2, window_rect: egui::Rect| {
+            let min_dim = window_rect.width().min(window_rect.height());
+            let corner_limit = if min_dim < 40.0 { (min_dim * 0.28).max(3.0) } else { 12.0 };
+            let edge_threshold = if min_dim < 40.0 { (min_dim * 0.2).max(2.0) } else { 8.0 };
             let dist_tl = pointer_pos.distance(window_rect.left_top());
             let dist_tr = pointer_pos.distance(window_rect.right_top());
             let dist_bl = pointer_pos.distance(window_rect.left_bottom());
             let dist_br = pointer_pos.distance(window_rect.right_bottom());
-            let edge_threshold = 8.0;
             let vertical_hit_min = window_rect.top() - edge_threshold;
             let vertical_hit_max = window_rect.bottom() + edge_threshold;
             let horizontal_hit_min = window_rect.left() - edge_threshold;
             let horizontal_hit_max = window_rect.right() + edge_threshold;
 
-            if dist_tl < 12.0 {
+            if dist_tl < corner_limit {
                 DragHandle::TopLeft
-            } else if dist_tr < 12.0 {
+            } else if dist_tr < corner_limit {
                 DragHandle::TopRight
-            } else if dist_bl < 12.0 {
+            } else if dist_bl < corner_limit {
                 DragHandle::BottomLeft
-            } else if dist_br < 12.0 {
+            } else if dist_br < corner_limit {
                 DragHandle::BottomRight
             } else if (pointer_pos.x - window_rect.left()).abs() < edge_threshold
                 && pointer_pos.y >= vertical_hit_min
@@ -2366,23 +2451,25 @@ impl CrosshairApp {
         let mut active_handle: SelectionDragHandle =
             ui.data_mut(|d| d.get_temp(drag_id).unwrap_or(SelectionDragHandle::None));
         let pick_selection_drag_handle = |pointer_pos: egui::Pos2, rect: egui::Rect| {
+            let min_dim = rect.width().min(rect.height());
+            let corner_limit = if min_dim < 40.0 { (min_dim * 0.28).max(3.0) } else { 14.0 };
+            let edge_threshold = if min_dim < 40.0 { (min_dim * 0.2).max(2.0) } else { 10.0 };
             let dist_tl = pointer_pos.distance(rect.left_top());
             let dist_tr = pointer_pos.distance(rect.right_top());
             let dist_bl = pointer_pos.distance(rect.left_bottom());
             let dist_br = pointer_pos.distance(rect.right_bottom());
-            let edge_threshold = 10.0;
             let vertical_hit_min = rect.top() - edge_threshold;
             let vertical_hit_max = rect.bottom() + edge_threshold;
             let horizontal_hit_min = rect.left() - edge_threshold;
             let horizontal_hit_max = rect.right() + edge_threshold;
 
-            if dist_tl < 14.0 {
+            if dist_tl < corner_limit {
                 SelectionDragHandle::TopLeft
-            } else if dist_tr < 14.0 {
+            } else if dist_tr < corner_limit {
                 SelectionDragHandle::TopRight
-            } else if dist_bl < 14.0 {
+            } else if dist_bl < corner_limit {
                 SelectionDragHandle::BottomLeft
-            } else if dist_br < 14.0 {
+            } else if dist_br < corner_limit {
                 SelectionDragHandle::BottomRight
             } else if (pointer_pos.x - rect.left()).abs() < edge_threshold
                 && pointer_pos.y >= vertical_hit_min
@@ -2972,6 +3059,69 @@ impl CrosshairApp {
         self.state.window_layouts.push(new_preset);
         self.persist_window_layouts();
         self.status = format!("Added layout {id}.");
+    }
+
+    pub(crate) fn window_layout_preview_regions(layout: &WindowLayout) -> Vec<crate::overlay::VisionRegion> {
+        if layout.rows == 0 || layout.cols == 0 {
+            return Vec::new();
+        }
+        let (screen_x, screen_y, screen_width, screen_height) = crate::window_list::virtual_screen_bounds();
+        let total_w = screen_width.max(1) as f32;
+        let total_h = screen_height.max(1) as f32;
+
+        let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
+        let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
+        let mut row_starts = vec![0.0f32];
+        let mut acc = 0.0f32;
+        for r in &layout.row_ratios {
+            acc += r / r_sum;
+            row_starts.push(acc);
+        }
+        while row_starts.len() <= layout.rows {
+            row_starts.push(1.0);
+        }
+
+        let mut col_starts = vec![0.0f32];
+        let mut acc = 0.0f32;
+        for c in &layout.col_ratios {
+            acc += c / c_sum;
+            col_starts.push(acc);
+        }
+        while col_starts.len() <= layout.cols {
+            col_starts.push(1.0);
+        }
+
+        let mut regions = Vec::new();
+        for cell in &layout.cells {
+            if cell.row >= layout.rows || cell.col >= layout.cols {
+                continue;
+            }
+            let end_row = (cell.row + cell.row_span.max(1)).min(layout.rows);
+            let end_col = (cell.col + cell.col_span.max(1)).min(layout.cols);
+
+            let left_frac = col_starts[cell.col] + cell.adjust_left;
+            let right_frac = col_starts[end_col] + cell.adjust_right;
+            let top_frac = row_starts[cell.row] + cell.adjust_top;
+            let bottom_frac = row_starts[end_row] + cell.adjust_bottom;
+
+            let left = screen_x + (left_frac * total_w).round() as i32;
+            let top = screen_y + (top_frac * total_h).round() as i32;
+            let right = screen_x + (right_frac * total_w).round() as i32;
+            let bottom = screen_y + (bottom_frac * total_h).round() as i32;
+            let width = (right - left).max(10);
+            let height = (bottom - top).max(10);
+
+            regions.push(crate::overlay::VisionRegion {
+                left,
+                top,
+                width,
+                height,
+                is_circle: false,
+                angle_offset_deg: None,
+                angle_span_deg: None,
+            });
+        }
+        regions
     }
 
     fn sanitize_layout(layout: &mut WindowLayout) {
@@ -3920,6 +4070,7 @@ impl CrosshairApp {
         let layouts_count = self.state.window_layouts.len();
         let active_capture_target = self.capture_target.clone();
         let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
+        let mut hovered_layout_preset: Option<(u32, Vec<crate::overlay::VisionRegion>)> = None;
         for index in 0..layouts_count {
             let mut next_capture_target = None;
             let mut cancel_active_capture = false;
@@ -3931,7 +4082,7 @@ impl CrosshairApp {
             let capture_target = CaptureRequest::WindowLayoutHotkey(layout.id);
             let id_source = layout.id;
 
-            Self::show_preset_card(ui, layout.enabled, |ui| {
+            let (_, card_response) = Self::show_preset_card_with_response(ui, layout.enabled, |ui| {
                 egui::Grid::new((id_source, "window-layout-header"))
                     .num_columns(2)
                     .spacing([14.0, 8.0])
@@ -5660,18 +5811,31 @@ impl CrosshairApp {
                                     }
                                     ui.end_row();
 
-                                    // Render cell estimated resolution info
-                                    ui.label(Self::tr_lang(language, "Resolution", "Resolution"));
+                                    // Render cell estimated resolution and position info
                                     let (mon_w, mon_h) =
                                         Self::get_monitor_work_size(layout.block_taskbar);
+                                    let metrics = Self::get_monitor_layout_metrics();
+                                    let origin_x = if layout.block_taskbar {
+                                        metrics.monitor_width * metrics.work_left
+                                    } else {
+                                        0.0
+                                    };
+                                    let origin_y = if layout.block_taskbar {
+                                        metrics.monitor_height * metrics.work_top
+                                    } else {
+                                        0.0
+                                    };
 
-                                    let r_sum: f32 = layout.row_ratios.iter().sum();
-                                    let c_sum: f32 = layout.col_ratios.iter().sum();
+                                    let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
+                                    let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
                                     let mut row_starts = vec![0.0];
                                     let mut acc = 0.0f32;
                                     for r in &layout.row_ratios {
                                         acc += r / r_sum;
                                         row_starts.push(acc);
+                                    }
+                                    while row_starts.len() <= layout.rows {
+                                        row_starts.push(1.0);
                                     }
                                     let mut col_starts = vec![0.0];
                                     let mut acc = 0.0f32;
@@ -5679,21 +5843,66 @@ impl CrosshairApp {
                                         acc += c / c_sum;
                                         col_starts.push(acc);
                                     }
+                                    while col_starts.len() <= layout.cols {
+                                        col_starts.push(1.0);
+                                    }
 
-                                    let cell_w_frac = col_starts[col_starts
-                                        .len()
-                                        .min(sel_col + layout.cells[cell_idx].col_span)]
-                                        - col_starts[sel_col]
-                                        + layout.cells[cell_idx].adjust_right
-                                        - layout.cells[cell_idx].adjust_left;
-                                    let cell_h_frac = row_starts[row_starts
-                                        .len()
-                                        .min(sel_row + layout.cells[cell_idx].row_span)]
-                                        - row_starts[sel_row]
-                                        + layout.cells[cell_idx].adjust_bottom
-                                        - layout.cells[cell_idx].adjust_top;
-                                    let cell_w = (cell_w_frac * mon_w).round() as i32;
-                                    let cell_h = (cell_h_frac * mon_h).round() as i32;
+                                    let end_c = (sel_col + layout.cells[cell_idx].col_span).min(layout.cols);
+                                    let end_r = (sel_row + layout.cells[cell_idx].row_span).min(layout.rows);
+
+                                    let cl = (col_starts[sel_col] + layout.cells[cell_idx].adjust_left).clamp(0.0, 1.0);
+                                    let cr = (col_starts[end_c] + layout.cells[cell_idx].adjust_right).clamp(cl + 0.01, 1.0);
+                                    let ct = (row_starts[sel_row] + layout.cells[cell_idx].adjust_top).clamp(0.0, 1.0);
+                                    let cb = (row_starts[end_r] + layout.cells[cell_idx].adjust_bottom).clamp(ct + 0.01, 1.0);
+
+                                    let mut cell_x = (origin_x + cl * mon_w).round() as i32;
+                                    let mut cell_y = (origin_y + ct * mon_h).round() as i32;
+                                    let mut cell_w = ((cr - cl) * mon_w).round().max(10.0) as i32;
+                                    let mut cell_h = ((cb - ct) * mon_h).round().max(10.0) as i32;
+
+                                    ui.label(Self::tr_lang(language, "Position (X, Y)", "Tọa độ (X, Y)"));
+                                    ui.horizontal(|ui| {
+                                        ui.label("X:");
+                                        if ui.add(DragValue::new(&mut cell_x).range(0..=20000).suffix(" px")).changed() {
+                                            let new_cl = ((cell_x as f32 - origin_x) / mon_w).clamp(0.0, 0.98);
+                                            let current_w_frac = cr - cl;
+                                            let new_cr = (new_cl + current_w_frac).clamp(new_cl + 0.01, 1.0);
+                                            layout.cells[cell_idx].adjust_left = new_cl - col_starts[sel_col];
+                                            layout.cells[cell_idx].adjust_right = new_cr - col_starts[end_c];
+                                            cell_modified = true;
+                                        }
+                                        ui.label("Y:");
+                                        if ui.add(DragValue::new(&mut cell_y).range(0..=20000).suffix(" px")).changed() {
+                                            let new_ct = ((cell_y as f32 - origin_y) / mon_h).clamp(0.0, 0.98);
+                                            let current_h_frac = cb - ct;
+                                            let new_cb = (new_ct + current_h_frac).clamp(new_ct + 0.01, 1.0);
+                                            layout.cells[cell_idx].adjust_top = new_ct - row_starts[sel_row];
+                                            layout.cells[cell_idx].adjust_bottom = new_cb - row_starts[end_r];
+                                            cell_modified = true;
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label(Self::tr_lang(language, "Size (W x H)", "Kích thước (Dài x Cao)"));
+                                    ui.horizontal(|ui| {
+                                        ui.label("W:");
+                                        if ui.add(DragValue::new(&mut cell_w).range(10..=20000).suffix(" px")).changed() {
+                                            let new_cr = ((cell_x as f32 + cell_w as f32 - origin_x) / mon_w).clamp(cl + 0.01, 1.0);
+                                            layout.cells[cell_idx].adjust_right = new_cr - col_starts[end_c];
+                                            cell_modified = true;
+                                        }
+                                        ui.label("H:");
+                                        if ui.add(DragValue::new(&mut cell_h).range(10..=20000).suffix(" px")).changed() {
+                                            let new_cb = ((cell_y as f32 + cell_h as f32 - origin_y) / mon_h).clamp(ct + 0.01, 1.0);
+                                            layout.cells[cell_idx].adjust_bottom = new_cb - row_starts[end_r];
+                                            cell_modified = true;
+                                        }
+                                    });
+                                    ui.end_row();
+
+                                    ui.label(Self::tr_lang(language, "Resolution", "Resolution"));
+                                    let cell_w_frac = cr - cl;
+                                    let cell_h_frac = cb - ct;
                                     let info_text = format!(
                                         "{} x {} ({:.0}% x {:.0}%)",
                                         cell_w,
@@ -5722,6 +5931,13 @@ impl CrosshairApp {
                 }
             });
 
+            if card_response.hovered() {
+                let regions = Self::window_layout_preview_regions(layout);
+                if !regions.is_empty() {
+                    hovered_layout_preset = Some((layout.id, regions));
+                }
+            }
+
             if let Some((target, status)) = next_capture_target.take() {
                 self.begin_capture(target, status);
             }
@@ -5735,6 +5951,26 @@ impl CrosshairApp {
                     .overlay_tx
                     .send(OverlayCommand::ApplyWindowLayout(layout));
                 self.status = format!("Applied layout preset {}.", layout_name);
+            }
+        }
+
+        {
+            const LAYOUT_PANEL_TAG: usize = 105;
+            let mut hook_state = crate::overlay::HOOK_STATE.lock();
+            if let Some((pid, regions)) = hovered_layout_preset {
+                if hook_state.vision_capture_preview_regions != regions {
+                    hook_state.vision_capture_preview_regions = regions;
+                    hook_state.vision_preview_source = Some((pid, LAYOUT_PANEL_TAG));
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                }
+            } else if let Some((_, tag)) = hook_state.vision_preview_source {
+                if tag == LAYOUT_PANEL_TAG {
+                    hook_state.vision_capture_preview_regions.clear();
+                    hook_state.vision_preview_source = None;
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(crate::overlay::OverlayCommand::RefreshSearchAreaOverlay);
+                }
             }
         }
 
@@ -6271,5 +6507,31 @@ mod tests {
             overlap_w,
             overlap_h
         );
+    }
+
+    #[test]
+    fn test_window_layout_preview_regions() {
+        let layout = WindowLayout {
+            id: 1,
+            name: "Test Layout".to_owned(),
+            rows: 2,
+            cols: 2,
+            row_ratios: vec![0.5, 0.5],
+            col_ratios: vec![0.5, 0.5],
+            cells: vec![
+                WindowLayoutCell {
+                    row: 0,
+                    col: 0,
+                    row_span: 1,
+                    col_span: 1,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let regions = CrosshairApp::window_layout_preview_regions(&layout);
+        assert_eq!(regions.len(), 1);
+        assert!(regions[0].width >= 10);
+        assert!(regions[0].height >= 10);
     }
 }

@@ -91,6 +91,14 @@ impl CrosshairApp {
         enabled: bool,
         add_contents: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
+        Self::show_preset_card_with_response(ui, enabled, add_contents).0
+    }
+
+    pub(crate) fn show_preset_card_with_response<R>(
+        ui: &mut egui::Ui,
+        enabled: bool,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> (R, egui::Response) {
         let dark_mode = ui.visuals().dark_mode;
         let res = Self::preset_frame(ui, enabled).show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -105,7 +113,7 @@ impl CrosshairApp {
         });
 
         Self::paint_card_hover(ui, &res.response, dark_mode);
-        res.inner
+        (res.inner, res.response)
     }
 
     fn paint_card_hover(ui: &egui::Ui, response: &egui::Response, dark_mode: bool) {

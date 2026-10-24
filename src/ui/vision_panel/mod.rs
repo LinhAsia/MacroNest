@@ -154,6 +154,7 @@ impl CrosshairApp {
             self.preset_clipboard,
             Some(crate::ui::PresetClipboard::Vision(_))
         );
+        let mut hovered_vision_preset: Option<(u32, Vec<crate::overlay::VisionRegion>)> = None;
 
         for (title, filter_color, filter_counter) in categories {
             ui.add_space(8.0);
@@ -193,7 +194,7 @@ impl CrosshairApp {
                 let pending_combo_keys = self.capture_hotkey_combo_keys.clone();
 
                 preset.enabled = preset.hotkey.is_some() || !preset.trigger_keys.trim().is_empty();
-                Self::show_preset_card(ui, preset.enabled, |ui| {
+                let (_, card_response) = Self::show_preset_card_with_response(ui, preset.enabled, |ui| {
                     ui.horizontal(|ui| {
                         let name_width = Self::preset_header_name_width(ui);
                         let response = ui
@@ -433,7 +434,6 @@ impl CrosshairApp {
                             ui.label(Self::tr_lang(language, "Area", "Vùng"));
                             ui.horizontal_wrapped(|ui| {
                                 ui.monospace(Self::image_search_search_area_text(preset, language));
-
                                 let mut is_single = preset.search_region_is_single_pixel;
                                 if preset.use_color_matching && !preset.is_pixel_counter {
                                     if ui
@@ -453,6 +453,65 @@ impl CrosshairApp {
                                         }
                                         live_sync = true;
                                     }
+                                }
+
+                                let mut area_changed = false;
+                                if preset.search_region_is_single_pixel {
+                                    let mut x_val = preset.search_region_screen_x.unwrap_or(0);
+                                    let mut y_val = preset.search_region_screen_y.unwrap_or(0);
+                                    ui.label("X:");
+                                    if ui.add(DragValue::new(&mut x_val).range(-10000..=30000)).changed() {
+                                        preset.search_region_screen_x = Some(x_val);
+                                        preset.search_region_screen_y = Some(y_val);
+                                        area_changed = true;
+                                    }
+                                    ui.label("Y:");
+                                    if ui.add(DragValue::new(&mut y_val).range(-10000..=30000)).changed() {
+                                        preset.search_region_screen_x = Some(x_val);
+                                        preset.search_region_screen_y = Some(y_val);
+                                        area_changed = true;
+                                    }
+                                } else {
+                                    let mut x_val = preset.search_region_screen_x.unwrap_or(0);
+                                    let mut y_val = preset.search_region_screen_y.unwrap_or(0);
+                                    let mut w_val = preset.search_region_width.unwrap_or(100);
+                                    let mut h_val = preset.search_region_height.unwrap_or(100);
+
+                                    ui.label("X:");
+                                    if ui.add(DragValue::new(&mut x_val).range(-10000..=30000)).changed() {
+                                        preset.search_region_screen_x = Some(x_val);
+                                        preset.search_region_screen_y = Some(y_val);
+                                        preset.search_region_width = Some(w_val.max(1));
+                                        preset.search_region_height = Some(h_val.max(1));
+                                        area_changed = true;
+                                    }
+                                    ui.label("Y:");
+                                    if ui.add(DragValue::new(&mut y_val).range(-10000..=30000)).changed() {
+                                        preset.search_region_screen_x = Some(x_val);
+                                        preset.search_region_screen_y = Some(y_val);
+                                        preset.search_region_width = Some(w_val.max(1));
+                                        preset.search_region_height = Some(h_val.max(1));
+                                        area_changed = true;
+                                    }
+                                    ui.label("W:");
+                                    if ui.add(DragValue::new(&mut w_val).range(1..=30000)).changed() {
+                                        preset.search_region_screen_x = Some(x_val);
+                                        preset.search_region_screen_y = Some(y_val);
+                                        preset.search_region_width = Some(w_val.max(1));
+                                        preset.search_region_height = Some(h_val.max(1));
+                                        area_changed = true;
+                                    }
+                                    ui.label("H:");
+                                    if ui.add(DragValue::new(&mut h_val).range(1..=30000)).changed() {
+                                        preset.search_region_screen_x = Some(x_val);
+                                        preset.search_region_screen_y = Some(y_val);
+                                        preset.search_region_width = Some(w_val.max(1));
+                                        preset.search_region_height = Some(h_val.max(1));
+                                        area_changed = true;
+                                    }
+                                }
+                                if area_changed {
+                                    live_sync = true;
                                 }
 
                                 if preset.search_region_is_single_pixel {
@@ -901,6 +960,13 @@ impl CrosshairApp {
                     }
                 });
 
+                if card_response.hovered() {
+                    let regions = Self::vision_preset_preview_regions(preset);
+                    if !regions.is_empty() {
+                        hovered_vision_preset = Some((preset.id, regions));
+                    }
+                }
+
                 if let Some((target, status)) = next_capture_local {
                     self.begin_capture(target, status);
                 }
@@ -1001,9 +1067,72 @@ impl CrosshairApp {
             self.import_share_code_from_clipboard(crate::ui::MacroShareCodeKind::Vision, Some(index));
         }
 
+        {
+            const VISION_PANEL_TAG: usize = 101;
+            let mut hook_state = crate::overlay::HOOK_STATE.lock();
+            if let Some((pid, regions)) = hovered_vision_preset {
+                if hook_state.vision_capture_preview_regions != regions {
+                    hook_state.vision_capture_preview_regions = regions;
+                    hook_state.vision_preview_source = Some((pid, VISION_PANEL_TAG));
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(OverlayCommand::RefreshSearchAreaOverlay);
+                }
+            } else if let Some((_, tag)) = hook_state.vision_preview_source {
+                if tag == VISION_PANEL_TAG {
+                    hook_state.vision_capture_preview_regions.clear();
+                    hook_state.vision_preview_source = None;
+                    drop(hook_state);
+                    let _ = self.overlay_tx.send(OverlayCommand::RefreshSearchAreaOverlay);
+                }
+            }
+        }
+
         if live_sync {
             self.persist_vision_presets();
         }
+    }
+
+    pub(crate) fn vision_preset_preview_regions(preset: &crate::model::VisionPreset) -> Vec<crate::overlay::VisionRegion> {
+        let mut regions = Vec::new();
+        if preset.search_region_is_single_pixel {
+            if let (Some(x), Some(y)) = (preset.search_region_screen_x, preset.search_region_screen_y) {
+                let radius = 14;
+                regions.push(crate::overlay::VisionRegion {
+                    left: x - radius,
+                    top: y - radius,
+                    width: radius * 2,
+                    height: radius * 2,
+                    is_circle: true,
+                    angle_offset_deg: None,
+                    angle_span_deg: None,
+                });
+            }
+        } else if let (Some(rx), Some(ry), Some(rw), Some(rh)) = (
+            preset.search_region_screen_x,
+            preset.search_region_screen_y,
+            preset.search_region_width,
+            preset.search_region_height,
+        ) {
+            let bounds = crate::window_list::virtual_screen_bounds();
+            let left = rx.max(bounds.0);
+            let top = ry.max(bounds.1);
+            let right = (rx + rw).min(bounds.0 + bounds.2);
+            let bottom = (ry + rh).min(bounds.1 + bounds.3);
+            let width = right - left;
+            let height = bottom - top;
+            if width > 0 && height > 0 {
+                regions.push(crate::overlay::VisionRegion {
+                    left,
+                    top,
+                    width,
+                    height,
+                    is_circle: preset.search_region_is_circle,
+                    angle_offset_deg: None,
+                    angle_span_deg: None,
+                });
+            }
+        }
+        regions
     }
 
     pub(crate) fn sync_vision_presets(&mut self) {

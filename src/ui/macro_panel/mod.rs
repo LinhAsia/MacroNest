@@ -2180,36 +2180,37 @@ impl CrosshairApp {
 
                 ui.set_min_width(300.0);
                 egui::Grid::new(ui.auto_id_with("vision_outputs_grid"))
-                    .num_columns(2)
+                    .num_columns(5)
                     .spacing([8.0, 6.0])
                     .show(ui, |ui| {
-                        ui.label("Found:");
+                        ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new("Found:").strong()));
                         let prev_override = ui.visuals().override_text_color;
                         ui.visuals_mut().override_text_color = None;
                         let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var").desired_width(150.0));
                         ui.visuals_mut().override_text_color = prev_override;
                         Self::apply_vietnamese_input_if_changed(&resp, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_found_var);
                         *live_sync |= resp.changed();
+                        ui.label("");
+                        ui.label("");
+                        ui.label("");
                         ui.end_row();
 
-                        ui.label(Self::tr_lang(language, "Target (X, Y):", "Tâm (X, Y):"));
-                        ui.horizontal(|ui| {
-                            ui.label("X:");
-                            let prev_override = ui.visuals().override_text_color;
-                            ui.visuals_mut().override_text_color = None;
-                            let resp_x = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_x).hint_text("target_x").desired_width(65.0));
-                            ui.visuals_mut().override_text_color = prev_override;
-                            Self::apply_vietnamese_input_if_changed(&resp_x, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_pos_var_x);
-                            *live_sync |= resp_x.changed();
+                        ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(Self::tr_lang(language, "Target:", "Tâm:")).strong()));
+                        ui.label("X:");
+                        let prev_override = ui.visuals().override_text_color;
+                        ui.visuals_mut().override_text_color = None;
+                        let resp_x = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_x).hint_text("target_x").desired_width(65.0));
+                        ui.visuals_mut().override_text_color = prev_override;
+                        Self::apply_vietnamese_input_if_changed(&resp_x, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_pos_var_x);
+                        *live_sync |= resp_x.changed();
 
-                            ui.label("Y:");
-                            let prev_override = ui.visuals().override_text_color;
-                            ui.visuals_mut().override_text_color = None;
-                            let resp_y = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_y).hint_text("target_y").desired_width(65.0));
-                            ui.visuals_mut().override_text_color = prev_override;
-                            Self::apply_vietnamese_input_if_changed(&resp_y, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_pos_var_y);
-                            *live_sync |= resp_y.changed();
-                        });
+                        ui.label("Y:");
+                        let prev_override = ui.visuals().override_text_color;
+                        ui.visuals_mut().override_text_color = None;
+                        let resp_y = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_y).hint_text("target_y").desired_width(65.0));
+                        ui.visuals_mut().override_text_color = prev_override;
+                        Self::apply_vietnamese_input_if_changed(&resp_y, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_pos_var_y);
+                        *live_sync |= resp_y.changed();
                         ui.end_row();
                     });
 
@@ -2225,31 +2226,35 @@ impl CrosshairApp {
                     "Nhập tên biến để tự động lưu tọa độ hướng đó.",
                 ));
 
-                let mut render_dir_row = |label: &str, def_x: &'static str, def_y: &'static str, var_x: &mut String, var_y: &mut String| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("{:<7}", label)).strong());
-                        ui.label("X:");
-                        let prev_override = ui.visuals().override_text_color;
-                        ui.visuals_mut().override_text_color = None;
-                        let resp_x = ui.add(egui::TextEdit::singleline(var_x).hint_text(def_x).desired_width(65.0));
-                        ui.visuals_mut().override_text_color = prev_override;
-                        Self::apply_vietnamese_input_if_changed(&resp_x, vietnamese_input_enabled, vietnamese_input_mode, var_x);
-                        *live_sync |= resp_x.changed();
+                egui::Grid::new(ui.auto_id_with("vision_extreme_points_grid"))
+                    .num_columns(5)
+                    .spacing([8.0, 6.0])
+                    .show(ui, |ui| {
+                        let mut render_dir_row = |ui: &mut egui::Ui, label: &str, def_x: &'static str, def_y: &'static str, var_x: &mut String, var_y: &mut String| {
+                            ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(label).strong()));
+                            ui.label("X:");
+                            let prev_override = ui.visuals().override_text_color;
+                            ui.visuals_mut().override_text_color = None;
+                            let resp_x = ui.add(egui::TextEdit::singleline(var_x).hint_text(def_x).desired_width(65.0));
+                            ui.visuals_mut().override_text_color = prev_override;
+                            Self::apply_vietnamese_input_if_changed(&resp_x, vietnamese_input_enabled, vietnamese_input_mode, var_x);
+                            *live_sync |= resp_x.changed();
 
-                        ui.label("Y:");
-                        let prev_override = ui.visuals().override_text_color;
-                        ui.visuals_mut().override_text_color = None;
-                        let resp_y = ui.add(egui::TextEdit::singleline(var_y).hint_text(def_y).desired_width(65.0));
-                        ui.visuals_mut().override_text_color = prev_override;
-                        Self::apply_vietnamese_input_if_changed(&resp_y, vietnamese_input_enabled, vietnamese_input_mode, var_y);
-                        *live_sync |= resp_y.changed();
+                            ui.label("Y:");
+                            let prev_override = ui.visuals().override_text_color;
+                            ui.visuals_mut().override_text_color = None;
+                            let resp_y = ui.add(egui::TextEdit::singleline(var_y).hint_text(def_y).desired_width(65.0));
+                            ui.visuals_mut().override_text_color = prev_override;
+                            Self::apply_vietnamese_input_if_changed(&resp_y, vietnamese_input_enabled, vietnamese_input_mode, var_y);
+                            *live_sync |= resp_y.changed();
+                            ui.end_row();
+                        };
+
+                        render_dir_row(ui, Self::tr_lang(language, "Top:", "Trên:"), "top_x", "top_y", &mut step.vision_top_var_x, &mut step.vision_top_var_y);
+                        render_dir_row(ui, Self::tr_lang(language, "Bottom:", "Dưới:"), "bottom_x", "bottom_y", &mut step.vision_bottom_var_x, &mut step.vision_bottom_var_y);
+                        render_dir_row(ui, Self::tr_lang(language, "Left:", "Trái:"), "left_x", "left_y", &mut step.vision_left_var_x, &mut step.vision_left_var_y);
+                        render_dir_row(ui, Self::tr_lang(language, "Right:", "Phải:"), "right_x", "right_y", &mut step.vision_right_var_x, &mut step.vision_right_var_y);
                     });
-                };
-
-                render_dir_row(Self::tr_lang(language, "Top:", "Trên:"), "top_x", "top_y", &mut step.vision_top_var_x, &mut step.vision_top_var_y);
-                render_dir_row(Self::tr_lang(language, "Bottom:", "Dưới:"), "bottom_x", "bottom_y", &mut step.vision_bottom_var_x, &mut step.vision_bottom_var_y);
-                render_dir_row(Self::tr_lang(language, "Left:", "Trái:"), "left_x", "left_y", &mut step.vision_left_var_x, &mut step.vision_left_var_y);
-                render_dir_row(Self::tr_lang(language, "Right:", "Phải:"), "right_x", "right_y", &mut step.vision_right_var_x, &mut step.vision_right_var_y);
             });
     }
 
