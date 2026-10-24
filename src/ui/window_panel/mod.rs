@@ -3069,6 +3069,158 @@ impl CrosshairApp {
         }
 
         layout.cells = sanitized_cells;
+
+        if layout.cells.is_empty() {
+            return;
+        }
+
+        let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
+        let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
+        let mut row_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for r in &layout.row_ratios {
+            acc += r / r_sum;
+            row_starts.push(acc);
+        }
+        while row_starts.len() <= rows {
+            row_starts.push(1.0);
+        }
+
+        let mut col_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for c in &layout.col_ratios {
+            acc += c / c_sum;
+            col_starts.push(acc);
+        }
+        while col_starts.len() <= cols {
+            col_starts.push(1.0);
+        }
+
+        // Geometric anti-overlap pass: detect and eliminate visual overlaps
+        let min_size = 0.02f32;
+        let mut boxes: Vec<(f32, f32, f32, f32)> = layout
+            .cells
+            .iter()
+            .map(|cell| {
+                let end_c = (cell.col + cell.col_span).min(cols);
+                let end_r = (cell.row + cell.row_span).min(rows);
+                let cl = (col_starts[cell.col] + cell.adjust_left).clamp(0.0, 1.0 - min_size);
+                let cr = (col_starts[end_c] + cell.adjust_right).clamp(cl + min_size, 1.0);
+                let ct = (row_starts[cell.row] + cell.adjust_top).clamp(0.0, 1.0 - min_size);
+                let cb = (row_starts[end_r] + cell.adjust_bottom).clamp(ct + min_size, 1.0);
+                (cl, ct, cr, cb)
+            })
+            .collect();
+
+        let n = boxes.len();
+        for _pass in 0..8 {
+            let mut any_overlap = false;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let (cl1, ct1, cr1, cb1) = boxes[i];
+                    let (cl2, ct2, cr2, cb2) = boxes[j];
+
+                    let ox1 = cl1.max(cl2);
+                    let ox2 = cr1.min(cr2);
+                    let oy1 = ct1.max(ct2);
+                    let oy2 = cb1.min(cb2);
+
+                    if ox2 > ox1 + 0.002 && oy2 > oy1 + 0.002 {
+                        any_overlap = true;
+                        let dx = ox2 - ox1;
+                        let dy = oy2 - oy1;
+
+                        if dy < dx {
+                            // Vertical penetration
+                            if ct1 <= ct2 {
+                                let mid_y = if ct2 >= ct1 + min_size {
+                                    ct2
+                                } else {
+                                    0.5 * (cb1 + ct2)
+                                };
+                                let clamped_mid = mid_y.clamp(ct1 + min_size, 1.0);
+                                boxes[i].3 = clamped_mid;
+                                boxes[j].1 = clamped_mid;
+                                if boxes[j].3 < boxes[j].1 + min_size {
+                                    boxes[j].3 = (boxes[j].1 + min_size).min(1.0);
+                                }
+                            } else {
+                                let mid_y = if ct1 >= ct2 + min_size {
+                                    ct1
+                                } else {
+                                    0.5 * (cb2 + ct1)
+                                };
+                                let clamped_mid = mid_y.clamp(ct2 + min_size, 1.0);
+                                boxes[j].3 = clamped_mid;
+                                boxes[i].1 = clamped_mid;
+                                if boxes[i].3 < boxes[i].1 + min_size {
+                                    boxes[i].3 = (boxes[i].1 + min_size).min(1.0);
+                                }
+                            }
+                        } else {
+                            // Horizontal penetration
+                            if cl1 <= cl2 {
+                                let mid_x = if cl2 >= cl1 + min_size {
+                                    cl2
+                                } else {
+                                    0.5 * (cr1 + cl2)
+                                };
+                                let clamped_mid = mid_x.clamp(cl1 + min_size, 1.0);
+                                boxes[i].2 = clamped_mid;
+                                boxes[j].0 = clamped_mid;
+                                if boxes[j].2 < boxes[j].0 + min_size {
+                                    boxes[j].2 = (boxes[j].0 + min_size).min(1.0);
+                                }
+                            } else {
+                                let mid_x = if cl1 >= cl2 + min_size {
+                                    cl1
+                                } else {
+                                    0.5 * (cr2 + cl1)
+                                };
+                                let clamped_mid = mid_x.clamp(cl2 + min_size, 1.0);
+                                boxes[j].2 = clamped_mid;
+                                boxes[i].0 = clamped_mid;
+                                if boxes[i].2 < boxes[i].0 + min_size {
+                                    boxes[i].2 = (boxes[i].0 + min_size).min(1.0);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if !any_overlap {
+                break;
+            }
+        }
+
+        // Write back adjustments
+        for (cell, (cl, ct, cr, cb)) in layout.cells.iter_mut().zip(boxes) {
+            let end_c = (cell.col + cell.col_span).min(cols);
+            let end_r = (cell.row + cell.row_span).min(rows);
+
+            let mut adj_l = cl - col_starts[cell.col];
+            let mut adj_r = cr - col_starts[end_c];
+            let mut adj_t = ct - row_starts[cell.row];
+            let mut adj_b = cb - row_starts[end_r];
+
+            if adj_l.abs() < 0.0005 {
+                adj_l = 0.0;
+            }
+            if adj_r.abs() < 0.0005 {
+                adj_r = 0.0;
+            }
+            if adj_t.abs() < 0.0005 {
+                adj_t = 0.0;
+            }
+            if adj_b.abs() < 0.0005 {
+                adj_b = 0.0;
+            }
+
+            cell.adjust_left = adj_l;
+            cell.adjust_right = adj_r;
+            cell.adjust_top = adj_t;
+            cell.adjust_bottom = adj_b;
+        }
     }
 
     pub(crate) fn compute_empty_layout_slots(
@@ -3491,6 +3643,107 @@ impl CrosshairApp {
         }
     }
 
+    pub(crate) fn resize_layout_grid(layout: &mut WindowLayout, new_rows: usize, new_cols: usize) {
+        let new_rows = new_rows.clamp(1, 6);
+        let new_cols = new_cols.clamp(1, 6);
+        if layout.rows == new_rows && layout.cols == new_cols {
+            return;
+        }
+
+        let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
+        let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
+
+        let mut old_row_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for r in &layout.row_ratios {
+            acc += r / r_sum;
+            old_row_starts.push(acc);
+        }
+        while old_row_starts.len() <= layout.rows {
+            old_row_starts.push(1.0);
+        }
+
+        let mut old_col_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for c in &layout.col_ratios {
+            acc += c / c_sum;
+            old_col_starts.push(acc);
+        }
+        while old_col_starts.len() <= layout.cols {
+            old_col_starts.push(1.0);
+        }
+
+        // Save current visual bounding boxes
+        let boxes: Vec<(f32, f32, f32, f32)> = layout
+            .cells
+            .iter()
+            .map(|cell| {
+                let end_c = (cell.col + cell.col_span).min(layout.cols);
+                let end_r = (cell.row + cell.row_span).min(layout.rows);
+                let cl = (old_col_starts[cell.col] + cell.adjust_left).clamp(0.0, 0.98);
+                let cr = (old_col_starts[end_c] + cell.adjust_right).clamp(cl + 0.02, 1.0);
+                let ct = (old_row_starts[cell.row] + cell.adjust_top).clamp(0.0, 0.98);
+                let cb = (old_row_starts[end_r] + cell.adjust_bottom).clamp(ct + 0.02, 1.0);
+                (cl, ct, cr, cb)
+            })
+            .collect();
+
+        layout.rows = new_rows;
+        layout.cols = new_cols;
+
+        if layout.row_ratios.len() < new_rows {
+            layout.row_ratios.resize(new_rows, 1.0);
+        } else if layout.row_ratios.len() > new_rows {
+            layout.row_ratios.truncate(new_rows);
+        }
+
+        if layout.col_ratios.len() < new_cols {
+            layout.col_ratios.resize(new_cols, 1.0);
+        } else if layout.col_ratios.len() > new_cols {
+            layout.col_ratios.truncate(new_cols);
+        }
+
+        let r_sum_new: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
+        let c_sum_new: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
+
+        let mut new_row_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for r in &layout.row_ratios {
+            acc += r / r_sum_new;
+            new_row_starts.push(acc);
+        }
+        while new_row_starts.len() <= new_rows {
+            new_row_starts.push(1.0);
+        }
+
+        let mut new_col_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for c in &layout.col_ratios {
+            acc += c / c_sum_new;
+            new_col_starts.push(acc);
+        }
+        while new_col_starts.len() <= new_cols {
+            new_col_starts.push(1.0);
+        }
+
+        for (cell, (cl, ct, cr, cb)) in layout.cells.iter_mut().zip(boxes) {
+            cell.col = cell.col.min(new_cols - 1);
+            cell.row = cell.row.min(new_rows - 1);
+            cell.col_span = cell.col_span.clamp(1, new_cols - cell.col);
+            cell.row_span = cell.row_span.clamp(1, new_rows - cell.row);
+
+            let end_c = (cell.col + cell.col_span).min(new_cols);
+            let end_r = (cell.row + cell.row_span).min(new_rows);
+
+            cell.adjust_left = cl - new_col_starts[cell.col];
+            cell.adjust_right = cr - new_col_starts[end_c];
+            cell.adjust_top = ct - new_row_starts[cell.row];
+            cell.adjust_bottom = cb - new_row_starts[end_r];
+        }
+
+        Self::sanitize_layout(layout);
+    }
+
     pub(crate) fn merge_layout_cells(
         layout: &mut WindowLayout,
         start_row: usize,
@@ -3564,11 +3817,20 @@ impl CrosshairApp {
         let adj_t = min_y - row_starts[r1];
         let adj_b = max_y - row_starts[r2];
 
-        // CRITICAL: Remove all cells that intersect the merged area [r1, r2) x [c1, c2)
+        // CRITICAL: Remove all cells that intersect the merged area nominally or visually
         layout.cells.retain(|c| {
             let cr2 = (c.row + c.row_span).min(layout.rows);
             let cc2 = (c.col + c.col_span).min(layout.cols);
-            !(c.row < r2 && cr2 > r1 && c.col < c2 && cc2 > c1)
+            let c_x1 = col_starts[c.col] + c.adjust_left;
+            let c_y1 = row_starts[c.row] + c.adjust_top;
+            let c_x2 = col_starts[cc2] + c.adjust_right;
+            let c_y2 = row_starts[cr2] + c.adjust_bottom;
+            let nominal_intersect = c.row < r2 && cr2 > r1 && c.col < c2 && cc2 > c1;
+            let visual_intersect = c_x1 < max_x - 0.005
+                && c_x2 > min_x + 0.005
+                && c_y1 < max_y - 0.005
+                && c_y2 > min_y + 0.005;
+            !(nominal_intersect || visual_intersect)
         });
 
         let mut target_title = cell_a.target_window_title.clone();
@@ -3910,15 +4172,13 @@ impl CrosshairApp {
                             ui.label(Self::tr_lang(language, "Rows", "Rows"));
                             let mut rows = layout.rows;
                             if ui.add(DragValue::new(&mut rows).range(1..=6)).changed() {
-                                layout.rows = rows;
-                                Self::sanitize_layout(layout);
+                                Self::resize_layout_grid(layout, rows, layout.cols);
                                 live_sync = true;
                             }
                             ui.label(Self::tr_lang(language, "Cols", "Cols"));
                             let mut cols = layout.cols;
                             if ui.add(DragValue::new(&mut cols).range(1..=6)).changed() {
-                                layout.cols = cols;
-                                Self::sanitize_layout(layout);
+                                Self::resize_layout_grid(layout, layout.rows, cols);
                                 live_sync = true;
                             }
                         });
@@ -5242,10 +5502,18 @@ impl CrosshairApp {
                                     Some(s) => s,
                                     None => {
                                         if layout.cols <= layout.rows {
-                                            layout.cols += 1;
+                                            Self::resize_layout_grid(
+                                                layout,
+                                                layout.rows,
+                                                layout.cols + 1,
+                                            );
                                             (pref_r, layout.cols - 1)
                                         } else {
-                                            layout.rows += 1;
+                                            Self::resize_layout_grid(
+                                                layout,
+                                                layout.rows + 1,
+                                                layout.cols,
+                                            );
                                             (layout.rows - 1, pref_c)
                                         }
                                     }
@@ -5915,5 +6183,93 @@ mod tests {
         assert_eq!(merged.row_span, 1);
         assert_eq!(merged.col_span, 2);
         assert_eq!(merged.target_window_title, Some("Win A".to_string()));
+    }
+
+    #[test]
+    fn test_sanitize_layout_eliminates_2d_overlaps() {
+        // Reproduce the scenario from user screenshot:
+        // Cell 0 is nominally at (0, 0), but with visual right at 0.72 and bottom at 0.50.
+        // Cell 1 is nominally at (1, 1), but with visual left at 0.56, right at 0.88, top at 0.42, bottom at 0.52.
+        // Visually they overlap in X in [0.56, 0.72], Y in [0.42, 0.50].
+        let mut layout = WindowLayout {
+            id: 11,
+            name: "Anti-Overlap Test".to_owned(),
+            rows: 2,
+            cols: 2,
+            row_ratios: vec![0.5, 0.5],
+            col_ratios: vec![0.5, 0.5],
+            cells: vec![
+                WindowLayoutCell {
+                    row: 0,
+                    col: 0,
+                    row_span: 1,
+                    col_span: 1,
+                    target_window_title: Some("Cell 0,0".to_string()),
+                    adjust_left: 0.0,
+                    adjust_right: 0.22, // nominal end_col = 1 (x = 0.5), so x2 = 0.72
+                    adjust_top: 0.0,
+                    adjust_bottom: 0.0, // nominal end_row = 1 (y = 0.5), so y2 = 0.50
+                    ..Default::default()
+                },
+                WindowLayoutCell {
+                    row: 1,
+                    col: 1,
+                    row_span: 1,
+                    col_span: 1,
+                    target_window_title: Some("Cell 1,1".to_string()),
+                    adjust_left: 0.06,  // nominal col = 1 (x = 0.5), so x1 = 0.56
+                    adjust_right: -0.12, // nominal end_col = 2 (x = 1.0), so x2 = 0.88
+                    adjust_top: -0.08,  // nominal row = 1 (y = 0.5), so y1 = 0.42
+                    adjust_bottom: 0.02, // nominal end_row = 2 (y = 1.0), so y2 = 1.02 -> clamped to 1.0
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        CrosshairApp::sanitize_layout(&mut layout);
+
+        // Verify that visual overlap has been completely eliminated!
+        let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
+        let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
+        let mut row_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for r in &layout.row_ratios {
+            acc += r / r_sum;
+            row_starts.push(acc);
+        }
+        let mut col_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for c in &layout.col_ratios {
+            acc += c / c_sum;
+            col_starts.push(acc);
+        }
+
+        let c0 = &layout.cells[0];
+        let c1 = &layout.cells[1];
+        let c0_x1 = col_starts[c0.col] + c0.adjust_left;
+        let c0_x2 = col_starts[c0.col + c0.col_span] + c0.adjust_right;
+        let c0_y1 = row_starts[c0.row] + c0.adjust_top;
+        let c0_y2 = row_starts[c0.row + c0.row_span] + c0.adjust_bottom;
+
+        let c1_x1 = col_starts[c1.col] + c1.adjust_left;
+        let c1_x2 = col_starts[c1.col + c1.col_span] + c1.adjust_right;
+        let c1_y1 = row_starts[c1.row] + c1.adjust_top;
+        let c1_y2 = row_starts[c1.row + c1.row_span] + c1.adjust_bottom;
+
+        let ox1 = c0_x1.max(c1_x1);
+        let ox2 = c0_x2.min(c1_x2);
+        let oy1 = c0_y1.max(c1_y1);
+        let oy2 = c0_y2.min(c1_y2);
+
+        let overlap_w = (ox2 - ox1).max(0.0);
+        let overlap_h = (oy2 - oy1).max(0.0);
+
+        assert!(
+            overlap_w <= 0.003 || overlap_h <= 0.003,
+            "Cells must not overlap: overlap_w={}, overlap_h={}",
+            overlap_w,
+            overlap_h
+        );
     }
 }
