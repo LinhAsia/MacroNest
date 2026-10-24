@@ -3026,7 +3026,18 @@ impl CrosshairApp {
                 continue;
             }
             if covered[cell.row][cell.col] {
-                continue;
+                // Collision due to reduced grid size: find any free slot instead of silently dropping
+                if let Some((free_r, free_c)) = (0..rows)
+                    .flat_map(|r| (0..cols).map(move |c| (r, c)))
+                    .find(|&(r, c)| !covered[r][c])
+                {
+                    cell.row = free_r;
+                    cell.col = free_c;
+                    cell.row_span = 1;
+                    cell.col_span = 1;
+                } else {
+                    continue;
+                }
             }
             let mut max_row_span = rows - cell.row;
             let mut max_col_span = cols - cell.col;
@@ -3058,6 +3069,217 @@ impl CrosshairApp {
         }
 
         layout.cells = sanitized_cells;
+    }
+
+    pub(crate) fn compute_empty_layout_slots(
+        layout: &WindowLayout,
+    ) -> Vec<(usize, usize, usize, usize, f32, f32, f32, f32)> {
+        let rows = layout.rows.max(1);
+        let cols = layout.cols.max(1);
+
+        let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
+        let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
+
+        let mut row_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for r in &layout.row_ratios {
+            acc += r / r_sum;
+            row_starts.push(acc);
+        }
+        while row_starts.len() <= rows {
+            row_starts.push(1.0);
+        }
+
+        let mut col_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for c in &layout.col_ratios {
+            acc += c / c_sum;
+            col_starts.push(acc);
+        }
+        while col_starts.len() <= cols {
+            col_starts.push(1.0);
+        }
+
+        let mut cell_boxes: Vec<(f32, f32, f32, f32)> = Vec::new();
+        for cell in &layout.cells {
+            if cell.row < rows && cell.col < cols {
+                let end_r = (cell.row + cell.row_span).min(rows);
+                let end_c = (cell.col + cell.col_span).min(cols);
+                let cl = (col_starts[cell.col] + cell.adjust_left).clamp(0.0, 1.0);
+                let cr = (col_starts[end_c] + cell.adjust_right).clamp(0.0, 1.0);
+                let ct = (row_starts[cell.row] + cell.adjust_top).clamp(0.0, 1.0);
+                let cb = (row_starts[end_r] + cell.adjust_bottom).clamp(0.0, 1.0);
+                if cr > cl + 0.005 && cb > ct + 0.005 {
+                    cell_boxes.push((cl, ct, cr, cb));
+                }
+            }
+        }
+
+        let mut raw_empty_slots: Vec<(usize, usize, usize, usize, f32, f32, f32, f32)> = Vec::new();
+        for r in 0..rows {
+            for c in 0..cols {
+                let nom_l = col_starts[c];
+                let nom_r = col_starts[c + 1];
+                let nom_t = row_starts[r];
+                let nom_b = row_starts[r + 1];
+                let cx = 0.5 * (nom_l + nom_r);
+                let cy = 0.5 * (nom_t + nom_b);
+                let nom_area = (nom_r - nom_l) * (nom_b - nom_t);
+
+                let mut covered = false;
+                for &(cl, ct, cr, cb) in &cell_boxes {
+                    if cx >= cl - 0.005 && cx <= cr + 0.005 && cy >= ct - 0.005 && cy <= cb + 0.005 {
+                        covered = true;
+                        break;
+                    }
+                    let iw = (cr.min(nom_r) - cl.max(nom_l)).max(0.0);
+                    let ih = (cb.min(nom_b) - ct.max(nom_t)).max(0.0);
+                    if nom_area > 0.0001 && (iw * ih) / nom_area > 0.35 {
+                        covered = true;
+                        break;
+                    }
+                }
+
+                if !covered {
+                    let mut x1 = nom_l;
+                    let mut x2 = nom_r;
+                    let mut y1 = nom_t;
+                    let mut y2 = nom_b;
+
+                    if c == 0 {
+                        x1 = 0.0;
+                    }
+                    if c + 1 == cols {
+                        x2 = 1.0;
+                    }
+                    if r == 0 {
+                        y1 = 0.0;
+                    }
+                    if r + 1 == rows {
+                        y2 = 1.0;
+                    }
+
+                    let mut min_right_cl = 1.0f32;
+                    let mut found_right = false;
+                    for &(cl, ct, _cr, cb) in &cell_boxes {
+                        if cb > nom_t + 0.02 && ct < nom_b - 0.02 {
+                            if cl >= nom_l + 0.02 && cl < min_right_cl {
+                                min_right_cl = cl;
+                                found_right = true;
+                            }
+                        }
+                    }
+                    if found_right {
+                        x2 = min_right_cl;
+                    }
+
+                    let mut max_left_cr = 0.0f32;
+                    let mut found_left = false;
+                    for &(_cl, ct, cr, cb) in &cell_boxes {
+                        if cb > nom_t + 0.02 && ct < nom_b - 0.02 {
+                            if cr <= nom_r - 0.02 && cr > max_left_cr {
+                                max_left_cr = cr;
+                                found_left = true;
+                            }
+                        }
+                    }
+                    if found_left {
+                        x1 = max_left_cr;
+                    }
+
+                    let mut min_bottom_ct = 1.0f32;
+                    let mut found_bottom = false;
+                    for &(cl, ct, cr, _cb) in &cell_boxes {
+                        if cr > nom_l + 0.02 && cl < nom_r - 0.02 {
+                            if ct >= nom_t + 0.02 && ct < min_bottom_ct {
+                                min_bottom_ct = ct;
+                                found_bottom = true;
+                            }
+                        }
+                    }
+                    if found_bottom {
+                        y2 = min_bottom_ct;
+                    }
+
+                    let mut max_top_cb = 0.0f32;
+                    let mut found_top = false;
+                    for &(cl, _ct, cr, cb) in &cell_boxes {
+                        if cr > nom_l + 0.02 && cl < nom_r - 0.02 {
+                            if cb <= nom_b - 0.02 && cb > max_top_cb {
+                                max_top_cb = cb;
+                                found_top = true;
+                            }
+                        }
+                    }
+                    if found_top {
+                        y1 = max_top_cb;
+                    }
+
+                    for &(cl, ct, cr, cb) in &cell_boxes {
+                        if cl < x2 - 0.005 && cr > x1 + 0.005 && ct < y2 - 0.005 && cb > y1 + 0.005 {
+                            let overlap_l = (cr - x1).max(0.0);
+                            let overlap_r = (x2 - cl).max(0.0);
+                            let overlap_t = (cb - y1).max(0.0);
+                            let overlap_b = (y2 - ct).max(0.0);
+                            let min_ov = overlap_l.min(overlap_r).min(overlap_t).min(overlap_b);
+                            if min_ov == overlap_r && cl > x1 + 0.02 {
+                                x2 = cl;
+                            } else if min_ov == overlap_l && cr < x2 - 0.02 {
+                                x1 = cr;
+                            } else if min_ov == overlap_b && ct > y1 + 0.02 {
+                                y2 = ct;
+                            } else if min_ov == overlap_t && cb < y2 - 0.02 {
+                                y1 = cb;
+                            }
+                        }
+                    }
+
+                    if x2 > x1 + 0.025 && y2 > y1 + 0.025 {
+                        raw_empty_slots.push((r, c, 1, 1, x1, y1, x2, y2));
+                    }
+                }
+            }
+        }
+
+        let mut merged_empty_slots: Vec<(usize, usize, usize, usize, f32, f32, f32, f32)> = Vec::new();
+        for slot in raw_empty_slots {
+            let (_r, c, r_span, c_span, x1, y1, x2, y2) = slot;
+            if let Some(existing) = merged_empty_slots.iter_mut().find(|e| {
+                e.1 == c
+                    && e.3 == c_span
+                    && (e.4 - x1).abs() < 0.025
+                    && (e.6 - x2).abs() < 0.025
+                    && (e.7 - y1).abs() < 0.025
+            }) {
+                existing.2 += r_span;
+                existing.7 = y2;
+                existing.4 = existing.4.min(x1);
+                existing.6 = existing.6.max(x2);
+            } else {
+                merged_empty_slots.push(slot);
+            }
+        }
+
+        let mut final_empty_slots: Vec<(usize, usize, usize, usize, f32, f32, f32, f32)> = Vec::new();
+        for slot in merged_empty_slots {
+            let (r, _c, r_span, c_span, x1, y1, x2, y2) = slot;
+            if let Some(existing) = final_empty_slots.iter_mut().find(|e| {
+                e.0 == r
+                    && e.2 == r_span
+                    && (e.5 - y1).abs() < 0.025
+                    && (e.7 - y2).abs() < 0.025
+                    && (e.6 - x1).abs() < 0.025
+            }) {
+                existing.3 += c_span;
+                existing.6 = x2;
+                existing.5 = existing.5.min(y1);
+                existing.7 = existing.7.max(y2);
+            } else {
+                final_empty_slots.push(slot);
+            }
+        }
+
+        final_empty_slots
     }
 
     fn get_monitor_layout_metrics() -> MonitorLayoutMetrics {
@@ -3637,10 +3859,6 @@ impl CrosshairApp {
                             let mut rows = layout.rows;
                             if ui.add(DragValue::new(&mut rows).range(1..=6)).changed() {
                                 layout.rows = rows;
-                                for cell in &mut layout.cells {
-                                    cell.adjust_top = 0.0;
-                                    cell.adjust_bottom = 0.0;
-                                }
                                 Self::sanitize_layout(layout);
                                 live_sync = true;
                             }
@@ -3648,10 +3866,6 @@ impl CrosshairApp {
                             let mut cols = layout.cols;
                             if ui.add(DragValue::new(&mut cols).range(1..=6)).changed() {
                                 layout.cols = cols;
-                                for cell in &mut layout.cells {
-                                    cell.adjust_left = 0.0;
-                                    cell.adjust_right = 0.0;
-                                }
                                 Self::sanitize_layout(layout);
                                 live_sync = true;
                             }
@@ -3822,139 +4036,131 @@ impl CrosshairApp {
                             }
 
                             let mut delete_cell = None;
-                            let mut add_cell = None;
+                            let mut add_cell: Option<(usize, usize, usize, usize, f32, f32, f32, f32)> = None;
                             let mut snap_preview = None;
                             let mut merge_action = None;
                             let cells_to_draw = layout.cells.clone();
-                            let mut occupied = vec![vec![false; layout.cols]; layout.rows];
-                            for cell in &cells_to_draw {
-                                if cell.row < layout.rows && cell.col < layout.cols {
-                                    let end_r = (cell.row + cell.row_span).min(layout.rows);
-                                    let end_c = (cell.col + cell.col_span).min(layout.cols);
-                                    for r in cell.row..end_r {
-                                        for c in cell.col..end_c {
-                                            occupied[r][c] = true;
-                                        }
-                                    }
+
+                            let final_empty_slots = Self::compute_empty_layout_slots(layout);
+
+                            for (r, c, r_span, c_span, sx1, sy1, sx2, sy2) in final_empty_slots {
+                                let x1 = grid_rect.min.x + sx1 * grid_w;
+                                let y1 = grid_rect.min.y + sy1 * grid_h;
+                                let x2 = grid_rect.min.x + sx2 * grid_w;
+                                let y2 = grid_rect.min.y + sy2 * grid_h;
+                                let empty_rect = egui::Rect::from_min_max(
+                                    egui::pos2(x1, y1),
+                                    egui::pos2(x2, y2),
+                                )
+                                .shrink(2.0);
+
+                                let empty_id =
+                                    ui.make_persistent_id((layout.id, "empty_slot", r, c));
+                                let empty_resp =
+                                    ui.interact(empty_rect, empty_id, egui::Sense::click());
+                                let is_hovered = empty_resp.hovered();
+
+                                let stroke_color = if is_hovered {
+                                    Color32::from_rgb(0, 190, 255)
+                                } else {
+                                    Color32::from_rgba_unmultiplied(0, 150, 240, 150)
+                                };
+                                let fill = if is_hovered {
+                                    Color32::from_rgba_unmultiplied(0, 140, 230, 45)
+                                } else {
+                                    Color32::from_rgba_unmultiplied(0, 100, 180, 20)
+                                };
+
+                                Self::draw_dashed_line(
+                                    ui.painter(),
+                                    empty_rect.left_top(),
+                                    empty_rect.right_top(),
+                                    egui::Stroke::new(1.5, stroke_color),
+                                    6.0,
+                                    4.0,
+                                );
+                                Self::draw_dashed_line(
+                                    ui.painter(),
+                                    empty_rect.right_top(),
+                                    empty_rect.right_bottom(),
+                                    egui::Stroke::new(1.5, stroke_color),
+                                    6.0,
+                                    4.0,
+                                );
+                                Self::draw_dashed_line(
+                                    ui.painter(),
+                                    empty_rect.right_bottom(),
+                                    empty_rect.left_bottom(),
+                                    egui::Stroke::new(1.5, stroke_color),
+                                    6.0,
+                                    4.0,
+                                );
+                                Self::draw_dashed_line(
+                                    ui.painter(),
+                                    empty_rect.left_bottom(),
+                                    empty_rect.left_top(),
+                                    egui::Stroke::new(1.5, stroke_color),
+                                    6.0,
+                                    4.0,
+                                );
+
+                                ui.painter().rect_filled(empty_rect, 3.0, fill);
+
+                                let btn_size = 38.0f32
+                                    .min(empty_rect.width() - 8.0)
+                                    .min(empty_rect.height() - 8.0)
+                                    .max(18.0);
+                                let plus_rect = egui::Rect::from_center_size(
+                                    empty_rect.center(),
+                                    egui::vec2(btn_size, btn_size),
+                                );
+                                let add_btn = egui::Button::new(Self::material_icon_text(
+                                    0xe145,
+                                    (btn_size * 0.58).clamp(14.0, 22.0),
+                                ))
+                                .fill(if is_hovered {
+                                    Color32::from_rgb(0, 140, 240)
+                                } else {
+                                    Color32::from_rgb(0, 110, 200)
+                                })
+                                .rounding(6.0);
+                                let add_resp = ui.put(plus_rect, add_btn).on_hover_text(
+                                    Self::tr_lang(
+                                        language,
+                                        "Click to add window in this empty area",
+                                        "Nhấn để thêm cửa sổ vào vùng trống này",
+                                    ),
+                                );
+
+                                if is_hovered || add_resp.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                 }
-                            }
 
-                            for r in 0..layout.rows {
-                                for c in 0..layout.cols {
-                                    if !occupied[r][c] {
-                                        let x1 = grid_rect.min.x + col_starts[c] * grid_w;
-                                        let y1 = grid_rect.min.y + row_starts[r] * grid_h;
-                                        let x2 = grid_rect.min.x + col_starts[c + 1] * grid_w;
-                                        let y2 = grid_rect.min.y + row_starts[r + 1] * grid_h;
-                                        let empty_rect = egui::Rect::from_min_max(
-                                            egui::pos2(x1, y1),
-                                            egui::pos2(x2, y2),
-                                        )
-                                        .shrink(2.0);
-
-                                        let empty_id =
-                                            ui.make_persistent_id((layout.id, "empty_slot", r, c));
-                                        let empty_resp =
-                                            ui.interact(empty_rect, empty_id, egui::Sense::click());
-                                        let is_hovered = empty_resp.hovered();
-
-                                        let stroke_color = if is_hovered {
-                                            Color32::from_rgb(0, 190, 255)
-                                        } else {
-                                            Color32::from_rgba_unmultiplied(0, 150, 240, 150)
-                                        };
-                                        let fill = if is_hovered {
-                                            Color32::from_rgba_unmultiplied(0, 140, 230, 45)
-                                        } else {
-                                            Color32::from_rgba_unmultiplied(0, 100, 180, 20)
-                                        };
-
-                                        Self::draw_dashed_line(
-                                            ui.painter(),
-                                            empty_rect.left_top(),
-                                            empty_rect.right_top(),
-                                            egui::Stroke::new(1.5, stroke_color),
-                                            6.0,
-                                            4.0,
-                                        );
-                                        Self::draw_dashed_line(
-                                            ui.painter(),
-                                            empty_rect.right_top(),
-                                            empty_rect.right_bottom(),
-                                            egui::Stroke::new(1.5, stroke_color),
-                                            6.0,
-                                            4.0,
-                                        );
-                                        Self::draw_dashed_line(
-                                            ui.painter(),
-                                            empty_rect.right_bottom(),
-                                            empty_rect.left_bottom(),
-                                            egui::Stroke::new(1.5, stroke_color),
-                                            6.0,
-                                            4.0,
-                                        );
-                                        Self::draw_dashed_line(
-                                            ui.painter(),
-                                            empty_rect.left_bottom(),
-                                            empty_rect.left_top(),
-                                            egui::Stroke::new(1.5, stroke_color),
-                                            6.0,
-                                            4.0,
-                                        );
-
-                                        ui.painter().rect_filled(empty_rect, 3.0, fill);
-
-                                        let btn_size = 38.0f32
-                                            .min(empty_rect.width() - 8.0)
-                                            .min(empty_rect.height() - 8.0)
-                                            .max(18.0);
-                                        let plus_rect = egui::Rect::from_center_size(
-                                            empty_rect.center(),
-                                            egui::vec2(btn_size, btn_size),
-                                        );
-                                        let add_btn = egui::Button::new(Self::material_icon_text(
-                                            0xe145,
-                                            (btn_size * 0.58).clamp(14.0, 22.0),
-                                        ))
-                                        .fill(if is_hovered {
-                                            Color32::from_rgb(0, 140, 240)
-                                        } else {
-                                            Color32::from_rgb(0, 110, 200)
-                                        })
-                                        .rounding(6.0);
-                                        let add_resp = ui.put(plus_rect, add_btn).on_hover_text(
-                                            Self::tr_lang(
-                                                language,
-                                                "Click to add window in this empty area",
-                                                "Nhấn để thêm cửa sổ vào vùng trống này",
-                                            ),
-                                        );
-
-                                        if is_hovered || add_resp.hovered() {
-                                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                                        }
-
-                                        if empty_rect.height() >= 65.0 && empty_rect.width() >= 65.0 {
-                                            ui.painter().text(
-                                                empty_rect.center() + egui::vec2(0.0, btn_size * 0.5 + 11.0),
-                                                egui::Align2::CENTER_CENTER,
-                                                Self::tr_lang(language, "Add Window", "Thêm cửa sổ"),
-                                                egui::FontId::proportional(11.5),
-                                                Color32::from_rgb(180, 215, 255),
-                                            );
-                                        }
-
-                                        if empty_resp.clicked() || add_resp.clicked() {
-                                            add_cell = Some((r, c));
-                                        }
-
-                                        empty_resp.on_hover_text(Self::tr_lang(
-                                            language,
-                                            "Click to add window in this empty area",
-                                            "Nhấn để thêm cửa sổ vào vùng trống này",
-                                        ));
-                                    }
+                                if empty_rect.height() >= 65.0 && empty_rect.width() >= 65.0 {
+                                    ui.painter().text(
+                                        empty_rect.center() + egui::vec2(0.0, btn_size * 0.5 + 11.0),
+                                        egui::Align2::CENTER_CENTER,
+                                        Self::tr_lang(language, "Add Window", "Thêm cửa sổ"),
+                                        egui::FontId::proportional(11.5),
+                                        Color32::from_rgb(180, 215, 255),
+                                    );
                                 }
+
+                                if empty_resp.clicked() || add_resp.clicked() {
+                                    let end_c = (c + c_span).min(layout.cols);
+                                    let end_r = (r + r_span).min(layout.rows);
+                                    let adj_l = sx1 - col_starts[c];
+                                    let adj_r = sx2 - col_starts[end_c];
+                                    let adj_t = sy1 - row_starts[r];
+                                    let adj_b = sy2 - row_starts[end_r];
+                                    add_cell = Some((r, c, r_span, c_span, adj_l, adj_r, adj_t, adj_b));
+                                }
+
+                                empty_resp.on_hover_text(Self::tr_lang(
+                                    language,
+                                    "Click to add window in this empty area",
+                                    "Nhấn để thêm cửa sổ vào vùng trống này",
+                                ));
                             }
                             let merge_preview_bounds = self.drag_start_layout_cell.and_then(
                                 |(drag_layout, drag_row, drag_col)| {
@@ -4941,19 +5147,19 @@ impl CrosshairApp {
                                 live_sync = true;
                             }
 
-                            if let Some((r, c)) = add_cell {
+                            if let Some((r, c, r_span, c_span, adj_l, adj_r, adj_t, adj_b)) = add_cell {
                                 layout.cells.push(WindowLayoutCell {
                                     row: r,
                                     col: c,
-                                    row_span: 1,
-                                    col_span: 1,
+                                    row_span: r_span,
+                                    col_span: c_span,
                                     target_window_title: None,
                                     extra_target_window_titles: Vec::new(),
                                     match_duplicate_window_titles: true,
-                                    adjust_left: 0.0,
-                                    adjust_right: 0.0,
-                                    adjust_top: 0.0,
-                                    adjust_bottom: 0.0,
+                                    adjust_left: adj_l,
+                                    adjust_right: adj_r,
+                                    adjust_top: adj_t,
+                                    adjust_bottom: adj_b,
                                 });
                                 Self::sanitize_layout(layout);
                                 self.selected_layout_cell = Some((layout.id, r, c));
@@ -5482,5 +5688,44 @@ mod tests {
         assert_eq!(layout.col_ratios[0], 0.3);
         assert_eq!(layout.col_ratios[1], 0.7);
         assert_eq!(layout.col_ratios[2], 0.5);
+    }
+
+    #[test]
+    fn test_compute_empty_layout_slots_hugs_window_and_avoids_overlap() {
+        // 2x2 grid where Android Device spans the right column (col 1) from y=0 to y=1,
+        // and adjusted leftwards/rightwards so it occupies [0.6, 1.0] in X and [0.0, 1.0] in Y.
+        let layout = WindowLayout {
+            id: 3,
+            name: "Hugging Test".to_owned(),
+            rows: 2,
+            cols: 2,
+            row_ratios: vec![0.5, 0.5],
+            col_ratios: vec![0.5, 0.5],
+            cells: vec![WindowLayoutCell {
+                row: 0,
+                col: 1,
+                row_span: 1,
+                col_span: 1,
+                adjust_left: 0.1,    // x starts at 0.5 + 0.1 = 0.6
+                adjust_right: 0.0,   // x ends at 1.0
+                adjust_top: 0.0,     // y starts at 0.0
+                adjust_bottom: 0.5,  // y ends at 0.5 + 0.5 = 1.0
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let empty_slots = CrosshairApp::compute_empty_layout_slots(&layout);
+        // There should be exactly 1 merged empty slot on the left, NOT overlapping Android Device!
+        assert_eq!(empty_slots.len(), 1, "Expected exactly 1 cohesive empty slot on the left");
+        let (r, c, r_span, c_span, x1, y1, x2, y2) = empty_slots[0];
+        assert_eq!(r, 0);
+        assert_eq!(c, 0);
+        assert_eq!(r_span, 2);
+        assert_eq!(c_span, 1);
+        assert!((x1 - 0.0).abs() < 0.01, "x1 must be 0.0");
+        assert!((x2 - 0.6).abs() < 0.01, "x2 must hug Android Device border at 0.6");
+        assert!((y1 - 0.0).abs() < 0.01, "y1 must be 0.0");
+        assert!((y2 - 1.0).abs() < 0.01, "y2 must be 1.0");
     }
 }
