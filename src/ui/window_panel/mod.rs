@@ -3073,7 +3073,7 @@ impl CrosshairApp {
 
     pub(crate) fn compute_empty_layout_slots(
         layout: &WindowLayout,
-    ) -> Vec<(usize, usize, usize, usize, f32, f32, f32, f32)> {
+    ) -> Vec<(f32, f32, f32, f32)> {
         let rows = layout.rows.max(1);
         let cols = layout.cols.max(1);
 
@@ -3115,171 +3115,113 @@ impl CrosshairApp {
             }
         }
 
-        let mut raw_empty_slots: Vec<(usize, usize, usize, usize, f32, f32, f32, f32)> = Vec::new();
-        for r in 0..rows {
-            for c in 0..cols {
-                let nom_l = col_starts[c];
-                let nom_r = col_starts[c + 1];
-                let nom_t = row_starts[r];
-                let nom_b = row_starts[r + 1];
-                let cx = 0.5 * (nom_l + nom_r);
-                let cy = 0.5 * (nom_t + nom_b);
-                let nom_area = (nom_r - nom_l) * (nom_b - nom_t);
+        // Collect all horizontal and vertical boundary lines
+        let mut x_coords = vec![0.0f32, 1.0f32];
+        let mut y_coords = vec![0.0f32, 1.0f32];
+        for &(cl, ct, cr, cb) in &cell_boxes {
+            x_coords.push(cl);
+            x_coords.push(cr);
+            y_coords.push(ct);
+            y_coords.push(cb);
+        }
 
-                let mut covered = false;
-                for &(cl, ct, cr, cb) in &cell_boxes {
-                    if cx >= cl - 0.005 && cx <= cr + 0.005 && cy >= ct - 0.005 && cy <= cb + 0.005 {
-                        covered = true;
-                        break;
-                    }
-                    let iw = (cr.min(nom_r) - cl.max(nom_l)).max(0.0);
-                    let ih = (cb.min(nom_b) - ct.max(nom_t)).max(0.0);
-                    if nom_area > 0.0001 && (iw * ih) / nom_area > 0.35 {
-                        covered = true;
-                        break;
+        let dedup = |mut coords: Vec<f32>| -> Vec<f32> {
+            coords.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let mut out: Vec<f32> = Vec::new();
+            for c in coords {
+                let c = c.clamp(0.0, 1.0);
+                if let Some(last) = out.last_mut() {
+                    if (c - *last).abs() < 0.008 {
+                        continue;
                     }
                 }
+                out.push(c);
+            }
+            if out.is_empty() {
+                return vec![0.0, 1.0];
+            }
+            if let Some(first) = out.first_mut() {
+                if *first > 0.008 {
+                    out.insert(0, 0.0);
+                } else {
+                    *first = 0.0;
+                }
+            }
+            if let Some(last) = out.last_mut() {
+                if (1.0 - *last).abs() > 0.008 {
+                    out.push(1.0);
+                } else {
+                    *last = 1.0;
+                }
+            }
+            out
+        };
 
-                if !covered {
-                    let mut x1 = nom_l;
-                    let mut x2 = nom_r;
-                    let mut y1 = nom_t;
-                    let mut y2 = nom_b;
+        let x_splits = dedup(x_coords);
+        let y_splits = dedup(y_coords);
 
-                    if c == 0 {
-                        x1 = 0.0;
-                    }
-                    if c + 1 == cols {
-                        x2 = 1.0;
-                    }
-                    if r == 0 {
-                        y1 = 0.0;
-                    }
-                    if r + 1 == rows {
-                        y2 = 1.0;
-                    }
+        if x_splits.len() < 2 || y_splits.len() < 2 {
+            return Vec::new();
+        }
 
-                    let mut min_right_cl = 1.0f32;
-                    let mut found_right = false;
-                    for &(cl, ct, _cr, cb) in &cell_boxes {
-                        if cb > nom_t + 0.02 && ct < nom_b - 0.02 {
-                            if cl >= nom_l + 0.02 && cl < min_right_cl {
-                                min_right_cl = cl;
-                                found_right = true;
+        let p = x_splits.len() - 1;
+        let q = y_splits.len() - 1;
+
+        let mut is_empty = vec![vec![false; q]; p];
+        for i in 0..p {
+            for j in 0..q {
+                let mx = 0.5 * (x_splits[i] + x_splits[i + 1]);
+                let my = 0.5 * (y_splits[j] + y_splits[j + 1]);
+                let occupied = cell_boxes.iter().any(|&(cl, ct, cr, cb)| {
+                    mx >= cl - 0.002 && mx <= cr + 0.002 && my >= ct - 0.002 && my <= cb + 0.002
+                });
+                is_empty[i][j] = !occupied;
+            }
+        }
+
+        // Decompose the 2D empty cell grid into maximal empty rectangles (horizontal-first merge)
+        let mut visited = vec![vec![false; q]; p];
+        let mut empty_rectangles: Vec<(f32, f32, f32, f32)> = Vec::new();
+
+        for j in 0..q {
+            for i in 0..p {
+                if is_empty[i][j] && !visited[i][j] {
+                    let mut i2 = i;
+                    while i2 < p && is_empty[i2][j] && !visited[i2][j] {
+                        i2 += 1;
+                    }
+                    let mut j2 = j + 1;
+                    while j2 < q {
+                        let mut can_expand = true;
+                        for test_i in i..i2 {
+                            if !is_empty[test_i][j2] || visited[test_i][j2] {
+                                can_expand = false;
+                                break;
                             }
                         }
-                    }
-                    if found_right {
-                        x2 = min_right_cl;
-                    }
-
-                    let mut max_left_cr = 0.0f32;
-                    let mut found_left = false;
-                    for &(_cl, ct, cr, cb) in &cell_boxes {
-                        if cb > nom_t + 0.02 && ct < nom_b - 0.02 {
-                            if cr <= nom_r - 0.02 && cr > max_left_cr {
-                                max_left_cr = cr;
-                                found_left = true;
-                            }
+                        if can_expand {
+                            j2 += 1;
+                        } else {
+                            break;
                         }
                     }
-                    if found_left {
-                        x1 = max_left_cr;
-                    }
-
-                    let mut min_bottom_ct = 1.0f32;
-                    let mut found_bottom = false;
-                    for &(cl, ct, cr, _cb) in &cell_boxes {
-                        if cr > nom_l + 0.02 && cl < nom_r - 0.02 {
-                            if ct >= nom_t + 0.02 && ct < min_bottom_ct {
-                                min_bottom_ct = ct;
-                                found_bottom = true;
-                            }
+                    for visit_j in j..j2 {
+                        for visit_i in i..i2 {
+                            visited[visit_i][visit_j] = true;
                         }
                     }
-                    if found_bottom {
-                        y2 = min_bottom_ct;
-                    }
-
-                    let mut max_top_cb = 0.0f32;
-                    let mut found_top = false;
-                    for &(cl, _ct, cr, cb) in &cell_boxes {
-                        if cr > nom_l + 0.02 && cl < nom_r - 0.02 {
-                            if cb <= nom_b - 0.02 && cb > max_top_cb {
-                                max_top_cb = cb;
-                                found_top = true;
-                            }
-                        }
-                    }
-                    if found_top {
-                        y1 = max_top_cb;
-                    }
-
-                    for &(cl, ct, cr, cb) in &cell_boxes {
-                        if cl < x2 - 0.005 && cr > x1 + 0.005 && ct < y2 - 0.005 && cb > y1 + 0.005 {
-                            let overlap_l = (cr - x1).max(0.0);
-                            let overlap_r = (x2 - cl).max(0.0);
-                            let overlap_t = (cb - y1).max(0.0);
-                            let overlap_b = (y2 - ct).max(0.0);
-                            let min_ov = overlap_l.min(overlap_r).min(overlap_t).min(overlap_b);
-                            if min_ov == overlap_r && cl > x1 + 0.02 {
-                                x2 = cl;
-                            } else if min_ov == overlap_l && cr < x2 - 0.02 {
-                                x1 = cr;
-                            } else if min_ov == overlap_b && ct > y1 + 0.02 {
-                                y2 = ct;
-                            } else if min_ov == overlap_t && cb < y2 - 0.02 {
-                                y1 = cb;
-                            }
-                        }
-                    }
-
-                    if x2 > x1 + 0.025 && y2 > y1 + 0.025 {
-                        raw_empty_slots.push((r, c, 1, 1, x1, y1, x2, y2));
+                    let x1 = x_splits[i];
+                    let x2 = x_splits[i2];
+                    let y1 = y_splits[j];
+                    let y2 = y_splits[j2];
+                    if x2 > x1 + 0.015 && y2 > y1 + 0.015 {
+                        empty_rectangles.push((x1, y1, x2, y2));
                     }
                 }
             }
         }
 
-        let mut merged_empty_slots: Vec<(usize, usize, usize, usize, f32, f32, f32, f32)> = Vec::new();
-        for slot in raw_empty_slots {
-            let (_r, c, r_span, c_span, x1, y1, x2, y2) = slot;
-            if let Some(existing) = merged_empty_slots.iter_mut().find(|e| {
-                e.1 == c
-                    && e.3 == c_span
-                    && (e.4 - x1).abs() < 0.025
-                    && (e.6 - x2).abs() < 0.025
-                    && (e.7 - y1).abs() < 0.025
-            }) {
-                existing.2 += r_span;
-                existing.7 = y2;
-                existing.4 = existing.4.min(x1);
-                existing.6 = existing.6.max(x2);
-            } else {
-                merged_empty_slots.push(slot);
-            }
-        }
-
-        let mut final_empty_slots: Vec<(usize, usize, usize, usize, f32, f32, f32, f32)> = Vec::new();
-        for slot in merged_empty_slots {
-            let (r, _c, r_span, c_span, x1, y1, x2, y2) = slot;
-            if let Some(existing) = final_empty_slots.iter_mut().find(|e| {
-                e.0 == r
-                    && e.2 == r_span
-                    && (e.5 - y1).abs() < 0.025
-                    && (e.7 - y2).abs() < 0.025
-                    && (e.6 - x1).abs() < 0.025
-            }) {
-                existing.3 += c_span;
-                existing.6 = x2;
-                existing.5 = existing.5.min(y1);
-                existing.7 = existing.7.max(y2);
-            } else {
-                final_empty_slots.push(slot);
-            }
-        }
-
-        final_empty_slots
+        empty_rectangles
     }
 
     fn get_monitor_layout_metrics() -> MonitorLayoutMetrics {
@@ -4036,14 +3978,14 @@ impl CrosshairApp {
                             }
 
                             let mut delete_cell = None;
-                            let mut add_cell: Option<(usize, usize, usize, usize, f32, f32, f32, f32)> = None;
+                            let mut add_cell: Option<(f32, f32, f32, f32)> = None;
                             let mut snap_preview = None;
                             let mut merge_action = None;
                             let cells_to_draw = layout.cells.clone();
 
                             let final_empty_slots = Self::compute_empty_layout_slots(layout);
 
-                            for (r, c, r_span, c_span, sx1, sy1, sx2, sy2) in final_empty_slots {
+                            for (idx, &(sx1, sy1, sx2, sy2)) in final_empty_slots.iter().enumerate() {
                                 let x1 = grid_rect.min.x + sx1 * grid_w;
                                 let y1 = grid_rect.min.y + sy1 * grid_h;
                                 let x2 = grid_rect.min.x + sx2 * grid_w;
@@ -4055,7 +3997,7 @@ impl CrosshairApp {
                                 .shrink(2.0);
 
                                 let empty_id =
-                                    ui.make_persistent_id((layout.id, "empty_slot", r, c));
+                                    ui.make_persistent_id((layout.id, "empty_slot", idx));
                                 let empty_resp =
                                     ui.interact(empty_rect, empty_id, egui::Sense::click());
                                 let is_hovered = empty_resp.hovered();
@@ -4147,13 +4089,7 @@ impl CrosshairApp {
                                 }
 
                                 if empty_resp.clicked() || add_resp.clicked() {
-                                    let end_c = (c + c_span).min(layout.cols);
-                                    let end_r = (r + r_span).min(layout.rows);
-                                    let adj_l = sx1 - col_starts[c];
-                                    let adj_r = sx2 - col_starts[end_c];
-                                    let adj_t = sy1 - row_starts[r];
-                                    let adj_b = sy2 - row_starts[end_r];
-                                    add_cell = Some((r, c, r_span, c_span, adj_l, adj_r, adj_t, adj_b));
+                                    add_cell = Some((sx1, sy1, sx2, sy2));
                                 }
 
                                 empty_resp.on_hover_text(Self::tr_lang(
@@ -5147,12 +5083,96 @@ impl CrosshairApp {
                                 live_sync = true;
                             }
 
-                            if let Some((r, c, r_span, c_span, adj_l, adj_r, adj_t, adj_b)) = add_cell {
+                            if let Some((x1, y1, x2, y2)) = add_cell {
+                                let used_slots: std::collections::HashSet<(usize, usize)> = layout
+                                    .cells
+                                    .iter()
+                                    .map(|c| (c.row, c.col))
+                                    .collect();
+
+                                let cx = 0.5 * (x1 + x2);
+                                let cy = 0.5 * (y1 + y2);
+
+                                let pref_c = (0..layout.cols)
+                                    .min_by(|&a, &b| {
+                                        let da = (0.5 * (col_starts[a] + col_starts[a + 1]) - cx).abs();
+                                        let db = (0.5 * (col_starts[b] + col_starts[b + 1]) - cx).abs();
+                                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                                    })
+                                    .unwrap_or(0);
+                                let pref_r = (0..layout.rows)
+                                    .min_by(|&a, &b| {
+                                        let da = (0.5 * (row_starts[a] + row_starts[a + 1]) - cy).abs();
+                                        let db = (0.5 * (row_starts[b] + row_starts[b + 1]) - cy).abs();
+                                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                                    })
+                                    .unwrap_or(0);
+
+                                let mut chosen = None;
+                                if !used_slots.contains(&(pref_r, pref_c)) {
+                                    chosen = Some((pref_r, pref_c));
+                                } else {
+                                    for r in 0..layout.rows {
+                                        for c in 0..layout.cols {
+                                            if !used_slots.contains(&(r, c)) {
+                                                chosen = Some((r, c));
+                                                break;
+                                            }
+                                        }
+                                        if chosen.is_some() {
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                let (r, c) = match chosen {
+                                    Some(s) => s,
+                                    None => {
+                                        if layout.cols <= layout.rows {
+                                            layout.cols += 1;
+                                            (pref_r, layout.cols - 1)
+                                        } else {
+                                            layout.rows += 1;
+                                            (layout.rows - 1, pref_c)
+                                        }
+                                    }
+                                };
+
+                                Self::sanitize_layout(layout);
+
+                                let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
+                                let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
+                                let mut new_col_starts = vec![0.0];
+                                let mut acc = 0.0f32;
+                                for c_ratio in &layout.col_ratios {
+                                    acc += c_ratio / c_sum;
+                                    new_col_starts.push(acc);
+                                }
+                                while new_col_starts.len() <= layout.cols {
+                                    new_col_starts.push(1.0);
+                                }
+                                let mut new_row_starts = vec![0.0];
+                                let mut acc = 0.0f32;
+                                for r_ratio in &layout.row_ratios {
+                                    acc += r_ratio / r_sum;
+                                    new_row_starts.push(acc);
+                                }
+                                while new_row_starts.len() <= layout.rows {
+                                    new_row_starts.push(1.0);
+                                }
+
+                                let end_c = (c + 1).min(layout.cols);
+                                let end_r = (r + 1).min(layout.rows);
+                                let adj_l = x1 - new_col_starts[c];
+                                let adj_r = x2 - new_col_starts[end_c];
+                                let adj_t = y1 - new_row_starts[r];
+                                let adj_b = y2 - new_row_starts[end_r];
+
                                 layout.cells.push(WindowLayoutCell {
                                     row: r,
                                     col: c,
-                                    row_span: r_span,
-                                    col_span: c_span,
+                                    row_span: 1,
+                                    col_span: 1,
                                     target_window_title: None,
                                     extra_target_window_titles: Vec::new(),
                                     match_duplicate_window_titles: true,
@@ -5718,14 +5738,75 @@ mod tests {
         let empty_slots = CrosshairApp::compute_empty_layout_slots(&layout);
         // There should be exactly 1 merged empty slot on the left, NOT overlapping Android Device!
         assert_eq!(empty_slots.len(), 1, "Expected exactly 1 cohesive empty slot on the left");
-        let (r, c, r_span, c_span, x1, y1, x2, y2) = empty_slots[0];
-        assert_eq!(r, 0);
-        assert_eq!(c, 0);
-        assert_eq!(r_span, 2);
-        assert_eq!(c_span, 1);
+        let (x1, y1, x2, y2) = empty_slots[0];
         assert!((x1 - 0.0).abs() < 0.01, "x1 must be 0.0");
         assert!((x2 - 0.6).abs() < 0.01, "x2 must hug Android Device border at 0.6");
         assert!((y1 - 0.0).abs() < 0.01, "y1 must be 0.0");
         assert!((y2 - 1.0).abs() < 0.01, "y2 must be 1.0");
+    }
+
+    #[test]
+    fn test_compute_empty_layout_slots_user_screenshot_three_rectangles() {
+        // Reproduce exact user screenshot:
+        // Window 1 (Android Device): [0.69, 1.0] in X, [0.0, 0.63] in Y
+        // Window 2 (1,1): [0.49, 0.69] in X, [0.63, 1.0] in Y
+        let layout = WindowLayout {
+            id: 4,
+            name: "Three Rectangles Screenshot".to_owned(),
+            rows: 2,
+            cols: 2,
+            row_ratios: vec![0.5, 0.5],
+            col_ratios: vec![0.5, 0.5],
+            cells: vec![
+                WindowLayoutCell {
+                    row: 0,
+                    col: 1,
+                    row_span: 1,
+                    col_span: 1,
+                    adjust_left: 0.19,   // 0.5 + 0.19 = 0.69
+                    adjust_right: 0.0,   // 1.0
+                    adjust_top: 0.0,     // 0.0
+                    adjust_bottom: 0.13, // 0.5 + 0.13 = 0.63
+                    ..Default::default()
+                },
+                WindowLayoutCell {
+                    row: 1,
+                    col: 1,
+                    row_span: 1,
+                    col_span: 1,
+                    adjust_left: -0.01,  // 0.5 - 0.01 = 0.49
+                    adjust_right: -0.31, // 1.0 - 0.31 = 0.69
+                    adjust_top: 0.13,    // 0.5 + 0.13 = 0.63
+                    adjust_bottom: 0.0,  // 1.0
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+
+        let empty_slots = CrosshairApp::compute_empty_layout_slots(&layout);
+        // Must decompose the empty space into EXACTLY 3 rectangles filling 100% of empty space!
+        assert_eq!(empty_slots.len(), 3, "Expected exactly 3 empty rectangles as requested by user");
+
+        // Top-left rectangle: [0.0, 0.69] x [0.0, 0.63]
+        let r1 = empty_slots[0];
+        assert!((r1.0 - 0.0).abs() < 0.02);
+        assert!((r1.1 - 0.0).abs() < 0.02);
+        assert!((r1.2 - 0.69).abs() < 0.02);
+        assert!((r1.3 - 0.63).abs() < 0.02);
+
+        // Bottom-left rectangle: [0.0, 0.49] x [0.63, 1.0]
+        let r2 = empty_slots[1];
+        assert!((r2.0 - 0.0).abs() < 0.02);
+        assert!((r2.1 - 0.63).abs() < 0.02);
+        assert!((r2.2 - 0.49).abs() < 0.02);
+        assert!((r2.3 - 1.0).abs() < 0.02);
+
+        // Bottom-right rectangle (under Android Device): [0.69, 1.0] x [0.63, 1.0]
+        let r3 = empty_slots[2];
+        assert!((r3.0 - 0.69).abs() < 0.02);
+        assert!((r3.1 - 0.63).abs() < 0.02);
+        assert!((r3.2 - 1.0).abs() < 0.02);
+        assert!((r3.3 - 1.0).abs() < 0.02);
     }
 }
