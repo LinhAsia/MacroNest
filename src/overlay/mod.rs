@@ -263,7 +263,7 @@ mod windows_overlay {
 
     const MENU_SHOW: usize = 2002;
     const MENU_EXIT: usize = 2003;
-    static SUPPRESSED_MACRO_HOTKEYS: Lazy<Mutex<HashSet<i32>>> =
+    pub(crate) static SUPPRESSED_MACRO_HOTKEYS: Lazy<Mutex<HashSet<i32>>> =
         Lazy::new(|| Mutex::new(HashSet::new()));
     static MEMORY_POINTER_ENTRIES: Lazy<Mutex<Vec<crate::model::MemoryPointerEntry>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
@@ -2752,7 +2752,7 @@ mod windows_overlay {
         groq_settings: crate::model::GroqSettings,
         macro_groups: Vec<MacroGroup>,
         active_macro_folder_scope: MacroFolderScope,
-        macros_master_enabled: bool,
+        pub(crate) macros_master_enabled: bool,
         windows_key_locked: bool,
         macros_master_hotkey: Option<HotkeyBinding>,
         vietnamese_input_enabled: bool,
@@ -3359,6 +3359,67 @@ mod windows_overlay {
             let mut size_wnd = SIZE {
                 cx: target_w,
                 cy: target_h,
+            };
+            let mut pt_src = POINT { x: 0, y: 0 };
+            let mut blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: pin_opacity(preset.opacity_percent),
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
+
+            UpdateLayeredWindow(
+                pin_hwnd,
+                Some(self.screen_dc),
+                Some(&mut pt_dst),
+                Some(&mut size_wnd),
+                Some(self.mem_dc),
+                Some(&mut pt_src),
+                COLORREF(0),
+                Some(&mut blend),
+                ULW_ALPHA,
+            )
+            .is_ok()
+        }
+
+        unsafe fn present_bgra(
+            &mut self,
+            pin_hwnd: HWND,
+            preset: &PinPreset,
+            bgra: &[u8],
+            target_w: usize,
+            target_h: usize,
+        ) -> bool {
+            let tw = target_w as i32;
+            let th = target_h as i32;
+            if !self.ensure_target_surface(tw, th) {
+                return false;
+            }
+
+            self.ensure_source_bitmap_info(target_w, target_h);
+            let _ = StretchDIBits(
+                self.mem_dc,
+                0,
+                0,
+                tw,
+                th,
+                0,
+                0,
+                tw,
+                th,
+                Some(bgra.as_ptr() as *const c_void),
+                &self.source_bitmap_info,
+                DIB_RGB_COLORS,
+                SRCCOPY,
+            );
+
+            let mut pt_dst = POINT {
+                x: preset.x,
+                y: preset.y,
+            };
+            let mut size_wnd = SIZE {
+                cx: tw,
+                cy: th,
             };
             let mut pt_src = POINT { x: 0, y: 0 };
             let mut blend = BLENDFUNCTION {
@@ -6597,14 +6658,13 @@ mod windows_overlay {
         }
 
         let master_toggle = {
-            let mut hook_state = HOOK_STATE.lock();
+            let hook_state = HOOK_STATE.lock();
             let matches_master_hotkey = hook_state
                 .macros_master_hotkey
                 .as_ref()
                 .is_some_and(|hotkey| hotkey::binding_matches(hotkey, binding));
             if matches_master_hotkey {
-                hook_state.macros_master_enabled = !hook_state.macros_master_enabled;
-                let enabled = hook_state.macros_master_enabled;
+                let enabled = !hook_state.macros_master_enabled;
                 let status = if enabled {
                     "Enabled macros globally.".to_owned()
                 } else {
@@ -6616,6 +6676,8 @@ mod windows_overlay {
             }
         };
         if let Some((enabled, status)) = master_toggle {
+            apply_macros_master_enabled(enabled, None);
+            increment_press_trigger_suppression(&binding.key);
             send_ui_command(UiCommand::SetMacrosMasterEnabled(enabled, status));
             send_overlay_command(OverlayCommand::SetMacrosMasterEnabled(enabled));
             return Some(true);
@@ -6921,6 +6983,11 @@ mod windows_overlay {
         let suppressed_press_release = is_press_trigger_suppressed(&binding.key);
         if suppressed_press_release {
             decrement_press_trigger_suppression(&binding.key);
+        }
+
+        let macros_master_enabled = HOOK_STATE.lock().macros_master_enabled;
+        if !macros_master_enabled {
+            return suppressed_press_release;
         }
 
         let mut release_matches: Vec<(MacroPreset, Option<String>, Vec<String>, bool)> = Vec::new();
@@ -10207,24 +10274,7 @@ mod windows_overlay {
                 }
 
                 OverlayCommand::SetMacrosMasterEnabled(enabled) => {
-                    let mut hook_state = HOOK_STATE.lock();
-                    hook_state.macros_master_enabled = enabled;
-                    if !enabled {
-                        hook_state.locked_inputs.clear();
-                        hook_state.press_trigger_suppression.clear();
-                        hook_state.active_hold_macros.clear();
-                    }
-
-                    drop(hook_state);
-                    let _ = update_tray_icon(hwnd, enabled);
-                    if !enabled {
-                        stop_all_active_macros_and_overlays();
-                        reset_window_focus_dispatch_guard();
-                    } else {
-                        reset_window_focus_dispatch_guard();
-                        SUPPRESSED_MACRO_HOTKEYS.lock().clear();
-                        trigger_window_focus_macros(None);
-                    }
+                    apply_macros_master_enabled(enabled, Some(hwnd));
                 }
 
                 OverlayCommand::SetWindowsKeyLocked(locked) => {
@@ -20627,6 +20677,52 @@ mod windows_overlay {
         crate::window_list::close_window_capture_session();
     }
 
+    pub(crate) fn render_transformed_pin_pixels(
+        src_rgba: &[u8],
+        src_w: usize,
+        src_h: usize,
+        target_w: usize,
+        target_h: usize,
+        flip_h: bool,
+        flip_v: bool,
+        rotation_deg: f32,
+    ) -> Option<Vec<u8>> {
+        use tiny_skia::{FilterQuality, Paint, Pattern, Pixmap, PixmapRef, Rect, SpreadMode, Transform};
+
+        let src_ref = PixmapRef::from_bytes(src_rgba, src_w as u32, src_h as u32)?;
+        let mut dest = Pixmap::new(target_w as u32, target_h as u32)?;
+
+        let flip_x = if flip_h { -1.0 } else { 1.0 };
+        let flip_y = if flip_v { -1.0 } else { 1.0 };
+        let scale_x = (target_w as f32 / src_w as f32) * flip_x;
+        let scale_y = (target_h as f32 / src_h as f32) * flip_y;
+
+        let transform = Transform::from_translate(-(src_w as f32) / 2.0, -(src_h as f32) / 2.0)
+            .post_scale(scale_x, scale_y)
+            .post_rotate(rotation_deg)
+            .post_translate(target_w as f32 / 2.0, target_h as f32 / 2.0);
+
+        let paint = Paint {
+            shader: Pattern::new(
+                src_ref,
+                SpreadMode::Pad,
+                FilterQuality::Bilinear,
+                1.0,
+                transform,
+            ),
+            ..Default::default()
+        };
+
+        let rect = Rect::from_xywh(0.0, 0.0, target_w as f32, target_h as f32)?;
+        dest.fill_rect(rect, &paint, Transform::identity(), None);
+
+        let mut bgra = dest.take();
+        for pixel in bgra.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        Some(bgra)
+    }
+
     fn spawn_bin_pin_thread(preset_id: u32, raw_source_hwnd: HWND, raw_pin_hwnd: HWND) {
         let previous = ACTIVE_BIN_PIN_STOP.lock().take();
         if let Some(stop_flag) = previous {
@@ -20678,7 +20774,12 @@ mod windows_overlay {
                     break;
                 };
 
-                if !preset.binary_filter {
+                let needs_custom_render = preset.binary_filter
+                    || preset.flip_horizontal
+                    || preset.flip_vertical
+                    || preset.rotation_degrees.abs() > 0.001;
+
+                if !needs_custom_render {
                     break;
                 }
 
@@ -20712,13 +20813,9 @@ mod windows_overlay {
                     continue;
                 }
 
-                let threshold = preset.binary_threshold;
-                let threshold_sq = (threshold as i32).pow(2);
-                let binary_mode = preset.binary_mode;
-                let transparent_black = preset.binary_transparent_black;
-                let transparent_white = preset.binary_transparent_white;
-                let target_colors = preset.binary_target_colors.as_slice();
-                let single_target_color = preset.binary_target_color;
+                let target_w = preset.width.max(1) as usize;
+                let target_h = preset.height.max(1) as usize;
+
                 let renderer_ref = if let Some(existing) = renderer.as_mut() {
                     existing
                 } else {
@@ -20727,61 +20824,108 @@ mod windows_overlay {
                     };
                     renderer.insert(created)
                 };
-                let binarized = renderer_ref.binarized_mut(crop_w * crop_h * 4);
 
-                for y in 0..crop_h {
-                    let src_row_offset = (crop_y + y) * width * 4;
-                    let dst_row_offset = y * crop_w * 4;
-                    for x in 0..crop_w {
-                        let src_pixel_offset = src_row_offset + (crop_x + x) * 4;
-                        let dst_pixel_offset = dst_row_offset + x * 4;
+                let mut buffer_rgba = vec![0u8; crop_w * crop_h * 4];
 
-                        let r = frame.rgba[src_pixel_offset];
-                        let g = frame.rgba[src_pixel_offset + 1];
-                        let b = frame.rgba[src_pixel_offset + 2];
-                        let a = frame.rgba[src_pixel_offset + 3];
+                let needs_custom_render = preset.binary_filter
+            || preset.flip_horizontal
+            || preset.flip_vertical
+            || preset.rotation_degrees.abs() > 0.001;
+        if needs_custom_render {
+                    let threshold = preset.binary_threshold;
+                    let threshold_sq = (threshold as i32).pow(2);
+                    let binary_mode = preset.binary_mode;
+                    let transparent_black = preset.binary_transparent_black;
+                    let transparent_white = preset.binary_transparent_white;
+                    let target_colors = preset.binary_target_colors.as_slice();
+                    let single_target_color = preset.binary_target_color;
 
-                        let val = match binary_mode {
-                            crate::model::PinBinaryMode::Grayscale => {
-                                let gray = ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114)
-                                    / 1000) as u8;
-                                if gray >= threshold { 255 } else { 0 }
-                            }
-                            crate::model::PinBinaryMode::ColorSimilarity => {
-                                let matched = if target_colors.is_empty() {
-                                    single_target_color.is_some_and(|target_color| {
-                                        let dist_sq = (r as i32 - target_color.r as i32).pow(2)
-                                            + (g as i32 - target_color.g as i32).pow(2)
-                                            + (b as i32 - target_color.b as i32).pow(2);
-                                        dist_sq <= threshold_sq
-                                    })
-                                } else {
-                                    target_colors.iter().any(|target_color| {
-                                        let dist_sq = (r as i32 - target_color.r as i32).pow(2)
-                                            + (g as i32 - target_color.g as i32).pow(2)
-                                            + (b as i32 - target_color.b as i32).pow(2);
-                                        dist_sq <= threshold_sq
-                                    })
-                                };
-                                if matched { 255 } else { 0 }
-                            }
-                        };
+                    for y in 0..crop_h {
+                        let src_row_offset = (crop_y + y) * width * 4;
+                        let dst_row_offset = y * crop_w * 4;
+                        for x in 0..crop_w {
+                            let src_pixel_offset = src_row_offset + (crop_x + x) * 4;
+                            let dst_pixel_offset = dst_row_offset + x * 4;
 
-                        binarized[dst_pixel_offset] = val;
-                        binarized[dst_pixel_offset + 1] = val;
-                        binarized[dst_pixel_offset + 2] = val;
-                        binarized[dst_pixel_offset + 3] = if transparent_black && !transparent_white
-                        {
-                            if val == 0 { 0 } else { 255 }
-                        } else if transparent_white && !transparent_black {
-                            if val == 255 { 0 } else { 255 }
-                        } else {
-                            a
-                        };
+                            let r = frame.rgba[src_pixel_offset];
+                            let g = frame.rgba[src_pixel_offset + 1];
+                            let b = frame.rgba[src_pixel_offset + 2];
+                            let a = frame.rgba[src_pixel_offset + 3];
+
+                            let val = match binary_mode {
+                                crate::model::PinBinaryMode::Grayscale => {
+                                    let gray = ((r as u32 * 299 + g as u32 * 587 + b as u32 * 114)
+                                        / 1000) as u8;
+                                    if gray >= threshold { 255 } else { 0 }
+                                }
+                                crate::model::PinBinaryMode::ColorSimilarity => {
+                                    let matched = if target_colors.is_empty() {
+                                        single_target_color.is_some_and(|target_color| {
+                                            let dist_sq = (r as i32 - target_color.r as i32).pow(2)
+                                                + (g as i32 - target_color.g as i32).pow(2)
+                                                + (b as i32 - target_color.b as i32).pow(2);
+                                            dist_sq <= threshold_sq
+                                        })
+                                    } else {
+                                        target_colors.iter().any(|target_color| {
+                                            let dist_sq = (r as i32 - target_color.r as i32).pow(2)
+                                                + (g as i32 - target_color.g as i32).pow(2)
+                                                + (b as i32 - target_color.b as i32).pow(2);
+                                            dist_sq <= threshold_sq
+                                        })
+                                    };
+                                    if matched { 255 } else { 0 }
+                                }
+                            };
+
+                            buffer_rgba[dst_pixel_offset] = val;
+                            buffer_rgba[dst_pixel_offset + 1] = val;
+                            buffer_rgba[dst_pixel_offset + 2] = val;
+                            buffer_rgba[dst_pixel_offset + 3] = if transparent_black && !transparent_white
+                            {
+                                if val == 0 { 0 } else { 255 }
+                            } else if transparent_white && !transparent_black {
+                                if val == 255 { 0 } else { 255 }
+                            } else {
+                                a
+                            };
+                        }
+                    }
+                } else {
+                    for y in 0..crop_h {
+                        let src_row_offset = (crop_y + y) * width * 4 + crop_x * 4;
+                        let dst_row_offset = y * crop_w * 4;
+                        buffer_rgba[dst_row_offset..dst_row_offset + crop_w * 4]
+                            .copy_from_slice(&frame.rgba[src_row_offset..src_row_offset + crop_w * 4]);
                     }
                 }
 
-                if !unsafe { renderer_ref.present(pin_hwnd, &preset, crop_w, crop_h) } {
+                let needs_transform = preset.flip_horizontal
+                    || preset.flip_vertical
+                    || preset.rotation_degrees.abs() > 0.001;
+
+                let presented = if needs_transform {
+                    if let Some(bgra) = render_transformed_pin_pixels(
+                        &buffer_rgba,
+                        crop_w,
+                        crop_h,
+                        target_w,
+                        target_h,
+                        preset.flip_horizontal,
+                        preset.flip_vertical,
+                        preset.rotation_degrees,
+                    ) {
+                        unsafe { renderer_ref.present_bgra(pin_hwnd, &preset, &bgra, target_w, target_h) }
+                    } else {
+                        false
+                    }
+                } else {
+                    let binarized = renderer_ref.binarized_mut(crop_w * crop_h * 4);
+                    binarized.copy_from_slice(&buffer_rgba);
+                    unsafe { renderer_ref.present(pin_hwnd, &preset, crop_w, crop_h) }
+                };
+
+                if !presented {
                     renderer = None;
                 }
             }
@@ -38499,6 +38643,39 @@ mod windows_overlay {
         if root.0.is_null() { hwnd } else { root }
     }
 
+    pub(crate) fn apply_macros_master_enabled(enabled: bool, hwnd: Option<HWND>) {
+        let mut hook_state = HOOK_STATE.lock();
+        hook_state.macros_master_enabled = enabled;
+        if !enabled {
+            hook_state.locked_inputs.clear();
+            hook_state.press_trigger_suppression.clear();
+            hook_state.active_hold_macros.clear();
+        }
+        drop(hook_state);
+
+        let target_hwnd = hwnd.or_else(|| {
+            let hwnd_val = CONTROLLER_HWND.load(Ordering::Relaxed);
+            if hwnd_val != 0 {
+                Some(HWND(hwnd_val as *mut c_void))
+            } else {
+                None
+            }
+        });
+        if let Some(h) = target_hwnd {
+            let _ = unsafe { update_tray_icon(h, enabled) };
+        }
+
+        if !enabled {
+            stop_all_active_macros_and_overlays();
+            reset_window_focus_dispatch_guard();
+        } else {
+            reset_window_focus_dispatch_guard();
+            SUPPRESSED_MACRO_HOTKEYS.lock().clear();
+            STOP_REQUESTED_MACRO_PRESETS.lock().clear();
+            trigger_window_focus_macros(None);
+        }
+    }
+
     fn stop_all_active_macros_and_overlays() {
         let active_ids: Vec<u32> = ACTIVE_MACRO_PRESETS.lock().iter().copied().collect();
         for id in active_ids {
@@ -41145,6 +41322,69 @@ mod tests {
 
         let res_z = resolve_memory_action_target(Some(1234), "{test_base_addr} + 4", false);
         assert_eq!(res_z, Some((1234, 0x2813B5CC924)));
+    }
+
+    #[test]
+    fn test_render_transformed_pin_pixels() {
+        use super::windows_overlay::render_transformed_pin_pixels;
+
+        // 2x2 test image with 4 distinct colors:
+        // Top-left: Red (255, 0, 0, 255)
+        // Top-right: Green (0, 255, 0, 255)
+        // Bottom-left: Blue (0, 0, 255, 255)
+        // Bottom-right: Yellow (255, 255, 0, 255)
+        let src_rgba = vec![
+            255, 0, 0, 255,    0, 255, 0, 255,
+            0, 0, 255, 255,    255, 255, 0, 255,
+        ];
+
+        // 1. Identity transform
+        let id_bgra = render_transformed_pin_pixels(&src_rgba, 2, 2, 2, 2, false, false, 0.0)
+            .expect("identity transform");
+        // Output is BGRA, so Red is [0, 0, 255, 255]
+        assert_eq!(&id_bgra[0..4], &[0, 0, 255, 255]); // top-left is red
+
+        // 2. Flip horizontal
+        let flip_h_bgra = render_transformed_pin_pixels(&src_rgba, 2, 2, 2, 2, true, false, 0.0)
+            .expect("flip horizontal");
+        // Top-left should now be Green [0, 255, 0, 255]
+        assert_eq!(&flip_h_bgra[0..4], &[0, 255, 0, 255]);
+        // Top-right should now be Red [0, 0, 255, 255]
+        assert_eq!(&flip_h_bgra[4..8], &[0, 0, 255, 255]);
+
+        // 3. Flip vertical
+        let flip_v_bgra = render_transformed_pin_pixels(&src_rgba, 2, 2, 2, 2, false, true, 0.0)
+            .expect("flip vertical");
+        // Top-left should now be Blue [255, 0, 0, 255]
+        assert_eq!(&flip_v_bgra[0..4], &[255, 0, 0, 255]);
+        // Bottom-left should now be Red [0, 0, 255, 255]
+        assert_eq!(&flip_v_bgra[8..12], &[0, 0, 255, 255]);
+
+        // 4. 180 degree rotation
+        let rot180_bgra = render_transformed_pin_pixels(&src_rgba, 2, 2, 2, 2, false, false, 180.0)
+            .expect("rotate 180");
+        // Top-left should now be Yellow [0, 255, 255, 255]
+        assert_eq!(&rot180_bgra[0..4], &[0, 255, 255, 255]);
+        // Bottom-right should now be Red [0, 0, 255, 255]
+        assert_eq!(&rot180_bgra[12..16], &[0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn test_apply_macros_master_enabled() {
+        use super::windows_overlay::{apply_macros_master_enabled, HOOK_STATE, SUPPRESSED_MACRO_HOTKEYS};
+
+        apply_macros_master_enabled(true, None);
+        assert!(HOOK_STATE.lock().macros_master_enabled);
+
+        SUPPRESSED_MACRO_HOTKEYS.lock().insert(9999);
+        assert!(SUPPRESSED_MACRO_HOTKEYS.lock().contains(&9999));
+
+        apply_macros_master_enabled(false, None);
+        assert!(!HOOK_STATE.lock().macros_master_enabled);
+
+        apply_macros_master_enabled(true, None);
+        assert!(HOOK_STATE.lock().macros_master_enabled);
+        assert!(!SUPPRESSED_MACRO_HOTKEYS.lock().contains(&9999));
     }
 }
 

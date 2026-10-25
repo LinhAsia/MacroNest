@@ -502,7 +502,7 @@ pub enum PinOverlayStyle {
     HorizontalBar,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct PinPreset {
     pub id: u32,
@@ -548,6 +548,12 @@ pub struct PinPreset {
     pub binary_target_color: Option<RgbaColor>,
     #[serde(default)]
     pub binary_target_colors: Vec<RgbaColor>,
+    #[serde(default)]
+    pub flip_horizontal: bool,
+    #[serde(default)]
+    pub flip_vertical: bool,
+    #[serde(default)]
+    pub rotation_degrees: f32,
 }
 
 impl PinPreset {
@@ -584,6 +590,9 @@ impl PinPreset {
             binary_mode: PinBinaryMode::Grayscale,
             binary_target_color: default_binary_target_color_option(),
             binary_target_colors: Vec::new(),
+            flip_horizontal: false,
+            flip_vertical: false,
+            rotation_degrees: 0.0,
         }
     }
 

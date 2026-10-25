@@ -16196,6 +16196,7 @@ impl eframe::App for CrosshairApp {
                 }
                 UiCommand::SetMacrosMasterEnabled(enabled, status) => {
                     self.state.macros_master_enabled = enabled;
+                    self.last_synced_macros_master_enabled = Some(enabled);
                     self.persist();
                     self.status = status;
                     ctx.request_repaint();

@@ -945,6 +945,63 @@ impl CrosshairApp {
                             .changed();
                         ui.end_row();
 
+                        ui.label(Self::tr_lang(language, "Flip / Mirror", "Lật / Gương"));
+                        ui.horizontal(|ui| {
+                            live_sync |= ui
+                                .checkbox(
+                                    &mut preset.flip_horizontal,
+                                    Self::tr_lang(
+                                        language,
+                                        "Horizontal (Mirror X)",
+                                        "Lật ngang (Mirror X)",
+                                    ),
+                                )
+                                .changed();
+                            live_sync |= ui
+                                .checkbox(
+                                    &mut preset.flip_vertical,
+                                    Self::tr_lang(
+                                        language,
+                                        "Vertical (Mirror Y)",
+                                        "Lật dọc (Mirror Y)",
+                                    ),
+                                )
+                                .changed();
+                        });
+                        ui.end_row();
+
+                        ui.label(Self::tr_lang(language, "Rotation", "Góc xoay"));
+                        ui.horizontal(|ui| {
+                            live_sync |= ui
+                                .add(
+                                    egui::Slider::new(&mut preset.rotation_degrees, 0.0..=360.0)
+                                        .suffix("°")
+                                        .fixed_decimals(1),
+                                )
+                                .changed();
+                            if ui
+                                .button("0°")
+                                .on_hover_text(Self::tr_lang(language, "Reset angle to 0°", "Đặt lại góc 0°"))
+                                .clicked()
+                            {
+                                preset.rotation_degrees = 0.0;
+                                live_sync = true;
+                            }
+                            if ui.button("90°").clicked() {
+                                preset.rotation_degrees = (preset.rotation_degrees + 90.0) % 360.0;
+                                live_sync = true;
+                            }
+                            if ui.button("180°").clicked() {
+                                preset.rotation_degrees = (preset.rotation_degrees + 180.0) % 360.0;
+                                live_sync = true;
+                            }
+                            if ui.button("270°").clicked() {
+                                preset.rotation_degrees = (preset.rotation_degrees + 270.0) % 360.0;
+                                live_sync = true;
+                            }
+                        });
+                        ui.end_row();
+
                         ui.label(Self::tr_lang(language, "Binarize", "Binarize"));
                         let binary_changed = ui
                             .checkbox(

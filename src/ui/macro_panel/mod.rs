@@ -6369,6 +6369,7 @@ impl CrosshairApp {
                 });
             ui.add_space(8.0);
         }
+        let mut macro_step_selection_interacted = self.macro_drag_select_anchor.is_some();
         ui.add_space(2.0);
         ui.horizontal(|ui| {
             egui::Frame::group(ui.style())
@@ -8403,7 +8404,7 @@ impl CrosshairApp {
                                                         struct ActiveVarBadgeData {
                                                             var_name: String,
                                                             val_str: String,
-                                                            full_text: String,
+                                                            _full_text: String,
                                                             display_text: String,
                                                             has_value: bool,
                                                             is_hovered: bool,
@@ -8448,15 +8449,11 @@ impl CrosshairApp {
                                                                     .ctx()
                                                                     .data(|d| d.get_temp::<bool>(badge_hover_id))
                                                                     .unwrap_or(false);
-                                                                let display_text = if is_hovered {
-                                                                    full_text.clone()
-                                                                } else {
-                                                                    compact_text
-                                                                };
+                                                                let display_text = compact_text;
                                                                 ActiveVarBadgeData {
                                                                     var_name: var_name.clone(),
                                                                     val_str,
-                                                                    full_text,
+                                                                    _full_text: full_text,
                                                                     display_text,
                                                                     has_value: val.is_some(),
                                                                     is_hovered,
@@ -8505,7 +8502,8 @@ impl CrosshairApp {
                                                         if !active_vars_overflow {
                                                             active_vars_expanded = true;
                                                         }
-                                                        let render_badge = |ui: &mut egui::Ui, item: &ActiveVarBadgeData| {
+                                                        let mut copied_var_info: Option<(String, String)> = None;
+                                                        let render_badge = |ui: &mut egui::Ui, item: &ActiveVarBadgeData, copied_var_info: &mut Option<(String, String)>| {
                                                             let (
                                                                 fill_color,
                                                                 stroke_color,
@@ -8556,10 +8554,34 @@ impl CrosshairApp {
                                                             }
                                                             if badge_resp.clicked() {
                                                                 ui.ctx().copy_text(item.val_str.clone());
+                                                                *copied_var_info = Some((item.var_name.clone(), item.val_str.clone()));
                                                             }
+                                                            let copy_tip = Self::tr_lang(
+                                                                language,
+                                                                "Click to copy variable value",
+                                                                "Nhấn để sao chép giá trị biến",
+                                                            );
+                                                            let status_text = if item.has_value {
+                                                                Self::tr_lang(language, "Value assigned", "Đã có giá trị")
+                                                            } else {
+                                                                Self::tr_lang(language, "Not defined (?)", "Chưa gán giá trị (?)")
+                                                            };
                                                             badge_resp.on_hover_ui(|ui| {
-                                                                ui.label(RichText::new(&item.full_text).size(11.0).strong());
-                                                                ui.label(RichText::new("Click to copy value").size(10.0).weak());
+                                                                ui.spacing_mut().item_spacing.y = 3.0;
+                                                                ui.horizontal(|ui| {
+                                                                    ui.label(RichText::new(Self::tr_lang(language, "Variable:", "Tên biến:")).size(11.0).weak());
+                                                                    ui.label(RichText::new(&item.var_name).size(11.0).strong().color(Color32::from_rgb(96, 232, 255)));
+                                                                });
+                                                                ui.horizontal(|ui| {
+                                                                    ui.label(RichText::new(Self::tr_lang(language, "Value:", "Giá trị:")).size(11.0).weak());
+                                                                    ui.label(RichText::new(&item.val_str).size(11.0).strong().color(text_color));
+                                                                });
+                                                                ui.horizontal(|ui| {
+                                                                    ui.label(RichText::new(Self::tr_lang(language, "Status:", "Trạng thái:")).size(10.0).weak());
+                                                                    ui.label(RichText::new(status_text).size(10.0).italics());
+                                                                });
+                                                                ui.separator();
+                                                                ui.label(RichText::new(format!("📋 {copy_tip}")).size(10.5).color(Color32::from_rgb(180, 220, 255)));
                                                             });
                                                         };
                                                         ui.add_space(4.0);
@@ -8591,7 +8613,7 @@ impl CrosshairApp {
                                                                 {
                                                                     break;
                                                                 }
-                                                                render_badge(ui, item);
+                                                                render_badge(ui, item, &mut copied_var_info);
                                                                 consumed_width += badge_width + 4.0;
                                                                 preview_badge_count += 1;
                                                             }
@@ -8636,9 +8658,12 @@ impl CrosshairApp {
                                                                 for item in
                                                                     badge_items.iter().skip(preview_badge_count)
                                                                 {
-                                                                    render_badge(ui, item);
+                                                                    render_badge(ui, item, &mut copied_var_info);
                                                                 }
                                                             });
+                                                        }
+                                                        if let Some((name, val)) = copied_var_info {
+                                                            self.status = format!("Copied variable {} = {}", name, val);
                                                         }
                                                     }
                                                 },
@@ -17789,6 +17814,13 @@ if supports_move_mouse || show_detection_tuning {
                                 if row_response.secondary_clicked() {
                                     remove_step = Some((preset.id, step_index));
                                 }
+                                if is_selected {
+                                    if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                                        if row_response.rect.contains(pos) {
+                                            macro_step_selection_interacted = true;
+                                        }
+                                    }
+                                }
                                 let actual_height = row_response.rect.height();
                                 if (actual_height - estimated_step_height).abs() > 0.5 && actual_height > 10.0 {
                                     estimated_step_height = actual_height;
@@ -18305,6 +18337,15 @@ if supports_move_mouse || show_detection_tuning {
                         };
                         self.begin_capture(target, capture_status);
                     }
+                    if copy_selected_steps.is_some()
+                        || delete_selected_steps.is_some()
+                        || paste_steps_at_start.is_some()
+                        || paste_step_after.is_some()
+                        || pending_step_selection.is_some()
+                        || clear_step_selection.is_some()
+                    {
+                        macro_step_selection_interacted = true;
+                    }
                     if let Some((group_id, preset_id)) = copy_selected_steps {
                         self.copy_selected_macro_steps_for_preset(group_id, preset_id);
                     }
@@ -18606,6 +18647,14 @@ if supports_move_mouse || show_detection_tuning {
             }
         } else {
             self.pending_macro_group_scroll_target = None;
+        }
+        if !self.selected_macro_steps.is_empty() {
+            let primary_clicked = ui.input(|i| i.pointer.primary_clicked());
+            let escape_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            if escape_pressed || (primary_clicked && !macro_step_selection_interacted) {
+                self.selected_macro_steps.clear();
+                self.last_selected_macro_step = None;
+            }
         }
         });
         if let Some(scroll_delta) = ui
