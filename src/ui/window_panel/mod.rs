@@ -3125,8 +3125,8 @@ impl CrosshairApp {
     }
 
     fn sanitize_layout(layout: &mut WindowLayout) {
-        let rows = layout.rows.clamp(1, 6);
-        let cols = layout.cols.clamp(1, 6);
+        let rows = layout.rows.clamp(1, 16);
+        let cols = layout.cols.clamp(1, 16);
 
         layout.rows = rows;
         layout.cols = cols;
@@ -3617,7 +3617,7 @@ impl CrosshairApp {
             layout.cells.push(cell_b);
             Self::sanitize_layout(layout);
         } else {
-            if layout.cols >= 6 {
+            if layout.cols >= 16 {
                 return;
             }
             let split_col = col;
@@ -3703,7 +3703,7 @@ impl CrosshairApp {
             layout.cells.push(cell_b);
             Self::sanitize_layout(layout);
         } else {
-            if layout.rows >= 6 {
+            if layout.rows >= 16 {
                 return;
             }
             let split_row = row;
@@ -3760,8 +3760,8 @@ impl CrosshairApp {
     }
 
     pub(crate) fn resize_layout_grid(layout: &mut WindowLayout, new_rows: usize, new_cols: usize) {
-        let new_rows = new_rows.clamp(1, 6);
-        let new_cols = new_cols.clamp(1, 6);
+        let new_rows = new_rows.clamp(1, 16);
+        let new_cols = new_cols.clamp(1, 16);
         if layout.rows == new_rows && layout.cols == new_cols {
             return;
         }
@@ -4364,13 +4364,13 @@ impl CrosshairApp {
                         ui.horizontal(|ui| {
                             ui.label(Self::tr_lang(language, "Rows", "Rows"));
                             let mut rows = layout.rows;
-                            if ui.add(DragValue::new(&mut rows).range(1..=6)).changed() {
+                            if ui.add(DragValue::new(&mut rows).range(1..=16)).changed() {
                                 Self::resize_layout_grid(layout, rows, layout.cols);
                                 live_sync = true;
                             }
                             ui.label(Self::tr_lang(language, "Cols", "Cols"));
                             let mut cols = layout.cols;
-                            if ui.add(DragValue::new(&mut cols).range(1..=6)).changed() {
+                            if ui.add(DragValue::new(&mut cols).range(1..=16)).changed() {
                                 Self::resize_layout_grid(layout, layout.rows, cols);
                                 live_sync = true;
                             }
@@ -4870,6 +4870,8 @@ impl CrosshairApp {
                                         );
                                         if edge_response.hovered() || edge_response.dragged() {
                                             ui.ctx().set_cursor_icon(cursor);
+                                        }
+                                        if edge_response.dragged() {
                                             cell_edge_active = true;
                                         }
                                         if edge_response.dragged()
@@ -5549,60 +5551,63 @@ impl CrosshairApp {
                                     egui::StrokeKind::Outside,
                                 );
 
-                                if !split_hovered_or_dragged && cell_resp.hovered() {
+                                if !split_hovered_or_dragged {
                                     if let Some(pointer_pos) =
                                         ui.ctx().input(|i| i.pointer.hover_pos())
                                     {
-                                        let norm_dx = (pointer_pos.x - cell_rect.center().x)
-                                            / cell_rect.width();
-                                        let norm_dy = (pointer_pos.y - cell_rect.center().y)
-                                            / cell_rect.height();
+                                        let is_cell_hovered = cell_resp.hovered()
+                                            || (!controls_active && cell_rect.contains(pointer_pos));
+                                        if is_cell_hovered {
+                                            let dx = pointer_pos.x - cell_rect.center().x;
+                                            let dy = pointer_pos.y - cell_rect.center().y;
 
-                                        if norm_dx.abs() > norm_dy.abs() {
-                                            Self::draw_dashed_line(
-                                                ui.painter(),
-                                                egui::pos2(cell_rect.center().x, cell_rect.min.y),
-                                                egui::pos2(cell_rect.center().x, cell_rect.max.y),
-                                                egui::Stroke::new(
-                                                    2.5,
-                                                    Color32::from_rgb(255, 69, 0),
-                                                ),
-                                                8.0,
-                                                4.0,
-                                            );
-
-                                            if cell_resp.secondary_clicked() {
-                                                if let Some(cell_idx) =
-                                                    layout.cells.iter().position(|c| {
-                                                        c.row == cell.row && c.col == cell.col
-                                                    })
-                                                {
-                                                    Self::split_cell_vertical(layout, cell_idx);
-                                                    Self::sanitize_layout(layout);
-                                                    self.selected_layout_cell = None;
-                                                    live_sync = true;
-                                                }
+                                            let is_vertical = dx.abs() > dy.abs();
+                                            if is_vertical {
+                                                Self::draw_dashed_line(
+                                                    ui.painter(),
+                                                    egui::pos2(cell_rect.center().x, cell_rect.min.y),
+                                                    egui::pos2(cell_rect.center().x, cell_rect.max.y),
+                                                    egui::Stroke::new(
+                                                        2.5,
+                                                        Color32::from_rgb(255, 69, 0),
+                                                    ),
+                                                    8.0,
+                                                    4.0,
+                                                );
+                                            } else {
+                                                Self::draw_dashed_line(
+                                                    ui.painter(),
+                                                    egui::pos2(cell_rect.min.x, cell_rect.center().y),
+                                                    egui::pos2(cell_rect.max.x, cell_rect.center().y),
+                                                    egui::Stroke::new(
+                                                        2.5,
+                                                        Color32::from_rgb(255, 69, 0),
+                                                    ),
+                                                    8.0,
+                                                    4.0,
+                                                );
                                             }
-                                        } else {
-                                            Self::draw_dashed_line(
-                                                ui.painter(),
-                                                egui::pos2(cell_rect.min.x, cell_rect.center().y),
-                                                egui::pos2(cell_rect.max.x, cell_rect.center().y),
-                                                egui::Stroke::new(
-                                                    2.5,
-                                                    Color32::from_rgb(255, 69, 0),
-                                                ),
-                                                8.0,
-                                                4.0,
-                                            );
 
-                                            if cell_resp.secondary_clicked() {
+                                            let secondary_clicked = !controls_active
+                                                && (cell_resp.secondary_clicked()
+                                                    || (cell_rect.contains(pointer_pos)
+                                                        && ui.input(|i| {
+                                                            i.pointer.button_clicked(
+                                                                egui::PointerButton::Secondary,
+                                                            )
+                                                        })));
+
+                                            if secondary_clicked {
                                                 if let Some(cell_idx) =
                                                     layout.cells.iter().position(|c| {
                                                         c.row == cell.row && c.col == cell.col
                                                     })
                                                 {
-                                                    Self::split_cell_horizontal(layout, cell_idx);
+                                                    if is_vertical {
+                                                        Self::split_cell_vertical(layout, cell_idx);
+                                                    } else {
+                                                        Self::split_cell_horizontal(layout, cell_idx);
+                                                    }
                                                     Self::sanitize_layout(layout);
                                                     self.selected_layout_cell = None;
                                                     live_sync = true;
@@ -6601,5 +6606,31 @@ mod tests {
         assert!(layout.cells.iter().any(|c| c.row == 0 && c.row_span == 1));
         assert!(layout.cells.iter().any(|c| c.row == 1 && c.row_span == 1));
         assert!(layout.cells.iter().any(|c| c.row == 2 && c.row_span == 2));
+    }
+
+    #[test]
+    fn test_split_cell_vertical_and_horizontal() {
+        let mut layout = WindowLayout {
+            id: 10,
+            name: "Split Test".to_owned(),
+            rows: 1,
+            cols: 1,
+            row_ratios: vec![1.0],
+            col_ratios: vec![1.0],
+            cells: vec![
+                WindowLayoutCell { row: 0, col: 0, row_span: 1, col_span: 1, ..Default::default() },
+            ],
+            ..Default::default()
+        };
+
+        // Split vertical: 1x1 cell becomes two columns
+        CrosshairApp::split_cell_vertical(&mut layout, 0);
+        assert_eq!(layout.cols, 2);
+        assert_eq!(layout.cells.len(), 2);
+
+        // Split horizontal on cell 0: becomes two rows
+        CrosshairApp::split_cell_horizontal(&mut layout, 0);
+        assert_eq!(layout.rows, 2);
+        assert_eq!(layout.cells.len(), 3);
     }
 }
