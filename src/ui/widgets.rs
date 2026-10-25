@@ -94,6 +94,28 @@ impl CrosshairApp {
         Self::show_preset_card_with_response(ui, enabled, add_contents).0
     }
 
+    pub(crate) fn is_card_active_or_hovered(ui: &egui::Ui, response: &egui::Response) -> bool {
+        if response.hovered() || response.contains_pointer() {
+            return true;
+        }
+        ui.input(|i| {
+            if !i.pointer.any_down() {
+                return false;
+            }
+            if let Some(pos) = i.pointer.latest_pos() {
+                if response.rect.contains(pos) {
+                    return true;
+                }
+            }
+            if let Some(origin) = i.pointer.press_origin() {
+                if response.rect.contains(origin) {
+                    return true;
+                }
+            }
+            false
+        })
+    }
+
     pub(crate) fn show_preset_card_with_response<R>(
         ui: &mut egui::Ui,
         enabled: bool,

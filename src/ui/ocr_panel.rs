@@ -475,7 +475,7 @@ impl CrosshairApp {
                 }
             });
 
-            if card_response.hovered() {
+            if Self::is_card_active_or_hovered(ui, &card_response) {
                 let r = crate::overlay::VisionRegion {
                     left: preset.x,
                     top: preset.y,

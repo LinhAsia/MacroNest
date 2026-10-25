@@ -517,7 +517,7 @@ impl CrosshairApp {
                         }
                     });
                 });
-                if card_response.hovered() {
+                if Self::is_card_active_or_hovered(ui, &card_response) {
                     let (wx, wy) = Self::window_anchor_preview_position(preset).unwrap_or((preset.x, preset.y));
                     let r = crate::overlay::VisionRegion {
                         left: wx,
@@ -1400,7 +1400,7 @@ impl CrosshairApp {
                     });
                 }
             });
-            if card_response.hovered() {
+            if Self::is_card_active_or_hovered(ui, &card_response) {
                 let mut regions = Vec::new();
                 if preset.use_source_crop {
                     regions.push(crate::overlay::VisionRegion {
@@ -3125,8 +3125,8 @@ impl CrosshairApp {
     }
 
     fn sanitize_layout(layout: &mut WindowLayout) {
-        let rows = layout.rows.max(1);
-        let cols = layout.cols.max(1);
+        let rows = layout.rows.clamp(1, 6);
+        let cols = layout.cols.clamp(1, 6);
 
         layout.rows = rows;
         layout.cols = cols;
@@ -3167,58 +3167,6 @@ impl CrosshairApp {
         }
 
         layout.cells.sort_by_key(|c| (c.row, c.col));
-
-        let mut covered = vec![vec![false; cols]; rows];
-        let mut sanitized_cells = Vec::new();
-
-        for mut cell in layout.cells.drain(..) {
-            if cell.row >= rows || cell.col >= cols {
-                continue;
-            }
-            if covered[cell.row][cell.col] {
-                // Collision due to reduced grid size: find any free slot instead of silently dropping
-                if let Some((free_r, free_c)) = (0..rows)
-                    .flat_map(|r| (0..cols).map(move |c| (r, c)))
-                    .find(|&(r, c)| !covered[r][c])
-                {
-                    cell.row = free_r;
-                    cell.col = free_c;
-                    cell.row_span = 1;
-                    cell.col_span = 1;
-                } else {
-                    continue;
-                }
-            }
-            let mut max_row_span = rows - cell.row;
-            let mut max_col_span = cols - cell.col;
-
-            for c in cell.col..(cell.col + cell.col_span).min(cols) {
-                if covered[cell.row][c] {
-                    max_col_span = c - cell.col;
-                    break;
-                }
-            }
-            cell.col_span = cell.col_span.min(max_col_span).max(1);
-
-            'outer: for r in cell.row..(cell.row + cell.row_span).min(rows) {
-                for c in cell.col..(cell.col + cell.col_span) {
-                    if covered[r][c] {
-                        max_row_span = r - cell.row;
-                        break 'outer;
-                    }
-                }
-            }
-            cell.row_span = cell.row_span.min(max_row_span).max(1);
-
-            for r in cell.row..(cell.row + cell.row_span) {
-                for c in cell.col..(cell.col + cell.col_span) {
-                    covered[r][c] = true;
-                }
-            }
-            sanitized_cells.push(cell);
-        }
-
-        layout.cells = sanitized_cells;
 
         if layout.cells.is_empty() {
             return;
@@ -3343,15 +3291,22 @@ impl CrosshairApp {
             }
         }
 
-        // Write back adjustments
+        // Write back adjustments & update nominal spans based on visual position
         for (cell, (cl, ct, cr, cb)) in layout.cells.iter_mut().zip(boxes) {
-            let end_c = (cell.col + cell.col_span).min(cols);
-            let end_r = (cell.row + cell.row_span).min(rows);
+            let c_start = (0..cols).find(|&c| col_starts[c + 1] > cl + 0.005).unwrap_or(0);
+            let c_end = (c_start + 1..=cols).find(|&c| col_starts[c] >= cr - 0.005).unwrap_or(cols);
+            let r_start = (0..rows).find(|&r| row_starts[r + 1] > ct + 0.005).unwrap_or(0);
+            let r_end = (r_start + 1..=rows).find(|&r| row_starts[r] >= cb - 0.005).unwrap_or(rows);
+
+            cell.col = c_start;
+            cell.col_span = (c_end - c_start).max(1);
+            cell.row = r_start;
+            cell.row_span = (r_end - r_start).max(1);
 
             let mut adj_l = cl - col_starts[cell.col];
-            let mut adj_r = cr - col_starts[end_c];
+            let mut adj_r = cr - col_starts[cell.col + cell.col_span];
             let mut adj_t = ct - row_starts[cell.row];
-            let mut adj_b = cb - row_starts[end_r];
+            let mut adj_b = cb - row_starts[cell.row + cell.row_span];
 
             if adj_l.abs() < 0.0005 {
                 adj_l = 0.0;
@@ -3664,8 +3619,14 @@ impl CrosshairApp {
             layout.cells[cell_idx].col_span = half;
             cell_b.col = col + half;
             cell_b.col_span = col_span - half;
+            cell_b.target_window_title = None;
+            cell_b.extra_target_window_titles.clear();
             layout.cells.push(cell_b);
+            Self::sanitize_layout(layout);
         } else {
+            if layout.cols >= 6 {
+                return;
+            }
             let split_col = col;
             let old_bounds: Vec<(f32, f32)> = layout
                 .cells
@@ -3712,7 +3673,10 @@ impl CrosshairApp {
             layout.cells[cell_idx].adjust_right = actual_mid - new_split_base;
             cell_b.adjust_left = actual_mid - new_split_base;
             cell_b.adjust_right = actual_right - new_starts[split_col + 2];
+            cell_b.target_window_title = None;
+            cell_b.extra_target_window_titles.clear();
             layout.cells.push(cell_b);
+            Self::sanitize_layout(layout);
         }
     }
 
@@ -3741,8 +3705,14 @@ impl CrosshairApp {
             layout.cells[cell_idx].row_span = half;
             cell_b.row = row + half;
             cell_b.row_span = row_span - half;
+            cell_b.target_window_title = None;
+            cell_b.extra_target_window_titles.clear();
             layout.cells.push(cell_b);
+            Self::sanitize_layout(layout);
         } else {
+            if layout.rows >= 6 {
+                return;
+            }
             let split_row = row;
             let old_bounds: Vec<(f32, f32)> = layout
                 .cells
@@ -3789,7 +3759,10 @@ impl CrosshairApp {
             layout.cells[cell_idx].adjust_bottom = actual_mid - new_split_base;
             cell_b.adjust_top = actual_mid - new_split_base;
             cell_b.adjust_bottom = actual_bottom - new_starts[split_row + 2];
+            cell_b.target_window_title = None;
+            cell_b.extra_target_window_titles.clear();
             layout.cells.push(cell_b);
+            Self::sanitize_layout(layout);
         }
     }
 
@@ -3894,6 +3867,27 @@ impl CrosshairApp {
         Self::sanitize_layout(layout);
     }
 
+    pub(crate) fn is_valid_merge_pair(
+        source: &WindowLayoutCell,
+        target: &WindowLayoutCell,
+        rows: usize,
+        cols: usize,
+    ) -> bool {
+        let s_end_r = (source.row + source.row_span).min(rows);
+        let s_end_c = (source.col + source.col_span).min(cols);
+        let t_end_r = (target.row + target.row_span).min(rows);
+        let t_end_c = (target.col + target.col_span).min(cols);
+
+        let horizontal = source.row == target.row
+            && source.row_span == target.row_span
+            && (s_end_c == target.col || t_end_c == source.col);
+        let vertical = source.col == target.col
+            && source.col_span == target.col_span
+            && (s_end_r == target.row || t_end_r == source.row);
+
+        horizontal || vertical
+    }
+
     pub(crate) fn merge_layout_cells(
         layout: &mut WindowLayout,
         start_row: usize,
@@ -3912,6 +3906,10 @@ impl CrosshairApp {
             .iter()
             .find(|cell| cell.row == end_row && cell.col == end_col)
             .cloned()?;
+
+        if !Self::is_valid_merge_pair(&cell_a, &cell_b, layout.rows, layout.cols) {
+            return None;
+        }
 
         let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
         let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
@@ -3967,20 +3965,10 @@ impl CrosshairApp {
         let adj_t = min_y - row_starts[r1];
         let adj_b = max_y - row_starts[r2];
 
-        // CRITICAL: Remove all cells that intersect the merged area nominally or visually
+        // Remove only the two merged cells, leaving all other cells intact
         layout.cells.retain(|c| {
-            let cr2 = (c.row + c.row_span).min(layout.rows);
-            let cc2 = (c.col + c.col_span).min(layout.cols);
-            let c_x1 = col_starts[c.col] + c.adjust_left;
-            let c_y1 = row_starts[c.row] + c.adjust_top;
-            let c_x2 = col_starts[cc2] + c.adjust_right;
-            let c_y2 = row_starts[cr2] + c.adjust_bottom;
-            let nominal_intersect = c.row < r2 && cr2 > r1 && c.col < c2 && cc2 > c1;
-            let visual_intersect = c_x1 < max_x - 0.005
-                && c_x2 > min_x + 0.005
-                && c_y1 < max_y - 0.005
-                && c_y2 > min_y + 0.005;
-            !(nominal_intersect || visual_intersect)
+            !((c.row == cell_a.row && c.col == cell_a.col)
+                || (c.row == cell_b.row && c.col == cell_b.col))
         });
 
         let mut target_title = cell_a.target_window_title.clone();
@@ -4655,6 +4643,9 @@ impl CrosshairApp {
                                         rect.contains(pointer)
                                     })?;
                                     if (source.row, source.col) == (target.row, target.col) {
+                                        return None;
+                                    }
+                                    if !Self::is_valid_merge_pair(source, target, layout.rows, layout.cols) {
                                         return None;
                                     }
                                     Some((
@@ -5442,10 +5433,12 @@ impl CrosshairApp {
                                                         ),
                                                     );
                                                     if other_rect.contains(pointer) {
-                                                        merge_action = Some((
-                                                            start_row, start_col, other.row,
-                                                            other.col,
-                                                        ));
+                                                        if Self::is_valid_merge_pair(&cell, other, layout.rows, layout.cols) {
+                                                            merge_action = Some((
+                                                                start_row, start_col, other.row,
+                                                                other.col,
+                                                            ));
+                                                        }
                                                         break;
                                                     }
                                                 }
@@ -5605,106 +5598,52 @@ impl CrosshairApp {
                             }
 
                             if let Some((x1, y1, x2, y2)) = add_cell {
-                                let mut used_slots = std::collections::HashSet::new();
-                                for c in &layout.cells {
-                                    for r in c.row..(c.row + c.row_span).min(layout.rows) {
-                                        for col in c.col..(c.col + c.col_span).min(layout.cols) {
-                                            used_slots.insert((r, col));
-                                        }
-                                    }
-                                }
-
-                                let cx = 0.5 * (x1 + x2);
-                                let cy = 0.5 * (y1 + y2);
-
-                                let pref_c = (0..layout.cols)
-                                    .min_by(|&a, &b| {
-                                        let da = (0.5 * (col_starts[a] + col_starts[a + 1]) - cx).abs();
-                                        let db = (0.5 * (col_starts[b] + col_starts[b + 1]) - cx).abs();
-                                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                                    })
-                                    .unwrap_or(0);
-                                let pref_r = (0..layout.rows)
-                                    .min_by(|&a, &b| {
-                                        let da = (0.5 * (row_starts[a] + row_starts[a + 1]) - cy).abs();
-                                        let db = (0.5 * (row_starts[b] + row_starts[b + 1]) - cy).abs();
-                                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-                                    })
-                                    .unwrap_or(0);
-
-                                let mut chosen = None;
-                                if !used_slots.contains(&(pref_r, pref_c)) {
-                                    chosen = Some((pref_r, pref_c));
-                                } else {
-                                    for r in 0..layout.rows {
-                                        for c in 0..layout.cols {
-                                            if !used_slots.contains(&(r, c)) {
-                                                chosen = Some((r, c));
-                                                break;
-                                            }
-                                        }
-                                        if chosen.is_some() {
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                let (r, c) = match chosen {
-                                    Some(s) => s,
-                                    None => {
-                                        if layout.cols <= layout.rows {
-                                            Self::resize_layout_grid(
-                                                layout,
-                                                layout.rows,
-                                                layout.cols + 1,
-                                            );
-                                            (pref_r, layout.cols - 1)
-                                        } else {
-                                            Self::resize_layout_grid(
-                                                layout,
-                                                layout.rows + 1,
-                                                layout.cols,
-                                            );
-                                            (layout.rows - 1, pref_c)
-                                        }
-                                    }
-                                };
-
-                                Self::sanitize_layout(layout);
-
                                 let r_sum: f32 = layout.row_ratios.iter().sum::<f32>().max(0.001);
                                 let c_sum: f32 = layout.col_ratios.iter().sum::<f32>().max(0.001);
-                                let mut new_col_starts = vec![0.0];
+                                let mut col_starts = vec![0.0];
                                 let mut acc = 0.0f32;
                                 for c_ratio in &layout.col_ratios {
                                     acc += c_ratio / c_sum;
-                                    new_col_starts.push(acc);
+                                    col_starts.push(acc);
                                 }
-                                while new_col_starts.len() <= layout.cols {
-                                    new_col_starts.push(1.0);
+                                while col_starts.len() <= layout.cols {
+                                    col_starts.push(1.0);
                                 }
-                                let mut new_row_starts = vec![0.0];
+                                let mut row_starts = vec![0.0];
                                 let mut acc = 0.0f32;
                                 for r_ratio in &layout.row_ratios {
                                     acc += r_ratio / r_sum;
-                                    new_row_starts.push(acc);
+                                    row_starts.push(acc);
                                 }
-                                while new_row_starts.len() <= layout.rows {
-                                    new_row_starts.push(1.0);
+                                while row_starts.len() <= layout.rows {
+                                    row_starts.push(1.0);
                                 }
 
-                                let end_c = (c + 1).min(layout.cols);
-                                let end_r = (r + 1).min(layout.rows);
-                                let adj_l = x1 - new_col_starts[c];
-                                let adj_r = x2 - new_col_starts[end_c];
-                                let adj_t = y1 - new_row_starts[r];
-                                let adj_b = y2 - new_row_starts[end_r];
+                                let c_start = (0..layout.cols).find(|&c| col_starts[c + 1] > x1 + 0.005).unwrap_or(0);
+                                let c_end = (c_start + 1..=layout.cols).find(|&c| col_starts[c] >= x2 - 0.005).unwrap_or(layout.cols);
+                                let r_start = (0..layout.rows).find(|&r| row_starts[r + 1] > y1 + 0.005).unwrap_or(0);
+                                let r_end = (r_start + 1..=layout.rows).find(|&r| row_starts[r] >= y2 - 0.005).unwrap_or(layout.rows);
+
+                                let new_col = c_start;
+                                let new_col_span = (c_end - c_start).max(1);
+                                let new_row = r_start;
+                                let new_row_span = (r_end - r_start).max(1);
+
+                                let mut adj_l = x1 - col_starts[new_col];
+                                let mut adj_r = x2 - col_starts[new_col + new_col_span];
+                                let mut adj_t = y1 - row_starts[new_row];
+                                let mut adj_b = y2 - row_starts[new_row + new_row_span];
+
+                                if adj_l.abs() < 0.002 { adj_l = 0.0; }
+                                if adj_r.abs() < 0.002 { adj_r = 0.0; }
+                                if adj_t.abs() < 0.002 { adj_t = 0.0; }
+                                if adj_b.abs() < 0.002 { adj_b = 0.0; }
 
                                 layout.cells.push(WindowLayoutCell {
-                                    row: r,
-                                    col: c,
-                                    row_span: 1,
-                                    col_span: 1,
+                                    row: new_row,
+                                    col: new_col,
+                                    row_span: new_row_span,
+                                    col_span: new_col_span,
                                     target_window_title: None,
                                     extra_target_window_titles: Vec::new(),
                                     match_duplicate_window_titles: true,
@@ -5714,7 +5653,7 @@ impl CrosshairApp {
                                     adjust_bottom: adj_b,
                                 });
                                 Self::sanitize_layout(layout);
-                                self.selected_layout_cell = Some((layout.id, r, c));
+                                self.selected_layout_cell = Some((layout.id, new_row, new_col));
                                 live_sync = true;
                             }
 
@@ -5931,7 +5870,7 @@ impl CrosshairApp {
                 }
             });
 
-            if card_response.hovered() {
+            if Self::is_card_active_or_hovered(ui, &card_response) {
                 let regions = Self::window_layout_preview_regions(layout);
                 if !regions.is_empty() {
                     hovered_layout_preset = Some((layout.id, regions));
@@ -6533,5 +6472,15 @@ mod tests {
         assert_eq!(regions.len(), 1);
         assert!(regions[0].width >= 10);
         assert!(regions[0].height >= 10);
+    }
+
+    #[test]
+    fn test_is_valid_merge_pair_rejects_diagonal() {
+        let cell_a = WindowLayoutCell { row: 0, col: 0, row_span: 1, col_span: 1, ..Default::default() };
+        let cell_b = WindowLayoutCell { row: 1, col: 1, row_span: 1, col_span: 1, ..Default::default() };
+        assert!(!CrosshairApp::is_valid_merge_pair(&cell_a, &cell_b, 2, 2));
+
+        let cell_c = WindowLayoutCell { row: 0, col: 1, row_span: 1, col_span: 1, ..Default::default() };
+        assert!(CrosshairApp::is_valid_merge_pair(&cell_a, &cell_c, 2, 2));
     }
 }

@@ -960,7 +960,7 @@ impl CrosshairApp {
                     }
                 });
 
-                if card_response.hovered() {
+                if Self::is_card_active_or_hovered(ui, &card_response) {
                     let regions = Self::vision_preset_preview_regions(preset);
                     if !regions.is_empty() {
                         hovered_vision_preset = Some((preset.id, regions));
