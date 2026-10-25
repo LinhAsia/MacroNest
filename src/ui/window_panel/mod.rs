@@ -3917,14 +3917,14 @@ impl CrosshairApp {
         let y2_b = row_starts[t_end_r] + target.adjust_bottom;
 
         // Visual vertical merge: horizontal edges align (left & right match) and vertical edges touch
-        let visual_v = (x1_a - x1_b).abs() < 0.04
-            && (x2_a - x2_b).abs() < 0.04
-            && ((y2_a - y1_b).abs() < 0.04 || (y2_b - y1_a).abs() < 0.04);
+        let visual_v = (x1_a - x1_b).abs() < 0.06
+            && (x2_a - x2_b).abs() < 0.06
+            && ((y2_a - y1_b).abs() < 0.06 || (y2_b - y1_a).abs() < 0.06);
 
         // Visual horizontal merge: vertical edges align (top & bottom match) and horizontal edges touch
-        let visual_h = (y1_a - y1_b).abs() < 0.04
-            && (y2_a - y2_b).abs() < 0.04
-            && ((x2_a - x1_b).abs() < 0.04 || (x2_b - x1_a).abs() < 0.04);
+        let visual_h = (y1_a - y1_b).abs() < 0.06
+            && (y2_a - y2_b).abs() < 0.06
+            && ((x2_a - x1_b).abs() < 0.06 || (x2_b - x1_a).abs() < 0.06);
 
         visual_v || visual_h
     }
@@ -4534,7 +4534,7 @@ impl CrosshairApp {
                             let mut add_cell: Option<(f32, f32, f32, f32)> = None;
                             let mut snap_preview = None;
                             let mut merge_action = None;
-                            if !ui.input(|i| i.pointer.primary_down()) {
+                            if !ui.input(|i| i.pointer.primary_down() || i.pointer.primary_released()) {
                                 self.drag_start_layout_cell = None;
                             }
                             let cells_to_draw = layout.cells.clone();
@@ -4657,7 +4657,8 @@ impl CrosshairApp {
                             let merge_target_cell = self.drag_start_layout_cell.and_then(
                                 |(drag_layout, drag_row, drag_col)| {
                                     if drag_layout != layout.id
-                                        || !ui.input(|input| input.pointer.primary_down())
+                                        || !ui.input(|input| input.pointer.primary_down() || input.pointer.primary_released())
+                                        || ui.input(|input| input.modifiers.alt)
                                     {
                                         return None;
                                     }
@@ -4700,7 +4701,7 @@ impl CrosshairApp {
                                                         * grid_h,
                                             ),
                                         );
-                                        if rect.expand(6.0).contains(pointer) {
+                                        if rect.expand(8.0).contains(pointer) {
                                             let dist = rect.center().distance(pointer);
                                             if best_target.as_ref().map_or(true, |(_, d)| dist < *d) {
                                                 best_target = Some((other, dist));
@@ -4711,6 +4712,15 @@ impl CrosshairApp {
                                     Some((target.row, target.col))
                                 },
                             );
+                            if ui.input(|input| input.pointer.primary_released()) {
+                                if let Some((drag_layout, start_row, start_col)) = self.drag_start_layout_cell.take() {
+                                    if drag_layout == layout.id {
+                                        if let Some((target_row, target_col)) = merge_target_cell {
+                                            merge_action = Some((start_row, start_col, target_row, target_col));
+                                        }
+                                    }
+                                }
+                            }
                             for (cell_idx, cell) in cells_to_draw.iter().enumerate() {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
                                     continue;
@@ -5434,71 +5444,7 @@ impl CrosshairApp {
                                             }
                                         }
                                     }
-                                    if let Some((start_layout, start_row, start_col)) =
-                                        self.drag_start_layout_cell.take()
-                                    {
-                                        if start_layout == layout.id {
-                                            let pointer =
-                                                ui.input(|input| input.pointer.latest_pos());
-                                            if let Some(pointer) = pointer {
-                                                if let Some(source) = layout
-                                                    .cells
-                                                    .iter()
-                                                    .find(|c| (c.row, c.col) == (start_row, start_col))
-                                                    .cloned()
-                                                {
-                                                    let mut best_target: Option<(&WindowLayoutCell, f32)> = None;
-                                                    for other in &layout.cells {
-                                                        if (other.row, other.col) == (start_row, start_col) {
-                                                            continue;
-                                                        }
-                                                        if !Self::is_valid_merge_pair(
-                                                            &source,
-                                                            other,
-                                                            layout.rows,
-                                                            layout.cols,
-                                                            &layout.col_ratios,
-                                                            &layout.row_ratios,
-                                                        ) {
-                                                            continue;
-                                                        }
-                                                        let other_end_row = (other.row + other.row_span).min(layout.rows);
-                                                        let other_end_col = (other.col + other.col_span).min(layout.cols);
-                                                        let other_rect = egui::Rect::from_min_max(
-                                                            egui::pos2(
-                                                                grid_rect.min.x
-                                                                    + (col_starts[other.col] + other.adjust_left)
-                                                                        * grid_w,
-                                                                grid_rect.min.y
-                                                                    + (row_starts[other.row] + other.adjust_top)
-                                                                        * grid_h,
-                                                            ),
-                                                            egui::pos2(
-                                                                grid_rect.min.x
-                                                                    + (col_starts[other_end_col] + other.adjust_right)
-                                                                        * grid_w,
-                                                                grid_rect.min.y
-                                                                    + (row_starts[other_end_row] + other.adjust_bottom)
-                                                                        * grid_h,
-                                                            ),
-                                                        );
-                                                        if other_rect.expand(6.0).contains(pointer) {
-                                                            let dist = other_rect.center().distance(pointer);
-                                                            if best_target.as_ref().map_or(true, |(_, d)| dist < *d) {
-                                                                best_target = Some((other, dist));
-                                                            }
-                                                        }
-                                                    }
-                                                    if let Some((target, _)) = best_target {
-                                                        merge_action = Some((
-                                                            start_row, start_col, target.row,
-                                                            target.col,
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+
                                 }
 
                                 if cell_resp.clicked() && !controls_active {
