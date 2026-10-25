@@ -3863,70 +3863,12 @@ impl CrosshairApp {
     pub(crate) fn is_valid_merge_pair(
         source: &WindowLayoutCell,
         target: &WindowLayoutCell,
-        rows: usize,
-        cols: usize,
-        col_ratios: &[f32],
-        row_ratios: &[f32],
+        _rows: usize,
+        _cols: usize,
+        _col_ratios: &[f32],
+        _row_ratios: &[f32],
     ) -> bool {
-        let s_end_r = (source.row + source.row_span).min(rows);
-        let s_end_c = (source.col + source.col_span).min(cols);
-        let t_end_r = (target.row + target.row_span).min(rows);
-        let t_end_c = (target.col + target.col_span).min(cols);
-
-        let nominal_h = source.row == target.row
-            && source.row_span == target.row_span
-            && (s_end_c == target.col || t_end_c == source.col);
-        let nominal_v = source.col == target.col
-            && source.col_span == target.col_span
-            && (s_end_r == target.row || t_end_r == source.row);
-
-        if nominal_h || nominal_v {
-            return true;
-        }
-
-        let r_sum: f32 = row_ratios.iter().sum::<f32>().max(0.001);
-        let c_sum: f32 = col_ratios.iter().sum::<f32>().max(0.001);
-        let mut row_starts = vec![0.0];
-        let mut acc = 0.0f32;
-        for r in row_ratios {
-            acc += r / r_sum;
-            row_starts.push(acc);
-        }
-        while row_starts.len() <= rows {
-            row_starts.push(1.0);
-        }
-
-        let mut col_starts = vec![0.0];
-        let mut acc = 0.0f32;
-        for c in col_ratios {
-            acc += c / c_sum;
-            col_starts.push(acc);
-        }
-        while col_starts.len() <= cols {
-            col_starts.push(1.0);
-        }
-
-        let x1_a = col_starts[source.col] + source.adjust_left;
-        let x2_a = col_starts[s_end_c] + source.adjust_right;
-        let y1_a = row_starts[source.row] + source.adjust_top;
-        let y2_a = row_starts[s_end_r] + source.adjust_bottom;
-
-        let x1_b = col_starts[target.col] + target.adjust_left;
-        let x2_b = col_starts[t_end_c] + target.adjust_right;
-        let y1_b = row_starts[target.row] + target.adjust_top;
-        let y2_b = row_starts[t_end_r] + target.adjust_bottom;
-
-        // Visual vertical merge: horizontal edges align (left & right match) and vertical edges touch
-        let visual_v = (x1_a - x1_b).abs() < 0.06
-            && (x2_a - x2_b).abs() < 0.06
-            && ((y2_a - y1_b).abs() < 0.06 || (y2_b - y1_a).abs() < 0.06);
-
-        // Visual horizontal merge: vertical edges align (top & bottom match) and horizontal edges touch
-        let visual_h = (y1_a - y1_b).abs() < 0.06
-            && (y2_a - y2_b).abs() < 0.06
-            && ((x2_a - x1_b).abs() < 0.06 || (x2_b - x1_a).abs() < 0.06);
-
-        visual_v || visual_h
+        source.row != target.row || source.col != target.col
     }
 
     pub(crate) fn merge_layout_cells(
@@ -3951,7 +3893,14 @@ impl CrosshairApp {
             .find(|cell| cell.row == end_row && cell.col == end_col)
             .cloned()?;
 
-        if !Self::is_valid_merge_pair(&cell_a, &cell_b, layout.rows, layout.cols, &layout.col_ratios, &layout.row_ratios) {
+        if !Self::is_valid_merge_pair(
+            &cell_a,
+            &cell_b,
+            layout.rows,
+            layout.cols,
+            &layout.col_ratios,
+            &layout.row_ratios,
+        ) {
             return None;
         }
 
@@ -3977,42 +3926,92 @@ impl CrosshairApp {
             col_starts.push(1.0);
         }
 
-        let r1 = cell_a.row.min(cell_b.row);
-        let c1 = cell_a.col.min(cell_b.col);
+        let mut r1 = cell_a.row.min(cell_b.row);
+        let mut c1 = cell_a.col.min(cell_b.col);
         let a_end_r = (cell_a.row + cell_a.row_span).min(layout.rows);
         let a_end_c = (cell_a.col + cell_a.col_span).min(layout.cols);
         let b_end_r = (cell_b.row + cell_b.row_span).min(layout.rows);
         let b_end_c = (cell_b.col + cell_b.col_span).min(layout.cols);
-        let r2 = a_end_r.max(b_end_r);
-        let c2 = a_end_c.max(b_end_c);
+        let mut r2 = a_end_r.max(b_end_r);
+        let mut c2 = a_end_c.max(b_end_c);
+
+        loop {
+            let mut expanded = false;
+            for c in &layout.cells {
+                let cr2 = (c.row + c.row_span).min(layout.rows);
+                let cc2 = (c.col + c.col_span).min(layout.cols);
+                if c.row < r2 && cr2 > r1 && c.col < c2 && cc2 > c1 {
+                    if c.row < r1 {
+                        r1 = c.row;
+                        expanded = true;
+                    }
+                    if c.col < c1 {
+                        c1 = c.col;
+                        expanded = true;
+                    }
+                    if cr2 > r2 {
+                        r2 = cr2;
+                        expanded = true;
+                    }
+                    if cc2 > c2 {
+                        c2 = cc2;
+                        expanded = true;
+                    }
+                }
+            }
+            if !expanded {
+                break;
+            }
+        }
+
+        let to_merge: Vec<WindowLayoutCell> = layout
+            .cells
+            .iter()
+            .filter(|c| {
+                let cr2 = (c.row + c.row_span).min(layout.rows);
+                let cc2 = (c.col + c.col_span).min(layout.cols);
+                c.row < r2 && cr2 > r1 && c.col < c2 && cc2 > c1
+            })
+            .cloned()
+            .collect();
+
+        if to_merge.is_empty() {
+            return None;
+        }
 
         let new_row_span = (r2 - r1).max(1);
         let new_col_span = (c2 - c1).max(1);
 
-        let x1_a = col_starts[cell_a.col] + cell_a.adjust_left;
-        let y1_a = row_starts[cell_a.row] + cell_a.adjust_top;
-        let x2_a = col_starts[a_end_c] + cell_a.adjust_right;
-        let y2_a = row_starts[a_end_r] + cell_a.adjust_bottom;
-
-        let x1_b = col_starts[cell_b.col] + cell_b.adjust_left;
-        let y1_b = row_starts[cell_b.row] + cell_b.adjust_top;
-        let x2_b = col_starts[b_end_c] + cell_b.adjust_right;
-        let y2_b = row_starts[b_end_r] + cell_b.adjust_bottom;
-
-        let min_x = x1_a.min(x1_b);
-        let min_y = y1_a.min(y1_b);
-        let max_x = x2_a.max(x2_b);
-        let max_y = y2_a.max(y2_b);
+        let min_x = to_merge
+            .iter()
+            .map(|c| col_starts[c.col] + c.adjust_left)
+            .fold(1.0f32, f32::min);
+        let max_x = to_merge
+            .iter()
+            .map(|c| {
+                let end_c = (c.col + c.col_span).min(layout.cols);
+                col_starts[end_c] + c.adjust_right
+            })
+            .fold(0.0f32, f32::max);
+        let min_y = to_merge
+            .iter()
+            .map(|c| row_starts[c.row] + c.adjust_top)
+            .fold(1.0f32, f32::min);
+        let max_y = to_merge
+            .iter()
+            .map(|c| {
+                let end_r = (c.row + c.row_span).min(layout.rows);
+                row_starts[end_r] + c.adjust_bottom
+            })
+            .fold(0.0f32, f32::max);
 
         let adj_l = min_x - col_starts[c1];
         let adj_r = max_x - col_starts[c2];
         let adj_t = min_y - row_starts[r1];
         let adj_b = max_y - row_starts[r2];
 
-        // Remove only the two merged cells, leaving all other cells intact
         layout.cells.retain(|c| {
-            !((c.row == cell_a.row && c.col == cell_a.col)
-                || (c.row == cell_b.row && c.col == cell_b.col))
+            !to_merge.iter().any(|m| m.row == c.row && m.col == c.col)
         });
 
         let mut target_title = cell_a.target_window_title.clone();
@@ -4020,9 +4019,19 @@ impl CrosshairApp {
             target_title = cell_b.target_window_title.clone();
         }
         let mut extras = cell_a.extra_target_window_titles.clone();
-        for t in cell_b.extra_target_window_titles {
-            if !extras.contains(&t) {
-                extras.push(t);
+        for t in &cell_b.extra_target_window_titles {
+            if !extras.contains(t) {
+                extras.push(t.clone());
+            }
+        }
+        for c in &to_merge {
+            if target_title.is_none() {
+                target_title = c.target_window_title.clone();
+            }
+            for t in &c.extra_target_window_titles {
+                if !extras.contains(t) {
+                    extras.push(t.clone());
+                }
             }
         }
 
@@ -4033,8 +4042,9 @@ impl CrosshairApp {
             col_span: new_col_span,
             target_window_title: target_title,
             extra_target_window_titles: extras,
-            match_duplicate_window_titles: cell_a.match_duplicate_window_titles
-                || cell_b.match_duplicate_window_titles,
+            match_duplicate_window_titles: to_merge
+                .iter()
+                .any(|c| c.match_duplicate_window_titles),
             adjust_left: if adj_l.abs() < 0.0005 { 0.0 } else { adj_l },
             adjust_right: if adj_r.abs() < 0.0005 { 0.0 } else { adj_r },
             adjust_top: if adj_t.abs() < 0.0005 { 0.0 } else { adj_t },
@@ -4666,6 +4676,29 @@ impl CrosshairApp {
                                     let source = cells_to_draw.iter().find(|cell| {
                                         (cell.row, cell.col) == (drag_row, drag_col)
                                     })?;
+                                    let s_end_r = (source.row + source.row_span).min(layout.rows);
+                                    let s_end_c = (source.col + source.col_span).min(layout.cols);
+                                    let source_rect = egui::Rect::from_min_max(
+                                        egui::pos2(
+                                            grid_rect.min.x
+                                                + (col_starts[source.col] + source.adjust_left)
+                                                    * grid_w,
+                                            grid_rect.min.y
+                                                + (row_starts[source.row] + source.adjust_top)
+                                                    * grid_h,
+                                        ),
+                                        egui::pos2(
+                                            grid_rect.min.x
+                                                + (col_starts[s_end_c] + source.adjust_right)
+                                                    * grid_w,
+                                            grid_rect.min.y
+                                                + (row_starts[s_end_r] + source.adjust_bottom)
+                                                    * grid_h,
+                                        ),
+                                    );
+                                    if source_rect.shrink(4.0).contains(pointer) {
+                                        return None;
+                                    }
                                     let mut best_target: Option<(&WindowLayoutCell, f32)> = None;
                                     for other in &cells_to_draw {
                                         if (other.row, other.col) == (source.row, source.col) {
@@ -4701,7 +4734,7 @@ impl CrosshairApp {
                                                         * grid_h,
                                             ),
                                         );
-                                        if rect.expand(8.0).contains(pointer) {
+                                        if rect.expand(2.0).contains(pointer) {
                                             let dist = rect.center().distance(pointer);
                                             if best_target.as_ref().map_or(true, |(_, d)| dist < *d) {
                                                 best_target = Some((other, dist));
@@ -4749,8 +4782,27 @@ impl CrosshairApp {
                                 let is_merge_source = self.drag_start_layout_cell
                                     == Some((layout.id, cell.row, cell.col))
                                     && ui.input(|input| input.pointer.primary_down());
-                                let is_merge_target = !is_merge_source
-                                    && merge_target_cell == Some((cell.row, cell.col));
+                                let is_merge_target = if is_merge_source {
+                                    false
+                                } else if let Some((drag_layout, d_row, d_col)) = self.drag_start_layout_cell {
+                                    if drag_layout == layout.id && let Some((t_row, t_col)) = merge_target_cell {
+                                        let r1 = d_row.min(t_row);
+                                        let c1 = d_col.min(t_col);
+                                        let s_cell = cells_to_draw.iter().find(|c| (c.row, c.col) == (d_row, d_col));
+                                        let t_cell = cells_to_draw.iter().find(|c| (c.row, c.col) == (t_row, t_col));
+                                        let s_end_r = s_cell.map_or(d_row + 1, |c| (c.row + c.row_span).min(layout.rows));
+                                        let s_end_c = s_cell.map_or(d_col + 1, |c| (c.col + c.col_span).min(layout.cols));
+                                        let t_end_r = t_cell.map_or(t_row + 1, |c| (c.row + c.row_span).min(layout.rows));
+                                        let t_end_c = t_cell.map_or(t_col + 1, |c| (c.col + c.col_span).min(layout.cols));
+                                        let r2 = s_end_r.max(t_end_r);
+                                        let c2 = s_end_c.max(t_end_c);
+                                        cell.row < r2 && end_row > r1 && cell.col < c2 && end_col > c1
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
 
                                 let cell_id =
                                     ui.make_persistent_id((layout.id, "cell", cell_idx));
@@ -6475,21 +6527,79 @@ mod tests {
     }
 
     #[test]
-    fn test_is_valid_merge_pair_rejects_diagonal() {
+    fn test_merge_pair_supports_diagonal_and_mismatched_spans() {
         let cell_a = WindowLayoutCell { row: 0, col: 0, row_span: 1, col_span: 1, ..Default::default() };
         let cell_b = WindowLayoutCell { row: 1, col: 1, row_span: 1, col_span: 1, ..Default::default() };
         let ratios = vec![0.5, 0.5];
-        assert!(!CrosshairApp::is_valid_merge_pair(&cell_a, &cell_b, 2, 2, &ratios, &ratios));
+        // Diagonal merge is allowed
+        assert!(CrosshairApp::is_valid_merge_pair(&cell_a, &cell_b, 2, 2, &ratios, &ratios));
 
         let cell_c = WindowLayoutCell { row: 0, col: 1, row_span: 1, col_span: 1, ..Default::default() };
         assert!(CrosshairApp::is_valid_merge_pair(&cell_a, &cell_c, 2, 2, &ratios, &ratios));
 
-        // Reject vertical merge when widths do not match (e.g. 4-column cell with 1-column cell)
+        // Merging cells with different spans / widths is allowed
         let cell_wide = WindowLayoutCell { row: 2, col: 0, row_span: 1, col_span: 4, ..Default::default() };
         let cell_narrow_top = WindowLayoutCell { row: 0, col: 0, row_span: 2, col_span: 1, ..Default::default() };
         let cell_wide_bottom = WindowLayoutCell { row: 3, col: 0, row_span: 1, col_span: 4, ..Default::default() };
         let r5 = vec![0.2, 0.2, 0.2, 0.2, 0.2];
-        assert!(!CrosshairApp::is_valid_merge_pair(&cell_wide, &cell_narrow_top, 5, 5, &r5, &r5));
+        assert!(CrosshairApp::is_valid_merge_pair(&cell_wide, &cell_narrow_top, 5, 5, &r5, &r5));
         assert!(CrosshairApp::is_valid_merge_pair(&cell_wide, &cell_wide_bottom, 5, 5, &r5, &r5));
+
+        // Same cell cannot be merged with itself
+        assert!(!CrosshairApp::is_valid_merge_pair(&cell_a, &cell_a, 2, 2, &ratios, &ratios));
+    }
+
+    #[test]
+    fn test_diagonal_merge_layout_cells() {
+        let mut layout = WindowLayout {
+            id: 1,
+            name: "Test Layout".to_owned(),
+            rows: 2,
+            cols: 2,
+            row_ratios: vec![0.5, 0.5],
+            col_ratios: vec![0.5, 0.5],
+            cells: vec![
+                WindowLayoutCell { row: 0, col: 0, row_span: 1, col_span: 1, ..Default::default() },
+                WindowLayoutCell { row: 0, col: 1, row_span: 1, col_span: 1, ..Default::default() },
+                WindowLayoutCell { row: 1, col: 0, row_span: 1, col_span: 1, ..Default::default() },
+                WindowLayoutCell { row: 1, col: 1, row_span: 1, col_span: 1, ..Default::default() },
+            ],
+            ..Default::default()
+        };
+
+        let result = CrosshairApp::merge_layout_cells(&mut layout, 0, 0, 1, 1);
+        assert_eq!(result, Some((0, 0)));
+        assert_eq!(layout.cells.len(), 1);
+        assert_eq!(layout.cells[0].row, 0);
+        assert_eq!(layout.cells[0].col, 0);
+        assert_eq!(layout.cells[0].row_span, 2);
+        assert_eq!(layout.cells[0].col_span, 2);
+    }
+
+    #[test]
+    fn test_merge_different_sized_cells_preserves_other_cells() {
+        let mut layout = WindowLayout {
+            id: 2,
+            name: "Test Layout".to_owned(),
+            rows: 4,
+            cols: 2,
+            row_ratios: vec![0.25, 0.25, 0.25, 0.25],
+            col_ratios: vec![0.5, 0.5],
+            cells: vec![
+                WindowLayoutCell { row: 0, col: 0, row_span: 1, col_span: 2, ..Default::default() },
+                WindowLayoutCell { row: 1, col: 0, row_span: 1, col_span: 2, ..Default::default() },
+                WindowLayoutCell { row: 2, col: 0, row_span: 1, col_span: 2, ..Default::default() },
+                WindowLayoutCell { row: 3, col: 0, row_span: 1, col_span: 2, ..Default::default() },
+            ],
+            ..Default::default()
+        };
+
+        // Merging row 2 and row 3 should NOT touch row 0 or row 1
+        let result = CrosshairApp::merge_layout_cells(&mut layout, 2, 0, 3, 0);
+        assert_eq!(result, Some((2, 0)));
+        assert_eq!(layout.cells.len(), 3);
+        assert!(layout.cells.iter().any(|c| c.row == 0 && c.row_span == 1));
+        assert!(layout.cells.iter().any(|c| c.row == 1 && c.row_span == 1));
+        assert!(layout.cells.iter().any(|c| c.row == 2 && c.row_span == 2));
     }
 }
