@@ -3291,22 +3291,15 @@ impl CrosshairApp {
             }
         }
 
-        // Write back adjustments & update nominal spans based on visual position
+        // Write back adjustments
         for (cell, (cl, ct, cr, cb)) in layout.cells.iter_mut().zip(boxes) {
-            let c_start = (0..cols).find(|&c| col_starts[c + 1] > cl + 0.005).unwrap_or(0);
-            let c_end = (c_start + 1..=cols).find(|&c| col_starts[c] >= cr - 0.005).unwrap_or(cols);
-            let r_start = (0..rows).find(|&r| row_starts[r + 1] > ct + 0.005).unwrap_or(0);
-            let r_end = (r_start + 1..=rows).find(|&r| row_starts[r] >= cb - 0.005).unwrap_or(rows);
-
-            cell.col = c_start;
-            cell.col_span = (c_end - c_start).max(1);
-            cell.row = r_start;
-            cell.row_span = (r_end - r_start).max(1);
+            let end_c = (cell.col + cell.col_span).min(cols);
+            let end_r = (cell.row + cell.row_span).min(rows);
 
             let mut adj_l = cl - col_starts[cell.col];
-            let mut adj_r = cr - col_starts[cell.col + cell.col_span];
+            let mut adj_r = cr - col_starts[end_c];
             let mut adj_t = ct - row_starts[cell.row];
-            let mut adj_b = cb - row_starts[cell.row + cell.row_span];
+            let mut adj_b = cb - row_starts[end_r];
 
             if adj_l.abs() < 0.0005 {
                 adj_l = 0.0;
@@ -3872,20 +3865,68 @@ impl CrosshairApp {
         target: &WindowLayoutCell,
         rows: usize,
         cols: usize,
+        col_ratios: &[f32],
+        row_ratios: &[f32],
     ) -> bool {
         let s_end_r = (source.row + source.row_span).min(rows);
         let s_end_c = (source.col + source.col_span).min(cols);
         let t_end_r = (target.row + target.row_span).min(rows);
         let t_end_c = (target.col + target.col_span).min(cols);
 
-        let horizontal = source.row == target.row
+        let nominal_h = source.row == target.row
             && source.row_span == target.row_span
             && (s_end_c == target.col || t_end_c == source.col);
-        let vertical = source.col == target.col
+        let nominal_v = source.col == target.col
             && source.col_span == target.col_span
             && (s_end_r == target.row || t_end_r == source.row);
 
-        horizontal || vertical
+        if nominal_h || nominal_v {
+            return true;
+        }
+
+        let r_sum: f32 = row_ratios.iter().sum::<f32>().max(0.001);
+        let c_sum: f32 = col_ratios.iter().sum::<f32>().max(0.001);
+        let mut row_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for r in row_ratios {
+            acc += r / r_sum;
+            row_starts.push(acc);
+        }
+        while row_starts.len() <= rows {
+            row_starts.push(1.0);
+        }
+
+        let mut col_starts = vec![0.0];
+        let mut acc = 0.0f32;
+        for c in col_ratios {
+            acc += c / c_sum;
+            col_starts.push(acc);
+        }
+        while col_starts.len() <= cols {
+            col_starts.push(1.0);
+        }
+
+        let x1_a = col_starts[source.col] + source.adjust_left;
+        let x2_a = col_starts[s_end_c] + source.adjust_right;
+        let y1_a = row_starts[source.row] + source.adjust_top;
+        let y2_a = row_starts[s_end_r] + source.adjust_bottom;
+
+        let x1_b = col_starts[target.col] + target.adjust_left;
+        let x2_b = col_starts[t_end_c] + target.adjust_right;
+        let y1_b = row_starts[target.row] + target.adjust_top;
+        let y2_b = row_starts[t_end_r] + target.adjust_bottom;
+
+        let v_overlap = y2_a.min(y2_b) - y1_a.max(y1_b);
+        let min_h = (y2_a - y1_a).min(y2_b - y1_b);
+        let y_aligned = v_overlap >= min_h * 0.5;
+        let x_touch = (x2_a - x1_b).abs() < 0.05 || (x2_b - x1_a).abs() < 0.05;
+
+        let h_overlap = x2_a.min(x2_b) - x1_a.max(x1_b);
+        let min_w = (x2_a - x1_a).min(x2_b - x1_b);
+        let x_aligned = h_overlap >= min_w * 0.5;
+        let y_touch = (y2_a - y1_b).abs() < 0.05 || (y2_b - y1_a).abs() < 0.05;
+
+        (y_aligned && x_touch) || (x_aligned && y_touch)
     }
 
     pub(crate) fn merge_layout_cells(
@@ -3907,7 +3948,7 @@ impl CrosshairApp {
             .find(|cell| cell.row == end_row && cell.col == end_col)
             .cloned()?;
 
-        if !Self::is_valid_merge_pair(&cell_a, &cell_b, layout.rows, layout.cols) {
+        if !Self::is_valid_merge_pair(&cell_a, &cell_b, layout.rows, layout.cols, &layout.col_ratios, &layout.row_ratios) {
             return None;
         }
 
@@ -4490,6 +4531,9 @@ impl CrosshairApp {
                             let mut add_cell: Option<(f32, f32, f32, f32)> = None;
                             let mut snap_preview = None;
                             let mut merge_action = None;
+                            if !ui.input(|i| i.pointer.primary_down()) {
+                                self.drag_start_layout_cell = None;
+                            }
                             let cells_to_draw = layout.cells.clone();
 
                             let final_empty_slots = Self::compute_empty_layout_slots(layout);
@@ -4645,7 +4689,7 @@ impl CrosshairApp {
                                     if (source.row, source.col) == (target.row, target.col) {
                                         return None;
                                     }
-                                    if !Self::is_valid_merge_pair(source, target, layout.rows, layout.cols) {
+                                    if !Self::is_valid_merge_pair(source, target, layout.rows, layout.cols, &layout.col_ratios, &layout.row_ratios) {
                                         return None;
                                     }
                                     Some((
@@ -4660,7 +4704,7 @@ impl CrosshairApp {
                                     ))
                                 },
                             );
-                            for cell in &cells_to_draw {
+                            for (cell_idx, cell) in cells_to_draw.iter().enumerate() {
                                 if cell.row >= layout.rows || cell.col >= layout.cols {
                                     continue;
                                 }
@@ -4701,19 +4745,19 @@ impl CrosshairApp {
                                     );
 
                                 let cell_id =
-                                    ui.make_persistent_id((layout.id, "cell", cell.row, cell.col));
-                                let cell_index = layout.cells.iter().position(|candidate| {
-                                    candidate.row == cell.row && candidate.col == cell.col
-                                });
+                                    ui.make_persistent_id((layout.id, "cell", cell_idx));
+                                let cell_index = Some(cell_idx);
                                 let mut cell_edge_active = false;
                                 if !split_hovered_or_dragged {
+                                    let ew = 5.0f32.min(raw_cell_rect.width() * 0.15).max(2.0);
+                                    let eh = 5.0f32.min(raw_cell_rect.height() * 0.15).max(2.0);
                                     let edge_handles = [
                                         (
                                             "left",
                                             egui::Rect::from_min_max(
                                                 raw_cell_rect.left_top(),
                                                 egui::pos2(
-                                                    raw_cell_rect.min.x + 7.0,
+                                                    raw_cell_rect.min.x + ew,
                                                     raw_cell_rect.max.y,
                                                 ),
                                             ),
@@ -4723,7 +4767,7 @@ impl CrosshairApp {
                                             "right",
                                             egui::Rect::from_min_max(
                                                 egui::pos2(
-                                                    raw_cell_rect.max.x - 7.0,
+                                                    raw_cell_rect.max.x - ew,
                                                     raw_cell_rect.min.y,
                                                 ),
                                                 raw_cell_rect.right_bottom(),
@@ -4736,7 +4780,7 @@ impl CrosshairApp {
                                                 raw_cell_rect.left_top(),
                                                 egui::pos2(
                                                     raw_cell_rect.max.x,
-                                                    raw_cell_rect.min.y + 7.0,
+                                                    raw_cell_rect.min.y + eh,
                                                 ),
                                             ),
                                             egui::CursorIcon::ResizeVertical,
@@ -4746,7 +4790,7 @@ impl CrosshairApp {
                                             egui::Rect::from_min_max(
                                                 egui::pos2(
                                                     raw_cell_rect.min.x,
-                                                    raw_cell_rect.max.y - 7.0,
+                                                    raw_cell_rect.max.y - eh,
                                                 ),
                                                 raw_cell_rect.right_bottom(),
                                             ),
@@ -4759,8 +4803,7 @@ impl CrosshairApp {
                                             ui.make_persistent_id((
                                                 layout.id,
                                                 "cell_edge",
-                                                cell.row,
-                                                cell.col,
+                                                cell_idx,
                                                 edge,
                                             )),
                                             egui::Sense::drag(),
@@ -5090,7 +5133,9 @@ impl CrosshairApp {
                                     delete_cell = cell_index;
                                 }
 
-                                if cell_resp.drag_started() && !controls_active {
+                                if (cell_resp.drag_started() || (cell_resp.dragged() && self.drag_start_layout_cell.is_none()))
+                                    && !controls_active
+                                {
                                     self.drag_start_layout_cell =
                                         Some((layout.id, cell.row, cell.col));
                                 }
@@ -5432,8 +5477,8 @@ impl CrosshairApp {
                                                                     * grid_h,
                                                         ),
                                                     );
-                                                    if other_rect.contains(pointer) {
-                                                        if Self::is_valid_merge_pair(&cell, other, layout.rows, layout.cols) {
+                                                    if other_rect.expand(6.0).contains(pointer) {
+                                                        if Self::is_valid_merge_pair(&cell, other, layout.rows, layout.cols, &layout.col_ratios, &layout.row_ratios) {
                                                             merge_action = Some((
                                                                 start_row, start_col, other.row,
                                                                 other.col,
@@ -6478,9 +6523,10 @@ mod tests {
     fn test_is_valid_merge_pair_rejects_diagonal() {
         let cell_a = WindowLayoutCell { row: 0, col: 0, row_span: 1, col_span: 1, ..Default::default() };
         let cell_b = WindowLayoutCell { row: 1, col: 1, row_span: 1, col_span: 1, ..Default::default() };
-        assert!(!CrosshairApp::is_valid_merge_pair(&cell_a, &cell_b, 2, 2));
+        let ratios = vec![0.5, 0.5];
+        assert!(!CrosshairApp::is_valid_merge_pair(&cell_a, &cell_b, 2, 2, &ratios, &ratios));
 
         let cell_c = WindowLayoutCell { row: 0, col: 1, row_span: 1, col_span: 1, ..Default::default() };
-        assert!(CrosshairApp::is_valid_merge_pair(&cell_a, &cell_c, 2, 2));
+        assert!(CrosshairApp::is_valid_merge_pair(&cell_a, &cell_c, 2, 2, &ratios, &ratios));
     }
 }
