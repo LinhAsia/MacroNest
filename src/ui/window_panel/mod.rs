@@ -3916,17 +3916,17 @@ impl CrosshairApp {
         let y1_b = row_starts[target.row] + target.adjust_top;
         let y2_b = row_starts[t_end_r] + target.adjust_bottom;
 
-        let v_overlap = y2_a.min(y2_b) - y1_a.max(y1_b);
-        let min_h = (y2_a - y1_a).min(y2_b - y1_b);
-        let y_aligned = v_overlap >= min_h * 0.5;
-        let x_touch = (x2_a - x1_b).abs() < 0.05 || (x2_b - x1_a).abs() < 0.05;
+        // Visual vertical merge: horizontal edges align (left & right match) and vertical edges touch
+        let visual_v = (x1_a - x1_b).abs() < 0.04
+            && (x2_a - x2_b).abs() < 0.04
+            && ((y2_a - y1_b).abs() < 0.04 || (y2_b - y1_a).abs() < 0.04);
 
-        let h_overlap = x2_a.min(x2_b) - x1_a.max(x1_b);
-        let min_w = (x2_a - x1_a).min(x2_b - x1_b);
-        let x_aligned = h_overlap >= min_w * 0.5;
-        let y_touch = (y2_a - y1_b).abs() < 0.05 || (y2_b - y1_a).abs() < 0.05;
+        // Visual horizontal merge: vertical edges align (top & bottom match) and horizontal edges touch
+        let visual_h = (y1_a - y1_b).abs() < 0.04
+            && (y2_a - y2_b).abs() < 0.04
+            && ((x2_a - x1_b).abs() < 0.04 || (x2_b - x1_a).abs() < 0.04);
 
-        (y_aligned && x_touch) || (x_aligned && y_touch)
+        visual_v || visual_h
     }
 
     pub(crate) fn merge_layout_cells(
@@ -3937,6 +3937,9 @@ impl CrosshairApp {
         end_col: usize,
     ) -> Option<(usize, usize)> {
         Self::sanitize_layout(layout);
+        if start_row == end_row && start_col == end_col {
+            return None;
+        }
         let cell_a = layout
             .cells
             .iter()
@@ -4651,7 +4654,7 @@ impl CrosshairApp {
                                     "Nhấn để thêm cửa sổ vào vùng trống này",
                                 ));
                             }
-                            let merge_preview_bounds = self.drag_start_layout_cell.and_then(
+                            let merge_target_cell = self.drag_start_layout_cell.and_then(
                                 |(drag_layout, drag_row, drag_col)| {
                                     if drag_layout != layout.id
                                         || !ui.input(|input| input.pointer.primary_down())
@@ -4662,46 +4665,50 @@ impl CrosshairApp {
                                     let source = cells_to_draw.iter().find(|cell| {
                                         (cell.row, cell.col) == (drag_row, drag_col)
                                     })?;
-                                    let target = cells_to_draw.iter().find(|cell| {
-                                        let end_row = (cell.row + cell.row_span).min(layout.rows);
-                                        let end_col = (cell.col + cell.col_span).min(layout.cols);
+                                    let mut best_target: Option<(&WindowLayoutCell, f32)> = None;
+                                    for other in &cells_to_draw {
+                                        if (other.row, other.col) == (source.row, source.col) {
+                                            continue;
+                                        }
+                                        if !Self::is_valid_merge_pair(
+                                            source,
+                                            other,
+                                            layout.rows,
+                                            layout.cols,
+                                            &layout.col_ratios,
+                                            &layout.row_ratios,
+                                        ) {
+                                            continue;
+                                        }
+                                        let end_row = (other.row + other.row_span).min(layout.rows);
+                                        let end_col = (other.col + other.col_span).min(layout.cols);
                                         let rect = egui::Rect::from_min_max(
                                             egui::pos2(
                                                 grid_rect.min.x
-                                                    + (col_starts[cell.col] + cell.adjust_left)
+                                                    + (col_starts[other.col] + other.adjust_left)
                                                         * grid_w,
                                                 grid_rect.min.y
-                                                    + (row_starts[cell.row] + cell.adjust_top)
+                                                    + (row_starts[other.row] + other.adjust_top)
                                                         * grid_h,
                                             ),
                                             egui::pos2(
                                                 grid_rect.min.x
-                                                    + (col_starts[end_col] + cell.adjust_right)
+                                                    + (col_starts[end_col] + other.adjust_right)
                                                         * grid_w,
                                                 grid_rect.min.y
-                                                    + (row_starts[end_row] + cell.adjust_bottom)
+                                                    + (row_starts[end_row] + other.adjust_bottom)
                                                         * grid_h,
                                             ),
-                                        )
-                                        .shrink(2.0);
-                                        rect.contains(pointer)
-                                    })?;
-                                    if (source.row, source.col) == (target.row, target.col) {
-                                        return None;
+                                        );
+                                        if rect.expand(6.0).contains(pointer) {
+                                            let dist = rect.center().distance(pointer);
+                                            if best_target.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                                best_target = Some((other, dist));
+                                            }
+                                        }
                                     }
-                                    if !Self::is_valid_merge_pair(source, target, layout.rows, layout.cols, &layout.col_ratios, &layout.row_ratios) {
-                                        return None;
-                                    }
-                                    Some((
-                                        source.row.min(target.row),
-                                        (source.row + source.row_span)
-                                            .max(target.row + target.row_span)
-                                            .min(layout.rows),
-                                        source.col.min(target.col),
-                                        (source.col + source.col_span)
-                                            .max(target.col + target.col_span)
-                                            .min(layout.cols),
-                                    ))
+                                    let (target, _) = best_target?;
+                                    Some((target.row, target.col))
                                 },
                             );
                             for (cell_idx, cell) in cells_to_draw.iter().enumerate() {
@@ -4733,16 +4740,7 @@ impl CrosshairApp {
                                     == Some((layout.id, cell.row, cell.col))
                                     && ui.input(|input| input.pointer.primary_down());
                                 let is_merge_target = !is_merge_source
-                                    && merge_preview_bounds.is_some_and(
-                                        |(start_row, end_row, start_col, end_col)| {
-                                            cell.row < end_row
-                                                && end_row > start_row
-                                                && cell.col < end_col
-                                                && end_col > start_col
-                                                && (cell.row + cell.row_span) > start_row
-                                                && (cell.col + cell.col_span) > start_col
-                                        },
-                                    );
+                                    && merge_target_cell == Some((cell.row, cell.col));
 
                                 let cell_id =
                                     ui.make_persistent_id((layout.id, "cell", cell_idx));
@@ -5443,48 +5441,59 @@ impl CrosshairApp {
                                             let pointer =
                                                 ui.input(|input| input.pointer.latest_pos());
                                             if let Some(pointer) = pointer {
-                                                for other in &layout.cells {
-                                                    if (other.row, other.col)
-                                                        == (start_row, start_col)
-                                                    {
-                                                        continue;
-                                                    }
-                                                    let other_end_row = (other.row
-                                                        + other.row_span)
-                                                        .min(layout.rows);
-                                                    let other_end_col = (other.col
-                                                        + other.col_span)
-                                                        .min(layout.cols);
-                                                    let other_rect = egui::Rect::from_min_max(
-                                                        egui::pos2(
-                                                            grid_rect.min.x
-                                                                + (col_starts[other.col]
-                                                                    + other.adjust_left)
-                                                                    * grid_w,
-                                                            grid_rect.min.y
-                                                                + (row_starts[other.row]
-                                                                    + other.adjust_top)
-                                                                    * grid_h,
-                                                        ),
-                                                        egui::pos2(
-                                                            grid_rect.min.x
-                                                                + (col_starts[other_end_col]
-                                                                    + other.adjust_right)
-                                                                    * grid_w,
-                                                            grid_rect.min.y
-                                                                + (row_starts[other_end_row]
-                                                                    + other.adjust_bottom)
-                                                                    * grid_h,
-                                                        ),
-                                                    );
-                                                    if other_rect.expand(6.0).contains(pointer) {
-                                                        if Self::is_valid_merge_pair(&cell, other, layout.rows, layout.cols, &layout.col_ratios, &layout.row_ratios) {
-                                                            merge_action = Some((
-                                                                start_row, start_col, other.row,
-                                                                other.col,
-                                                            ));
+                                                if let Some(source) = layout
+                                                    .cells
+                                                    .iter()
+                                                    .find(|c| (c.row, c.col) == (start_row, start_col))
+                                                    .cloned()
+                                                {
+                                                    let mut best_target: Option<(&WindowLayoutCell, f32)> = None;
+                                                    for other in &layout.cells {
+                                                        if (other.row, other.col) == (start_row, start_col) {
+                                                            continue;
                                                         }
-                                                        break;
+                                                        if !Self::is_valid_merge_pair(
+                                                            &source,
+                                                            other,
+                                                            layout.rows,
+                                                            layout.cols,
+                                                            &layout.col_ratios,
+                                                            &layout.row_ratios,
+                                                        ) {
+                                                            continue;
+                                                        }
+                                                        let other_end_row = (other.row + other.row_span).min(layout.rows);
+                                                        let other_end_col = (other.col + other.col_span).min(layout.cols);
+                                                        let other_rect = egui::Rect::from_min_max(
+                                                            egui::pos2(
+                                                                grid_rect.min.x
+                                                                    + (col_starts[other.col] + other.adjust_left)
+                                                                        * grid_w,
+                                                                grid_rect.min.y
+                                                                    + (row_starts[other.row] + other.adjust_top)
+                                                                        * grid_h,
+                                                            ),
+                                                            egui::pos2(
+                                                                grid_rect.min.x
+                                                                    + (col_starts[other_end_col] + other.adjust_right)
+                                                                        * grid_w,
+                                                                grid_rect.min.y
+                                                                    + (row_starts[other_end_row] + other.adjust_bottom)
+                                                                        * grid_h,
+                                                            ),
+                                                        );
+                                                        if other_rect.expand(6.0).contains(pointer) {
+                                                            let dist = other_rect.center().distance(pointer);
+                                                            if best_target.as_ref().map_or(true, |(_, d)| dist < *d) {
+                                                                best_target = Some((other, dist));
+                                                            }
+                                                        }
+                                                    }
+                                                    if let Some((target, _)) = best_target {
+                                                        merge_action = Some((
+                                                            start_row, start_col, target.row,
+                                                            target.col,
+                                                        ));
                                                     }
                                                 }
                                             }
@@ -6528,5 +6537,13 @@ mod tests {
 
         let cell_c = WindowLayoutCell { row: 0, col: 1, row_span: 1, col_span: 1, ..Default::default() };
         assert!(CrosshairApp::is_valid_merge_pair(&cell_a, &cell_c, 2, 2, &ratios, &ratios));
+
+        // Reject vertical merge when widths do not match (e.g. 4-column cell with 1-column cell)
+        let cell_wide = WindowLayoutCell { row: 2, col: 0, row_span: 1, col_span: 4, ..Default::default() };
+        let cell_narrow_top = WindowLayoutCell { row: 0, col: 0, row_span: 2, col_span: 1, ..Default::default() };
+        let cell_wide_bottom = WindowLayoutCell { row: 3, col: 0, row_span: 1, col_span: 4, ..Default::default() };
+        let r5 = vec![0.2, 0.2, 0.2, 0.2, 0.2];
+        assert!(!CrosshairApp::is_valid_merge_pair(&cell_wide, &cell_narrow_top, 5, 5, &r5, &r5));
+        assert!(CrosshairApp::is_valid_merge_pair(&cell_wide, &cell_wide_bottom, 5, 5, &r5, &r5));
     }
 }
