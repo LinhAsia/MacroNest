@@ -2151,45 +2151,49 @@ impl CrosshairApp {
             .width(115.0)
             .selected_text(outputs_label)
             .show_ui(ui, |ui| {
+                let mut render_expanding_box = |ui: &mut egui::Ui, id_name: &str, val: &mut String, hint: &str, base_w: f32, exp_w: f32| -> egui::Response {
+                    let box_id = ui.auto_id_with(id_name);
+                    let focus_key = box_id.with("focus");
+                    let has_focus = ui.memory(|mem| mem.data.get_temp::<bool>(focus_key)).unwrap_or(false);
+                    let target_w = if has_focus { exp_w } else { base_w };
+                    let anim_w = ui.ctx().animate_value_with_time(box_id.with("anim_w"), target_w, 0.18);
+                    let prev_override = ui.visuals().override_text_color;
+                    ui.visuals_mut().override_text_color = None;
+                    let resp = ui.add(egui::TextEdit::singleline(val).hint_text(hint).desired_width(anim_w));
+                    ui.visuals_mut().override_text_color = prev_override;
+                    Self::apply_vietnamese_input_if_changed(&resp, vietnamese_input_enabled, vietnamese_input_mode, val);
+                    let now_focus = resp.has_focus();
+                    if now_focus != has_focus {
+                        ui.memory_mut(|mem| mem.data.insert_temp(focus_key, now_focus));
+                    }
+                    *live_sync |= resp.changed();
+                    resp
+                };
+
                 if is_pixel {
-                    ui.set_min_width(200.0);
+                    ui.set_min_width(280.0);
                     egui::Grid::new(ui.auto_id_with("vision_outputs_grid_pixel"))
                         .num_columns(2)
-                        .spacing([8.0, 6.0])
+                        .spacing([10.0, 6.0])
                         .show(ui, |ui| {
                             ui.label("Found:");
-                            let prev_override = ui.visuals().override_text_color;
-                            ui.visuals_mut().override_text_color = None;
-                            let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var"));
-                            ui.visuals_mut().override_text_color = prev_override;
-                            Self::apply_vietnamese_input_if_changed(&resp, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_found_var);
-                            *live_sync |= resp.changed();
+                            render_expanding_box(ui, "pixel_found", &mut step.vision_found_var, "found_var", 160.0, 220.0);
                             ui.end_row();
 
                             ui.label(Self::tr_lang(language, "Count Var:", "Count Var:"));
-                            let prev_override = ui.visuals().override_text_color;
-                            ui.visuals_mut().override_text_color = None;
-                            let resp = ui.add(egui::TextEdit::singleline(&mut step.if_variable_name).hint_text("count_var"));
-                            ui.visuals_mut().override_text_color = prev_override;
-                            Self::apply_vietnamese_input_if_changed(&resp, vietnamese_input_enabled, vietnamese_input_mode, &mut step.if_variable_name);
-                            *live_sync |= resp.changed();
+                            render_expanding_box(ui, "pixel_count", &mut step.if_variable_name, "count_var", 160.0, 220.0);
                             ui.end_row();
                         });
                     return;
                 }
 
-                ui.set_min_width(300.0);
+                ui.set_min_width(420.0);
                 egui::Grid::new(ui.auto_id_with("vision_outputs_grid"))
                     .num_columns(5)
-                    .spacing([8.0, 6.0])
+                    .spacing([10.0, 6.0])
                     .show(ui, |ui| {
                         ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new("Found:").strong()));
-                        let prev_override = ui.visuals().override_text_color;
-                        ui.visuals_mut().override_text_color = None;
-                        let resp = ui.add(egui::TextEdit::singleline(&mut step.vision_found_var).hint_text("found_var").desired_width(150.0));
-                        ui.visuals_mut().override_text_color = prev_override;
-                        Self::apply_vietnamese_input_if_changed(&resp, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_found_var);
-                        *live_sync |= resp.changed();
+                        render_expanding_box(ui, "target_found", &mut step.vision_found_var, "found_var", 180.0, 260.0);
                         ui.label("");
                         ui.label("");
                         ui.label("");
@@ -2197,20 +2201,10 @@ impl CrosshairApp {
 
                         ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(Self::tr_lang(language, "Target:", "Tâm:")).strong()));
                         ui.label("X:");
-                        let prev_override = ui.visuals().override_text_color;
-                        ui.visuals_mut().override_text_color = None;
-                        let resp_x = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_x).hint_text("target_x").desired_width(65.0));
-                        ui.visuals_mut().override_text_color = prev_override;
-                        Self::apply_vietnamese_input_if_changed(&resp_x, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_pos_var_x);
-                        *live_sync |= resp_x.changed();
+                        render_expanding_box(ui, "target_x", &mut step.vision_pos_var_x, "target_x", 110.0, 180.0);
 
                         ui.label("Y:");
-                        let prev_override = ui.visuals().override_text_color;
-                        ui.visuals_mut().override_text_color = None;
-                        let resp_y = ui.add(egui::TextEdit::singleline(&mut step.vision_pos_var_y).hint_text("target_y").desired_width(65.0));
-                        ui.visuals_mut().override_text_color = prev_override;
-                        Self::apply_vietnamese_input_if_changed(&resp_y, vietnamese_input_enabled, vietnamese_input_mode, &mut step.vision_pos_var_y);
-                        *live_sync |= resp_y.changed();
+                        render_expanding_box(ui, "target_y", &mut step.vision_pos_var_y, "target_y", 110.0, 180.0);
                         ui.end_row();
                     });
 
@@ -2228,25 +2222,15 @@ impl CrosshairApp {
 
                 egui::Grid::new(ui.auto_id_with("vision_extreme_points_grid"))
                     .num_columns(5)
-                    .spacing([8.0, 6.0])
+                    .spacing([10.0, 6.0])
                     .show(ui, |ui| {
                         let mut render_dir_row = |ui: &mut egui::Ui, label: &str, def_x: &'static str, def_y: &'static str, var_x: &mut String, var_y: &mut String| {
                             ui.add_sized([58.0, 18.0], egui::Label::new(egui::RichText::new(label).strong()));
                             ui.label("X:");
-                            let prev_override = ui.visuals().override_text_color;
-                            ui.visuals_mut().override_text_color = None;
-                            let resp_x = ui.add(egui::TextEdit::singleline(var_x).hint_text(def_x).desired_width(65.0));
-                            ui.visuals_mut().override_text_color = prev_override;
-                            Self::apply_vietnamese_input_if_changed(&resp_x, vietnamese_input_enabled, vietnamese_input_mode, var_x);
-                            *live_sync |= resp_x.changed();
+                            render_expanding_box(ui, def_x, var_x, def_x, 110.0, 180.0);
 
                             ui.label("Y:");
-                            let prev_override = ui.visuals().override_text_color;
-                            ui.visuals_mut().override_text_color = None;
-                            let resp_y = ui.add(egui::TextEdit::singleline(var_y).hint_text(def_y).desired_width(65.0));
-                            ui.visuals_mut().override_text_color = prev_override;
-                            Self::apply_vietnamese_input_if_changed(&resp_y, vietnamese_input_enabled, vietnamese_input_mode, var_y);
-                            *live_sync |= resp_y.changed();
+                            render_expanding_box(ui, def_y, var_y, def_y, 110.0, 180.0);
                             ui.end_row();
                         };
 

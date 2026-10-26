@@ -1766,6 +1766,7 @@ mod windows_overlay {
         MouseTrail,
         Crosshair,
         Hud,
+        ResourceMonitor,
     }
 
     static GPU_OVERLAY_EXTRA_SHAPES: Lazy<Mutex<HashMap<OverlayLayer, Vec<GeometryRenderShape>>>> =
@@ -1778,12 +1779,96 @@ mod windows_overlay {
         let mut guard = GPU_OVERLAY_EXTRA_SHAPES.lock();
         let current = guard.entry(layer).or_default();
         if *current != shapes {
+            let has_shapes = !shapes.is_empty();
             *current = shapes;
             drop(guard);
+            if has_shapes {
+                ensure_esp_worker();
+            }
             if let Some(tx) = GPU_OVERLAY_RENDER_SENDER.lock().as_ref() {
                 let _ = tx.try_send(Vec::new());
             }
         }
+    }
+
+    pub(crate) fn update_resource_monitor_overlay(
+        stats: Option<&crate::resource_monitor::ProcessResourceStats>,
+    ) {
+        let Some(stats) = stats else {
+            set_gpu_overlay_layer_shapes(OverlayLayer::ResourceMonitor, Vec::new());
+            return;
+        };
+
+        let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(1);
+        let badge_w = 210;
+        let badge_h = 48;
+        let margin = 16;
+        let badge_x = (screen_w - badge_w - margin).max(0);
+        let badge_y = margin;
+
+        let p1 = (badge_x, badge_y);
+        let p2 = (badge_x + badge_w, badge_y);
+        let p3 = (badge_x + badge_w, badge_y + badge_h);
+        let p4 = (badge_x, badge_y + badge_h);
+
+        let mut shapes = Vec::with_capacity(3);
+
+        // Background card (dark frosted glass with cyan accent border)
+        shapes.push(GeometryRenderShape {
+            bounds: (badge_x, badge_y, badge_x + badge_w, badge_y + badge_h),
+            draw: GeometryRenderDraw::Polygon {
+                points: vec![p1, p2, p3, p4],
+                stroke: [56, 189, 248, 180],
+                fill: Some([14, 18, 26, 225]),
+                thickness: 1,
+            },
+        });
+
+        let cpu_color = if stats.cpu_usage_pct > 50.0 {
+            [248, 113, 113, 255]
+        } else if stats.cpu_usage_pct > 20.0 {
+            [251, 191, 36, 255]
+        } else {
+            [56, 189, 248, 255]
+        };
+
+        let line1 = format!(
+            "CPU: {:>4.1}%  |  RAM: {:.0} MB",
+            stats.cpu_usage_pct, stats.ram_working_set_mb
+        );
+        shapes.push(GeometryRenderShape {
+            bounds: (badge_x + 4, badge_y + 4, badge_x + badge_w - 4, badge_y + 24),
+            draw: GeometryRenderDraw::Label(GeometryRenderText {
+                x: badge_x + 4,
+                y: badge_y + 4,
+                font_size: 12,
+                color: cpu_color,
+                rotation_deg: 0.0,
+                text: line1,
+            }),
+        });
+
+        let macro_status = if !stats.macros_master_enabled {
+            "Macro: Paused".to_string()
+        } else if stats.active_macros_count > 0 {
+            format!("Macro: {} active", stats.active_macros_count)
+        } else {
+            "Macro: Idle".to_string()
+        };
+        let line2 = format!("{} thr  |  {}", stats.thread_count, macro_status);
+        shapes.push(GeometryRenderShape {
+            bounds: (badge_x + 4, badge_y + 24, badge_x + badge_w - 4, badge_y + 44),
+            draw: GeometryRenderDraw::Label(GeometryRenderText {
+                x: badge_x + 4,
+                y: badge_y + 24,
+                font_size: 11,
+                color: [203, 213, 225, 240],
+                rotation_deg: 0.0,
+                text: line2,
+            }),
+        });
+
+        set_gpu_overlay_layer_shapes(OverlayLayer::ResourceMonitor, shapes);
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41264,6 +41349,7 @@ mod fallback {
         crate::model::UiLanguage::English
     }
     pub fn send_ui_command(_command: UiCommand) {}
+    pub(crate) fn update_resource_monitor_overlay(_stats: Option<&crate::resource_monitor::ProcessResourceStats>) {}
 }
 
 #[cfg(all(test, windows))]

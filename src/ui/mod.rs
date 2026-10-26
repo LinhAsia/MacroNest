@@ -966,6 +966,9 @@ pub struct CrosshairApp {
     variable_inspector_search: String,
     custom_table_search: String,
     titlebar_guides_open: bool,
+    pub titlebar_resource_monitor_open: bool,
+    pub resource_monitor_tracker: crate::resource_monitor::ResourceMonitorTracker,
+    last_resource_monitor_overlay_enabled: bool,
     pub show_share_buttons: bool,
     arduino_available_ports: Vec<String>,
     arduino_ports_last_refresh: Option<Instant>,
@@ -1343,6 +1346,9 @@ impl CrosshairApp {
             variable_inspector_search: String::new(),
             custom_table_search: String::new(),
             titlebar_guides_open: false,
+            titlebar_resource_monitor_open: false,
+            resource_monitor_tracker: crate::resource_monitor::ResourceMonitorTracker::new(),
+            last_resource_monitor_overlay_enabled: false,
             show_share_buttons: false,
             arduino_available_ports: Vec::new(),
             arduino_ports_last_refresh: None,
@@ -15945,6 +15951,25 @@ impl eframe::App for CrosshairApp {
         } else {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
+
+        // Track and sync Resource Monitor stats
+        let active_macro_count = crate::overlay::ACTIVE_MACRO_PRESETS.lock().len();
+        let stats = self
+            .resource_monitor_tracker
+            .sample(active_macro_count, self.state.macros_master_enabled);
+
+        if self.state.resource_monitor_overlay_enabled {
+            crate::overlay::update_resource_monitor_overlay(Some(&stats));
+            self.last_resource_monitor_overlay_enabled = true;
+            ctx.request_repaint_after(Duration::from_millis(300));
+        } else if self.last_resource_monitor_overlay_enabled {
+            crate::overlay::update_resource_monitor_overlay(None);
+            self.last_resource_monitor_overlay_enabled = false;
+        }
+
+        if self.titlebar_resource_monitor_open {
+            ctx.request_repaint_after(Duration::from_millis(300));
+        }
         if self.state.active_panel == AppPanel::Zoom {
             self.state.active_panel = AppPanel::Pin;
         } else if self.state.active_panel == AppPanel::Modes {
@@ -17861,6 +17886,38 @@ impl eframe::App for CrosshairApp {
                             self.settings_popup_open = !self.settings_popup_open;
                         }
 
+                        let resource_monitor_response = Self::hover_if(
+                            Self::add_sized_with_show_hover_radius(
+                                ui,
+                                [38.0, 30.0],
+                                8,
+                                self.titlebar_button(
+                                    Self::material_icon_text(0xe422, 18.0),
+                                    self.titlebar_resource_monitor_open,
+                                    false,
+                                ),
+                            ),
+                            show_icon_tooltips,
+                            Self::tr_lang(
+                                self.state.ui_language,
+                                "Resource Monitor",
+                                "Giám sát tài nguyên",
+                            ),
+                        );
+                        if self.state.resource_monitor_overlay_enabled {
+                            let dot_center =
+                                resource_monitor_response.rect.right_top() + vec2(-7.0, 7.0);
+                            ui.painter().circle_filled(
+                                dot_center,
+                                3.5,
+                                Color32::from_rgb(56, 189, 248),
+                            );
+                        }
+                        if resource_monitor_response.clicked() {
+                            self.titlebar_resource_monitor_open =
+                                !self.titlebar_resource_monitor_open;
+                        }
+
                         let share_response = Self::hover_if(
                             Self::add_sized_with_show_hover_radius(
                                 ui,
@@ -18386,6 +18443,56 @@ impl eframe::App for CrosshairApp {
                 });
         }
 
+        if self.titlebar_resource_monitor_open {
+            if self.capture_target.is_none()
+                && ctx.input(|input| input.key_pressed(egui::Key::Escape))
+            {
+                self.titlebar_resource_monitor_open = false;
+            } else {
+                self.render_modal_backdrop(ctx, true);
+                let (panel_size, panel_pos) =
+                    Self::centered_modal_placement(ctx, vec2(460.0, 420.0), vec2(400.0, 360.0));
+                let inner_margin = 16.0;
+                let content_size = vec2(
+                    (panel_size.x - inner_margin * 2.0).max(0.0),
+                    (panel_size.y - inner_margin * 2.0).max(0.0),
+                );
+                egui::Area::new(egui::Id::new("resource_monitor_modal"))
+                    .order(Order::Foreground)
+                    .fixed_pos(panel_pos)
+                    .interactable(true)
+                    .show(ctx, |ui| {
+                        Frame::new()
+                            .fill(if self.state.ui_theme == UiThemeMode::Dark {
+                                Color32::from_rgba_premultiplied(24, 26, 32, 248)
+                            } else {
+                                Color32::from_rgba_premultiplied(248, 248, 250, 248)
+                            })
+                            .stroke(Stroke::new(
+                                1.0,
+                                Color32::from_rgba_premultiplied(90, 94, 108, 180),
+                            ))
+                            .shadow(Shadow {
+                                offset: [0, 14],
+                                blur: 32,
+                                spread: 0,
+                                color: Color32::from_rgba_premultiplied(12, 12, 16, 72),
+                            })
+                            .corner_radius(16.0)
+                            .inner_margin(Margin::same(inner_margin as i8))
+                            .show(ui, |ui| {
+                                ui.set_min_size(content_size);
+                                ui.set_max_size(content_size);
+                                ui.set_width(content_size.x);
+                                ui.set_max_width(content_size.x);
+                                ui.set_height(content_size.y);
+                                ui.set_max_height(content_size.y);
+                                self.render_resource_monitor_content(ui);
+                            });
+                    });
+            }
+        }
+
         if self.startup_show_pending && self.startup_shell_frames_remaining == 0 {
             self.startup_show_pending = false;
             if !self.startup_hide_to_tray_pending {
@@ -18439,6 +18546,302 @@ impl eframe::App for CrosshairApp {
         self.sync_vietnamese_input_enabled();
         let _ = self.overlay_tx.send(OverlayCommand::Exit);
         self.persist_blocking();
+    }
+}
+
+impl CrosshairApp {
+    fn render_resource_monitor_content(&mut self, ui: &mut egui::Ui) {
+        let language = self.state.ui_language;
+        let stats = self.resource_monitor_tracker.last_stats().clone();
+
+        ui.vertical(|ui| {
+            // Header
+            ui.horizontal(|ui| {
+                ui.label(Self::material_icon_text(0xe422, 22.0));
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(Self::tr_lang(
+                        language,
+                        "Resource Monitor",
+                        "Giám sát tài nguyên",
+                    ))
+                    .strong()
+                    .size(17.0),
+                );
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let close_btn = ui.add(
+                        egui::Button::new(Self::material_icon_text(0xe5cd, 14.0))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE),
+                    );
+                    if close_btn.clicked() {
+                        self.titlebar_resource_monitor_open = false;
+                    }
+
+                    // Uptime badge
+                    let hours = stats.uptime_secs / 3600;
+                    let mins = (stats.uptime_secs % 3600) / 60;
+                    let secs = stats.uptime_secs % 60;
+                    let uptime_str = if hours > 0 {
+                        format!("Uptime: {:02}h {:02}m {:02}s", hours, mins, secs)
+                    } else {
+                        format!("Uptime: {:02}m {:02}s", mins, secs)
+                    };
+                    ui.label(
+                        RichText::new(uptime_str)
+                            .size(11.0)
+                            .color(Color32::from_rgb(148, 163, 184)),
+                    );
+                });
+            });
+
+            ui.add_space(4.0);
+            ui.separator();
+            ui.add_space(8.0);
+
+            let card_fill = if self.state.ui_theme == UiThemeMode::Dark {
+                Color32::from_rgba_premultiplied(30, 36, 48, 180)
+            } else {
+                Color32::from_rgba_premultiplied(235, 240, 248, 220)
+            };
+            let card_stroke = egui::Stroke::new(
+                1.0,
+                if self.state.ui_theme == UiThemeMode::Dark {
+                    Color32::from_rgba_premultiplied(60, 72, 92, 160)
+                } else {
+                    Color32::from_rgba_premultiplied(200, 210, 225, 180)
+                },
+            );
+
+            // 2x2 Grid of Resource Cards
+            egui::Grid::new("resource_monitor_cards_grid")
+                .num_columns(2)
+                .spacing([12.0, 12.0])
+                .show(ui, |ui| {
+                    // Card 1: CPU Usage
+                    egui::Frame::new()
+                        .fill(card_fill)
+                        .stroke(card_stroke)
+                        .corner_radius(10.0)
+                        .inner_margin(egui::Margin::symmetric(14, 12))
+                        .show(ui, |ui| {
+                            ui.set_width(200.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "⚡ CPU Usage",
+                                        "⚡ Mức sử dụng CPU",
+                                    ))
+                                    .size(12.0)
+                                    .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.add_space(2.0);
+                                let cpu_val_color = if stats.cpu_usage_pct > 50.0 {
+                                    Color32::from_rgb(248, 113, 113)
+                                } else if stats.cpu_usage_pct > 20.0 {
+                                    Color32::from_rgb(251, 191, 36)
+                                } else {
+                                    Color32::from_rgb(56, 189, 248)
+                                };
+                                ui.label(
+                                    RichText::new(format!("{:.1}%", stats.cpu_usage_pct))
+                                        .size(24.0)
+                                        .strong()
+                                        .color(cpu_val_color),
+                                );
+                                ui.add(
+                                    egui::ProgressBar::new(stats.cpu_usage_pct / 100.0)
+                                        .desired_width(190.0)
+                                        .show_percentage(),
+                                );
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} logical cores",
+                                        stats.num_cpus
+                                    ))
+                                    .size(10.5)
+                                    .color(Color32::from_rgb(100, 116, 139)),
+                                );
+                            });
+                        });
+
+                    // Card 2: RAM Memory
+                    egui::Frame::new()
+                        .fill(card_fill)
+                        .stroke(card_stroke)
+                        .corner_radius(10.0)
+                        .inner_margin(egui::Margin::symmetric(14, 12))
+                        .show(ui, |ui| {
+                            ui.set_width(200.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "💾 RAM Usage",
+                                        "💾 Bộ nhớ RAM",
+                                    ))
+                                    .size(12.0)
+                                    .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(format!("{:.1} MB", stats.ram_working_set_mb))
+                                        .size(24.0)
+                                        .strong()
+                                        .color(Color32::from_rgb(52, 211, 153)),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Commit: {:.1} MB",
+                                        stats.ram_commit_mb
+                                    ))
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new("Physical Working Set")
+                                        .size(10.5)
+                                        .color(Color32::from_rgb(100, 116, 139)),
+                                );
+                            });
+                        });
+                    ui.end_row();
+
+                    // Card 3: Threads & Processes
+                    egui::Frame::new()
+                        .fill(card_fill)
+                        .stroke(card_stroke)
+                        .corner_radius(10.0)
+                        .inner_margin(egui::Margin::symmetric(14, 12))
+                        .show(ui, |ui| {
+                            ui.set_width(200.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "🧵 Threads",
+                                        "🧵 Luồng xử lý",
+                                    ))
+                                    .size(12.0)
+                                    .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(format!("{}", stats.thread_count))
+                                        .size(24.0)
+                                        .strong()
+                                        .color(Color32::from_rgb(167, 139, 250)),
+                                );
+                                ui.label(
+                                    RichText::new(format!("PID: {}", stats.pid))
+                                        .size(11.0)
+                                        .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new("Active OS Threads")
+                                        .size(10.5)
+                                        .color(Color32::from_rgb(100, 116, 139)),
+                                );
+                            });
+                        });
+
+                    // Card 4: Macro Engine
+                    egui::Frame::new()
+                        .fill(card_fill)
+                        .stroke(card_stroke)
+                        .corner_radius(10.0)
+                        .inner_margin(egui::Margin::symmetric(14, 12))
+                        .show(ui, |ui| {
+                            ui.set_width(200.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new(Self::tr_lang(
+                                        language,
+                                        "🎯 Macro Engine",
+                                        "🎯 Trình chạy Macro",
+                                    ))
+                                    .size(12.0)
+                                    .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.add_space(2.0);
+                                let (status_str, status_color) = if !stats.macros_master_enabled {
+                                    (
+                                        Self::tr_lang(language, "Paused", "Tạm dừng"),
+                                        Color32::from_rgb(251, 146, 60),
+                                    )
+                                } else if stats.active_macros_count > 0 {
+                                    (
+                                        Self::tr_lang(language, "Running", "Đang chạy"),
+                                        Color32::from_rgb(74, 222, 128),
+                                    )
+                                } else {
+                                    (
+                                        Self::tr_lang(language, "Idle", "Chờ kích hoạt"),
+                                        Color32::from_rgb(148, 163, 184),
+                                    )
+                                };
+                                ui.label(
+                                    RichText::new(status_str)
+                                        .size(24.0)
+                                        .strong()
+                                        .color(status_color),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} active macro(s)",
+                                        stats.active_macros_count
+                                    ))
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(148, 163, 184)),
+                                );
+                                ui.add_space(2.0);
+                                ui.label(
+                                    RichText::new(if stats.macros_master_enabled {
+                                        "Master Switch: ON"
+                                    } else {
+                                        "Master Switch: OFF"
+                                    })
+                                    .size(10.5)
+                                    .color(Color32::from_rgb(100, 116, 139)),
+                                );
+                            });
+                        });
+                    ui.end_row();
+                });
+
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(6.0);
+
+            // Overlay Checkbox & controls
+            let chk = ui.checkbox(
+                &mut self.state.resource_monitor_overlay_enabled,
+                RichText::new(Self::tr_lang(
+                    language,
+                    "Show stats overlay on top-right of screen",
+                    "Hiển thị overlay thông số ở góc trên bên phải màn hình",
+                ))
+                .strong(),
+            );
+            if chk.changed() {
+                self.persist_dirty = true;
+            }
+
+            ui.label(
+                RichText::new(Self::tr_lang(
+                    language,
+                    "Displays real-time CPU %, RAM, active threads and macro counters on screen to verify performance.",
+                    "Hiển thị widget CPU %, RAM, số luồng và macro trực tiếp trên màn hình để kiểm tra độ tối ưu tài nguyên.",
+                ))
+                .size(11.0)
+                .color(Color32::from_rgb(148, 163, 184)),
+            );
+        });
     }
 }
 

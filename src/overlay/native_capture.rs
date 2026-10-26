@@ -159,7 +159,7 @@ impl Drop for CaptureState {
 
 fn point_click_panel_rect(width: i32, height: i32, curr: (i32, i32)) -> RECT {
     let panel_w = 184i32;
-    let panel_h = 246i32;
+    let panel_h = 264i32;
     let margin = 24i32;
 
     let pointer_x = curr.0;
@@ -541,6 +541,7 @@ unsafe extern "system" fn capture_wnd_proc(
                     let rx = pt.x - state.left;
                     let ry = pt.y - state.top;
                     if matches!(state.mode, NativeCaptureMode::RegionAdjust { .. }) {
+                        state.current_point = Some((rx, ry));
                         if let Some(drag) = state.adjust_drag {
                             // Apply drag delta to rect
                             let dx = rx - state.adjust_drag_origin.0;
@@ -784,13 +785,17 @@ unsafe extern "system" fn capture_wnd_proc(
                         NativeCaptureMode::PointClick { .. }
                             | NativeCaptureMode::ProtractorCalibration { .. }
                             | NativeCaptureMode::DistanceMeasure { .. }
+                            | NativeCaptureMode::RegionSelect { .. }
+                            | NativeCaptureMode::RegionAdjust { .. }
                     ) {
-                        let mut pt = POINT::default();
-                        if GetCursorPos(&mut pt).is_ok() {
-                            let rx = pt.x - state.left;
-                            let ry = pt.y - state.top;
-                            state.current_point =
-                                Some(distance_measure_constrained_local_point(state, (rx, ry)));
+                        if state.current_point.is_none() {
+                            let mut pt = POINT::default();
+                            if GetCursorPos(&mut pt).is_ok() {
+                                let rx = pt.x - state.left;
+                                let ry = pt.y - state.top;
+                                state.current_point =
+                                    Some(distance_measure_constrained_local_point(state, (rx, ry)));
+                            }
                         }
                     }
                     let _ = draw_capture_to_dc(hdc, state, Some(ps.rcPaint));
@@ -1982,12 +1987,18 @@ unsafe fn draw_capture_to_dc(
     let _ = SelectObject(mem_dc, old_font);
     let _ = DeleteObject(HGDIOBJ(font.0));
 
-    // Render coordinate & color magnifier preview panel for PointClick
-    if matches!(state.mode, NativeCaptureMode::PointClick { .. })
+    // Render coordinate & color magnifier preview panel for PointClick, RegionSelect, and RegionAdjust
+    let show_magnifier_panel = matches!(
+        state.mode,
+        NativeCaptureMode::PointClick { .. }
+            | NativeCaptureMode::RegionSelect { .. }
+            | NativeCaptureMode::RegionAdjust { .. }
+    );
+    if show_magnifier_panel
         && let Some(curr) = state.current_point
     {
         let panel_w = 184i32;
-        let panel_h = 246i32;
+        let panel_h = 264i32;
         let margin = 24i32;
 
         let pointer_x = curr.0;
@@ -2252,6 +2263,50 @@ unsafe fn draw_capture_to_dc(
             &mut rgb_rect,
             DT_LEFT | DT_SINGLELINE | DT_VCENTER,
         );
+
+        let region_size = match state.mode {
+            NativeCaptureMode::RegionSelect { .. } => {
+                if let (Some(start), Some(cur)) = (state.start_point, state.current_point) {
+                    let rw = (start.0 - cur.0).abs();
+                    let rh = (start.1 - cur.1).abs();
+                    if rw >= 2 && rh >= 2 {
+                        Some((rw, rh))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            NativeCaptureMode::RegionAdjust { .. } => {
+                let rw = (state.adjust_rect.right - state.adjust_rect.left).abs();
+                let rh = (state.adjust_rect.bottom - state.adjust_rect.top).abs();
+                if rw >= 2 && rh >= 2 {
+                    Some((rw, rh))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        if let Some((rw, rh)) = region_size {
+            let size_str = format!("Size: {rw} × {rh}");
+            let mut size_u16: Vec<u16> = size_str.encode_utf16().collect();
+            let mut size_rect = RECT {
+                left: grid_x,
+                top: rgb_rect.bottom + 2,
+                right: panel_x + panel_w - 10,
+                bottom: rgb_rect.bottom + 18,
+            };
+            let _ = SetTextColor(mem_dc, rgb(56, 189, 248));
+            let _ = DrawTextW(
+                mem_dc,
+                &mut size_u16,
+                &mut size_rect,
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER,
+            );
+        }
 
         let _ = SelectObject(mem_dc, old_lf);
         let _ = DeleteObject(HGDIOBJ(label_font.0));

@@ -18,6 +18,7 @@ mod platform;
 mod process_memory;
 mod protractor;
 mod render;
+pub mod resource_monitor;
 mod storage;
 mod ui;
 mod video_recorder;
